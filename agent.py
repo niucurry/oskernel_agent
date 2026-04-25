@@ -99,7 +99,6 @@ def agent_run(system_prompt: str, user_prompt: str):
 
 
 if __name__ == "__main__":
-    # 目标：分析上个阶段我们提取的 T202510008995695-2259 项目中的调度器设计
     repo_id_test = "T202510008995695-2259"
     
     agent_a_system_prompt = f"""

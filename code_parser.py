@@ -1,5 +1,7 @@
 import os
 import sqlite3
+from pathlib import Path
+
 import tree_sitter_c as tsc
 import tree_sitter_rust as tsr
 from tree_sitter import Language, Parser
@@ -39,7 +41,7 @@ def init_db():
         )
     ''')
     
-    # 【重要】为了防止重复运行导致数据叠加，每次运行时先清理当前项目的数据
+    # 为了防止重复运行导致数据叠加，每次运行时先清理当前项目的数据
     cursor.execute("DELETE FROM Symbols WHERE repo_id=?", (REPO_ID,))
     cursor.execute("DELETE FROM CallGraph WHERE repo_id=?", (REPO_ID,))
     
@@ -103,7 +105,7 @@ def parse_file_and_store(file_path, conn):
             source_code = f.read()
         source_bytes = source_code.encode('utf-8')
     except Exception as e:
-        print(f"⚠️ 跳过无法读取的文件 {rel_path}: {e}")
+        print(f" 跳过无法读取的文件 {rel_path}: {e}")
         return
 
     tree = parser.parse(source_bytes)
@@ -160,23 +162,69 @@ def parse_file_and_store(file_path, conn):
                     
     conn.commit()
 
-def build_knowledge_graph():
-    print(f"🚀 开始构建代码知识图谱 (支持 C/Rust)，目标仓库: {REPO_ID}")
+def deduplicate_parent_paths(paths: list[str]) -> list[str]:
+    """如果 A 是 B 的父路径，去掉 A，保留更精确的 B"""
+    paths = sorted(paths, key=len, reverse=True)
+    result = []
+    for p in paths:
+        if not any(kept.startswith(p + "/") for kept in result):
+            result.append(p)
+    return result
+
+
+def find_source_roots(repo_path: Path) -> list[str]:
+    """找到仓库中源代码文件最密集的目录"""
+    SKIP_DIRS = {".git", "target", "build", "node_modules", "__pycache__", ".cargo", "vendor"}
+    SRC_EXTS = {".c", ".rs", ".h", ".S", ".asm"}
+    KNOWN_NAMES = {"src", "kernel", "kern", "os", "core", "code"}
+
+    candidates = []
+    for entry in repo_path.rglob("*"):
+        if not entry.is_dir():
+            continue
+        if any(skip in entry.parts for skip in SKIP_DIRS):
+            continue
+
+        src_count = sum(
+            1 for f in entry.iterdir()
+            if f.is_file() and f.suffix in SRC_EXTS
+        )
+        if src_count > 0:
+            rel = str(entry.relative_to(repo_path))
+            candidates.append((rel, src_count, entry.name.lower()))
+
+    candidates.sort(key=lambda x: (x[2] not in KNOWN_NAMES, -x[1]))
+
+    return deduplicate_parent_paths([c[0] for c in candidates[:8]])
+
+
+def build_knowledge_graph(repo_path: str | None = None):
+    target = repo_path or TARGET_REPO_DIR
+    source_roots = find_source_roots(Path(target))
+
+    if source_roots:
+        rt = Path(target)
+        scan_dirs = [str(rt / r) for r in source_roots]
+        print(f"  源码根目录检测结果: {source_roots}")
+    else:
+        scan_dirs = [target]
+
+    print(f" 开始构建代码知识图谱 (支持 C/Rust)，目标仓库: {REPO_ID}")
     conn = init_db()
-    
+
     processed_count = 0
-    for root, dirs, files in os.walk(TARGET_REPO_DIR):
-        for file in files:
-            # 扩展检索后缀，同时捕捉 C 和 Rust 文件
-            if file.endswith(('.c', '.rs')):
-                file_path = os.path.join(root, file)
-                print(f"正在解析: {os.path.relpath(file_path, TARGET_REPO_DIR)}...")
-                parse_file_and_store(file_path, conn)
-                processed_count += 1
-                
+    for scan_dir in scan_dirs:
+        for root, dirs, files in os.walk(scan_dir):
+            for file in files:
+                if file.endswith(('.c', '.rs')):
+                    file_path = os.path.join(root, file)
+                    print(f"正在解析: {os.path.relpath(file_path, target)}...")
+                    parse_file_and_store(file_path, conn)
+                    processed_count += 1
+
     conn.close()
-    print(f"\n✅ 解析完成！共处理了 {processed_count} 个 C/Rust 源码文件。")
-    print(f"📊 图谱数据已保存至 SQLite 数据库: {DB_PATH}")
+    print(f"\n 解析完成！共处理了 {processed_count} 个 C/Rust 源码文件。")
+    print(f" 图谱数据已保存至 SQLite 数据库: {DB_PATH}")
 
 if __name__ == "__main__":
     build_knowledge_graph()

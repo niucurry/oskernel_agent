@@ -23,7 +23,6 @@ class OSCodeTools:
         )
         results = cursor.fetchall()
         if not results:
-            # 【关键修改】：找不到时给出明确的文字警告，阻止它乱猜
             return f"警告：在数据库中未找到名为 '{function_name}' 的函数，可能是函数名错误，或该文件未被解析。"
         return [row[0] for row in results]
 
