@@ -359,6 +359,141 @@ def analyze_structure_depth(repo_path: Path) -> str:
     return "deep"
 
 
+def detect_anomalies(structure: dict, repo_path: Path) -> list[str]:
+    """根据预分析结构体生成需注入 System Prompt 的异常警告列表"""
+    anomalies = []
+
+    if not structure["doc_files"]:
+        anomalies.append("未找到任何文档文件（README/设计文档/技术报告），文档评分可能为零")
+
+    if not structure["subsystem_locations"].get("系统调用"):
+        anomalies.append("未找到 syscall 处理代码，请检查是否使用了极为非常规的命名")
+
+    if structure["structure_depth"] == "flat":
+        anomalies.append("目录结构极度扁平（平均深度≤2），可能存在代码堆砌，缺乏模块划分")
+
+    for root in structure["source_roots"]:
+        for f in Path(root).rglob("*.c"):
+            try:
+                size = f.stat().st_size
+                if size > 100_000:
+                    rel = str(f.relative_to(repo_path))
+                    anomalies.append(f"超大源文件：{rel}（{size // 1024}KB），疑似代码堆砌")
+            except OSError:
+                continue
+        for f in Path(root).rglob("*.rs"):
+            try:
+                line_count = f.read_text(errors="replace").count("\n")
+                if line_count > 800:
+                    rel = str(f.relative_to(repo_path))
+                    anomalies.append(f"超长源文件：{rel}（{line_count}行），建议人工核查模块划分")
+            except OSError:
+                continue
+
+    if structure["naming_style"] == "mixed":
+        anomalies.append("命名风格混杂（CamelCase 与 snake_case 并存），代码可能来自多个不同来源")
+
+    return anomalies
+
+
+_DOC_TYPE_LABELS: dict[str, str] = {
+    "readme":     "README",
+    "design_doc": "设计文档",
+    "report":     "技术报告",
+    "slides":     "幻灯片",
+    "changelog":  "更新日志",
+}
+
+_READER_NOTES: dict[str, str] = {
+    "pdf_reader":  "← 需使用 PDF 读取工具",
+    "docx_reader": "← 需使用 DOCX 读取工具",
+    "pptx_reader": "← 需使用 PPTX 读取工具",
+}
+
+
+def build_repo_profile(repo_path: Path) -> str:
+    """组装所有静态分析结果，返回可直接注入 System Prompt 的结构描述文本"""
+    rt = repo_path if isinstance(repo_path, Path) else Path(repo_path)
+
+    source_roots_rel = find_source_roots(rt)
+    source_roots_abs = [str(rt / r) for r in source_roots_rel]
+
+    all_depths = [
+        len(f.relative_to(rt).parts)
+        for ext in ("*.c", "*.rs")
+        for f in rt.rglob(ext)
+    ]
+    avg_depth = sum(all_depths) / len(all_depths) if all_depths else 0.0
+    if not all_depths:
+        depth_label = "unknown"
+    elif avg_depth <= 2:
+        depth_label = "flat"
+    elif avg_depth <= 4:
+        depth_label = "shallow"
+    else:
+        depth_label = "deep"
+
+    naming = detect_naming_style(rt)
+    subsystem_map = classify_files_by_content(str(rt), source_roots_rel)
+    doc_files = find_doc_files(rt)
+    annotated = annotate_doc_readers(doc_files)
+
+    structure = {
+        "doc_files":           doc_files,
+        "subsystem_locations": subsystem_map,
+        "structure_depth":     depth_label,
+        "source_roots":        source_roots_abs,
+        "naming_style":        naming,
+    }
+    anomalies = detect_anomalies(structure, rt)
+
+    output: list[str] = ["【仓库结构探索结果（确定性分析，非 LLM 推断）】", ""]
+
+    if source_roots_rel:
+        root_parts = [f"{source_roots_rel[0]}（主要）"] + \
+                     [f"{r}（次要）" for r in source_roots_rel[1:]]
+        output.append(f"源码根目录：{'，'.join(root_parts)}")
+    else:
+        output.append("源码根目录：（未检测到）")
+
+    output.append(f"目录风格：{depth_label}（平均深度 {avg_depth:.1f} 层）")
+    output.append(f"命名风格：{naming}")
+    output.append("")
+
+    output.append("子系统文件定位（按内容关键词识别，非路径名）：")
+    for subsystem, files in subsystem_map.items():
+        if not files:
+            output.append(f"  {subsystem} → 未找到明显的{subsystem}代码")
+            continue
+        for i, entry in enumerate(files[:3]):
+            score = entry["score"]
+            confidence = "高" if score >= 5 else "中" if score >= 3 else "低"
+            if i == 0:
+                output.append(f"  {subsystem} → {entry['file']}（置信度：{confidence}，命中{score}个关键词）")
+            else:
+                output.append(f"    └─ {entry['file']}（置信度：{confidence}，命中{score}个关键词）")
+    output.append("")
+
+    output.append("文档文件：")
+    if annotated:
+        for doc_type, entries in annotated.items():
+            label = _DOC_TYPE_LABELS.get(doc_type, doc_type)
+            for entry in entries:
+                note = _READER_NOTES.get(entry["reader"], "")
+                note_str = f"  {note}" if note else ""
+                output.append(f"  {label:<8}→ {entry['path']}{note_str}")
+    else:
+        output.append("  （未找到任何文档文件）")
+    output.append("")
+
+    if anomalies:
+        output.append("异常警告（分析时请特别注意）：")
+        for anomaly in anomalies:
+            output.append(f"  - {anomaly}")
+
+    return "\n".join(output)
+
+
 def build_knowledge_graph(repo_path: str | None = None):
     target = repo_path or TARGET_REPO_DIR
     rt = Path(target)

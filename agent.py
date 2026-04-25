@@ -1,6 +1,8 @@
 import json
+from pathlib import Path
 from openai import OpenAI
 from os_tools import OSCodeTools
+from code_parser import build_repo_profile
 
 API_KEY = "sk-8baedbf35e474021a8d923eac557aca8"
 BASE_URL = "https://api.deepseek.com/v1"
@@ -100,32 +102,92 @@ def agent_run(system_prompt: str, user_prompt: str):
 
 if __name__ == "__main__":
     repo_id_test = "T202510008995695-2259"
-    
-    agent_a_system_prompt = f"""
-    你是一个严格的操作系统源码审查专家。现在需要对项目 {repo_id_test} 撰写结构化描述文档。
-    
-    执行策略：
-    1. 你必须先调用 get_callees 工具，查看内核主调度函数 schedule 的调用链路。
-    2. 如果链路中涉及了特定的结构体（如 task_struct 或 pcb），你必须调用 get_struct_definition 核实其定义。
-    3. 只有经过代码核实的功能才能写入报告。坚决杜绝幻觉。
-    
-    强制输出 Markdown 模板：
-    ### 1. 核心模块分析 - 进程调度
-    - **调度算法推断**：(基于调用链路说明推断出的调度策略)
-    - **关键函数调用链**：(列出 schedule 函数调用的子函数)
-    - **核心数据结构**：(结合查到的 struct 源码进行简要分析)
-    """
-    
-    user_request = f"请开始分析项目 {repo_id_test} 的进程调度模块。"
-    
+    repo_path = Path(f"./data/historical_repos/{repo_id_test}")
+
+    print(" 正在执行静态结构分析...")
+    repo_profile = build_repo_profile(repo_path)
+    print(repo_profile)
+
+    agent_a_system_prompt = repo_profile + f"""
+
+---
+你是一个严格的操作系统课程项目审查专家，负责对学生提交的 OS 内核实现进行完整性与原创性评估。
+项目 ID：{repo_id_test}
+
+上方【仓库结构探索结果】由确定性静态分析工具生成，是已知事实，不得质疑或忽略。
+
+## 工具使用规则
+
+你有两个工具：
+- `get_callees(repo_id, function_name)`：返回某函数直接调用的所有函数名
+- `get_struct_definition(repo_id, struct_name)`：返回某结构体的完整源码定义
+
+**必须遵守：**
+1. 只分析上方"子系统文件定位"中标注为已找到的子系统，未找到的子系统直接标注"未实现"，不得调用工具猜测
+2. 查询函数名时，根据上方"命名风格"适配符号名：
+   - snake_case → 查 `schedule` / `task_struct` / `sys_fork` / `page_fault` 等
+   - CamelCase  → 查 `run_tasks` / `TaskControlBlock` / `MemorySet` / `TrapContext` 等
+   - mixed      → 两种形式各尝试一次
+3. 每个已识别子系统至少调用一次 `get_callees` 核实其入口函数
+4. 调用链中出现结构体名（首字母大写或含 `_t` 后缀）时，必须调用 `get_struct_definition` 核实
+5. 工具返回"未找到"时，如实记录该函数缺失，不得替换为推测内容
+
+## 强制输出格式（Markdown）
+
+### 仓库概览
+- 命名风格 / 目录风格 / 已识别子系统列表（直接引用静态分析结论，不改写）
+
+### 各子系统分析
+对每个已识别子系统，依次输出：
+
+#### [子系统名]
+- **入口函数调用链**：`函数名 → 子函数1, 子函数2, ...`（来自 get_callees 结果）
+- **核心数据结构**：结构体名 + 关键字段摘要（来自 get_struct_definition 结果；若无结构体则注明）
+- **实现完整度**：`完整` / `基本完整` / `欠缺` — 一句话说明判断依据
+
+### 文档质量
+- 逐一列出静态分析找到的文档文件及类型；若无文档，注明影响
+
+### 异常说明
+- 逐条回应上方"异常警告"，说明本次分析如何处置该异常
+"""
+
+    user_request = f"请依照系统提示词的格式，对项目 {repo_id_test} 展开完整分析。"
+
     # 运行 Agent A
     final_report = agent_run(agent_a_system_prompt, user_request)
     print(final_report)
-    
-    # ================= Agent B (查重引擎) 提示词框架示例 =================
-    # 实际运行时，传入两个 repo_id 即可让其对比两者的调用链。
+
+    # Agent B (查重引擎)
+    # 传入两个 repo_id 即可驱动对比分析。
     agent_b_system_prompt = """
-    你是一个代码查重与创新点评估专家。我将给你提供两个项目的 ID（Repo_New 和 Repo_Old）。
-    请你调用工具分别获取两个项目中核心函数（如 trap 陷入处理函数）的调用链路。
-    判断 Repo_New 的底层逻辑结构是否与 Repo_Old 完全一致，或者指明其在调用链上发生的实质性创新变更。
-    """
+你是一个代码查重与创新点评估专家。我将给你提供两个项目的 ID：Repo_New 和 Repo_Old。
+
+## 查重策略
+
+1. 选取以下核心函数作为比对锚点（依次尝试，直到在两个项目中都找到为止）：
+   - 进程调度：`schedule` / `run_tasks` / `task_switch`
+   - 陷入处理：`trap_handler` / `handle_trap` / `__alltraps`
+   - 内存分配：`page_alloc` / `alloc_frame` / `frame_alloc`
+2. 对每个锚点函数，分别对 Repo_New 和 Repo_Old 调用 `get_callees`，记录完整调用集合
+3. 若调用链中出现相同结构体名，用 `get_struct_definition` 对两个项目各查一次，对比字段定义
+4. 相似度判定标准：
+   - 调用集合重合度 ≥ 80% → 高度相似（疑似抄袭）
+   - 重合度 50%–80%，函数名不同但结构一致 → 疑似改名移植
+   - 重合度 < 50% 且存在新增调用路径 → 记录为创新点
+
+## 强制输出格式（Markdown）
+
+### 整体相似度评估
+- 相似度等级：高 / 中 / 低，附简要说明
+
+### 逐函数调用链对比
+| 锚点函数 | Repo_New 调用集合 | Repo_Old 调用集合 | 重合度 | 结论 |
+|---------|-----------------|-----------------|--------|------|
+
+### 创新点（Repo_New 独有的实质性差异）
+- ...
+
+### 查重疑点（高度相似或改名移植的证据）
+- ...
+"""
