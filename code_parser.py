@@ -198,12 +198,81 @@ def find_source_roots(repo_path: Path) -> list[str]:
     return deduplicate_parent_paths([c[0] for c in candidates[:8]])
 
 
+SUBSYSTEM_FINGERPRINTS = {
+    "进程管理": [
+        "fork", "exec", "waitpid", "do_fork", "task_struct",
+        "proc_struct", "TaskControlBlock", "switch_to", "schedule()"
+    ],
+    "内存管理": [
+        "page_alloc", "alloc_pages", "PageTable", "mmap", "buddy",
+        "page_fault", "MemorySet", "MapArea", "PhysPageNum", "brk"
+    ],
+    "文件系统": [
+        "fat32", "ext4", "inode", "dentry", "vfs", "open_file",
+        "FileDescriptor", "FAT", "superblock", "block_device"
+    ],
+    "系统调用": [
+        "sys_read", "sys_write", "sys_fork", "ecall",
+        "trap_handler", "syscall_handler", "SYSCALL_"
+    ],
+    "设备驱动": [
+        "virtio", "uart", "mmio", "disk_read", "disk_write",
+        "PLIC", "interrupt", "block_device"
+    ],
+    "硬件抽象": [
+        "riscv", "loongarch", "satp", "stvec", "TrapContext",
+        "sret", "mret", "CSR_", "__riscv"
+    ],
+}
+
+
+def classify_files_by_content(repo_path: str, source_roots: list[str]) -> dict:
+    """按内容指纹将源文件归类到子系统"""
+    result = {s: [] for s in SUBSYSTEM_FINGERPRINTS}
+    SRC_EXTS = {".c", ".rs", ".h", ".S"}
+
+    repo = Path(repo_path)
+    for root in source_roots:
+        for src_file in (repo / root).rglob("*"):
+            if not src_file.is_file():
+                continue
+            if src_file.suffix not in SRC_EXTS:
+                continue
+            if src_file.stat().st_size > 500_000:
+                continue
+
+            content = src_file.read_text(errors="replace").lower()
+            rel_path = str(src_file.relative_to(repo_path))
+
+            scores = {}
+            for subsystem, keywords in SUBSYSTEM_FINGERPRINTS.items():
+                hits = sum(1 for kw in keywords if kw.lower() in content)
+                if hits >= 2:
+                    scores[subsystem] = hits
+
+            if not scores:
+                continue
+
+            max_score = max(scores.values())
+            for subsystem, score in scores.items():
+                result[subsystem].append({
+                    "file": rel_path,
+                    "score": score,
+                    "is_primary": (score == max_score),
+                })
+
+    for s in result:
+        result[s].sort(key=lambda x: -x["score"])
+
+    return result
+
+
 def build_knowledge_graph(repo_path: str | None = None):
     target = repo_path or TARGET_REPO_DIR
-    source_roots = find_source_roots(Path(target))
+    rt = Path(target)
+    source_roots = find_source_roots(rt)
 
     if source_roots:
-        rt = Path(target)
         scan_dirs = [str(rt / r) for r in source_roots]
         print(f"  源码根目录检测结果: {source_roots}")
     else:
@@ -225,6 +294,13 @@ def build_knowledge_graph(repo_path: str | None = None):
     conn.close()
     print(f"\n 解析完成！共处理了 {processed_count} 个 C/Rust 源码文件。")
     print(f" 图谱数据已保存至 SQLite 数据库: {DB_PATH}")
+
+
+    print(f"\n子系统分类结果")
+    classification = classify_files_by_content(repo_path=str(rt), source_roots=source_roots)
+    for subsystem, files in classification.items():
+        if files:
+            print(f"\n{subsystem} → {files}")
 
 if __name__ == "__main__":
     build_knowledge_graph()
