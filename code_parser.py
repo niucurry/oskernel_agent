@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 from pathlib import Path
 
@@ -264,6 +265,58 @@ def classify_files_by_content(repo_path: str, source_roots: list[str]) -> dict:
     for s in result:
         result[s].sort(key=lambda x: -x["score"])
 
+    return result
+
+
+DOC_PATTERNS = {
+    "readme":     r"readme(\.\w+)?$",
+    "design_doc": r"(design|arch|architecture|设计|架构).+\.(md|pdf|docx|txt)$",
+    "report":     r"(report|总结|报告|技术报告).+\.(md|pdf|docx|txt)$",
+    "slides":     r"\.(pptx|ppt|key)$",
+    "changelog":  r"(changelog|history)\.(md|txt)$",
+}
+
+_EXT_TO_READER = {
+    ".pdf":  "pdf_reader",
+    ".docx": "docx_reader",
+    ".pptx": "pptx_reader",
+    ".ppt":  "pptx_reader",
+    ".key":  "pptx_reader",
+}
+
+
+def find_doc_files(repo_path: Path) -> dict[str, list[str]]:
+    """递归扫描仓库，按类型收集文档文件"""
+    found: dict[str, list[str]] = {k: [] for k in DOC_PATTERNS}
+    SKIP = {".git", "target", "build"}
+
+    for f in repo_path.rglob("*"):
+        if not f.is_file():
+            continue
+        if any(s in f.parts for s in SKIP):
+            continue
+
+        name_lower = f.name.lower()
+        rel = str(f.relative_to(repo_path))
+
+        for doc_type, pattern in DOC_PATTERNS.items():
+            if re.search(pattern, name_lower, re.IGNORECASE):
+                found[doc_type].append(rel)
+
+    return {k: v for k, v in found.items() if v}
+
+
+def annotate_doc_readers(doc_files: dict[str, list[str]]) -> dict[str, list[dict]]:
+    """为每个文档条目附加读取器类型，返回 {doc_type: [{path, reader}]}"""
+    result: dict[str, list[dict]] = {}
+    for doc_type, paths in doc_files.items():
+        result[doc_type] = [
+            {
+                "path": path,
+                "reader": _EXT_TO_READER.get(Path(path).suffix.lower(), "text_reader"),
+            }
+            for path in paths
+        ]
     return result
 
 
