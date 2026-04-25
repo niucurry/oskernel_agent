@@ -320,6 +320,45 @@ def annotate_doc_readers(doc_files: dict[str, list[str]]) -> dict[str, list[dict
     return result
 
 
+def detect_naming_style(repo_path: Path) -> str:
+    """采样最多 20 个源文件，判断仓库整体命名风格"""
+    snake_count = camel_count = 0
+
+    samples = list(repo_path.rglob("*.rs"))[:10] + \
+              list(repo_path.rglob("*.c"))[:10]
+
+    for f in samples:
+        try:
+            content = f.read_text(errors="replace")
+        except Exception:
+            continue
+        snake_count += len(re.findall(r'\b(fn|void|int)\s+[a-z][a-z0-9_]+\s*\(', content))
+        camel_count += len(re.findall(r'\b[A-Z][a-zA-Z0-9]{3,}\b', content))
+
+    if camel_count > snake_count * 2:
+        return "CamelCase"
+    if snake_count > camel_count * 2:
+        return "snake_case"
+    return "mixed"
+
+
+def analyze_structure_depth(repo_path: Path) -> str:
+    """根据源文件的平均目录深度判断项目结构层级"""
+    depths = [
+        len(f.relative_to(repo_path).parts)
+        for ext in ("*.c", "*.rs")
+        for f in repo_path.rglob(ext)
+    ]
+    if not depths:
+        return "unknown"
+    avg = sum(depths) / len(depths)
+    if avg <= 2:
+        return "flat"
+    if avg <= 4:
+        return "shallow"
+    return "deep"
+
+
 def build_knowledge_graph(repo_path: str | None = None):
     target = repo_path or TARGET_REPO_DIR
     rt = Path(target)
