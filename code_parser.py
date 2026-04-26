@@ -1,6 +1,7 @@
 import os
 import re
 import sqlite3
+import subprocess
 from pathlib import Path
 from collections import defaultdict
 
@@ -399,6 +400,147 @@ def detect_primary_language(source_roots: list[str]) -> dict:
     }
 
 
+# 参考 OS 溯源：三层判断
+STRUCT_FINGERPRINTS: dict[str, list[str]] = {
+    "rcore-tutorial-v3": [
+        "TaskControlBlock",
+        "MemorySet",
+        "MapArea",
+        "TrapContext",
+        "AppManager",
+    ],
+    "rcore-tutorial-v2": [
+        "AppManager",
+        "TaskContext",
+        "__switch",
+    ],
+    "xv6-riscv": [
+        "struct proc",
+        "struct spinlock",
+        "struct inode",
+        "kalloc",
+        "kinit",
+    ],
+    "ucore": [
+        "proc_struct",
+        "pmm_manager",
+        "run_queue",
+        "struct Page",
+        "le_to_struct",
+    ],
+    "titanix": [
+        "Titanix",
+        "ProcessInner",
+        "FrameTracker",
+    ],
+}
+
+GIT_FIRST_COMMIT_HINTS: dict[str, list[str]] = {
+    "rcore-tutorial": ["rcore", "rcore", "tutorial", "chapter"],
+    "xv6":            ["xv6", "mit", "6.828", "6.s081"],
+    "ucore":          ["ucore", "ucore", "tsinghua"],
+}
+
+FUNC_FINGERPRINTS: dict[str, list[str]] = {
+    "rcore-tutorial-v3": ["trap_handler", "sys_fork", "translated_byte_buffer"],
+    "xv6-riscv":         ["usertrap", "kernelvec", "uservec", "forkret"],
+    "ucore":             ["do_fork", "copy_mm", "load_icode"],
+}
+
+
+def _search_in_repo(repo_path: str, keyword: str, source_roots: list[str]) -> bool:
+    """在所有源文件中搜索关键词，找到即返回 True。"""
+    for root in source_roots:
+        for f in Path(root).rglob("*"):
+            if f.suffix not in {".rs", ".c", ".h"}:
+                continue
+            try:
+                if keyword in f.read_text(errors="replace"):
+                    return True
+            except Exception:
+                continue
+    return False
+
+
+def detect_reference_os(repo_path: str, structure: dict) -> dict:
+    """
+    三层指纹叠加判断参考 OS 来源。
+    返回：{
+      "name": "rcore-tutorial-v3",   # None 表示独立实现
+      "confidence": "high",          # high / medium / low
+      "evidence": [...],
+      "all_scores": {...},
+    }
+    """
+    scores: dict[str, int] = defaultdict(int)
+    evidence: dict[str, list[str]] = defaultdict(list)
+
+    # 第一层：数据结构名称（权重 3）
+    for root in structure["source_roots"]:
+        for src_file in Path(root).rglob("*"):
+            if src_file.suffix not in {".rs", ".c", ".h"}:
+                continue
+            try:
+                content = src_file.read_text(errors="replace")
+            except Exception:
+                continue
+            try:
+                rel = str(src_file.relative_to(repo_path))
+            except ValueError:
+                rel = str(src_file)
+            for ref_name, keywords in STRUCT_FINGERPRINTS.items():
+                for kw in keywords:
+                    if kw in content:
+                        scores[ref_name] += 3
+                        evidence[ref_name].append(f"数据结构 '{kw}' 出现在 {rel}")
+
+    # 第二层：Git 历史早期提交（权重 5）
+    try:
+        git_log = subprocess.run(
+            ["git", "log", "--oneline", "--reverse", "--max-count=5"],
+            cwd=repo_path, capture_output=True, text=True, timeout=10
+        ).stdout.lower()
+        for ref_name, hints in GIT_FIRST_COMMIT_HINTS.items():
+            for hint in hints:
+                if hint.lower() in git_log:
+                    scores[ref_name] += 5
+                    evidence[ref_name].append(f"Git 早期提交包含关键词 '{hint}'")
+    except Exception:
+        pass
+
+    # 第三层：特征函数名（权重 1，容易被重命名）
+    for ref_name, func_names in FUNC_FINGERPRINTS.items():
+        for func in func_names:
+            if _search_in_repo(repo_path, func, structure["source_roots"]):
+                scores[ref_name] += 1
+                evidence[ref_name].append(f"特征函数 '{func}' 存在")
+
+    if not scores:
+        return {
+            "name":       None,
+            "confidence": "high",
+            "evidence":   ["无已知参考OS特征，疑似独立实现"],
+            "all_scores": {},
+        }
+
+    best = max(scores, key=scores.__getitem__)
+    best_score = scores[best]
+
+    if best_score >= 8:
+        confidence = "high"
+    elif best_score >= 4:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    return {
+        "name":       best,
+        "confidence": confidence,
+        "evidence":   evidence[best][:5],
+        "all_scores": dict(scores),
+    }
+
+
 def analyze_structure_depth(repo_path: Path) -> str:
     """根据源文件的平均目录深度判断项目结构层级"""
     depths = [
@@ -504,6 +646,7 @@ def build_repo_profile(repo_path: Path) -> str:
         "naming_style":        naming,
     }
     anomalies = detect_anomalies(structure, rt)
+    ref_os = detect_reference_os(str(rt), structure)
 
     output: list[str] = ["【仓库结构探索结果（确定性分析，非 LLM 推断）】", ""]
 
@@ -527,6 +670,13 @@ def build_repo_profile(repo_path: Path) -> str:
         lang_line += f"（次要：{secondary}）"
     lang_line += f"  {loc_parts}{asm_note}"
     output.append(lang_line)
+    output.append("")
+
+    ref_name = ref_os["name"] or "独立实现"
+    ref_conf = ref_os["confidence"]
+    output.append(f"参考OS溯源：{ref_name}（置信度：{ref_conf}）")
+    for ev in ref_os["evidence"]:
+        output.append(f"  · {ev}")
     output.append("")
 
     output.append("子系统文件定位（按内容关键词识别，非路径名）：")
