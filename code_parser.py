@@ -541,8 +541,7 @@ def detect_reference_os(repo_path: str, structure: dict) -> dict:
     }
 
 
-# ── 内核类型识别 ────────────────────────────────────────────────────────────
-
+#内核类型识别 
 MICROKERNEL_SIGNATURES = [
     "ipc_send", "ipc_recv",
     "sys_ipc", "seL4", "L4",
@@ -598,6 +597,53 @@ def detect_kernel_type(repo_path: str, structure: dict) -> dict:
     if len(mono_hits) >= 2 or not micro_hits:
         return {"type": "monolithic",  "evidence": mono_hits[:3]}
     return {"type": "unknown",         "evidence": (micro_hits + mono_hits)[:3]}
+
+
+def detect_target_arch(repo_path: str) -> str:
+    """从 Cargo.toml / Makefile / 汇编文件中提取目标架构。"""
+    path = Path(repo_path)
+
+    cargo_config = path / ".cargo" / "config.toml"
+    if cargo_config.exists():
+        content = cargo_config.read_text(errors="replace")
+        if "riscv64" in content:
+            return "riscv64"
+        if "loongarch64" in content:
+            return "loongarch64"
+
+    makefile = path / "Makefile"
+    if makefile.exists():
+        content = makefile.read_text(errors="replace")
+        if re.search(r'ARCH\s*[:?]?=\s*riscv', content):
+            return "riscv64"
+        if re.search(r'loongarch', content, re.IGNORECASE):
+            return "loongarch64"
+        if re.search(r'riscv64-unknown-elf', content):
+            return "riscv64"
+
+    for asm_file in path.rglob("*.S"):
+        try:
+            content = asm_file.read_text(errors="replace")
+        except Exception:
+            continue
+        if "csrw" in content or "ecall" in content:
+            return "riscv64"
+        if "ertn" in content or "csrrd" in content:
+            return "loongarch64"
+
+    return "unknown"
+
+
+def detect_build_env(repo_path: str) -> str:
+    """检测构建系统类型：cargo / cmake / make / unknown。"""
+    path = Path(repo_path)
+    if (path / "Cargo.toml").exists():
+        return "cargo"
+    if (path / "CMakeLists.txt").exists():
+        return "cmake"
+    if (path / "Makefile").exists():
+        return "make"
+    return "unknown"
 
 
 def analyze_structure_depth(repo_path: Path) -> str:
@@ -776,6 +822,32 @@ def build_repo_profile(repo_path: Path) -> str:
             output.append(f"  - {anomaly}")
 
     return "\n".join(output)
+
+
+def build_profile(repo_path: str, structure: dict) -> dict:
+    """将三项识别任务的结果聚合为结构化 dict，供后续直接使用。"""
+    lang_info   = detect_primary_language(structure["source_roots"])
+    ref_os_info = detect_reference_os(repo_path, structure)
+    kernel_info = detect_kernel_type(repo_path, structure)
+    arch        = detect_target_arch(repo_path)
+
+    return {
+        "primary_lang":   lang_info["primary"],
+        "secondary_lang": lang_info["secondary"],
+        "has_assembly":   lang_info["has_assembly"],
+        "loc":            lang_info["loc"],
+
+        "reference_os":   ref_os_info["name"],
+        "ref_confidence": ref_os_info["confidence"],
+        "ref_evidence":   ref_os_info["evidence"],
+
+        "kernel_type":    kernel_info["type"],
+        "target_arch":    arch,
+
+        "has_cargo":      (Path(repo_path) / "Cargo.toml").exists(),
+        "has_makefile":   (Path(repo_path) / "Makefile").exists(),
+        "build_env":      detect_build_env(repo_path),
+    }
 
 
 def build_knowledge_graph(repo_path: str | None = None):
