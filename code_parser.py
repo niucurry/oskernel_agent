@@ -2,6 +2,7 @@ import os
 import re
 import sqlite3
 from pathlib import Path
+from collections import defaultdict
 
 import tree_sitter_c as tsc
 import tree_sitter_rust as tsr
@@ -342,6 +343,62 @@ def detect_naming_style(repo_path: Path) -> str:
     return "mixed"
 
 
+def detect_primary_language(source_roots: list[str]) -> dict:
+    """
+    按代码行数加权识别主语言，排除汇编和头文件干扰。
+    返回：{
+      "primary": "rust",
+      "secondary": "c",
+      "has_assembly": True,
+      "loc": {"rust": 8420, "c": 312, "asm": 89}
+    }
+    """
+    loc: dict[str, int] = defaultdict(int)
+
+    LANG_MAP = {
+        ".rs":  "rust",
+        ".c":   "c",
+        ".h":   "c",
+        ".cpp": "cpp",
+        ".S":   "asm",
+        ".s":   "asm",
+        ".asm": "asm",
+    }
+
+    for root in source_roots:
+        for f in Path(root).rglob("*"):
+            if not f.is_file():
+                continue
+            lang = LANG_MAP.get(f.suffix.lower())
+            if not lang:
+                continue
+            try:
+                lines = sum(
+                    1 for line in f.read_text(errors="replace").splitlines()
+                    if line.strip()
+                )
+                loc[lang] += lines
+            except Exception:
+                continue
+
+    substantive = {k: v for k, v in loc.items() if k != "asm"}
+
+    if not substantive:
+        primary = "unknown"
+    else:
+        primary = max(substantive, key=substantive.__getitem__)
+
+    secondary_langs = [k for k in substantive if k != primary and substantive[k] > 100]
+    secondary = secondary_langs[0] if secondary_langs else None
+
+    return {
+        "primary":      primary,
+        "secondary":    secondary,
+        "has_assembly": loc.get("asm", 0) > 0,
+        "loc":          dict(loc),
+    }
+
+
 def analyze_structure_depth(repo_path: Path) -> str:
     """根据源文件的平均目录深度判断项目结构层级"""
     depths = [
@@ -434,6 +491,7 @@ def build_repo_profile(repo_path: Path) -> str:
         depth_label = "deep"
 
     naming = detect_naming_style(rt)
+    lang_info = detect_primary_language(source_roots_abs)
     subsystem_map = classify_files_by_content(str(rt), source_roots_rel)
     doc_files = find_doc_files(rt)
     annotated = annotate_doc_readers(doc_files)
@@ -458,6 +516,17 @@ def build_repo_profile(repo_path: Path) -> str:
 
     output.append(f"目录风格：{depth_label}（平均深度 {avg_depth:.1f} 层）")
     output.append(f"命名风格：{naming}")
+
+    primary = lang_info["primary"]
+    secondary = lang_info["secondary"]
+    has_asm = lang_info["has_assembly"]
+    loc_parts = "、".join(f"{k} {v}行" for k, v in lang_info["loc"].items() if k != "asm")
+    asm_note = f"（含汇编 {lang_info['loc'].get('asm', 0)} 行）" if has_asm else ""
+    lang_line = f"主语言：{primary}"
+    if secondary:
+        lang_line += f"（次要：{secondary}）"
+    lang_line += f"  {loc_parts}{asm_note}"
+    output.append(lang_line)
     output.append("")
 
     output.append("子系统文件定位（按内容关键词识别，非路径名）：")
