@@ -541,6 +541,65 @@ def detect_reference_os(repo_path: str, structure: dict) -> dict:
     }
 
 
+# ── 内核类型识别 ────────────────────────────────────────────────────────────
+
+MICROKERNEL_SIGNATURES = [
+    "ipc_send", "ipc_recv",
+    "sys_ipc", "seL4", "L4",
+    "capability", "cap_table",
+    "server_process", "fs_server",
+    "driver_process", "dev_server",
+]
+
+MONOLITHIC_SIGNATURES = [
+    "vfs_read", "vfs_write",
+    "kmalloc", "kfree",
+    "task_struct", "proc_struct",
+]
+
+
+def detect_kernel_type(repo_path: str, structure: dict) -> dict:
+    """
+    通过特征签名和目录结构区分宏内核与微内核。
+    返回：{"type": "monolithic"|"microkernel"|"unknown", "evidence": [...]}
+    """
+    micro_hits: list[str] = []
+    mono_hits:  list[str] = []
+
+    for root in structure["source_roots"]:
+        for f in Path(root).rglob("*"):
+            if f.suffix not in {".rs", ".c", ".h"}:
+                continue
+            try:
+                content = f.read_text(errors="replace")
+            except Exception:
+                continue
+            try:
+                rel = str(f.relative_to(repo_path))
+            except ValueError:
+                rel = str(f)
+            for sig in MICROKERNEL_SIGNATURES:
+                if sig in content:
+                    micro_hits.append(f"'{sig}' in {rel}")
+            for sig in MONOLITHIC_SIGNATURES:
+                if sig in content:
+                    mono_hits.append(f"'{sig}' in {rel}")
+
+    has_servers_dir = any(
+        "server" in p.name.lower()
+        for p in Path(repo_path).iterdir()
+        if p.is_dir()
+    )
+    if has_servers_dir:
+        micro_hits.append("存在 servers/ 类目录（微内核典型结构）")
+
+    if len(micro_hits) >= 3:
+        return {"type": "microkernel", "evidence": micro_hits[:3]}
+    if len(mono_hits) >= 2 or not micro_hits:
+        return {"type": "monolithic",  "evidence": mono_hits[:3]}
+    return {"type": "unknown",         "evidence": (micro_hits + mono_hits)[:3]}
+
+
 def analyze_structure_depth(repo_path: Path) -> str:
     """根据源文件的平均目录深度判断项目结构层级"""
     depths = [
@@ -647,6 +706,7 @@ def build_repo_profile(repo_path: Path) -> str:
     }
     anomalies = detect_anomalies(structure, rt)
     ref_os = detect_reference_os(str(rt), structure)
+    kernel_type = detect_kernel_type(str(rt), structure)
 
     output: list[str] = ["【仓库结构探索结果（确定性分析，非 LLM 推断）】", ""]
 
@@ -676,6 +736,11 @@ def build_repo_profile(repo_path: Path) -> str:
     ref_conf = ref_os["confidence"]
     output.append(f"参考OS溯源：{ref_name}（置信度：{ref_conf}）")
     for ev in ref_os["evidence"]:
+        output.append(f"  · {ev}")
+    output.append("")
+
+    output.append(f"内核类型：{kernel_type['type']}")
+    for ev in kernel_type["evidence"]:
         output.append(f"  · {ev}")
     output.append("")
 
