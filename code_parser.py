@@ -312,6 +312,128 @@ def _classify_rust_symbol(name: str, kind: str, scope_kind: str) -> str:
     return "level2"
 
 
+
+def _simplify_signature(sig: str) -> str:
+    """
+    简化函数签名以减少 token。
+    (uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
+    → (uint32_t, uintptr_t, trapframe*)
+    """
+    params = sig.strip("()")
+    if not params:
+        return "()"
+
+    simplified = []
+    for param in params.split(","):
+        param = param.strip()
+        parts = param.split()
+        if len(parts) >= 2:
+            type_part = " ".join(parts[:-1]).replace("struct ", "").strip()
+            if parts[-1].startswith("*"):
+                type_part += "*"
+            simplified.append(type_part)
+        else:
+            simplified.append(param)
+
+    return "(" + ", ".join(simplified) + ")"
+
+
+def _format_symbol(tag: dict, lang: str) -> str:
+    """将 ctags tag 格式化为可读的单行符号描述。"""
+    name = tag["name"]
+    kind = tag.get("kind", "")
+    line = tag.get("line", "?")
+    signature = tag.get("signature", "")
+
+    if kind == "function":
+        short_sig = _simplify_signature(signature) if signature else "()"
+        return f"fn {name}{short_sig}  (L{line})"
+
+    if kind == "struct":
+        return f"struct {name}  (L{line})"
+
+    if kind == "macro":
+        return f"#define {name}  (L{line})"
+
+    if kind == "typedef":
+        typeref = tag.get("typeref", "")
+        return f"type {name} = {typeref}  (L{line})" if typeref else f"type {name}  (L{line})"
+
+    if kind in ("enum", "trait"):
+        return f"{kind} {name}  (L{line})"
+
+    return f"{name}  (L{line})"
+
+
+_SUBSYSTEM_ORDER = [
+    "系统调用",
+    "进程管理",
+    "内存管理",
+    "文件系统",
+    "设备驱动",
+    "硬件抽象",
+    "同步原语",
+]
+
+
+def generate_level1_map(
+    tags: list[dict],
+    structure: dict,
+    profile: dict,
+) -> str:
+    """生成精简地图（纯文本），直接注入 System Prompt。"""
+
+    primary_lang = profile["primary_lang"]
+
+    #过滤，只保留 level1 符号
+    level1_tags = [t for t in tags if classify_symbol(t, primary_lang) == "level1"]
+    #构建 文件路径 → 子系统 的映射
+    file_to_subsystem: dict[str, str] = {}
+    for subsystem, files in structure["subsystem_locations"].items():
+        for entry in files:
+            file_to_subsystem[entry["file"]] = subsystem
+
+    subsystem_groups: dict[str, list] = defaultdict(list)
+    ungrouped: list[dict] = []
+
+    for tag in level1_tags:
+        sub = file_to_subsystem.get(tag["rel_path"])
+        if sub:
+            subsystem_groups[sub].append(tag)
+        else:
+            ungrouped.append(tag)
+
+    #渲染
+    lines = ["## 仓库结构地图（公开接口）\n"]
+
+    for subsystem in _SUBSYSTEM_ORDER:
+        group = subsystem_groups.get(subsystem)
+        if not group:
+            continue
+
+        lines.append(f"### {subsystem}")
+
+        by_file: dict[str, list] = defaultdict(list)
+        for tag in group:
+            by_file[tag["rel_path"]].append(tag)
+
+        for file_path, file_tags in by_file.items():
+            lines.append(f"{file_path}:")
+            file_tags.sort(key=lambda t: t.get("line", 0))
+            for tag in file_tags:
+                lines.append(f"  {_format_symbol(tag, primary_lang)}")
+
+        lines.append("")
+
+    #未归类符号放到"其他"（最多 20 个）
+    if ungrouped:
+        lines.append("### 其他")
+        for tag in ungrouped[:20]:
+            lines.append(f"  {tag['rel_path']}: {_format_symbol(tag, primary_lang)}")
+
+    return "\n".join(lines)
+
+
 #子系统分类
 SUBSYSTEM_FINGERPRINTS = {
     "进程管理": [
