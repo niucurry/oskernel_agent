@@ -238,6 +238,79 @@ def run_ctags(repo_path: str, source_roots: list[str]) -> list[dict]:
 
     return all_tags
 
+#需要丢弃的噪声符号列表（常见库函数、宏、特殊标识符等）
+_NOISE_NAMES = {
+    "memset", "memcpy", "memmove", "strlen", "strcmp", "strncpy",
+    "printf", "printk", "kprintf", "panic",
+    "main",
+}
+
+
+def classify_symbol(tag: dict, primary_lang: str) -> str:
+    """
+    判断符号应进入哪一级：
+      "level1"  → 第一级精简地图（注入 Prompt）
+      "level2"  → 第二级完整索引
+      "discard" → 直接丢弃（噪声）
+    """
+    name      = tag.get("name", "")
+    kind      = tag.get("kind", "")
+    extras    = tag.get("extras", "")
+    scope_kind = tag.get("scopeKind", "")
+
+    if name in _NOISE_NAMES:
+        return "discard"
+    if name.startswith("__") and name.endswith("__"):
+        return "discard"
+
+    if primary_lang == "c":
+        return _classify_c_symbol(name, kind, extras)
+    if primary_lang == "rust":
+        return _classify_rust_symbol(name, kind, scope_kind)
+    return "level2"
+
+
+def _classify_c_symbol(name: str, kind: str, extras: str) -> str:
+    if kind == "function":
+        if "fileScope" in extras:
+            return "level2"
+        if name.startswith("_") and not name.startswith("__"):
+            return "level2"
+        return "level1"
+
+    if kind == "struct":
+        return "level1"
+
+    if kind == "macro":
+        return "level1" if (name.isupper() and len(name) > 2) else "level2"
+
+    if kind == "typedef":
+        return "level1"
+
+    if kind == "prototype":
+        return "level1"
+
+    # variable 及其他 kind → level2
+    return "level2"
+
+
+def _classify_rust_symbol(name: str, kind: str, scope_kind: str) -> str:
+    if kind in ("function", "method"):
+        if scope_kind in ("implementation", "impl"):
+            if name in ("new", "run", "init", "exec", "spawn"):
+                return "level1"
+            return "level2"
+        if name.startswith("sys_"):
+            return "level1"
+        if name.startswith("_"):
+            return "level2"
+        return "level1"
+
+    if kind in ("struct", "enum", "trait", "macro"):
+        return "level1"
+
+    return "level2"
+
 
 #子系统分类
 SUBSYSTEM_FINGERPRINTS = {
