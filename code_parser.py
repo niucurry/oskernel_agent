@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -201,6 +202,44 @@ def find_source_roots(repo_path: Path) -> list[str]:
     return deduplicate_parent_paths([c[0] for c in candidates[:8]])
 
 
+def run_ctags(repo_path: str, source_roots: list[str]) -> list[dict]:
+    """调用 ctags 提取所有符号，返回原始 tag 列表（路径已转为相对于 repo_path 的相对路径）"""
+    all_tags = []
+
+    for root in source_roots:
+        cmd = [
+            "ctags",
+            "--output-format=json",
+            "--fields=+neStzK",   # n=行号 e=extras S=签名 t=类型 z=kind全名 K=kind全名备选
+            "--extras=+fq",       # f=标记 file-scope 符号  q=产出全限定名
+            "--kinds-c=+dfgmpstuvx",   # C: define/function/enum/macro/prototype/struct/typedef/union/variable
+            "--kinds-rust=+fPMSg",     # Rust: function/method/macro/struct/enum
+            "-R", root,
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except FileNotFoundError:
+            print("  警告：未找到 ctags 命令，跳过符号提取")
+            break
+        except subprocess.TimeoutExpired:
+            print(f"  警告：ctags 扫描 {root} 超时，跳过")
+            continue
+
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            try:
+                tag = json.loads(line)
+                tag["rel_path"] = tag.get("path", "").replace(repo_path, "").lstrip("/")
+                all_tags.append(tag)
+            except json.JSONDecodeError:
+                continue
+
+    return all_tags
+
+
+#子系统分类
 SUBSYSTEM_FINGERPRINTS = {
     "进程管理": [
         "fork", "exec", "waitpid", "do_fork", "task_struct",
