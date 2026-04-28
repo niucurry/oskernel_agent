@@ -48,7 +48,7 @@ class RustAnalyzerEngine(LspEngine):
                 return False
 
             self._send_notification("initialized", {})
-            self._wait_for_indexing(timeout=120)
+            self._wait_for_indexing(timeout=self._timeout)
             print("[路径A] rust-analyzer 初始化成功")
             return True
 

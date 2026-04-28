@@ -14,9 +14,10 @@ class LspEngine(AnalysisEngine):
     子类只需实现语言相关的部分，不需要关心 JSON-RPC 通信细节。
     """
 
-    def __init__(self, repo_path: str, level2_index=None):
+    def __init__(self, repo_path: str, level2_index=None, timeout: int = 60):
         self.repo_path = os.path.abspath(repo_path)
         self._level2_index = level2_index
+        self._timeout = timeout
         self._request_id = 0
         self._pending: dict[int, queue.Queue] = {}
         self._pending_lock = threading.Lock()

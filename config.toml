@@ -1,0 +1,18 @@
+[api]
+key        = "sk-8baedbf35e474021a8d923eac557aca8"
+base_url   = "https://api.deepseek.com/v1"
+model      = "deepseek-chat"
+temperature = 0.1
+
+[data]
+repos_dir    = "./data/historical_repos"
+metadata_dir = "./data/metadata"
+
+[target]
+repo_id = "T202510008995695-2259"
+
+[engine]
+rust_analyzer_timeout = 120   # 路径A 等待索引完成的最长秒数
+clangd_timeout        = 60    # 路径B 等待索引完成的最长秒数
+max_call_depth        = 3     # get_call_chain 默认展开层数
+skip_dirs = ["vendor", "third_party", "target"]  # 路径C 跳过的目录

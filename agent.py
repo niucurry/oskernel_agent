@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from openai import OpenAI
 
+import config
 from engines.base import AnalysisEngine
 from parser.code_parser import (
     build_repo_profile, build_profile,
@@ -10,11 +11,7 @@ from parser.code_parser import (
 )
 from parser.os_tools import build_repo_map
 
-API_KEY = "sk-8baedbf35e474021a8d923eac557aca8"
-BASE_URL = "https://api.deepseek.com/v1"
-MODEL_NAME = "deepseek-chat"
-
-client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+client = OpenAI(api_key=config.api["key"], base_url=config.api["base_url"])
 
 #大模型可见的工具 Schema
 
@@ -84,9 +81,12 @@ tools_schema = [
 def select_engine(repo_path: str, profile: dict, level2_index) -> AnalysisEngine:
     primary_lang = profile["primary_lang"]
 
+    ecfg = config.engine
+
     if primary_lang == "rust" or profile.get("has_cargo"):
         from engines.path_a import RustAnalyzerEngine
-        engine = RustAnalyzerEngine(repo_path, level2_index)
+        engine = RustAnalyzerEngine(repo_path, level2_index,
+                                    timeout=ecfg["rust_analyzer_timeout"])
         if engine.initialize():
             print("[引擎选择] 路径 A：rust-analyzer")
             return engine
@@ -95,7 +95,8 @@ def select_engine(repo_path: str, profile: dict, level2_index) -> AnalysisEngine
         from engines.path_b import ClangdEngine, try_generate_compile_commands
         cc_path = try_generate_compile_commands(repo_path)
         if cc_path:
-            engine = ClangdEngine(repo_path, cc_path, level2_index)
+            engine = ClangdEngine(repo_path, cc_path, level2_index,
+                                  timeout=ecfg["clangd_timeout"])
             if engine.initialize():
                 print("[引擎选择] 路径 B：clangd")
                 return engine
@@ -103,7 +104,7 @@ def select_engine(repo_path: str, profile: dict, level2_index) -> AnalysisEngine
     from engines.path_c import TreeSitterEngine
     lang = primary_lang if primary_lang in ("c", "rust") else "c"
     print(f"[引擎选择] 路径 C：tree-sitter（{lang}）")
-    return TreeSitterEngine(repo_path, lang)
+    return TreeSitterEngine(repo_path, lang, skip_dirs=ecfg["skip_dirs"])
 
 
 #核心执行引擎
@@ -120,11 +121,11 @@ def agent_run(engine: AnalysisEngine, system_prompt: str, user_prompt: str) -> s
     step = 1
     while True:
         response = client.chat.completions.create(
-            model=MODEL_NAME,
+            model=config.api["model"],
             messages=messages,
             tools=tools_schema,
             tool_choice="auto",
-            temperature=0.1,
+            temperature=config.api["temperature"],
         )
 
         response_message = response.choices[0].message
@@ -185,8 +186,8 @@ def _build_structure(repo_path: Path) -> dict:
 
 
 if __name__ == "__main__":
-    repo_id_test = "T202510008995695-2259"
-    repo_path    = Path(f"./data/historical_repos/{repo_id_test}")
+    repo_id_test = config.target["repo_id"]
+    repo_path    = Path(config.data["repos_dir"]) / repo_id_test
 
     #静态结构分析（注入 System Prompt)
     print("正在执行静态结构分析...")

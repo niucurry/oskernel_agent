@@ -142,8 +142,8 @@ def _extract_flags_from_makefile(repo_path: str) -> str:
 class ClangdEngine(LspEngine):
     """路径 B：通过 LSP 协议与 clangd 通信（C 仓库）"""
 
-    def __init__(self, repo_path: str, compile_commands_path: str, level2_index=None):
-        super().__init__(repo_path, level2_index)
+    def __init__(self, repo_path: str, compile_commands_path: str, level2_index=None, timeout: int = 60):
+        super().__init__(repo_path, level2_index, timeout=timeout)
         self.compile_commands_path = compile_commands_path
 
     def initialize(self) -> bool:
@@ -181,7 +181,7 @@ class ClangdEngine(LspEngine):
                 return False
 
             self._send_notification("initialized", {})
-            self._wait_for_indexing(timeout=60)
+            self._wait_for_indexing(timeout=self._timeout)
             print("[路径B] clangd 初始化成功")
             return True
 

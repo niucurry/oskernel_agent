@@ -13,9 +13,11 @@ class TreeSitterEngine(AnalysisEngine):
     精度低于 LSP，但永远不会失败
     """
 
-    def __init__(self, repo_path: str, lang: str):
+    def __init__(self, repo_path: str, lang: str,
+                 skip_dirs: list[str] | None = None):
         self.repo_path = repo_path
         self.lang = lang
+        self._skip_dirs = skip_dirs or ["vendor", "third_party", "target"]
 
         if lang == "c":
             self.language = Language(tsc.language())
@@ -42,7 +44,7 @@ class TreeSitterEngine(AnalysisEngine):
         count = 0
         for src_file in Path(self.repo_path).rglob(f"*{self._src_ext}"):
             rel = str(src_file.relative_to(self.repo_path))
-            if any(skip in rel for skip in ["vendor", "third_party", "target"]):
+            if any(skip in rel for skip in self._skip_dirs):
                 continue
             try:
                 source = src_file.read_bytes()
