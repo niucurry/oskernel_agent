@@ -952,7 +952,11 @@ def build_profile(repo_path: str, structure: dict) -> dict:
         "kernel_type":    kernel_info["type"],
         "target_arch":    arch,
 
-        "has_cargo":      (Path(repo_path) / "Cargo.toml").exists(),
+        "has_cargo":      any(
+            f.name == "Cargo.toml"
+            for f in Path(repo_path).rglob("Cargo.toml")
+            if not any(p in {"vendor", "target", ".git"} for p in f.parts)
+        ),
         "has_makefile":   (Path(repo_path) / "Makefile").exists(),
         "build_env":      detect_build_env(repo_path),
     }
