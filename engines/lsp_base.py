@@ -5,7 +5,7 @@ import threading
 import subprocess
 from abc import abstractmethod
 
-from analysis_engine import AnalysisEngine
+from engines.base import AnalysisEngine
 
 
 class LspEngine(AnalysisEngine):

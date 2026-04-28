@@ -3,8 +3,8 @@ import re
 import subprocess
 import threading
 
-from lsp_engine import LspEngine
-from code_parser import find_function_calls
+from engines.lsp_base import LspEngine
+from parser.code_parser import find_function_calls
 
 
 class RustAnalyzerEngine(LspEngine):
