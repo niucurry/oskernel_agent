@@ -10,12 +10,22 @@ from parser.code_parser import find_function_calls
 class RustAnalyzerEngine(LspEngine):
     """路径 A：通过 LSP 协议与 rust-analyzer 通信"""
 
+    def _find_cargo_root(self) -> str | None:
+        """递归找含 Cargo.toml 的目录（跳过 vendor/target/.git），返回最浅的一个。"""
+        _SKIP = {"vendor", "target", ".git", "node_modules"}
+        for root, dirs, files in os.walk(self.repo_path):
+            dirs[:] = [d for d in dirs if d not in _SKIP]
+            if "Cargo.toml" in files:
+                return root
+        return None
+
     def initialize(self) -> bool:
         """
         启动 rust-analyzer 并完成握手
         如果仓库没有 Cargo.toml，直接返回 False（降级到下一条路径）
         """
-        if not os.path.exists(os.path.join(self.repo_path, "Cargo.toml")):
+        cargo_root = self._find_cargo_root()
+        if cargo_root is None:
             print("[路径A] 未找到 Cargo.toml，跳过 rust-analyzer")
             return False
 
@@ -34,7 +44,7 @@ class RustAnalyzerEngine(LspEngine):
 
             init_result = self._send_request("initialize", {
                 "processId": os.getpid(),
-                "rootUri": f"file://{self.repo_path}",
+                "rootUri": f"file://{cargo_root}",
                 "capabilities": {
                     "textDocument": {
                         "definition": {"dynamicRegistration": False},
