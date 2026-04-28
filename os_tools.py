@@ -2,7 +2,7 @@ import sqlite3
 import json
 from collections import defaultdict
 
-from code_parser import classify_symbol
+from code_parser import classify_symbol, run_ctags, generate_level1_map
 
 
 class Level2Index:
@@ -83,6 +83,34 @@ class Level2Index:
                 sig_str = f"  {s['signature']}" if s["signature"] else ""
                 lines.append(f"  {marker} {s['kind']} {s['name']}{sig_str}  (L{s['line']})")
         return "\n".join(lines)
+
+
+def build_repo_map(
+    repo_path: str,
+    structure: dict,
+    profile: dict,
+) -> tuple[str, "Level2Index"]:
+    """
+    第2步主入口，串联所有环节。
+    返回：(第一级地图文本, 第二级索引对象)
+    """
+    raw_tags = run_ctags(repo_path, structure["source_roots"])
+
+    level1_map = generate_level1_map(raw_tags, structure, profile)
+
+    level2_index = Level2Index(raw_tags, profile, structure)
+
+    primary_lang = profile["primary_lang"]
+    total    = len(raw_tags)
+    l1_count = sum(1 for t in raw_tags if classify_symbol(t, primary_lang) == "level1")
+    l2_count = sum(1 for t in raw_tags if classify_symbol(t, primary_lang) == "level2")
+
+    print(f"  符号统计：总计 {total}，"
+          f"第一级 {l1_count}，第二级 {l2_count}，"
+          f"丢弃 {total - l1_count - l2_count}")
+    print(f"  第一级地图预估 Token：{len(level1_map) // 3}")
+
+    return level1_map, level2_index
 
 
 class OSCodeTools:
