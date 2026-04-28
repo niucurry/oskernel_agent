@@ -87,19 +87,20 @@ def run_ctags(repo_path: str, source_roots: list[str]) -> list[dict]:
             "--fields=+neStzK",   # n=行号 e=extras S=签名 t=类型 z=kind全名 K=kind全名备选
             "--extras=+fq",       # f=标记 file-scope 符号  q=产出全限定名
             "--kinds-c=+dfgmpstuvx",   # C: define/function/enum/macro/prototype/struct/typedef/union/variable
-            "--kinds-rust=+fPMSg",     # Rust: function/method/macro/struct/enum
+            "--kinds-rust=+fPMsgi",    # Rust: function/method/macro/struct/enum/trait
             "-R", root,
         ]
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         except FileNotFoundError:
-            print("  警告：未找到 ctags 命令，跳过符号提取")
+            print("  警告：未找到 ctags 命令（需要 Universal Ctags）。符号索引为空，工具将无法查询符号。")
             break
         except subprocess.TimeoutExpired:
             print(f"  警告：ctags 扫描 {root} 超时，跳过")
             continue
 
+        parsed_in_root = 0
         for line in result.stdout.splitlines():
             if not line.strip():
                 continue
@@ -107,8 +108,13 @@ def run_ctags(repo_path: str, source_roots: list[str]) -> list[dict]:
                 tag = json.loads(line)
                 tag["rel_path"] = tag.get("path", "").replace(repo_path, "").lstrip("/")
                 all_tags.append(tag)
+                parsed_in_root += 1
             except json.JSONDecodeError:
                 continue
+
+        if parsed_in_root == 0 and result.returncode != 0:
+            print(f"  警告：ctags 在 {root} 未产生任何 JSON 输出（returncode={result.returncode}）。"
+                  f"可能是 Exuberant Ctags（不支持 --output-format=json），请安装 Universal Ctags。")
 
     return all_tags
 

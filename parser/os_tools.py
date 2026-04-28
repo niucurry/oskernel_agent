@@ -106,6 +106,13 @@ def build_repo_map(
     print(f"  符号统计：总计 {total}，"
           f"第一级 {l1_count}，第二级 {l2_count}，"
           f"丢弃 {total - l1_count - l2_count}")
+
+    if total == 0:
+        print("\n  !! 严重警告：符号索引为空 !!")
+        print("  所有工具调用（get_call_chain / get_struct_fields / find_references / go_to_definition）")
+        print('  将返回"未找到"，Agent 报告结论不可信。请检查：')
+        print("  1. 是否安装了 Universal Ctags（非 Exuberant Ctags）")
+        print("  2. source_roots 是否包含实际的源代码目录")
     print(f"  第一级地图预估 Token：{len(level1_map) // 3}")
 
     return level1_map, level2_index

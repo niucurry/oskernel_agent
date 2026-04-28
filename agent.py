@@ -109,6 +109,33 @@ def select_engine(repo_path: str, profile: dict, level2_index) -> AnalysisEngine
 
 #核心执行引擎
 
+_MAX_SUFFIX_HALLUCINATIONS = 3   # 触发幻觉扩展终止所需的次数
+_MAX_STEPS = 100                 # 单次 agent_run 最大工具调用步数
+
+
+def _is_not_found(result) -> bool:
+    if result is None:
+        return True
+    if isinstance(result, dict):
+        if not result:           # 空 dict
+            return True
+        values = list(result.values())
+        return bool(values) and isinstance(values[0], dict) and values[0].get("__not_found__")
+    if isinstance(result, (list, str)) and not result:  # 空 list / 空字符串
+        return True
+    return False
+
+
+def _is_suffix_of_any(failed_symbols: set, curr: str | None) -> str | None:
+    """若 curr 是 failed_symbols 中某个符号加后缀的变体，返回那个基础符号；否则返回 None。"""
+    if not curr:
+        return None
+    for base in failed_symbols:
+        if len(curr) > len(base) and curr.startswith(base + "_"):
+            return base
+    return None
+
+
 def agent_run(engine: AnalysisEngine, system_prompt: str, user_prompt: str) -> str:
     messages = [
         {"role": "system", "content": system_prompt},
@@ -117,9 +144,38 @@ def agent_run(engine: AnalysisEngine, system_prompt: str, user_prompt: str) -> s
 
     info = engine.get_engine_info()
     print(f"\n Agent 启动（引擎：{info['engine']}，路径{info['path']}，精度：{info['precision']}）")
-    #React
+
     step = 1
+    failed_symbols: set[str] = set()          # 所有已查询且未找到的符号名
+    queried_cache: set[tuple] = set()         # (tool_name, symbol) 去重缓存
+    hallucination_count = 0                   # 本轮幻觉扩展命中次数
+    force_finish = False
+
     while True:
+        if step > _MAX_STEPS:
+            print(f"\n [保护] 已达最大步数 {_MAX_STEPS}，强制终止并输出报告")
+            messages.append({
+                "role":    "user",
+                "content": f"已达工具调用上限（{_MAX_STEPS} 步）。请根据已收集到的信息直接输出最终分析报告，不要再调用任何工具。",
+            })
+            response = client.chat.completions.create(
+                model=config.api["model"],
+                messages=messages,
+                tools=tools_schema,
+                tool_choice="none",
+                temperature=config.api["temperature"],
+            )
+            return response.choices[0].message.content
+
+        if force_finish:
+            print("\n [保护] 注入终止指令，要求 LLM 输出最终报告")
+            messages.append({
+                "role":    "user",
+                "content": "这些符号在代码库中均不存在，请勿继续猜测变体名称。请根据已收集到的信息直接输出最终分析报告，不要再调用任何工具。",
+            })
+            force_finish = False
+            hallucination_count = 0
+
         response = client.chat.completions.create(
             model=config.api["model"],
             messages=messages,
@@ -142,6 +198,42 @@ def agent_run(engine: AnalysisEngine, system_prompt: str, user_prompt: str) -> s
 
             print(f"  [步骤 {step}] 调用工具：{function_name} → {args}")
 
+            queried_symbol = (args.get("function_name")
+                              or args.get("symbol_name")
+                              or args.get("struct_name"))
+
+            # 重复调用检测：完全相同的 (工具, 符号) 组合已查询过
+            cache_key = (function_name, queried_symbol)
+            if cache_key in queried_cache:
+                print(f"  [保护] 重复调用跳过：{function_name}({queried_symbol!r}) 已查询过")
+                messages.append({
+                    "tool_call_id": tool_call.id,
+                    "role":         "tool",
+                    "name":         function_name,
+                    "content":      f"符号 {queried_symbol!r} 已查询过，结果同前，请勿重复调用。",
+                })
+                step += 1
+                continue
+
+            queried_cache.add(cache_key)
+
+            # 幻觉扩展检测：当前符号是已失败符号集合中任意一个的后缀变体
+            base = _is_suffix_of_any(failed_symbols, queried_symbol)
+            if base is not None:
+                hallucination_count += 1
+                print(f"  [保护] 幻觉扩展（{hallucination_count}/{_MAX_SUFFIX_HALLUCINATIONS}）：{queried_symbol!r} 是 {base!r} 的后缀变体")
+                failed_symbols.add(queried_symbol)  # 也加入失败集，阻断更深层扩展
+                messages.append({
+                    "tool_call_id": tool_call.id,
+                    "role":         "tool",
+                    "name":         function_name,
+                    "content":      f"符号 {queried_symbol!r} 不存在（是对不存在符号 {base!r} 的猜测变体）。请勿继续猜测。",
+                })
+                step += 1
+                if hallucination_count >= _MAX_SUFFIX_HALLUCINATIONS:
+                    force_finish = True
+                continue
+
             if function_name == "get_call_chain":
                 result = engine.get_call_chain(args["function_name"], args.get("max_depth", 3))
             elif function_name == "get_struct_fields":
@@ -153,11 +245,18 @@ def agent_run(engine: AnalysisEngine, system_prompt: str, user_prompt: str) -> s
             else:
                 result = f"Error: 未知工具 {function_name}"
 
+            if _is_not_found(result):
+                if queried_symbol:
+                    failed_symbols.add(queried_symbol)
+                result_str = f"符号 {queried_symbol!r} 在代码库中不存在。"
+            else:
+                result_str = str(result)
+
             messages.append({
                 "tool_call_id": tool_call.id,
                 "role":         "tool",
                 "name":         function_name,
-                "content":      str(result),
+                "content":      result_str,
             })
             step += 1
 
@@ -236,7 +335,9 @@ if __name__ == "__main__":
    - mixed      → 两种形式各尝试一次
 3. 每个已识别子系统至少调用一次 `get_call_chain` 核实其入口函数
 4. 调用链中出现结构体名（首字母大写或含 `_t` 后缀）时，必须调用 `get_struct_fields` 核实
-5. 工具返回"未找到"时，如实记录，不得替换为推测内容
+5. 工具返回"未找到"时，区分两种情况：
+   - 若静态分析已在该子系统发现了相关源文件，则注明"符号查询受引擎限制，无法核实"，**不得**判定为"未实现"
+   - 若静态分析也未发现任何相关文件，才可判定为"未实现"
 
 ## 强制输出格式（Markdown）
 
