@@ -41,7 +41,7 @@ def test_single_repo():
     if not os.path.exists(project_path):
         print(f"  -> 开始从 {TARGET_REPO_URL} 克隆...")
         try:
-            Repo.clone_from(TARGET_REPO_URL, project_path)
+            Repo.clone_from(TARGET_REPO_URL, project_path, no_checkout=True)
         except Exception as e:
             print(f" 克隆失败，请检查链接是否正确且仓库是否公开: {e}")
             return
