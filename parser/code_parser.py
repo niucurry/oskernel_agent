@@ -713,27 +713,27 @@ def detect_kernel_type(repo_path: str, structure: dict) -> dict:
     return {"type": "unknown",         "evidence": (micro_hits + mono_hits)[:3]}
 
 
-def detect_target_arch(repo_path: str) -> str:
-    """从 Cargo.toml / Makefile / 汇编文件中提取目标架构。"""
+def detect_target_arch(repo_path: str) -> list[str]:
+    """从 Cargo.toml / Makefile / 汇编文件中提取目标架构，支持双架构项目。"""
     path = Path(repo_path)
+    found: set[str] = set()
 
     cargo_config = path / ".cargo" / "config.toml"
     if cargo_config.exists():
         content = cargo_config.read_text(errors="replace")
         if "riscv64" in content:
-            return "riscv64"
+            found.add("riscv64")
         if "loongarch64" in content:
-            return "loongarch64"
+            found.add("loongarch64")
 
     makefile = path / "Makefile"
     if makefile.exists():
         content = makefile.read_text(errors="replace")
-        if re.search(r'ARCH\s*[:?]?=\s*riscv', content):
-            return "riscv64"
+        if re.search(r'ARCH\s*[:?]?=\s*riscv', content) or \
+                re.search(r'riscv64-unknown-elf', content):
+            found.add("riscv64")
         if re.search(r'loongarch', content, re.IGNORECASE):
-            return "loongarch64"
-        if re.search(r'riscv64-unknown-elf', content):
-            return "riscv64"
+            found.add("loongarch64")
 
     for asm_file in path.rglob("*.S"):
         try:
@@ -741,11 +741,11 @@ def detect_target_arch(repo_path: str) -> str:
         except Exception:
             continue
         if "csrw" in content or "ecall" in content:
-            return "riscv64"
+            found.add("riscv64")
         if "ertn" in content or "csrrd" in content:
-            return "loongarch64"
+            found.add("loongarch64")
 
-    return "unknown"
+    return sorted(found) if found else ["unknown"]
 
 
 def detect_build_env(repo_path: str) -> str:
@@ -867,6 +867,7 @@ def build_repo_profile(repo_path: Path) -> str:
     anomalies = detect_anomalies(structure, rt)
     ref_os = detect_reference_os(str(rt), structure)
     kernel_type = detect_kernel_type(str(rt), structure)
+    arch_list = detect_target_arch(str(rt))
 
     output: list[str] = ["【仓库结构探索结果（确定性分析，非 LLM 推断）】", ""]
 
@@ -902,6 +903,12 @@ def build_repo_profile(repo_path: Path) -> str:
     output.append(f"内核类型：{kernel_type['type']}")
     for ev in kernel_type["evidence"]:
         output.append(f"  · {ev}")
+    output.append("")
+
+    if len(arch_list) > 1:
+        output.append(f"目标架构：{' + '.join(arch_list)}（双架构）")
+    else:
+        output.append(f"目标架构：{arch_list[0]}")
     output.append("")
 
     output.append("子系统文件定位（按内容关键词识别，非路径名）：")

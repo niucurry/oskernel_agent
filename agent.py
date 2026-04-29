@@ -110,7 +110,7 @@ def select_engine(repo_path: str, profile: dict, level2_index) -> AnalysisEngine
 #核心执行引擎
 
 _MAX_SUFFIX_HALLUCINATIONS = 3   # 触发幻觉扩展终止所需的次数
-_MAX_STEPS = 100                 # 单次 agent_run 最大工具调用步数
+_MAX_STEPS = 200                 # 单次 agent_run 最大工具调用步数
 
 
 def _is_not_found(result) -> bool:
@@ -286,7 +286,7 @@ def _build_structure(repo_path: Path) -> dict:
 
 if __name__ == "__main__":
     repo_id_test = config.target["repo_id"]
-    repo_path    = Path(config.data["repos_dir"]) / repo_id_test
+    repo_path    = (Path(config.data["repos_dir"]) / repo_id_test).resolve()
 
     #静态结构分析（注入 System Prompt)
     print("正在执行静态结构分析...")
