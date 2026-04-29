@@ -6,18 +6,72 @@ import threading
 from engines.lsp_base import LspEngine
 from parser.code_parser import find_function_calls
 
+# rust-analyzer 用来标记索引结束的 token 关键词
+_RA_INDEXING_TOKENS = {"Indexing", "Roots Scanned", "Loading"}
+
 
 class RustAnalyzerEngine(LspEngine):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # token_id → title 的映射，用于把数字 token 关联到它的 begin 标题
+        self._progress_titles: dict = {}
+
+    def _check_indexing_complete(self, msg: dict) -> bool:
+        """
+        rust-analyzer 进度消息结构：
+          begin:  {"token": "rustAnalyzer/Indexing", "value": {"kind": "begin", "title": "Indexing"}}
+          report: {"token": ..., "value": {"kind": "report", "message": "100/200"}}
+          end:    {"token": ..., "value": {"kind": "end"}}          ← message 字段不存在！
+
+        父类实现检查 value.message 里有无 "Indexing"，但 end 消息没有 message，永远不触发。
+        正确做法：检查 token 字符串或 begin 时记录的 title。
+        """
+        params = msg.get("params", {})
+        token  = params.get("token")
+        value  = params.get("value", {})
+        kind   = value.get("kind", "")
+
+        # begin 阶段：记录 token → title 映射
+        if kind == "begin":
+            title = value.get("title", "")
+            if token is not None:
+                self._progress_titles[token] = title
+
+        if kind != "end":
+            return False
+
+        # 用 token 字符串直接判断
+        if isinstance(token, str):
+            return any(kw in token for kw in _RA_INDEXING_TOKENS)
+
+        # 数字 token：查找 begin 时记录的 title
+        title = self._progress_titles.get(token, "")
+        return any(kw in title for kw in _RA_INDEXING_TOKENS)
+
     """路径 A：通过 LSP 协议与 rust-analyzer 通信"""
 
     def _find_cargo_root(self) -> str | None:
-        """递归找含 Cargo.toml 的目录（跳过 vendor/target/.git），返回最浅的一个。"""
-        _SKIP = {"vendor", "target", ".git", "node_modules"}
+        """
+        递归找含 Cargo.toml 的目录，优先选内核相关目录（os/kernel/kern），
+        其次选层级最浅的，跳过 vendor/target/.git。
+        """
+        _SKIP    = {"vendor", "target", ".git", "node_modules"}
+        _PREFER  = {"os", "kernel", "kern", "core"}
+        base_depth = self.repo_path.rstrip(os.sep).count(os.sep)
+
+        candidates: list[tuple[int, int, str]] = []  # (depth, not_preferred, path)
         for root, dirs, files in os.walk(self.repo_path):
             dirs[:] = [d for d in dirs if d not in _SKIP]
             if "Cargo.toml" in files:
-                return root
-        return None
+                depth = root.count(os.sep) - base_depth
+                preferred = os.path.basename(root).lower() in _PREFER
+                candidates.append((depth, 0 if preferred else 1, root))
+
+        if not candidates:
+            return None
+        candidates.sort()          # 先按深度升序，同深度内核目录排前面
+        return candidates[0][2]
 
     def initialize(self) -> bool:
         """
