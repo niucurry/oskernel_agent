@@ -10,7 +10,7 @@ from engines.lsp_base import LspEngine
 from parser.code_parser import find_function_calls
 
 
-# ── compile_commands.json 生成策略 ──
+# compile_commands.json 生成策略
 
 def try_generate_compile_commands(repo_path: str) -> str | None:
     """四种策略逐一尝试，任何一种成功就返回路径。"""
@@ -30,10 +30,10 @@ def try_generate_compile_commands(repo_path: str) -> str | None:
                 with open(output) as f:
                     entries = json.load(f)
                 if len(entries) > 0:
-                    print(f"  [路径B] ✅ 成功，{len(entries)} 个编译条目")
+                    print(f"  [路径B] 成功，{len(entries)} 个编译条目")
                     return output
         except Exception as e:
-            print(f"  [路径B] ❌ 策略 {name} 失败：{e}")
+            print(f"  [路径B] 策略 {name} 失败：{e}")
             continue
 
     return None
@@ -137,7 +137,7 @@ def _extract_flags_from_makefile(repo_path: str) -> str:
     return " ".join(flags)
 
 
-# ── ClangdEngine ──
+# ClangdEngine
 
 class ClangdEngine(LspEngine):
     """路径 B：通过 LSP 协议与 clangd 通信（C 仓库）"""

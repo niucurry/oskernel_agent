@@ -204,7 +204,7 @@ class TreeSitterEngine(AnalysisEngine):
             result.extend(self._collect_field_identifiers(child, source))
         return result
 
-    # ── 统一接口实现 ──
+    # 统一接口实现
 
     def go_to_definition(self, symbol_name: str) -> dict | None:
         """

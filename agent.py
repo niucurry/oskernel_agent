@@ -10,27 +10,15 @@ from parser.code_parser import (
     detect_naming_style, find_doc_files,
 )
 from parser.os_tools import build_repo_map
+from tools.tool_registry import get_tool_definitions, mcp_to_openai_schema
+from tools.mcp_tools import OSKernelMCPTools
+from tools.reference_db import ReferenceOSDatabase
 
 client = OpenAI(api_key=config.api["key"], base_url=config.api["base_url"])
 
-#大模型可见的工具 Schema
+# 工具 Schema：6 个 MCP 风格工具 + get_struct_fields（引擎原生，不在 MCP 列表中但保留兼容）
 
-tools_schema = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_call_chain",
-            "description": "从入口函数展开调用树（最多指定深度），用于分析内核函数的执行逻辑和调用链路。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "function_name": {"type": "string", "description": "C/Rust 函数名"},
-                    "max_depth":     {"type": "integer", "description": "调用树层数，默认 3"}
-                },
-                "required": ["function_name"]
-            }
-        }
-    },
+tools_schema = mcp_to_openai_schema(get_tool_definitions()) + [
     {
         "type": "function",
         "function": {
@@ -41,37 +29,9 @@ tools_schema = [
                 "properties": {
                     "struct_name": {"type": "string", "description": "结构体名称"}
                 },
-                "required": ["struct_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "find_references",
-            "description": "查找所有调用了指定函数或使用了指定符号的位置，返回调用方列表。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol_name": {"type": "string", "description": "函数名或结构体名"}
-                },
-                "required": ["symbol_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "go_to_definition",
-            "description": "查找符号的定义位置，返回完整源码和所在文件路径。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "symbol_name": {"type": "string", "description": "函数名或结构体名"}
-                },
-                "required": ["symbol_name"]
-            }
-        }
+                "required": ["struct_name"],
+            },
+        },
     },
 ]
 
@@ -116,12 +76,14 @@ _MAX_STEPS = 200                 # 单次 agent_run 最大工具调用步数
 def _is_not_found(result) -> bool:
     if result is None:
         return True
+    if isinstance(result, str):
+        return not result or result.startswith("[未找到]")
     if isinstance(result, dict):
-        if not result:           # 空 dict
+        if not result:
             return True
         values = list(result.values())
         return bool(values) and isinstance(values[0], dict) and values[0].get("__not_found__")
-    if isinstance(result, (list, str)) and not result:  # 空 list / 空字符串
+    if isinstance(result, list) and not result:
         return True
     return False
 
@@ -136,7 +98,22 @@ def _is_suffix_of_any(failed_symbols: set, curr: str | None) -> str | None:
     return None
 
 
-def agent_run(engine: AnalysisEngine, system_prompt: str, user_prompt: str) -> str:
+def agent_run(
+    engine: AnalysisEngine,
+    system_prompt: str,
+    user_prompt: str,
+    repo_path: str = "",
+    level2_index=None,
+    profile: dict | None = None,
+    structure: dict | None = None,
+) -> str:
+    _repo_path = repo_path or engine.repo_path
+    _ref_db = ReferenceOSDatabase(
+        config.data.get("reference_db_dir", "data/reference_db")
+    )
+    mcp_tools = OSKernelMCPTools(
+        _repo_path, engine, level2_index, profile or {}, structure, _ref_db
+    )
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user",   "content": user_prompt},
@@ -198,27 +175,40 @@ def agent_run(engine: AnalysisEngine, system_prompt: str, user_prompt: str) -> s
 
             print(f"  [步骤 {step}] 调用工具：{function_name} → {args}")
 
-            queried_symbol = (args.get("function_name")
-                              or args.get("symbol_name")
-                              or args.get("struct_name"))
+            queried_symbol = (
+                args.get("symbol_name")
+                or args.get("function_name")
+                or args.get("entry_function")
+                or args.get("struct_name")
+                or args.get("path")
+            )
 
-            # 重复调用检测：完全相同的 (工具, 符号) 组合已查询过
-            cache_key = (function_name, queried_symbol)
+            # 重复调用检测：完全相同的 (工具名 + 全部参数) 组合已查询过
+            # 用完整 args 序列化做 key，避免 read_file 不同行号被误判为重复
+            cache_key = (function_name, json.dumps(args, sort_keys=True))
             if cache_key in queried_cache:
+                hint = (
+                    f"已读取过 {queried_symbol!r} 的该行号范围，内容同前。"
+                    if function_name == "read_file"
+                    else f"符号 {queried_symbol!r} 已查询过，结果同前，请勿重复调用。"
+                )
                 print(f"  [保护] 重复调用跳过：{function_name}({queried_symbol!r}) 已查询过")
                 messages.append({
                     "tool_call_id": tool_call.id,
                     "role":         "tool",
                     "name":         function_name,
-                    "content":      f"符号 {queried_symbol!r} 已查询过，结果同前，请勿重复调用。",
+                    "content":      hint,
                 })
                 step += 1
                 continue
 
             queried_cache.add(cache_key)
 
-            # 幻觉扩展检测：当前符号是已失败符号集合中任意一个的后缀变体
-            base = _is_suffix_of_any(failed_symbols, queried_symbol)
+            # 幻觉扩展检测：仅对符号类工具生效，read_file 的 path 不参与
+            base = (
+                None if function_name == "read_file"
+                else _is_suffix_of_any(failed_symbols, queried_symbol)
+            )
             if base is not None:
                 hallucination_count += 1
                 print(f"  [保护] 幻觉扩展（{hallucination_count}/{_MAX_SUFFIX_HALLUCINATIONS}）：{queried_symbol!r} 是 {base!r} 的后缀变体")
@@ -234,21 +224,17 @@ def agent_run(engine: AnalysisEngine, system_prompt: str, user_prompt: str) -> s
                     force_finish = True
                 continue
 
-            if function_name == "get_call_chain":
-                result = engine.get_call_chain(args["function_name"], args.get("max_depth", 3))
-            elif function_name == "get_struct_fields":
-                result = engine.get_struct_fields(args["struct_name"])
-            elif function_name == "find_references":
-                result = engine.find_references(args["symbol_name"])
-            elif function_name == "go_to_definition":
-                result = engine.go_to_definition(args["symbol_name"])
-            else:
-                result = f"Error: 未知工具 {function_name}"
+            result = mcp_tools.execute(function_name, args)
 
             if _is_not_found(result):
-                if queried_symbol:
+                # read_file 的 path 不是符号名，不加入幻觉检测集合
+                if queried_symbol and function_name != "read_file":
                     failed_symbols.add(queried_symbol)
-                result_str = f"符号 {queried_symbol!r} 在代码库中不存在。"
+                result_str = (
+                    f"文件 {queried_symbol!r} 不存在或无法读取。"
+                    if function_name == "read_file"
+                    else f"符号 {queried_symbol!r} 在代码库中不存在。"
+                )
             else:
                 result_str = str(result)
 
@@ -321,23 +307,28 @@ if __name__ == "__main__":
 
 ## 工具使用规则
 
-你有四个工具：
-- `get_call_chain(function_name, max_depth)`：从入口函数展开调用树
+你有以下工具：
+- `read_file(path, start_line?, end_line?)`：读取源文件内容（带行号）
+- `find_symbol_definition(symbol_name, context_file?)`：查找符号定义，返回完整源码
+- `find_symbol_references(symbol_name)`：查找所有调用该符号的位置
+- `list_implemented_syscalls()`：扫描已实现的 syscall 并计算覆盖率
+- `get_subsystem_call_chain(entry_function, max_depth?)`：从入口函数展开调用树
 - `get_struct_fields(struct_name)`：获取结构体完整字段列表
-- `find_references(symbol_name)`：查找所有调用该符号的位置
-- `go_to_definition(symbol_name)`：查找符号定义，返回完整源码
+- `compare_with_reference_os(reference_name)`：与参考 OS 进行函数级相似度比对
 
 **必须遵守：**
-1. 只分析上方"子系统文件定位"中标注为已找到的子系统，未找到的直接标注"未实现"，不得调用工具猜测
-2. 查询函数名时根据"命名风格"适配符号名：
+1. 分析开始时调用一次 `list_implemented_syscalls` 获取功能完整性基线
+2. 只分析上方"子系统文件定位"中标注为已找到的子系统，未找到的直接标注"未实现"，不得调用工具猜测
+3. 查询函数名时根据"命名风格"适配符号名：
    - snake_case → `schedule` / `task_struct` / `sys_fork` / `page_fault` 等
    - CamelCase  → `run_tasks` / `TaskControlBlock` / `MemorySet` / `TrapContext` 等
    - mixed      → 两种形式各尝试一次
-3. 每个已识别子系统至少调用一次 `get_call_chain` 核实其入口函数
-4. 调用链中出现结构体名（首字母大写或含 `_t` 后缀）时，必须调用 `get_struct_fields` 核实
-5. 工具返回"未找到"时，区分两种情况：
+4. 每个已识别子系统至少调用一次 `get_subsystem_call_chain` 核实其入口函数
+5. 调用链中出现结构体名（首字母大写或含 `_t` 后缀）时，必须调用 `get_struct_fields` 核实
+6. 工具返回"未找到"时，区分两种情况：
    - 若静态分析已在该子系统发现了相关源文件，则注明"符号查询受引擎限制，无法核实"，**不得**判定为"未实现"
    - 若静态分析也未发现任何相关文件，才可判定为"未实现"
+7. 中后期调用 `compare_with_reference_os` 获取原创性分析数据（选择最接近的参考 OS）
 
 ## 强制输出格式（Markdown）
 
@@ -361,10 +352,16 @@ if __name__ == "__main__":
     )
 
     user_request = f"请依照系统提示词的格式，对项目 {repo_id_test} 展开完整分析。"
-    final_report = agent_run(engine, agent_a_system_prompt, user_request)
+    final_report = agent_run(
+        engine, agent_a_system_prompt, user_request,
+        repo_path=str(repo_path),
+        level2_index=level2_index,
+        profile=profile,
+        structure=structure,
+    )
     print(final_report)
 
-    # ── Agent B：查重引擎（需要两个仓库各自的引擎实例）──
+    # Agent B：查重引擎（需要两个仓库各自的引擎实例）
     # 使用方式：分别为 repo_new 和 repo_old 调用 select_engine，
     # 将两个引擎的查询结果拼入 system_prompt 后传给 agent_run
     agent_b_system_prompt = """
@@ -376,7 +373,7 @@ if __name__ == "__main__":
    - 进程调度：`schedule` / `run_tasks` / `task_switch`
    - 陷入处理：`trap_handler` / `handle_trap` / `__alltraps`
    - 内存分配：`page_alloc` / `alloc_frame` / `frame_alloc`
-2. 对每个锚点函数，分别对 Repo_New 和 Repo_Old 调用 `get_call_chain`，记录完整调用集合
+2. 对每个锚点函数，分别对 Repo_New 和 Repo_Old 调用 `get_subsystem_call_chain`，记录完整调用集合
 3. 若调用链中出现相同结构体名，用 `get_struct_fields` 对两个项目各查一次，对比字段定义
 4. 相似度判定标准：
    - 调用集合重合度 ≥ 80% → 高度相似（疑似抄袭）
