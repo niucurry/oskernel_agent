@@ -92,7 +92,7 @@ pip install -r requirements.txt
 1. 点击电脑左下角的“开始”菜单，搜索 **PowerShell**，右键选择**“以管理员身份运行”**。
 2. **安装 universal-ctags**：在弹出的蓝底窗口中，复制粘贴以下命令并回车：
    ```powershell
-   winget install UniversalCtags.UniversalCtags
+   winget install --id=UniversalCtags.Ctags -e
    ```
 
 *(如果提示是否同意协议，输入 `Y` 并回车)*
