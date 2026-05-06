@@ -136,7 +136,15 @@ def run_ctags(repo_path: str, source_roots: list[str]) -> list[dict]:
         ]
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            # 修复：添加编码 + 错误忽略
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                encoding="utf-8",    # 强制UTF-8
+                errors="replace"     # 无法解码字符自动替换，不崩溃
+            )
         except FileNotFoundError:
             print("  警告：未找到 ctags 命令（需要 Universal Ctags）。符号索引为空，工具将无法查询符号。")
             break
@@ -144,8 +152,12 @@ def run_ctags(repo_path: str, source_roots: list[str]) -> list[dict]:
             print(f"  警告：ctags 扫描 {root} 超时，跳过")
             continue
 
+        # 修复：防止 stdout 为 None 导致报错
+        output = result.stdout or ""
         parsed_in_root = 0
-        for line in result.stdout.splitlines():
+
+        # 把原来的 result.stdout 改成 output
+        for line in output.splitlines():
             if not line.strip():
                 continue
             try:
