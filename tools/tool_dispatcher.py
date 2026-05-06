@@ -127,9 +127,10 @@ class ToolDispatcher:
             if not candidates:
                 candidates = self.level2_index.search_symbols(symbol_name)
 
+        cached_defn: dict | None = None
         if not candidates:
-            defn = self.engine.go_to_definition(symbol_name)
-            if not defn:
+            cached_defn = self.engine.go_to_definition(symbol_name)
+            if not cached_defn:
                 return (
                     f"[未找到] 符号 '{symbol_name}' 不在索引中。\n"
                     f"可能原因：\n"
@@ -138,8 +139,8 @@ class ToolDispatcher:
                     f"建议：使用 read_file 直接查看你怀疑包含该符号的文件。"
                 )
             candidates = [{
-                "file":  defn["file"],
-                "line":  defn["start_line"],
+                "file":  cached_defn["file"],
+                "line":  cached_defn["start_line"],
                 "kind":  "function",
                 "level": "level1",
             }]
@@ -154,7 +155,28 @@ class ToolDispatcher:
         other_files = best.pop("_other_candidates", [])
 
         #引擎跳转拿完整源码
-        defn = self.engine.go_to_definition(symbol_name)
+        # 优先：用索引位置直接读文件（无 LSP 等待，适用于 99% 的情况）
+        defn = cached_defn
+        if defn is None:
+            file_rel = best.get("file", "")
+            start_ln = best.get("line", 0)
+            if file_rel and start_ln:
+                full_path = str(Path(self.repo_path) / file_rel)
+                if hasattr(self.engine, "_extract_code_block"):
+                    raw_body = self.engine._extract_code_block(full_path, start_ln)
+                else:
+                    raw_body = self._read_lines_around(file_rel, start_ln, context_lines=80)
+                if raw_body:
+                    defn = {
+                        "file":       file_rel,
+                        "start_line": start_ln,
+                        "end_line":   start_ln + raw_body.count("\n"),
+                        "body":       raw_body,
+                    }
+            # 降级：LSP 跳转（精度高但可能阻塞，仅在直接读取失败时使用）
+            if defn is None:
+                defn = self.engine.go_to_definition(symbol_name)
+
         if defn:
             body       = defn["body"]
             file_path  = defn["file"]

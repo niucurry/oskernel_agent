@@ -2,9 +2,8 @@
 OSKernelMCPTools：MCP 工具集的统一入口。
 
 继承 ToolDispatcher（T2–T6 的实现），并补充：
-  - read_file()        T1 的实例方法封装
-  - get_struct_fields() 引擎原生工具的透传
-  - execute()          统一路由：工具名 → 对应方法 + 参数名映射
+  - read_file()  T1 的实例方法封装
+  - execute()    统一路由：工具名 → 对应方法
 
 设计原则：
   1. 工具是 LLM 与代码之间的唯一通道（不直接接触源文件）
@@ -56,24 +55,6 @@ class OSKernelMCPTools(ToolDispatcher):
     ) -> str:
         return _read_file(self.repo_path, path, start_line, end_line)
 
-    #引擎原生工具透传
-
-    def get_struct_fields(self, struct_name: str) -> str:
-        result = self.engine.get_struct_fields(struct_name)
-        if not result:
-            return (
-                f"[未找到] 结构体 '{struct_name}' 不在索引中。\n"
-                f"可能原因：该结构体通过宏生成，或拼写与源码不符。"
-            )
-        fields = result.get("fields", [])
-        lines = [
-            f"## {struct_name}  ({result['file']}:{result['line']})",
-            f"字段数：{len(fields)}\n",
-        ]
-        for f in fields:
-            lines.append(f"  {f.get('type', '?')}  {f['name']}")
-        return "\n".join(lines)
-
     #统一路由
 
     def execute(self, tool_name: str, arguments: dict) -> str:
@@ -86,13 +67,6 @@ class OSKernelMCPTools(ToolDispatcher):
             "list_implemented_syscalls": self.list_implemented_syscalls,
             "get_subsystem_call_chain":  self.get_subsystem_call_chain,
             "compare_with_reference_os": self.compare_with_reference_os,
-            # 旧工具名兼容（参数名映射）
-            "get_struct_fields": lambda **a: self.get_struct_fields(a["struct_name"]),
-            "get_call_chain":    lambda **a: self.get_subsystem_call_chain(
-                                     a["function_name"], a.get("max_depth", 3)
-                                 ),
-            "find_references":   lambda **a: self.find_symbol_references(a["symbol_name"]),
-            "go_to_definition":  lambda **a: self.find_symbol_definition(a["symbol_name"]),
         }
 
         func = dispatch.get(tool_name)
