@@ -5,14 +5,15 @@ from openai import OpenAI
 import config
 from engines.base import AnalysisEngine
 from parser.code_parser import (
-    build_repo_profile, build_profile,
+    build_profile,
     find_source_roots, classify_files_by_content,
-    detect_naming_style, find_doc_files,
+    detect_naming_style, find_doc_files, detect_anomalies,
 )
 from parser.os_tools import build_repo_map
 from tools.tool_registry import get_tool_definitions, mcp_to_openai_schema
 from tools.mcp_tools import OSKernelMCPTools
 from tools.reference_db import ReferenceOSDatabase
+from prompts import assemble_system_prompt, detect_crate_roles
 
 client = OpenAI(api_key=config.api["key"], base_url=config.api["base_url"])
 
@@ -71,6 +72,7 @@ def select_engine(repo_path: str, profile: dict, level2_index) -> AnalysisEngine
 
 _MAX_SUFFIX_HALLUCINATIONS = 3   # 触发幻觉扩展终止所需的次数
 _MAX_STEPS = 200                 # 单次 agent_run 最大工具调用步数
+_MAX_CONSECUTIVE_DUPS = 5        # 连续重复调用同一工具超过此次数时强制终止
 
 
 def _is_not_found(result) -> bool:
@@ -125,7 +127,9 @@ def agent_run(
     step = 1
     failed_symbols: set[str] = set()          # 所有已查询且未找到的符号名
     queried_cache: set[tuple] = set()         # (tool_name, symbol) 去重缓存
+    queried_results: dict[tuple, str] = {}    # cache_key -> 首次结果（用于重复提示）
     hallucination_count = 0                   # 本轮幻觉扩展命中次数
+    consecutive_dup_count = 0                 # 当前连续重复调用计数
     force_finish = False
 
     while True:
@@ -146,12 +150,20 @@ def agent_run(
 
         if force_finish:
             print("\n [保护] 注入终止指令，要求 LLM 输出最终报告")
-            messages.append({
-                "role":    "user",
-                "content": "这些符号在代码库中均不存在，请勿继续猜测变体名称。请根据已收集到的信息直接输出最终分析报告，不要再调用任何工具。",
-            })
+            if consecutive_dup_count >= _MAX_CONSECUTIVE_DUPS:
+                stop_reason = (
+                    "你已连续多次调用相同的工具且结果没有变化（可能是将目录路径当作文件，或重复查询无效符号）。"
+                    "请根据已收集到的信息直接输出最终分析报告，不要再调用任何工具。"
+                )
+            else:
+                stop_reason = (
+                    "这些符号在代码库中均不存在，请勿继续猜测变体名称。"
+                    "请根据已收集到的信息直接输出最终分析报告，不要再调用任何工具。"
+                )
+            messages.append({"role": "user", "content": stop_reason})
             force_finish = False
             hallucination_count = 0
+            consecutive_dup_count = 0
 
         response = client.chat.completions.create(
             model=config.api["model"],
@@ -187,12 +199,19 @@ def agent_run(
             # 用完整 args 序列化做 key，避免 read_file 不同行号被误判为重复
             cache_key = (function_name, json.dumps(args, sort_keys=True))
             if cache_key in queried_cache:
-                hint = (
-                    f"已读取过 {queried_symbol!r} 的该行号范围，内容同前。"
-                    if function_name == "read_file"
-                    else f"符号 {queried_symbol!r} 已查询过，结果同前，请勿重复调用。"
-                )
-                print(f"  [保护] 重复调用跳过：{function_name}({queried_symbol!r}) 已查询过")
+                consecutive_dup_count += 1
+                prev_result = queried_results.get(cache_key, "")
+                if function_name == "read_file":
+                    if "[提示]" in prev_result and "是目录" in prev_result:
+                        hint = (
+                            f"{queried_symbol!r} 是目录，不能直接读取。"
+                            f"请从上次返回的文件列表中选择一个具体文件路径再调用 read_file。"
+                        )
+                    else:
+                        hint = f"已读取过 {queried_symbol!r}，结果同前，请勿重复调用。"
+                else:
+                    hint = f"符号 {queried_symbol!r} 已查询过，结果同前，请勿重复调用。"
+                print(f"  [保护] 重复调用（连续第 {consecutive_dup_count} 次）跳过：{function_name}({queried_symbol!r})")
                 messages.append({
                     "tool_call_id": tool_call.id,
                     "role":         "tool",
@@ -200,8 +219,11 @@ def agent_run(
                     "content":      hint,
                 })
                 step += 1
+                if consecutive_dup_count >= _MAX_CONSECUTIVE_DUPS:
+                    force_finish = True
                 continue
 
+            consecutive_dup_count = 0
             queried_cache.add(cache_key)
 
             # 幻觉扩展检测：仅对符号类工具生效，read_file 的 path 不参与
@@ -238,6 +260,7 @@ def agent_run(
             else:
                 result_str = str(result)
 
+            queried_results[cache_key] = result_str
             messages.append({
                 "tool_call_id": tool_call.id,
                 "role":         "tool",
@@ -261,137 +284,148 @@ def _build_structure(repo_path: Path) -> dict:
     avg_depth = sum(all_depths) / len(all_depths) if all_depths else 0.0
     depth_label = "flat" if avg_depth <= 2 else ("shallow" if avg_depth <= 4 else "deep")
 
-    return {
+    structure = {
         "doc_files":           find_doc_files(repo_path),
         "subsystem_locations": classify_files_by_content(str(repo_path), source_roots_rel),
         "structure_depth":     depth_label,
+        "avg_depth":           round(avg_depth, 1),
         "source_roots":        source_roots_abs,
+        "source_roots_rel":    source_roots_rel,
         "naming_style":        detect_naming_style(repo_path),
     }
+    structure["anomalies"] = detect_anomalies(structure, repo_path)
+    return structure
+
+
+def _resolve_repo_path(url: str | None, repo_path_arg: str | None,
+                        repo_id: str | None) -> tuple[Path, str]:
+    """根据命令行参数确定本地仓库路径，返回 (Path, repo_name)。"""
+    if url:
+        from fetch_single_repo import fetch_repo
+        local = fetch_repo(url,
+                           output_dir=config.data["repos_dir"],
+                           meta_dir=config.data.get("metadata_dir", "data/metadata"))
+        p = Path(local).resolve()
+        return p, p.name
+    if repo_path_arg:
+        p = Path(repo_path_arg).resolve()
+        return p, p.name
+    name = repo_id or config.target["repo_id"]
+    p = (Path(config.data["repos_dir"]) / name).resolve()
+    return p, name
+
+
+def _analyze_one(repo_path: Path, repo_name: str) -> tuple:
+    """对单个仓库执行静态分析，返回 (structure, profile, level1_map, level2_index, engine)。"""
+    print("正在执行静态结构分析...")
+    structure = _build_structure(repo_path)
+    profile = build_profile(str(repo_path), structure)
+    level1_map, level2_index = build_repo_map(str(repo_path), structure, profile)
+    profile["repo_name"] = repo_name
+    engine = select_engine(str(repo_path), profile, level2_index)
+    return structure, profile, level1_map, level2_index, engine
 
 
 if __name__ == "__main__":
-    repo_id_test = config.target["repo_id"]
-    repo_path    = (Path(config.data["repos_dir"]) / repo_id_test).resolve()
+    import argparse
+    import sys
 
-    #静态结构分析（注入 System Prompt)
-    print("正在执行静态结构分析...")
-    repo_profile_text = build_repo_profile(repo_path)
-    print(repo_profile_text)
-
-    #构建两级索引
-    structure        = _build_structure(repo_path)
-    profile          = build_profile(str(repo_path), structure)
-    level1_map, level2_index = build_repo_map(str(repo_path), structure, profile)
-
-    #按优先级选择引擎
-    engine      = select_engine(str(repo_path), profile, level2_index)
-    engine_info = engine.get_engine_info()
-
-    limitations_text = (
-        "引擎限制（分析结论请结合精度评估）：\n"
-        + "\n".join(f"- {l}" for l in engine_info.get("limitations", []))
-    ) if engine_info.get("limitations") else ""
-
-    #Agent A：完整性与原创性评估
-    agent_a_system_prompt = (
-        repo_profile_text + "\n\n" + level1_map + f"""
-
----
-你是一个严格的操作系统课程项目审查专家，负责对学生提交的 OS 内核实现进行完整性与原创性评估。
-项目 ID：{repo_id_test}
-当前分析引擎：{engine_info['engine']}（{engine_info['path']}，精度：{engine_info['precision']}）
-{limitations_text}
-
-上方【仓库结构探索结果】和【仓库结构地图】由确定性静态分析工具生成，是已知事实，不得质疑或忽略。
-
-## 工具使用规则
-
-你有以下工具：
-- `read_file(path, start_line?, end_line?)`：读取源文件内容（带行号）
-- `find_symbol_definition(symbol_name, context_file?)`：查找符号定义，返回完整源码
-- `find_symbol_references(symbol_name)`：查找所有调用该符号的位置
-- `list_implemented_syscalls()`：扫描已实现的 syscall 并计算覆盖率
-- `get_subsystem_call_chain(entry_function, max_depth?)`：从入口函数展开调用树
-- `get_struct_fields(struct_name)`：获取结构体完整字段列表
-- `compare_with_reference_os(reference_name)`：与参考 OS 进行函数级相似度比对
-
-**必须遵守：**
-1. 分析开始时调用一次 `list_implemented_syscalls` 获取功能完整性基线
-2. 只分析上方"子系统文件定位"中标注为已找到的子系统，未找到的直接标注"未实现"，不得调用工具猜测
-3. 查询函数名时根据"命名风格"适配符号名：
-   - snake_case → `schedule` / `task_struct` / `sys_fork` / `page_fault` 等
-   - CamelCase  → `run_tasks` / `TaskControlBlock` / `MemorySet` / `TrapContext` 等
-   - mixed      → 两种形式各尝试一次
-4. 每个已识别子系统至少调用一次 `get_subsystem_call_chain` 核实其入口函数
-5. 调用链中出现结构体名（首字母大写或含 `_t` 后缀）时，必须调用 `get_struct_fields` 核实
-6. 工具返回"未找到"时，区分两种情况：
-   - 若静态分析已在该子系统发现了相关源文件，则注明"符号查询受引擎限制，无法核实"，**不得**判定为"未实现"
-   - 若静态分析也未发现任何相关文件，才可判定为"未实现"
-7. 中后期调用 `compare_with_reference_os` 获取原创性分析数据（选择最接近的参考 OS）
-
-## 强制输出格式（Markdown）
-
-### 仓库概览
-- 命名风格 / 目录风格 / 已识别子系统列表（直接引用静态分析结论，不改写）
-
-### 各子系统分析
-对每个已识别子系统，依次输出：
-
-#### [子系统名]
-- **入口函数调用链**：`函数名 → 子函数1, 子函数2, ...`（来自 get_call_chain 结果）
-- **核心数据结构**：结构体名 + 关键字段摘要（来自 get_struct_fields 结果；若无结构体则注明）
-- **实现完整度**：`完整` / `基本完整` / `欠缺` — 一句话说明判断依据
-
-### 文档质量
-- 逐一列出静态分析找到的文档文件及类型；若无文档，注明影响
-
-### 异常说明
-- 逐条回应上方"异常警告"，说明本次分析如何处置该异常
-"""
+    parser = argparse.ArgumentParser(
+        description="OS 内核代码分析智能体",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+用法示例：
+  python agent.py                                      # 使用 config.toml 中的 repo_id
+  python agent.py --repo-id T202510008995695-2259
+  python agent.py --repo-path /absolute/path/to/repo
+  python agent.py --url https://gitlab.example.com/repo.git
+  python agent.py --repo-id REPO_A --output report.md
+  python agent.py --compare --repo-id REPO_A --repo-id-b REPO_B
+  python agent.py --compare --url URL_A --url-b URL_B
+        """,
     )
 
-    user_request = f"请依照系统提示词的格式，对项目 {repo_id_test} 展开完整分析。"
-    final_report = agent_run(
-        engine, agent_a_system_prompt, user_request,
-        repo_path=str(repo_path),
-        level2_index=level2_index,
-        profile=profile,
-        structure=structure,
+    src = parser.add_mutually_exclusive_group()
+    src.add_argument("--repo-id",   metavar="ID",
+                     help="data/historical_repos/ 下的仓库文件夹名")
+    src.add_argument("--repo-path", metavar="PATH",
+                     help="仓库的完整本地路径")
+    src.add_argument("--url",       metavar="URL",
+                     help="克隆并分析远程仓库（自动执行 fetch）")
+
+    parser.add_argument("--output", "-o", metavar="FILE",
+                        help="将报告写入文件（默认打印到标准输出）")
+    parser.add_argument("--model",  metavar="MODEL",
+                        help="覆盖 config.toml 中的模型名称")
+    parser.add_argument("--compare", action="store_true",
+                        help="启用比较模式（需同时指定第二个仓库）")
+
+    src_b = parser.add_argument_group("比较模式：第二个仓库（--compare 时使用）")
+    bgroup = src_b.add_mutually_exclusive_group()
+    bgroup.add_argument("--repo-id-b",   metavar="ID",
+                        help="第二个仓库的文件夹名")
+    bgroup.add_argument("--repo-path-b", metavar="PATH",
+                        help="第二个仓库的完整本地路径")
+    bgroup.add_argument("--url-b",       metavar="URL",
+                        help="第二个仓库的远程地址")
+
+    args = parser.parse_args()
+
+    if args.compare and not any([args.repo_id_b, args.repo_path_b, args.url_b]):
+        parser.error("--compare 需要同时指定第二个仓库（--repo-id-b / --repo-path-b / --url-b）")
+
+    if args.model:
+        config.api["model"] = args.model
+
+    repo_path_a, repo_name_a = _resolve_repo_path(args.url, args.repo_path, args.repo_id)
+    structure_a, profile_a, level1_map_a, level2_index_a, engine_a = _analyze_one(
+        repo_path_a, repo_name_a
     )
-    print(final_report)
+    crate_roles_a = detect_crate_roles(str(repo_path_a), profile_a)
 
-    # Agent B：查重引擎（需要两个仓库各自的引擎实例）
-    # 使用方式：分别为 repo_new 和 repo_old 调用 select_engine，
-    # 将两个引擎的查询结果拼入 system_prompt 后传给 agent_run
-    agent_b_system_prompt = """
-你是一个代码查重与创新点评估专家。我将给你提供两个项目的调用链和结构体对比数据。
+    if args.compare:
+        repo_path_b, repo_name_b = _resolve_repo_path(
+            args.url_b, args.repo_path_b, args.repo_id_b
+        )
+        structure_b, profile_b, level1_map_b, level2_index_b, engine_b = _analyze_one(
+            repo_path_b, repo_name_b
+        )
+        crate_roles_b = detect_crate_roles(str(repo_path_b), profile_b)
 
-## 查重策略
+        system_prompt = assemble_system_prompt(
+            mode="compare",
+            structure=structure_a,   profile=profile_a,   level1_map=level1_map_a,   engine=engine_a,
+            structure_b=structure_b, profile_b=profile_b, level1_map_b=level1_map_b, engine_b=engine_b,
+            crate_roles=crate_roles_a, crate_roles_b=crate_roles_b,
+        )
+        user_request = f"请对项目 {repo_name_a} 和 {repo_name_b} 展开完整的技术比较。"
+        final_report = agent_run(
+            engine_a, system_prompt, user_request,
+            repo_path=str(repo_path_a),
+            level2_index=level2_index_a,
+            profile=profile_a,
+            structure=structure_a,
+        )
+    else:
+        system_prompt = assemble_system_prompt(
+            mode="analyze",
+            structure=structure_a,
+            profile=profile_a,
+            level1_map=level1_map_a,
+            engine=engine_a,
+            crate_roles=crate_roles_a,
+        )
+        user_request = f"请依照系统提示词的格式，对项目 {repo_name_a} 展开完整分析。"
+        final_report = agent_run(
+            engine_a, system_prompt, user_request,
+            repo_path=str(repo_path_a),
+            level2_index=level2_index_a,
+            profile=profile_a,
+            structure=structure_a,
+        )
 
-1. 选取以下核心函数作为比对锚点（依次尝试，直到在两个项目中都找到为止）：
-   - 进程调度：`schedule` / `run_tasks` / `task_switch`
-   - 陷入处理：`trap_handler` / `handle_trap` / `__alltraps`
-   - 内存分配：`page_alloc` / `alloc_frame` / `frame_alloc`
-2. 对每个锚点函数，分别对 Repo_New 和 Repo_Old 调用 `get_subsystem_call_chain`，记录完整调用集合
-3. 若调用链中出现相同结构体名，用 `get_struct_fields` 对两个项目各查一次，对比字段定义
-4. 相似度判定标准：
-   - 调用集合重合度 ≥ 80% → 高度相似（疑似抄袭）
-   - 重合度 50%–80%，函数名不同但结构一致 → 疑似改名移植
-   - 重合度 < 50% 且存在新增调用路径 → 记录为创新点
-
-## 强制输出格式（Markdown）
-
-### 整体相似度评估
-- 相似度等级：高 / 中 / 低，附简要说明
-
-### 逐函数调用链对比
-| 锚点函数 | Repo_New 调用集合 | Repo_Old 调用集合 | 重合度 | 结论 |
-|---------|-----------------|-----------------|--------|------|
-
-### 创新点（Repo_New 独有的实质性差异）
-- ...
-
-### 查重疑点（高度相似或改名移植的证据）
-- ...
-"""
+    if args.output:
+        Path(args.output).write_text(final_report, encoding="utf-8")
+        print(f"\n报告已保存至: {args.output}")
+    else:
+        print(final_report)
