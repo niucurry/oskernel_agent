@@ -8,19 +8,30 @@
 
 ```
 agent/
-├── agent.py              # 主入口，运行分析
-├── fetch_single_repo.py  # 克隆仓库并生成元数据
-├── config.toml           # 配置文件（API、路径、引擎参数）
+├── agent.py              # 主入口：分析单仓库或比较两个仓库
+├── fetch_single_repo.py  # 克隆远程仓库并生成元数据
+├── config.toml           # 配置文件（API Key、路径、引擎参数）
 ├── config.py             # 读取 config.toml
+├── prompts.py            # 分层提示词构建
 ├── requirements.txt      # Python 依赖
 ├── setup.sh              # 一键环境安装脚本
 ├── engines/
+│   ├── base.py           # 引擎抽象接口
+│   ├── lsp_base.py       # LSP 客户端基类
 │   ├── path_a.py         # 引擎A：rust-analyzer（Rust 项目，精度最高）
 │   ├── path_b.py         # 引擎B：clangd（C 项目）
 │   └── path_c.py         # 引擎C：tree-sitter（降级方案，无需 LSP）
-└── parser/
-    ├── code_parser.py    # 符号提取、结构分析（依赖 ctags）
-    └── os_tools.py       # 仓库地图构建
+├── parser/
+│   ├── code_parser.py    # 符号提取、结构分析（依赖 ctags）
+│   └── os_tools.py       # 两级索引与仓库地图构建
+├── tools/
+│   ├── mcp_tools.py      # 工具统一入口
+│   ├── tool_registry.py  # 工具 Schema 定义
+│   ├── tool_dispatcher.py # 工具调度与引擎聚合
+│   ├── tool_handlers.py  # 底层实现（文件读取、syscall 扫描）
+│   └── reference_db.py   # 相似度指纹数据库
+└── scripts/
+    └── build_reference_db.py  # 构建参考 OS 指纹库
 ```
 
 ---
@@ -33,34 +44,20 @@ agent/
 
 ```bash
 bash setup.sh
-```
-
-脚本会自动安装：
-
-- `universal-ctags`：符号提取
-- `clangd`：C 代码 LSP 引擎
-- `bear`：生成 C 项目的 `compile_commands.json`
-- `rust-analyzer`：Rust 代码 LSP 引擎
-- Python 虚拟环境及所有依赖包
-
-完成后激活虚拟环境：
-
-```bash
 source .venv/bin/activate
 ```
 
-#### 手动安装
+脚本自动安装：`universal-ctags`、`clangd`、`bear`、`rust-analyzer` 以及 Python 虚拟环境。
+
+### 手动安装
 
 ```bash
-# 系统工具
 sudo apt-get install -y universal-ctags clangd bear
 
-# rust-analyzer
 curl -fL https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-x86_64-unknown-linux-gnu.gz \
   | gunzip -c | sudo tee /usr/local/bin/rust-analyzer > /dev/null
 sudo chmod +x /usr/local/bin/rust-analyzer
 
-# Python 依赖
 pip install -r requirements.txt
 ```
 
@@ -145,133 +142,117 @@ pip install -r requirements.txt
 
 ## 二、配置
 
-编辑 `config.toml`：
+编辑 `config.toml`（git-ignored，含 API Key）：
 
 ```toml
 [api]
-key        = "你的 API Key"       # DeepSeek 或 OpenAI 兼容接口的密钥
+key        = "sk-..."                       # DeepSeek 或 OpenAI 兼容接口的密钥
 base_url   = "https://api.deepseek.com/v1"
 model      = "deepseek-chat"
 temperature = 0.1
 
 [data]
 repos_dir    = "./data/historical_repos"   # 克隆下来的仓库存放目录
-metadata_dir = "./data/metadata"           # 元数据存放目录
+metadata_dir = "./data/metadata"
 
 [target]
-repo_id = "T202510008995695-2259"          # 要分析的仓库 ID（文件夹名）
+repo_id = "T202510008995695-2259"          # 默认分析的仓库（可被命令行参数覆盖）
 
 [engine]
 rust_analyzer_timeout = 120   # 等待 rust-analyzer 索引完成的秒数
 clangd_timeout        = 60    # 等待 clangd 索引完成的秒数
 max_call_depth        = 3     # get_call_chain 默认展开层数
-skip_dirs = ["vendor", "third_party", "target"]  # 跳过的目录（tree-sitter 引擎）
+skip_dirs = ["vendor", "third_party", "target"]
 ```
 
 ---
 
-## 三、使用流程
+## 三、使用方法
 
-### 第一步：获取仓库
+所有仓库参数均可通过命令行直接指定，无需修改代码或配置文件。
 
-修改 `fetch_single_repo.py` 顶部的仓库地址：
-
-```python
-TARGET_REPO_URL = 'https://gitlab.eduxiji.net/.../你的仓库.git'
-```
-
-然后运行：
+### 分析单个仓库
 
 ```bash
-python fetch_single_repo.py
-```
-
-执行结果：
-
-- 将仓库克隆到 `./data/historical_repos/<仓库名>/`
-- 在 `./data/metadata/all_repos_info.json` 中生成元数据（含最近 100 条 commit）
-
-### 第二步：修改配置中的目标仓库
-
-将 `config.toml` 的 `repo_id` 改为刚才克隆的仓库文件夹名：
-
-```toml
-[target]
-repo_id = "你的仓库名"   # 与 data/historical_repos/ 下的文件夹名一致
-```
-
-### 第三步：运行分析
-
-```bash
+# 使用 config.toml 中的默认 repo_id
 python agent.py
+
+# 指定已克隆的仓库名（data/historical_repos/ 下的文件夹名）
+python agent.py --repo-id T202510008995695-2259
+
+# 指定本地仓库的完整路径
+python agent.py --repo-path /path/to/repo
+
+# 直接给 URL，自动克隆后分析（不需要手动 fetch）
+python agent.py --url https://gitlab.eduxiji.net/.../repo.git
 ```
 
-运行过程输出示例：
-
-```
-正在执行静态结构分析...
-[引擎选择] 路径 A：rust-analyzer
-[路径A] rust-analyzer 初始化成功
-
- Agent 启动（引擎：rust-analyzer，路径A，精度：high）
-  [步骤 1] 调用工具：get_call_chain → {'function_name': 'sys_fork', 'max_depth': 3}
-  [步骤 2] 调用工具：get_struct_fields → {'struct_name': 'TaskControlBlock'}
-  ...
-
- Agent 分析完毕，输出最终报告：
-
-## 完整性评估
-...
-## 原创性评估
-...
-```
-
----
-
-## 四、分析引擎说明
-
-Agent 按以下优先级自动选择引擎，无需手动指定：
-
-| 优先级      | 引擎          | 适用场景                                 | 精度 |
-| ----------- | ------------- | ---------------------------------------- | ---- |
-| A（最优先） | rust-analyzer | 仓库含 `Cargo.toml`（Rust 项目）       | 高   |
-| B           | clangd        | C 项目，能生成 `compile_commands.json` | 高   |
-| C（降级）   | tree-sitter   | 其他情况，无需 LSP 环境                  | 中   |
-
-若 rust-analyzer 或 clangd 未安装，自动降级到 tree-sitter。
-
----
-
-## 五、可用工具（Agent 内部调用）
-
-Agent 在分析过程中会自动调用以下工具，无需手动操作：
-
-| 工具                                         | 说明                       |
-| -------------------------------------------- | -------------------------- |
-| `get_call_chain(function_name, max_depth)` | 从入口函数展开调用树       |
-| `get_struct_fields(struct_name)`           | 获取结构体完整字段列表     |
-| `find_references(symbol_name)`             | 查找所有调用该符号的位置   |
-| `go_to_definition(symbol_name)`            | 查找符号定义，返回完整源码 |
-
----
-
-## 六、常见问题
-
-**Q：运行时提示 `ctags not found`**
-A：执行 `sudo apt-get install universal-ctags` 后重试。
-
-**Q：路径 A 提示 `rust-analyzer 未安装` 但我已装过**
-A：确认 `rust-analyzer` 在 `$PATH` 中：`which rust-analyzer`。若使用虚拟环境，检查系统 PATH 是否包含 `/usr/local/bin`。
-
-**Q：路径 A 提示 `未找到 Cargo.toml`**
-A：Agent 会自动向子目录递归查找 `Cargo.toml`（跳过 vendor/target），若仓库确实无 Rust 代码则自动降级到路径 B/C。
-
-**Q：分析报告输出后直接退出，没有保存**
-A：目前报告直接打印到终端，可重定向保存：
+### 保存报告
 
 ```bash
+python agent.py --repo-id REPO_NAME --output report.md
+# 或者重定向（包含所有日志）
 python agent.py > report.txt 2>&1
 ```
 
-**Q：分析中途出现 `[保护] 注入终止指令`**
-A：Agent 检测到模型在对不存在的符号进行无效猜测（幻觉扩展），已自动打断并要求输出已有结论，属于正常保护机制。
+### 覆盖模型
+
+```bash
+python agent.py --repo-id REPO_NAME --model deepseek-chat
+```
+
+### 比较两个仓库
+
+```bash
+# 比较两个已克隆的仓库
+python agent.py --compare --repo-id REPO_A --repo-id-b REPO_B
+
+# 比较两个远程仓库（自动克隆）
+python agent.py --compare --url URL_A --url-b URL_B
+
+# 混合：本地 + 远程
+python agent.py --compare --repo-path /path/to/a --url-b URL_B
+```
+
+### 只克隆仓库（不分析）
+
+```bash
+python fetch_single_repo.py https://gitlab.eduxiji.net/.../repo.git
+
+# 自定义存放目录
+python fetch_single_repo.py https://... --output-dir ./data/historical_repos
+```
+
+### 构建参考指纹库（可选，用于原创性检测）
+
+```bash
+python scripts/build_reference_db.py --reference rcore-tutorial-v3 --repo-path /path/to/rCore-Tutorial-v3
+```
+
+---
+
+## 四、命令行参数完整说明
+
+### `agent.py`
+
+| 参数 | 说明 |
+|------|------|
+| `--repo-id ID` | 分析 `data/historical_repos/` 下的指定仓库 |
+| `--repo-path PATH` | 分析任意本地路径下的仓库 |
+| `--url URL` | 克隆远程仓库后分析 |
+| `--output FILE` / `-o FILE` | 将报告写入文件（默认打印到终端） |
+| `--model MODEL` | 覆盖 config.toml 中的模型名称 |
+| `--compare` | 启用比较模式 |
+| `--repo-id-b ID` | 比较模式：第二个仓库的文件夹名 |
+| `--repo-path-b PATH` | 比较模式：第二个仓库的本地路径 |
+| `--url-b URL` | 比较模式：第二个仓库的远程地址 |
+
+`--repo-id` / `--repo-path` / `--url` 三者互斥，`--repo-id-b` / `--repo-path-b` / `--url-b` 同理。
+
+### `fetch_single_repo.py`
+
+| 参数 | 说明 |
+|------|------|
+| `url`（位置参数） | 仓库 HTTPS 地址 |
+| `--output-dir DIR` | 本地存放目录（默认 `./data/historical_repos`） |
+| `--meta-dir DIR` | 元数据目录（默认 `./data/metadata`） |

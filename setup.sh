@@ -36,9 +36,9 @@ python3 -m venv "$SCRIPT_DIR/.venv"
 echo "[4/4] 验证安装..."
 check() {
     if command -v "$1" &>/dev/null; then
-        echo "  ✓ $1: $($1 --version 2>&1 | head -1)"
+        echo "  [OK] $1: $($1 --version 2>&1 | head -1)"
     else
-        echo "  ✗ $1: 未找到"
+        echo "  [缺失] $1: 未找到"
     fi
 }
 check clangd
@@ -49,16 +49,16 @@ check rust-analyzer
 if command -v ctags &>/dev/null; then
     CTAGS_VER=$(ctags --version 2>&1 | head -1)
     if echo "$CTAGS_VER" | grep -qi "universal"; then
-        echo "  ✓ ctags (Universal): $CTAGS_VER"
+        echo "  [OK] ctags (Universal): $CTAGS_VER"
     else
-        echo "  ✗ ctags: 检测到非 Universal Ctags（$CTAGS_VER）"
+        echo "  [警告] ctags: 检测到非 Universal Ctags（$CTAGS_VER）"
         echo "    本项目需要 Universal Ctags，请运行："
         echo "      sudo apt-get install -y universal-ctags"
         echo "    若已安装但命令仍指向旧版，检查 PATH 中的优先级："
         echo "      which -a ctags"
     fi
 else
-    echo "  ✗ ctags: 未找到"
+    echo "  [缺失] ctags: 未找到"
 fi
 
 "$SCRIPT_DIR/.venv/bin/python" - <<'EOF'
@@ -67,9 +67,9 @@ pkgs = ["openai", "git", "tree_sitter", "tree_sitter_c", "tree_sitter_rust"]
 for p in pkgs:
     try:
         importlib.import_module(p)
-        print(f"  ✓ {p}")
+        print(f"  [OK] {p}")
     except ImportError:
-        print(f"  ✗ {p}: 未安装")
+        print(f"  [缺失] {p}: 未安装")
 EOF
 
 echo ""

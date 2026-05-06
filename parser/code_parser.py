@@ -11,6 +11,33 @@ from tree_sitter import Language, Parser
 c_parser = Parser(Language(tsc.language()))
 rust_parser = Parser(Language(tsr.language()))
 
+# 全局常量：所有需要跳过的噪声目录（供本文件内所有 rglob 循环复用）
+_SKIP_DIRS: frozenset[str] = frozenset({
+    ".git", "target", "build", "node_modules",
+    "__pycache__", ".cargo", "vendor",
+    "third_party", "thirdparty", "external",
+})
+
+_SRC_EXTS: frozenset[str] = frozenset({".c", ".rs", ".h", ".S", ".asm"})
+
+
+def _in_skip_dir(path: Path, base: Path) -> bool:
+    """判断 path 是否位于 base 下的某个 skip 目录中。"""
+    try:
+        parts = path.relative_to(base).parts
+    except ValueError:
+        parts = path.parts
+    return any(part in _SKIP_DIRS for part in parts)
+
+
+def _is_subpath_of(child: Path, parent: Path) -> bool:
+    """判断 child 是否是 parent 的严格子路径（parent/... 形式）。"""
+    try:
+        child.relative_to(parent)
+        return child != parent
+    except ValueError:
+        return False
+
 
 def find_function_calls(func_code_bytes, lang_type):
     """局部解析，提取内部调用的子函数 (兼容 C 和 Rust)"""
@@ -51,29 +78,45 @@ def deduplicate_parent_paths(paths: list[str]) -> list[str]:
 
 
 def find_source_roots(repo_path: Path) -> list[str]:
-    """找到仓库中源代码文件最密集的目录"""
-    SKIP_DIRS = {".git", "target", "build", "node_modules", "__pycache__", ".cargo", "vendor"}
-    SRC_EXTS = {".c", ".rs", ".h", ".S", ".asm"}
-    KNOWN_NAMES = {"src", "kernel", "kern", "os", "core", "code"}
+    """
+    找到覆盖仓库内所有源代码文件的最小目录集合。
 
-    candidates = []
-    for entry in repo_path.rglob("*"):
-        if not entry.is_dir():
+    算法：贪心最小覆盖集
+      1. 遍历全部源文件（跳过 _SKIP_DIRS），收集其父目录
+         - repo_path 本身也参与（处理根目录直接放文件的情况）
+      2. 按路径深度升序排序，浅层目录优先处理
+      3. 贪心选取：若某目录已被已选目录递归覆盖则跳过
+      4. 最终每个选中目录用 ctags -R 扫描时能覆盖其下全部文件
+
+    相比旧版改进：
+      - 不再有 [:8] 硬截断，同级兄弟目录无论多少都能全部覆盖
+      - 根目录下的直接源文件不再遗漏
+      - 父目录有文件、子目录也有文件时，选父目录（-R 自动递归）
+    """
+    # 收集所有非 skip 源文件的直接父目录
+    dirs_with_files: set[Path] = set()
+    for f in repo_path.rglob("*"):
+        if not f.is_file() or f.suffix not in _SRC_EXTS:
             continue
-        if any(skip in entry.parts for skip in SKIP_DIRS):
+        if _in_skip_dir(f, repo_path):
             continue
+        dirs_with_files.add(f.parent)
 
-        src_count = sum(
-            1 for f in entry.iterdir()
-            if f.is_file() and f.suffix in SRC_EXTS
-        )
-        if src_count > 0:
-            rel = str(entry.relative_to(repo_path))
-            candidates.append((rel, src_count, entry.name.lower()))
+    if not dirs_with_files:
+        return ["."]
 
-    candidates.sort(key=lambda x: (x[2] not in KNOWN_NAMES, -x[1]))
+    # 按深度升序贪心：浅层目录先处理，子目录若已被覆盖则跳过
+    selected: list[Path] = []
+    for d in sorted(dirs_with_files, key=lambda p: len(p.parts)):
+        if not any(d == s or _is_subpath_of(d, s) for s in selected):
+            selected.append(d)
 
-    return deduplicate_parent_paths([c[0] for c in candidates[:8]])
+    # 转为相对路径；repo_path 本身转为 "."
+    result = []
+    for d in selected:
+        rel = str(d.relative_to(repo_path))
+        result.append(rel if rel else ".")
+    return result or ["."]
 
 
 def run_ctags(repo_path: str, source_roots: list[str]) -> list[dict]:
@@ -88,6 +131,7 @@ def run_ctags(repo_path: str, source_roots: list[str]) -> list[dict]:
             "--extras=+fq",       # f=标记 file-scope 符号  q=产出全限定名
             "--kinds-c=+dfgmpstuvx",   # C: define/function/enum/macro/prototype/struct/typedef/union/variable
             "--kinds-rust=+fPMsgi",    # Rust: function/method/macro/struct/enum/trait
+            *[f"--exclude={d}" for d in _SKIP_DIRS],
             "-R", root,
         ]
 
@@ -284,7 +328,7 @@ def generate_level1_map(
             ungrouped.append(tag)
 
     #渲染
-    lines = ["## 仓库结构地图（公开接口）\n"]
+    lines = ["━" * 30, "【仓库结构地图（公开接口）】\n"]
 
     for subsystem in _SUBSYSTEM_ORDER:
         group = subsystem_groups.get(subsystem)
@@ -356,6 +400,8 @@ def classify_files_by_content(repo_path: str, source_roots: list[str]) -> dict:
             if src_file.suffix not in SRC_EXTS:
                 continue
             if src_file.stat().st_size > 500_000:
+                continue
+            if _in_skip_dir(src_file, repo):
                 continue
 
             content = src_file.read_text(errors="replace").lower()
@@ -481,8 +527,11 @@ def detect_primary_language(source_roots: list[str]) -> dict:
     }
 
     for root in source_roots:
-        for f in Path(root).rglob("*"):
+        root_path = Path(root)
+        for f in root_path.rglob("*"):
             if not f.is_file():
+                continue
+            if _in_skip_dir(f, root_path):
                 continue
             lang = LANG_MAP.get(f.suffix.lower())
             if not lang:
@@ -565,8 +614,11 @@ FUNC_FINGERPRINTS: dict[str, list[str]] = {
 def _search_in_repo(repo_path: str, keyword: str, source_roots: list[str]) -> bool:
     """在所有源文件中搜索关键词，找到即返回 True。"""
     for root in source_roots:
-        for f in Path(root).rglob("*"):
+        root_path = Path(root)
+        for f in root_path.rglob("*"):
             if f.suffix not in {".rs", ".c", ".h"}:
+                continue
+            if _in_skip_dir(f, root_path):
                 continue
             try:
                 if keyword in f.read_text(errors="replace"):
@@ -591,8 +643,11 @@ def detect_reference_os(repo_path: str, structure: dict) -> dict:
 
     # 第一层：数据结构名称（权重 3）
     for root in structure["source_roots"]:
-        for src_file in Path(root).rglob("*"):
+        root_path = Path(root)
+        for src_file in root_path.rglob("*"):
             if src_file.suffix not in {".rs", ".c", ".h"}:
+                continue
+            if _in_skip_dir(src_file, root_path):
                 continue
             try:
                 content = src_file.read_text(errors="replace")
@@ -680,8 +735,11 @@ def detect_kernel_type(repo_path: str, structure: dict) -> dict:
     mono_hits:  list[str] = []
 
     for root in structure["source_roots"]:
-        for f in Path(root).rglob("*"):
+        root_path = Path(root)
+        for f in root_path.rglob("*"):
             if f.suffix not in {".rs", ".c", ".h"}:
+                continue
+            if _in_skip_dir(f, root_path):
                 continue
             try:
                 content = f.read_text(errors="replace")
