@@ -1,8 +1,7 @@
 """
-三个工具的具体实现：
+两个工具的具体实现：
   - read_file                读取文件内容（带行号，自动截断）
-  - list_implemented_syscalls  扫描 sys_* 符号，与标准 Linux syscall 集合比对
-  - compare_with_reference_os  从当前仓库提取函数名，与参考 OS 的代表性函数集对比
+  - compare_with_reference_os  从当前仓库提取函数名，与参考 OS 的代表性函数集对比（降级版）
 """
 
 import os
@@ -45,6 +44,17 @@ def read_file(
             f"[错误] 文件不存在：{path}\n"
             f"请检查路径是否正确，可以先查看仓库结构地图确认。"
         )
+
+    if full_path.is_dir():
+        entries = sorted(full_path.iterdir(), key=lambda p: (p.is_file(), p.name))
+        lines = [f"[提示] {path} 是目录，不能直接读取。请指定目录下的某个文件："]
+        for entry in entries[:60]:
+            rel = str(entry.relative_to(Path(repo_path)))
+            marker = "/" if entry.is_dir() else ""
+            lines.append(f"  {rel}{marker}")
+        if len(list(full_path.iterdir())) > 60:
+            lines.append("  ...（仅显示前 60 项）")
+        return "\n".join(lines)
 
     # 二进制文件保护
     if full_path.suffix.lower() in _BINARY_EXTS:
@@ -110,87 +120,6 @@ def read_file(
         + f", end_line={total - _TAIL_LINES}）...\n\n"
         + tail_part
     )
-
-
-# T4: list_implemented_syscalls（旧版正则扫描，作为降级实现保留）
-
-_SYS_RE = re.compile(r"\bsys_[a-zA-Z_][a-zA-Z0-9_]*")
-
-_LINUX_SYSCALL_SET: frozenset[str] = frozenset({
-    "sys_read", "sys_write", "sys_open", "sys_close",
-    "sys_fork", "sys_execve", "sys_exit", "sys_wait4", "sys_waitpid",
-    "sys_brk", "sys_mmap", "sys_munmap", "sys_mprotect",
-    "sys_getpid", "sys_getppid",
-    "sys_kill", "sys_signal", "sys_sigaction", "sys_sigreturn",
-    "sys_pipe", "sys_dup", "sys_dup2",
-    "sys_chdir", "sys_getcwd", "sys_mkdir", "sys_rmdir",
-    "sys_unlink", "sys_rename", "sys_stat", "sys_fstat", "sys_lseek",
-    "sys_ioctl", "sys_openat", "sys_mkdirat", "sys_fstatat",
-    "sys_unlinkat", "sys_renameat", "sys_linkat", "sys_readlinkat",
-    "sys_socket", "sys_bind", "sys_listen", "sys_accept", "sys_connect",
-    "sys_send", "sys_recv", "sys_sendto", "sys_recvfrom",
-    "sys_nanosleep", "sys_clock_gettime", "sys_gettimeofday", "sys_times",
-    "sys_uname", "sys_getuid", "sys_getgid", "sys_setuid", "sys_setgid",
-    "sys_clone", "sys_vfork", "sys_exit_group",
-    "sys_set_tid_address", "sys_futex",
-    "sys_sched_yield", "sys_sched_setscheduler", "sys_sched_getscheduler",
-    "sys_symlinkat",
-})
-
-
-def list_implemented_syscalls(repo_path: str) -> str:
-    """扫描 .c / .rs / .h 文件，收集 sys_* 符号，与标准集合比对后返回报告。"""
-    found: dict[str, list[str]] = {}
-
-    repo = Path(repo_path)
-    for ext in ("*.c", "*.rs", "*.h"):
-        for src in repo.rglob(ext):
-            rel = str(src.relative_to(repo))
-            if any(part in _SKIP_DIRS for part in Path(rel).parts):
-                continue
-            try:
-                for lineno, line in enumerate(
-                    src.read_text(errors="replace").splitlines(), 1
-                ):
-                    for m in _SYS_RE.finditer(line):
-                        name = m.group()
-                        locs = found.setdefault(name, [])
-                        loc = f"{rel}:{lineno}"
-                        if loc not in locs:
-                            locs.append(loc)
-            except Exception:
-                continue
-
-    impl = set(found)
-    hit = impl & _LINUX_SYSCALL_SET
-    extra = impl - _LINUX_SYSCALL_SET
-    missing = _LINUX_SYSCALL_SET - impl
-
-    lines = [
-        f"## Syscall 实现情况（共扫描到 {len(impl)} 个 sys_* 符号）",
-        f"- 标准 Linux syscall 覆盖：**{len(hit)}/{len(_LINUX_SYSCALL_SET)}**",
-        f"- 项目独有 syscall：{len(extra)} 个",
-        "",
-        "### 已实现（与标准集合重合）",
-    ]
-    for name in sorted(hit):
-        locs = "、".join(found[name][:3])
-        lines.append(f"- `{name}` — {locs}")
-
-    if extra:
-        lines += ["", "### 项目独有 syscall"]
-        for name in sorted(extra):
-            locs = "、".join(found[name][:3])
-            lines.append(f"- `{name}` — {locs}")
-
-    if missing:
-        lines += [
-            "",
-            f"### 未实现（标准集合中缺失，共 {len(missing)} 个）",
-            ", ".join(f"`{n}`" for n in sorted(missing)),
-        ]
-
-    return "\n".join(lines)
 
 
 # T6: compare_with_reference_os（降级版：函数名集合比对，无代码指纹库时使用）
