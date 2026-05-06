@@ -49,7 +49,7 @@ source .venv/bin/activate
 
 脚本自动安装：`universal-ctags`、`clangd`、`bear`、`rust-analyzer` 以及 Python 虚拟环境。
 
-### 手动安装
+#### 手动安装
 
 ```bash
 sudo apt-get install -y universal-ctags clangd bear
@@ -102,9 +102,7 @@ pip install -r requirements.txt
    rustup component add rust-analyzer
 ```
 
----
-
-### 第 3 步：配置 CMake 以生成 `compile_commands.json`
+#### 第 3 步：配置 CMake 以生成 `compile_commands.json`
 
 Linux 系统通常使用 `bear` 来拦截编译过程并生成 `compile_commands.json`（C/C++ 代码解析必须的文件），但 Windows 不支持 `bear`。我们通过 CMake 插件来完美替代：
 
@@ -115,7 +113,7 @@ Linux 系统通常使用 `bear` 来拦截编译过程并生成 `compile_commands
 
 ---
 
-### 第 4 步：初始化 Python 虚拟环境
+#### 第 4 步：初始化 Python 虚拟环境
 
 最后一步，我们需要隔离 Python 的依赖包，防止弄乱你电脑原本的 Python 环境。
 
@@ -235,24 +233,24 @@ python scripts/build_reference_db.py --reference rcore-tutorial-v3 --repo-path /
 
 ### `agent.py`
 
-| 参数 | 说明 |
-|------|------|
-| `--repo-id ID` | 分析 `data/historical_repos/` 下的指定仓库 |
-| `--repo-path PATH` | 分析任意本地路径下的仓库 |
-| `--url URL` | 克隆远程仓库后分析 |
-| `--output FILE` / `-o FILE` | 将报告写入文件（默认打印到终端） |
-| `--model MODEL` | 覆盖 config.toml 中的模型名称 |
-| `--compare` | 启用比较模式 |
-| `--repo-id-b ID` | 比较模式：第二个仓库的文件夹名 |
-| `--repo-path-b PATH` | 比较模式：第二个仓库的本地路径 |
-| `--url-b URL` | 比较模式：第二个仓库的远程地址 |
+| 参数                            | 说明                                         |
+| ------------------------------- | -------------------------------------------- |
+| `--repo-id ID`                | 分析 `data/historical_repos/` 下的指定仓库 |
+| `--repo-path PATH`            | 分析任意本地路径下的仓库                     |
+| `--url URL`                   | 克隆远程仓库后分析                           |
+| `--output FILE` / `-o FILE` | 将报告写入文件（默认打印到终端）             |
+| `--model MODEL`               | 覆盖 config.toml 中的模型名称                |
+| `--compare`                   | 启用比较模式                                 |
+| `--repo-id-b ID`              | 比较模式：第二个仓库的文件夹名               |
+| `--repo-path-b PATH`          | 比较模式：第二个仓库的本地路径               |
+| `--url-b URL`                 | 比较模式：第二个仓库的远程地址               |
 
 `--repo-id` / `--repo-path` / `--url` 三者互斥，`--repo-id-b` / `--repo-path-b` / `--url-b` 同理。
 
 ### `fetch_single_repo.py`
 
-| 参数 | 说明 |
-|------|------|
-| `url`（位置参数） | 仓库 HTTPS 地址 |
+| 参数                 | 说明                                             |
+| -------------------- | ------------------------------------------------ |
+| `url`（位置参数）  | 仓库 HTTPS 地址                                  |
 | `--output-dir DIR` | 本地存放目录（默认 `./data/historical_repos`） |
-| `--meta-dir DIR` | 元数据目录（默认 `./data/metadata`） |
+| `--meta-dir DIR`   | 元数据目录（默认 `./data/metadata`）           |
