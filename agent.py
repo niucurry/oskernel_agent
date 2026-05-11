@@ -22,14 +22,12 @@ from pathlib import Path
 import config
 from engines.base import AnalysisEngine
 from parser.code_parser import (
-    build_profile,
     find_source_roots,
     classify_files_by_content,
     detect_naming_style,
     find_doc_files,
     detect_anomalies,
 )
-from parser.os_tools import build_repo_map
 
 # OpenCode 可执行文件路径（由 npm install -g opencode-ai 安装）
 _OPENCODE = str(Path.home() / ".local" / "bin" / "opencode")
@@ -116,17 +114,6 @@ def _resolve_repo_path(url: str | None, repo_path_arg: str | None,
         sys.exit(1)
     p = (Path(config.data["repos_dir"]) / name).resolve()
     return p, name
-
-
-def _analyze_one(repo_path: Path, repo_name: str) -> tuple:
-    """执行静态结构分析，返回 (structure, profile, level1_map, level2_index, engine)。"""
-    print("正在执行静态结构分析...")
-    structure = _build_structure(repo_path)
-    profile   = build_profile(str(repo_path), structure)
-    level1_map, level2_index = build_repo_map(str(repo_path), structure, profile)
-    profile["repo_name"] = repo_name
-    engine = select_engine(str(repo_path), profile, level2_index)
-    return structure, profile, level1_map, level2_index, engine
 
 
 # OpenCode 调用
@@ -233,9 +220,6 @@ if __name__ == "__main__":
     if args.model:
         config.api["model"] = args.model
 
-    output_file = str(Path(args.output).resolve()) if args.output else ""
-    output_hint = f"完成后使用 write_report 工具将报告保存到 {output_file}。" if output_file else ""
-
     # 解析仓库路径（静态分析由 initialize_analysis 工具在 MCP server 端执行）
     repo_path_a, repo_name_a = _resolve_repo_path(args.url, args.repo_path, args.repo_id)
 
@@ -243,6 +227,29 @@ if __name__ == "__main__":
         repo_path_b, repo_name_b = _resolve_repo_path(
             args.url_b, args.repo_path_b, args.repo_id_b
         )
+
+    # 报告输出路径：未指定 --output 时按 data/reports/<repo>_<时间戳>.md 自动生成
+    if args.output:
+        output_file = str(Path(args.output).resolve())
+    else:
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        reports_dir = Path(config.data.get("reports_dir", "./data/reports")).resolve()
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        if args.compare:
+            fname = f"compare_{repo_name_a}_vs_{repo_name_b}_{ts}.md"
+        else:
+            fname = f"{repo_name_a}_{ts}.md"
+        output_file = str(reports_dir / fname)
+
+    output_hint = (
+        f"\n\n【报告输出要求（必须执行）】完成所有分析后，"
+        f"调用 write_report 工具将完整 Markdown 报告写入文件："
+        f"\n  write_report(content=\"<完整报告>\", output_path=\"{output_file}\")"
+        f"\n不要把报告内容直接输出到对话中；只调用 write_report 工具即可。"
+    )
+
+    if args.compare:
         user_request = (
             f"请比较项目 {repo_name_a}（路径：{repo_path_a}）"
             f"和项目 {repo_name_b}（路径：{repo_path_b}）。"
@@ -254,4 +261,5 @@ if __name__ == "__main__":
             f"{output_hint}"
         )
 
+    print(f"[agent] 报告将写入：{output_file}")
     _run_opencode(user_request, session_id=args.session or "", output_file=output_file)

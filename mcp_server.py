@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import sys
+import threading
 from pathlib import Path
 
 from mcp.server import Server
@@ -53,6 +54,114 @@ def _log(msg: str) -> None:
     print(f"[MCP] {msg}", file=sys.stderr, flush=True)
 
 
+# 引擎懒加载代理：rust-analyzer/clangd 启动可能耗时数十秒，会让 initialize_analysis
+# 超出 MCP 客户端的请求超时。这里把引擎初始化放到后台线程，让 initialize_analysis
+# 立即返回。需要引擎的工具调用（如 find_symbol_definition）首次访问时阻塞等待，
+# 不需要引擎的工具（read_file/search_code/list_implemented_syscalls）则不受影响。
+
+# 单次工具调用最多等待引擎多少秒。设置低于 OpenCode 默认 MCP 请求超时（约 60s），
+# 超时后返回友好提示而不是让 OpenCode 在 -32001 上失败。
+_LAZY_ENGINE_TIMEOUT = 50.0
+
+
+class _LazyEngine:
+    """后台线程中初始化的引擎代理。
+
+    - get_engine_info(): 引擎就绪前返回预测信息，就绪后透传到真实引擎
+    - is_ready(): 非阻塞探测
+    - 其他属性访问（go_to_definition、find_references 等）：阻塞至就绪后透传
+    - 初始化失败的异常会在首次属性访问时抛出
+    """
+
+    def __init__(self, repo_path: str, profile: dict, level2_index,
+                 predicted_info: dict):
+        self._args = (repo_path, profile, level2_index)
+        self._predicted_info = predicted_info
+        self._engine = None
+        self._error: Exception | None = None
+        self._done = threading.Event()
+        threading.Thread(target=self._init, daemon=True).start()
+
+    def _init(self) -> None:
+        try:
+            from agent import select_engine
+            self._engine = select_engine(*self._args)
+            info = self._engine.get_engine_info()
+            _log(f"[lazy-engine] 就绪：{info.get('engine')}（精度 {info.get('precision')}）")
+        except Exception as exc:
+            self._error = exc
+            _log(f"[lazy-engine] 初始化失败：{exc}")
+        finally:
+            self._done.set()
+
+    def is_ready(self) -> bool:
+        return self._done.is_set() and self._engine is not None
+
+    def get_engine_info(self) -> dict:
+        if self._engine is not None:
+            return self._engine.get_engine_info()
+        return self._predicted_info
+
+    def _wait(self):
+        if not self._done.wait(timeout=_LAZY_ENGINE_TIMEOUT):
+            raise TimeoutError(
+                f"语义引擎仍在初始化（已等待 {_LAZY_ENGINE_TIMEOUT:.0f} 秒，"
+                "大型 Rust 工作区 rust-analyzer 索引通常需要 60–120 秒）。"
+                "建议先用 read_file/search_code/list_implemented_syscalls 继续"
+                "阶段一文档扫读与阶段二事实收集，几次工具调用后再回到此符号查询。"
+            )
+        if self._error is not None:
+            raise RuntimeError(f"语义引擎初始化失败：{self._error}")
+        return self._engine
+
+    def __getattr__(self, name: str):
+        # 仅在实例/类上找不到该属性时触发；返回真实引擎的属性
+        return getattr(self._wait(), name)
+
+
+def _predict_engine_info(profile: dict) -> dict:
+    """根据 profile 预测最终选用的引擎，用于 initialize_analysis 立即返回的 Layer 2。
+
+    引擎类型由 select_engine 中的降级链决定：rust → A，c → B，其他 → C。
+    预测可能与最终结果不一致（如 rust-analyzer 启动失败会降级到 C），但不影响
+    LLM 进入工作流。最终 engine_info 会在引擎就绪后通过 get_engine_info() 自动更新。
+    """
+    primary_lang = profile.get("primary_lang", "")
+    has_cargo    = bool(profile.get("has_cargo"))
+
+    if primary_lang == "rust" or has_cargo:
+        return {
+            "engine": "rust-analyzer（后台启动中）",
+            "precision": "high",
+            "capabilities": [
+                "跨文件符号定义查找（含 trait/泛型解析）",
+                "精确引用追踪",
+                "调用链展开",
+            ],
+            "limitations": [
+                "首次符号查询可能阻塞数十秒等待引擎就绪",
+                "可优先使用 read_file/search_code/list_implemented_syscalls 等",
+                "不依赖语义引擎的工具开展阶段一文档扫读与阶段二事实收集",
+            ],
+        }
+    if primary_lang == "c":
+        return {
+            "engine": "clangd 或 tree-sitter（后台选择中）",
+            "precision": "medium-to-high",
+            "capabilities": ["符号定义查找", "引用追踪"],
+            "limitations": [
+                "若 clangd 启动失败将自动降级到 tree-sitter（精度下降）",
+                "首次符号查询前可先做文档扫读与 syscall 统计",
+            ],
+        }
+    return {
+        "engine": "tree-sitter",
+        "precision": "medium",
+        "capabilities": ["AST 级符号匹配", "基于名称的引用扫描"],
+        "limitations": ["基于名称匹配，同名函数可能误判"],
+    }
+
+
 app = Server("os-kernel-tools")
 
 _TOOL_DEFS_CACHE: list[types.Tool] | None = None
@@ -86,6 +195,47 @@ def _make_tool_defs() -> list[types.Tool]:
                     },
                 },
                 "required": ["repo_path"],
+            },
+        ),
+        types.Tool(
+            name="read_file",
+            description=(
+                "读取仓库中指定文件的源代码，返回带行号的文本。"
+                "支持 start_line/end_line 指定行号范围，避免一次性加载大文件；"
+                "对二进制文件、超大文件会自动拒绝或提示先用符号工具定位。"
+                "适用场景：查看 README 与设计文档、在符号查询失败时手动确认文件内容、"
+                "或在调用链返回的位置周围扩展阅读上下文。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path":       {"type": "string", "description": "相对仓库根目录的文件路径，如 os/src/task/mod.rs"},
+                    "start_line": {"type": "integer", "description": "起始行号，从 1 开始（可选）"},
+                    "end_line":   {"type": "integer", "description": "结束行号（可选）"},
+                    **_REPO_PARAM,
+                },
+                "required": ["path"],
+            },
+        ),
+        types.Tool(
+            name="search_code",
+            description=(
+                "在仓库内做正则文本搜索，返回 file:line:内容 列表（默认上限 50 条）。"
+                "适用场景：找 TODO/unimplemented/panic 等标记、定位错误信息常量、"
+                "搜索宏名或字符串字面量、在不知道精确符号名时按关键字探索。"
+                "默认大小写不敏感，自动跳过二进制文件和 vendor/target 等目录。"
+                "注意：本工具只做文本匹配，不是语义查询；需要符号定义请用 find_symbol_definition。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "pattern":        {"type": "string", "description": "Python 正则表达式"},
+                    "file_glob":      {"type": "string", "description": "文件名 glob，如 \"*.rs\"、\"trap*\"（可选）"},
+                    "case_sensitive": {"type": "boolean", "description": "是否大小写敏感，默认 false", "default": False},
+                    "max_results":    {"type": "integer", "description": "命中数上限，默认 50，最大 500", "default": 50},
+                    **_REPO_PARAM,
+                },
+                "required": ["pattern"],
             },
         ),
         types.Tool(
@@ -253,10 +403,10 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             "[错误] 尚未初始化分析。请先调用 initialize_analysis(repo_path)。"
         ))]
 
-    # 执行工具
+    # 执行工具：放到工作线程，避免懒加载引擎阻塞 asyncio 事件循环
     exec_args = {k: v for k, v in arguments.items() if k != "repo"}
     try:
-        result = ctx.execute(name, exec_args)
+        result = await asyncio.to_thread(ctx.execute, name, exec_args)
     except Exception as exc:
         return [types.TextContent(type="text", text=f"[工具执行错误] {name}: {exc}")]
 
@@ -290,36 +440,58 @@ async def _handle_initialize(arguments: dict) -> list[types.TextContent]:
 
     _log(f"初始化分析（label={label!r}）：{repo_path}")
 
+    # 重试时复用：同 label 已初始化且指向同一仓库 → 重新发送缓存的 Layer 2，
+    # 不重复执行静态分析、也不重复启动后台引擎。
+    existing = _contexts.get(label)
+    if (existing is not None
+            and getattr(existing, "repo_path", None) == str(repo_path)
+            and getattr(existing, "_cached_init_response", None)):
+        engine = existing.engine
+        engine_state = "就绪" if getattr(engine, "is_ready", lambda: True)() else "后台初始化中"
+        _log(f"复用已初始化上下文（label={label!r}），引擎{engine_state}")
+        return [types.TextContent(type="text", text=existing._cached_init_response)]
+
     try:
-        from agent import _build_structure, select_engine
-        from parser.code_parser import build_profile
-        from parser.os_tools import build_repo_map
         from prompts import build_layer_2, detect_crate_roles
 
-        structure              = _build_structure(repo_path)
-        profile                = build_profile(str(repo_path), structure)
-        level1_map, level2_idx = build_repo_map(str(repo_path), structure, profile)
-        profile["repo_name"]   = repo_path.name
-        engine                 = select_engine(str(repo_path), profile, level2_idx)
-        ref_db                 = ReferenceOSDatabase(
+        # 静态分析（ctags + tree-sitter 调用图）放到工作线程，避免阻塞 asyncio 事件循环
+        def _static_analysis():
+            from agent import _build_structure
+            from parser.code_parser import build_profile
+            from parser.os_tools import build_repo_map
+            structure              = _build_structure(repo_path)
+            profile                = build_profile(str(repo_path), structure)
+            level1_map, level2_idx = build_repo_map(str(repo_path), structure, profile)
+            profile["repo_name"]   = repo_path.name
+            return structure, profile, level1_map, level2_idx
+
+        structure, profile, level1_map, level2_idx = await asyncio.to_thread(_static_analysis)
+
+        # 引擎懒加载：select_engine 中 rust-analyzer/clangd 启动可能耗时数十秒，
+        # 放到后台线程，让本次 initialize_analysis 立即返回 Layer 2 给 LLM。
+        predicted_info = _predict_engine_info(profile)
+        engine         = _LazyEngine(str(repo_path), profile, level2_idx, predicted_info)
+        ref_db         = ReferenceOSDatabase(
             _config.data.get("reference_db_dir", "data/reference_db")
         )
-        ctx                    = OSKernelMCPTools(
+        ctx            = OSKernelMCPTools(
             str(repo_path), engine, level2_idx, profile, structure, ref_db
         )
-        _contexts[label]       = ctx
+        _contexts[label] = ctx
 
-        engine_info  = engine.get_engine_info()
-        crate_roles  = detect_crate_roles(str(repo_path), profile)
-        layer2       = build_layer_2(structure, profile, level1_map, engine_info, crate_roles)
+        crate_roles = detect_crate_roles(str(repo_path), profile)
+        layer2      = build_layer_2(structure, profile, level1_map, predicted_info, crate_roles)
 
         label_tag = f"（仓库 {label.upper()}）" if label else ""
         result    = (
-            f"[初始化完成{label_tag}] "
-            f"引擎：{engine_info['engine']}，精度：{engine_info['precision']}\n\n"
+            f"[初始化完成{label_tag}] 静态结构已就绪。"
+            f"语义引擎正在后台启动（{predicted_info['engine']}）。\n"
+            f"提示：可立即用 read_file/search_code/list_implemented_syscalls 开展"
+            f"阶段一文档扫读与阶段二事实收集；首次符号查询将阻塞至引擎就绪。\n\n"
             f"{layer2}"
         )
-        _log(f"初始化成功（label={label!r}），Layer2 长度 {len(layer2)} 字符")
+        ctx._cached_init_response = result  # 供后续 initialize_analysis 重试时直接复用
+        _log(f"初始化成功（label={label!r}），Layer2 长度 {len(layer2)} 字符，引擎后台启动中")
         return [types.TextContent(type="text", text=result)]
 
     except Exception as exc:
