@@ -22,7 +22,7 @@ class RustAnalyzerEngine(LspEngine):
         rust-analyzer 进度消息结构：
           begin:  {"token": "rustAnalyzer/Indexing", "value": {"kind": "begin", "title": "Indexing"}}
           report: {"token": ..., "value": {"kind": "report", "message": "100/200"}}
-          end:    {"token": ..., "value": {"kind": "end"}}          ← message 字段不存在！
+          end:    {"token": ..., "value": {"kind": "end"}}          注意：message 字段不存在！
 
         父类实现检查 value.message 里有无 "Indexing"，但 end 消息没有 message，永远不触发。
         正确做法：检查 token 字符串或 begin 时记录的 title。

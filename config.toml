@@ -1,7 +1,7 @@
 [api]
 key        = "sk-8baedbf35e474021a8d923eac557aca8"
 base_url   = "https://api.deepseek.com/v1"
-model      = "deepseek-chat"
+model      = "deepseek/deepseek-chat"
 temperature = 0.1
 
 [data]
@@ -9,10 +9,12 @@ repos_dir    = "./data/historical_repos"
 metadata_dir = "./data/metadata"
 
 [target]
-repo_id = "T202510008995695-2259"
+# 可选：填写后 python agent.py 不带参数时使用此仓库；留空则要求命令行传入 --repo-id / --repo-path / --url
+repo_id = ""
 
 [engine]
 rust_analyzer_timeout = 120   # 路径A 等待索引完成的最长秒数
 clangd_timeout        = 60    # 路径B 等待索引完成的最长秒数
 max_call_depth        = 3     # get_call_chain 默认展开层数
+max_steps             = 200   # MCP server 每会话最大工具调用步数（预算控制）
 skip_dirs = ["vendor", "third_party", "target"]  # 路径C 跳过的目录

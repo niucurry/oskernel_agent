@@ -85,8 +85,7 @@ def fetch_repo(url: str, output_dir: str = "./data/historical_repos",
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="克隆远程仓库并生成元数据")
-    parser.add_argument("url", nargs="?",
-                        default="https://gitlab.eduxiji.net/educg-group-36002-2710490/T202510008995695-2259.git",
+    parser.add_argument("url",
                         help="仓库 HTTPS 地址")
     parser.add_argument("--output-dir", default="./data/historical_repos",
                         help="本地仓库存放目录（默认 ./data/historical_repos）")

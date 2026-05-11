@@ -2,8 +2,25 @@
 # 项目环境一键安装脚本（Ubuntu 24.04 / Debian）
 set -e
 
-# ── 系统工具 ──────────────────────────────────────────────────────────────────
-echo "[1/4] 安装系统工具..."
+# OpenCode（前置依赖，需要 Node.js / npm）
+echo "[0/5] 检查 OpenCode..."
+if ! command -v opencode &>/dev/null; then
+    if command -v npm &>/dev/null; then
+        npm install -g opencode-ai
+        echo "  opencode 安装完成：$(opencode --version)"
+    else
+        echo "  [警告] 未找到 npm，无法自动安装 OpenCode"
+        echo "  请先安装 Node.js（https://nodejs.org），然后运行："
+        echo "    npm install -g opencode-ai"
+        echo "  安装完成后重新执行本脚本。"
+        exit 1
+    fi
+else
+    echo "  opencode 已存在：$(opencode --version)"
+fi
+
+# 系统工具
+echo "[1/6] 安装系统工具..."
 sudo apt-get update -qq
 sudo apt-get install -y \
     python3 python3-pip python3-venv \
@@ -13,8 +30,8 @@ sudo apt-get install -y \
     curl \
     git
 
-# ── rust-analyzer ─────────────────────────────────────────────────────────────
-echo "[2/4] 安装 rust-analyzer..."
+# rust-analyzer
+echo "[2/6] 安装 rust-analyzer..."
 if ! command -v rust-analyzer &>/dev/null; then
     RUST_ANALYZER_URL="https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-x86_64-unknown-linux-gnu.gz"
     curl -fL "$RUST_ANALYZER_URL" | gunzip -c > /tmp/rust-analyzer
@@ -25,15 +42,15 @@ else
     echo "  rust-analyzer 已存在：$(rust-analyzer --version)"
 fi
 
-# ── Python 虚拟环境 ───────────────────────────────────────────────────────────
-echo "[3/4] 创建虚拟环境并安装 Python 依赖..."
+# Python 虚拟环境
+echo "[3/6] 创建虚拟环境并安装 Python 依赖..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 python3 -m venv "$SCRIPT_DIR/.venv"
 "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip -q
 "$SCRIPT_DIR/.venv/bin/pip" install -r "$SCRIPT_DIR/requirements.txt"
 
-# ── 验证 ──────────────────────────────────────────────────────────────────────
-echo "[4/4] 验证安装..."
+# 验证安装
+echo "[4/6] 验证安装..."
 check() {
     if command -v "$1" &>/dev/null; then
         echo "  [OK] $1: $($1 --version 2>&1 | head -1)"
@@ -72,7 +89,18 @@ for p in pkgs:
         print(f"  [缺失] {p}: 未安装")
 EOF
 
+# OpenCode 全局配置注册
 echo ""
-echo "完成！激活虚拟环境后运行项目："
-echo "  source .venv/bin/activate"
-echo "  python agent.py"
+echo "[5/6] 注册 os-kernel-analyzer 到 OpenCode 全局配置..."
+"$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/setup_opencode.py"
+
+echo ""
+echo "完成！使用方式："
+echo "  直接使用 OpenCode："
+echo '    opencode run --agent os-kernel-analyzer "分析 /path/to/repo"'
+echo ""
+echo "  或通过封装脚本（支持 --repo-id / --url / --repo-path 等参数）："
+echo "    source .venv/bin/activate"
+echo "    python agent.py --url https://gitlab.example.com/repo.git"
+echo "    python agent.py --repo-path /path/to/local/repo"
+echo "    python agent.py --repo-id REPO_NAME"
