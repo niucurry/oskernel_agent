@@ -122,7 +122,7 @@ def read_file(
     )
 
 
-# T6: compare_with_reference_os（降级版：函数名集合比对，无代码指纹库时使用）
+# T6: compare_with_reference_os（函数名集合比对，无代码指纹库时使用）
 
 _REFERENCE_OS_FUNCS: dict[str, frozenset[str]] = {
     "rcore-tutorial-v3": frozenset({

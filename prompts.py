@@ -258,7 +258,7 @@ LAYER_3_WORKFLOW_ANALYZE = """
      a. 调用 find_symbol_definition() 查看核心函数的实际实现
      b. 调用 get_subsystem_call_chain() 分析关键算法的执行路径
      c. 如有需要，调用 find_symbol_references() 理解调用关系
-  4. 注意：地图中标注了"已折叠"的子系统，需要先用 read_file 查看文件内容
+  4. 注意：地图中标注了"已折叠"的子系统，需要先读取对应文件的内容
 
 阶段三：文档与工程质量评估
   5. 查看第②层探索结果中的文档文件列表
@@ -275,24 +275,27 @@ LAYER_3_WORKFLOW_COMPARE = """
 【工作流规范：必须严格按以下顺序执行】
 
 你的任务是比较仓库 A（{repo_a_name}）和仓库 B（{repo_b_name}）。
-你拥有两套工具，通过前缀区分：
-  a.read_file / a.find_symbol_definition / ...  ← 操作仓库 A
-  b.read_file / b.find_symbol_definition / ...  ← 操作仓库 B
+工具通过 repo 参数区分仓库：
+  find_symbol_definition(..., repo="a")  ← 操作仓库 A
+  find_symbol_definition(..., repo="b")  ← 操作仓库 B
+  （其他工具同理，留空或省略 repo 参数则操作第一个已初始化的仓库）
 
 阶段一：功能覆盖对比
-  1. 调用 a.list_implemented_syscalls() 和 b.list_implemented_syscalls()
+  1. 调用 list_implemented_syscalls(repo="a") 和 list_implemented_syscalls(repo="b")
      → 获取两个仓库的 syscall 覆盖率，直接对比
 
 阶段二：逐子系统技术对比
   2. 对共有的子系统（进程管理、内存管理、文件系统），
      分别在 A 和 B 中查询核心函数的实现：
-     a. 同时调用 a.find_symbol_definition("do_fork") 和 b.find_symbol_definition("do_fork")
+     a. 同时调用 find_symbol_definition("do_fork", repo="a") 和
+        find_symbol_definition("do_fork", repo="b")
      b. 对比两者的实现差异
      注意：如果 A 和 B 的函数命名不同（如 A 用 do_fork、B 用 sys_fork），
-     需要先从各自的地图中找到等价函数
+     需要先从各自的初始化返回的代码地图中找到等价函数
 
 阶段三：原创性交叉比对
-  3. 分别调用 a.compare_with_reference_os() 和 b.compare_with_reference_os()
+  3. 分别调用 compare_with_reference_os(..., repo="a") 和
+     compare_with_reference_os(..., repo="b")
   4. 对比两者的"独有函数"列表，识别各自的创新方向
 
 阶段四：生成比较文档

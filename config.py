@@ -14,5 +14,5 @@ with open(_path, "rb") as _f:
 
 api    = _cfg["api"]
 data   = _cfg["data"]
-target = _cfg["target"]
+target = _cfg.get("target", {})
 engine = _cfg["engine"]

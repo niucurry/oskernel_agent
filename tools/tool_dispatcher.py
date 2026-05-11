@@ -261,16 +261,16 @@ class ToolDispatcher:
             for ref in sub_refs:
                 tag = " [名称匹配]" if ref.get("_precision") == "name_match_only" else ""
                 lines.append(
-                    f"  ← {ref.get('caller', '?')}()"
+                    f"  调用方：{ref.get('caller', '?')}()"
                     f"  在 {ref.get('file', '?')}:{ref.get('line', '?')}{tag}"
                 )
             lines.append("")
 
         lines.append(f"**调用密度**：被 {len(refs)} 个函数调用")
         if len(refs) > 10:
-            lines.append("  → 这是一个高频使用的核心函数，修改它会影响大量模块")
+            lines.append("  注：这是一个高频使用的核心函数，修改它会影响大量模块")
         elif len(refs) == 1:
-            lines.append("  → 只有单一调用者，可能是特定流程的专用函数")
+            lines.append("  注：只有单一调用者，可能是特定流程的专用函数")
 
         return "\n".join(lines)
 
@@ -409,7 +409,7 @@ class ToolDispatcher:
         for name in sorted(covered):
             info = found[name]
             lines.append(
-                f"  [OK] {name:<18}  ←  {info['evidence']}"
+                f"  [OK] {name:<18}  来源：{info['evidence']}"
                 f"  ({info['file']}:{info['line']})"
             )
 
@@ -433,7 +433,7 @@ class ToolDispatcher:
             for name in sorted(extra):
                 info = found[name]
                 lines.append(
-                    f"  [独有] {name:<18}  ←  {info['evidence']}"
+                    f"  [独有] {name:<18}  来源：{info['evidence']}"
                     f"  ({info['file']}:{info['line']})"
                 )
 
@@ -441,7 +441,7 @@ class ToolDispatcher:
             lines.append(f"\n### 仅有常量声明（可能未真正实现，共 {len(constant_only)} 个）")
             for name in sorted(constant_only):
                 info = found[name]
-                lines.append(f"  [仅声明] {name:<18}  ←  {info['evidence']}")
+                lines.append(f"  [仅声明] {name:<18}  来源：{info['evidence']}")
 
         return "\n".join(lines)
 
@@ -476,8 +476,6 @@ class ToolDispatcher:
                     tree_lines.append(f"{prefix}... [节点过多，已截断]")
                     return
                 is_last = (i == len(items) - 1)
-                conn = "└── " if is_last else "├── "
-
                 sym = func_syms.get(func_name, {})
                 if sym:
                     loc = f"  ({sym['file']}:{sym['start_line']})"
@@ -488,11 +486,11 @@ class ToolDispatcher:
                 if not_found:
                     loc += "  [外部/未索引]"
 
-                tree_lines.append(f"{prefix}{conn}{func_name}(){loc}")
+                tree_lines.append(f"{prefix}- {func_name}(){loc}")
                 total_nodes[0] += 1
 
                 if children and not not_found:
-                    ext = prefix + ("    " if is_last else "│   ")
+                    ext = prefix + "  "
                     render(children, ext)
 
         render(chain)

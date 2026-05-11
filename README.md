@@ -4,41 +4,19 @@
 
 ---
 
-## 目录结构
-
-```
-agent/
-├── agent.py              # 主入口：分析单仓库或比较两个仓库
-├── fetch_single_repo.py  # 克隆远程仓库并生成元数据
-├── config.toml           # 配置文件（API Key、路径、引擎参数）
-├── config.py             # 读取 config.toml
-├── prompts.py            # 分层提示词构建
-├── requirements.txt      # Python 依赖
-├── setup.sh              # 一键环境安装脚本
-├── engines/
-│   ├── base.py           # 引擎抽象接口
-│   ├── lsp_base.py       # LSP 客户端基类
-│   ├── path_a.py         # 引擎A：rust-analyzer（Rust 项目，精度最高）
-│   ├── path_b.py         # 引擎B：clangd（C 项目）
-│   └── path_c.py         # 引擎C：tree-sitter（降级方案，无需 LSP）
-├── parser/
-│   ├── code_parser.py    # 符号提取、结构分析（依赖 ctags）
-│   └── os_tools.py       # 两级索引与仓库地图构建
-├── tools/
-│   ├── mcp_tools.py      # 工具统一入口
-│   ├── tool_registry.py  # 工具 Schema 定义
-│   ├── tool_dispatcher.py # 工具调度与引擎聚合
-│   ├── tool_handlers.py  # 底层实现（文件读取、syscall 扫描）
-│   └── reference_db.py   # 相似度指纹数据库
-└── scripts/
-    └── build_reference_db.py  # 构建参考 OS 指纹库
-```
-
----
-
 ## 一、环境安装
 
 ### Linux
+
+#### 前置依赖：OpenCode
+
+本项目使用 [OpenCode](https://opencode.ai) 作为 AI 交互宿主，需要提前安装（要求 Node.js >= 18）：
+
+```bash
+npm install -g opencode-ai
+```
+
+安装完成后验证：`opencode --version`
 
 #### 一键安装（推荐）
 
@@ -47,11 +25,14 @@ bash setup.sh
 source .venv/bin/activate
 ```
 
-脚本自动安装：`universal-ctags`、`clangd`、`bear`、`rust-analyzer` 以及 Python 虚拟环境。
+脚本自动安装：`universal-ctags`、`clangd`、`bear`、`rust-analyzer`、Python 虚拟环境，并将 agent 注册到 OpenCode 全局配置。若 OpenCode 未安装且系统有 npm，脚本会自动安装。
 
 #### 手动安装
 
 ```bash
+# 安装 OpenCode（需要 npm）
+npm install -g opencode-ai
+
 sudo apt-get install -y universal-ctags clangd bear
 
 curl -fL https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-x86_64-unknown-linux-gnu.gz \
@@ -59,6 +40,9 @@ curl -fL https://github.com/rust-lang/rust-analyzer/releases/latest/download/rus
 sudo chmod +x /usr/local/bin/rust-analyzer
 
 pip install -r requirements.txt
+
+# 注册 agent 到 OpenCode 全局配置
+python setup_opencode.py
 ```
 
 ### Windows
@@ -154,7 +138,8 @@ repos_dir    = "./data/historical_repos"   # 克隆下来的仓库存放目录
 metadata_dir = "./data/metadata"
 
 [target]
-repo_id = "T202510008995695-2259"          # 默认分析的仓库（可被命令行参数覆盖）
+# 可选：填写后 python agent.py 不带参数时使用此仓库；留空则要求命令行传入参数
+repo_id = ""
 
 [engine]
 rust_analyzer_timeout = 120   # 等待 rust-analyzer 索引完成的秒数
@@ -172,25 +157,26 @@ skip_dirs = ["vendor", "third_party", "target"]
 ### 分析单个仓库
 
 ```bash
-# 使用 config.toml 中的默认 repo_id
-python agent.py
-
-# 指定已克隆的仓库名（data/historical_repos/ 下的文件夹名）
-python agent.py --repo-id T202510008995695-2259
+# 指定远程 URL，自动克隆后分析
+python agent.py --url https://gitlab.example.com/group/repo.git
 
 # 指定本地仓库的完整路径
 python agent.py --repo-path /path/to/repo
 
-# 直接给 URL，自动克隆后分析（不需要手动 fetch）
-python agent.py --url https://gitlab.eduxiji.net/.../repo.git
+# 指定已克隆的仓库名（data/historical_repos/ 下的文件夹名）
+python agent.py --repo-id REPO_NAME
+
+# 若在 config.toml [target] 中填写了 repo_id，可不带参数直接运行
+python agent.py
 ```
 
 ### 保存报告
 
 ```bash
+python agent.py --url https://gitlab.example.com/group/repo.git --output report.md
 python agent.py --repo-id REPO_NAME --output report.md
 # 或者重定向（包含所有日志）
-python agent.py > report.txt 2>&1
+python agent.py --repo-path /path/to/repo > report.txt 2>&1
 ```
 
 ### 覆盖模型

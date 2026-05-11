@@ -136,14 +136,14 @@ def run_ctags(repo_path: str, source_roots: list[str]) -> list[dict]:
         ]
 
         try:
-            # 修复：添加编码 + 错误忽略
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=120,
-                encoding="utf-8",    # 强制UTF-8
-                errors="replace"     # 无法解码字符自动替换，不崩溃
+                encoding="utf-8",
+                errors="replace",
+                cwd=repo_path,
             )
         except FileNotFoundError:
             print("  警告：未找到 ctags 命令（需要 Universal Ctags）。符号索引为空，工具将无法查询符号。")
@@ -185,9 +185,9 @@ _NOISE_NAMES = {
 def classify_symbol(tag: dict, primary_lang: str) -> str:
     """
     判断符号应进入哪一级：
-      "level1"  → 第一级精简地图（注入 Prompt）
-      "level2"  → 第二级完整索引
-      "discard" → 直接丢弃（噪声）
+      "level1"：第一级精简地图（注入 Prompt）
+      "level2"：第二级完整索引
+      "discard"：直接丢弃（噪声）
     """
     name      = tag.get("name", "")
     kind      = tag.get("kind", "")
@@ -253,7 +253,7 @@ def _simplify_signature(sig: str) -> str:
     """
     简化函数签名以减少 token。
     (uint32_t clone_flags, uintptr_t stack, struct trapframe *tf)
-    → (uint32_t, uintptr_t, trapframe*)
+    简化为：(uint32_t, uintptr_t, trapframe*)
     """
     params = sig.strip("()")
     if not params:
@@ -323,7 +323,7 @@ def generate_level1_map(
 
     #过滤，只保留 level1 符号
     level1_tags = [t for t in tags if classify_symbol(t, primary_lang) == "level1"]
-    #构建 文件路径 → 子系统 的映射
+    #构建文件路径到子系统的映射
     file_to_subsystem: dict[str, str] = {}
     for subsystem, files in structure["subsystem_locations"].items():
         for entry in files:
@@ -340,7 +340,7 @@ def generate_level1_map(
             ungrouped.append(tag)
 
     #渲染
-    lines = ["━" * 30, "【仓库结构地图（公开接口）】\n"]
+    lines = ["仓库结构地图（公开接口）", ""]
 
     for subsystem in _SUBSYSTEM_ORDER:
         group = subsystem_groups.get(subsystem)
@@ -893,9 +893,9 @@ _DOC_TYPE_LABELS: dict[str, str] = {
 }
 
 _READER_NOTES: dict[str, str] = {
-    "pdf_reader":  "← 需使用 PDF 读取工具",
-    "docx_reader": "← 需使用 DOCX 读取工具",
-    "pptx_reader": "← 需使用 PPTX 读取工具",
+    "pdf_reader":  "（需使用 PDF 读取工具）",
+    "docx_reader": "（需使用 DOCX 读取工具）",
+    "pptx_reader": "（需使用 PPTX 读取工具）",
 }
 
 
@@ -939,7 +939,7 @@ def build_repo_profile(repo_path: Path) -> str:
     kernel_type = detect_kernel_type(str(rt), structure)
     arch_list = detect_target_arch(str(rt))
 
-    output: list[str] = ["【仓库结构探索结果（确定性分析，非 LLM 推断）】", ""]
+    output: list[str] = ["仓库结构探索结果（确定性分析，非 LLM 推断）", ""]
 
     if source_roots_rel:
         root_parts = [f"{source_roots_rel[0]}（主要）"] + \
@@ -984,15 +984,15 @@ def build_repo_profile(repo_path: Path) -> str:
     output.append("子系统文件定位（按内容关键词识别，非路径名）：")
     for subsystem, files in subsystem_map.items():
         if not files:
-            output.append(f"  {subsystem} → 未找到明显的{subsystem}代码")
+            output.append(f"  {subsystem}：未找到明显的{subsystem}代码")
             continue
         for i, entry in enumerate(files[:3]):
             score = entry["score"]
             confidence = "高" if score >= 5 else "中" if score >= 3 else "低"
             if i == 0:
-                output.append(f"  {subsystem} → {entry['file']}（置信度：{confidence}，命中{score}个关键词）")
+                output.append(f"  {subsystem}：{entry['file']}（置信度：{confidence}，命中{score}个关键词）")
             else:
-                output.append(f"    └─ {entry['file']}（置信度：{confidence}，命中{score}个关键词）")
+                output.append(f"    {entry['file']}（置信度：{confidence}，命中{score}个关键词）")
     output.append("")
 
     output.append("文档文件：")
@@ -1002,7 +1002,7 @@ def build_repo_profile(repo_path: Path) -> str:
             for entry in entries:
                 note = _READER_NOTES.get(entry["reader"], "")
                 note_str = f"  {note}" if note else ""
-                output.append(f"  {label:<8}→ {entry['path']}{note_str}")
+                output.append(f"  {label:<8} {entry['path']}{note_str}")
     else:
         output.append("  （未找到任何文档文件）")
     output.append("")

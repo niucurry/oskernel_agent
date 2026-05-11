@@ -1,0 +1,33 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  "model": "openai/deepseek-chat",
+
+  "agent": {
+    "os-kernel-analyzer": {
+      "model": "openai/deepseek-chat",
+
+      "system": "[此字段由 agent.py 在运行时动态生成：包含 5 层系统提示词（角色声明 + 仓库结构分析 + 工作流规范 + 硬性约束 + 输出格式模板）]",
+
+      "permission": {
+        "bash":  { "type": "deny" },
+        "edit":  { "type": "deny" },
+        "write": { "type": "deny" }
+      }
+    }
+  },
+
+  "mcp": {
+    "os-kernel-tools": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "/abs/path/to/.venv/bin/python",
+        "/abs/path/to/mcp_server.py",
+        "--repo-path",   "/abs/path/to/repo",
+        "--max-steps",   "200",
+        "--output-file", "/abs/path/to/report.md"
+      ]
+    }
+  }
+}
