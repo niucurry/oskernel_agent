@@ -1,9 +1,11 @@
 """
-两个工具的具体实现：
+工具的底层实现：
   - read_file                读取文件内容（带行号，自动截断）
+  - search_code              正则文本搜索，返回 file:line:content
   - compare_with_reference_os  从当前仓库提取函数名，与参考 OS 的代表性函数集对比（降级版）
 """
 
+import fnmatch
 import os
 import re
 from pathlib import Path
@@ -120,6 +122,116 @@ def read_file(
         + f", end_line={total - _TAIL_LINES}）...\n\n"
         + tail_part
     )
+
+
+# search_code: 仓库内文本/正则搜索
+
+_SEARCH_DEFAULT_EXTS = frozenset({
+    ".c", ".h", ".cc", ".cpp", ".hpp",
+    ".rs",
+    ".S", ".s", ".asm",
+    ".py", ".sh",
+    ".md", ".txt", ".rst",
+    ".toml", ".lds", ".ld",
+})
+
+_SEARCH_MAX_LINE_LEN = 240   # 单行内容超长时截断
+_SEARCH_DEFAULT_MAX  = 50    # 默认返回上限
+
+
+def search_code(
+    repo_path: str,
+    pattern: str,
+    file_glob: str | None = None,
+    case_sensitive: bool = False,
+    max_results: int = _SEARCH_DEFAULT_MAX,
+) -> str:
+    """在仓库内做正则文本搜索。
+
+    - pattern         Python 正则表达式
+    - file_glob       文件名匹配模式（如 "*.rs"、"trap*"），不带目录时只匹配 basename
+    - case_sensitive  默认大小写不敏感
+    - max_results     命中数上限，默认 50
+
+    跳过 _SKIP_DIRS、二进制文件、超长行；返回 file:line | content 列表。
+    """
+    if not pattern:
+        return "[错误] 搜索模式不能为空。"
+
+    try:
+        flags = 0 if case_sensitive else re.IGNORECASE
+        regex = re.compile(pattern, flags)
+    except re.error as exc:
+        return f"[错误] 正则表达式编译失败：{exc}"
+
+    if max_results <= 0 or max_results > 500:
+        max_results = _SEARCH_DEFAULT_MAX
+
+    root = Path(repo_path)
+    if not root.exists():
+        return f"[错误] 仓库路径不存在：{repo_path}"
+
+    hits: list[str] = []
+    scanned_files = 0
+    truncated = False
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        # 原地剪枝跳过目录
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
+
+        for name in filenames:
+            full = Path(dirpath) / name
+
+            # 扩展名筛选：未给 glob 时按白名单，给了 glob 时只看 glob
+            if file_glob:
+                if not fnmatch.fnmatch(name, file_glob):
+                    continue
+            else:
+                if full.suffix not in _SEARCH_DEFAULT_EXTS:
+                    continue
+
+            if full.suffix.lower() in _BINARY_EXTS:
+                continue
+
+            try:
+                # 大文件保护：>1MB 跳过（仓库内源码文件通常远小于此）
+                if full.stat().st_size > 1_000_000:
+                    continue
+                text = full.read_text(errors="replace")
+            except Exception:
+                continue
+
+            scanned_files += 1
+            rel_path = str(full.relative_to(root))
+
+            for lineno, line in enumerate(text.splitlines(), start=1):
+                if regex.search(line):
+                    content = line.rstrip()
+                    if len(content) > _SEARCH_MAX_LINE_LEN:
+                        content = content[:_SEARCH_MAX_LINE_LEN] + " …"
+                    hits.append(f"{rel_path}:{lineno} | {content}")
+                    if len(hits) >= max_results:
+                        truncated = True
+                        break
+            if truncated:
+                break
+        if truncated:
+            break
+
+    if not hits:
+        return (
+            f"[未找到] 模式 {pattern!r} 在仓库中无匹配"
+            f"（已扫描 {scanned_files} 个文件"
+            f"{'，glob=' + file_glob if file_glob else ''}）。"
+        )
+
+    header = (
+        f"搜索 {pattern!r}（大小写{'敏感' if case_sensitive else '不敏感'}"
+        f"{'，glob=' + file_glob if file_glob else ''}）"
+        f"命中 {len(hits)} 条"
+        f"{'（已达上限，结果被截断）' if truncated else ''}：\n"
+    )
+    return header + "\n".join(hits)
 
 
 # T6: compare_with_reference_os（函数名集合比对，无代码指纹库时使用）

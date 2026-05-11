@@ -37,6 +37,7 @@ def _build_static_prompt() -> str:
         LAYER_3_WORKFLOW_COMPARE,
         LAYER_4_CONSTRAINTS,
         LAYER_4_DEGRADED_ENGINE_EXTRA,
+        LAYER_4_COMPARISON_EXTRA,
         LAYER_5_FORMAT_ANALYZE,
         LAYER_5_FORMAT_COMPARE,
     )
@@ -85,6 +86,7 @@ def _build_static_prompt() -> str:
         layer3_compare,
         LAYER_4_CONSTRAINTS,
         LAYER_4_DEGRADED_ENGINE_EXTRA,
+        LAYER_4_COMPARISON_EXTRA,
         LAYER_5_FORMAT_ANALYZE,
         LAYER_5_FORMAT_COMPARE,
     ]

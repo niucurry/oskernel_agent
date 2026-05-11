@@ -13,6 +13,7 @@ OSKernelMCPTools：MCP 工具集的统一入口。
 
 from tools.tool_dispatcher import ToolDispatcher
 from tools.tool_handlers import read_file as _read_file
+from tools.tool_handlers import search_code as _search_code
 from tools.reference_db import ReferenceOSDatabase
 
 
@@ -55,13 +56,22 @@ class OSKernelMCPTools(ToolDispatcher):
     ) -> str:
         return _read_file(self.repo_path, path, start_line, end_line)
 
+    def search_code(
+        self,
+        pattern: str,
+        file_glob: str | None = None,
+        case_sensitive: bool = False,
+        max_results: int = 50,
+    ) -> str:
+        return _search_code(self.repo_path, pattern, file_glob, case_sensitive, max_results)
+
     #统一路由
 
     def execute(self, tool_name: str, arguments: dict) -> str:
         """将 LLM 请求的工具名分发到对应方法，统一处理参数和异常。"""
         dispatch: dict = {
-            # 6 个 MCP 工具（新名称）
             "read_file":                 self.read_file,
+            "search_code":               self.search_code,
             "find_symbol_definition":    self.find_symbol_definition,
             "find_symbol_references":    self.find_symbol_references,
             "list_implemented_syscalls": self.list_implemented_syscalls,
