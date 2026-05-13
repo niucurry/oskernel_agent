@@ -173,44 +173,22 @@ def _run_opencode(user_request: str, session_id: str = "", output_file: str = ""
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="OS 内核代码分析智能体（OpenCode 版）",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-用法示例：
-  python agent.py                                        # 使用 config.toml 中的 repo_id
-  python agent.py --repo-id REPO_NAME
-  python agent.py --repo-path /absolute/path/to/repo
-  python agent.py --url https://gitlab.example.com/repo.git
-  python agent.py --repo-id REPO_A --output report.md
-  python agent.py --compare --repo-id REPO_A --repo-id-b REPO_B
-  python agent.py --repo-id REPO_A --session abc123      # 继续历史会话
-  opencode stats                                          # 查看 token 使用统计
-        """,
-    )
+    parser = argparse.ArgumentParser(add_help=False)
 
     src = parser.add_mutually_exclusive_group()
-    src.add_argument("--repo-id",   metavar="ID",
-                     help="data/historical_repos/ 下的仓库文件夹名")
-    src.add_argument("--repo-path", metavar="PATH",
-                     help="仓库的完整本地路径")
-    src.add_argument("--url",       metavar="URL",
-                     help="克隆并分析远程仓库（自动执行 fetch）")
+    src.add_argument("--repo-id")
+    src.add_argument("--repo-path")
+    src.add_argument("--url")
 
-    parser.add_argument("--output", "-o", metavar="FILE",
-                        help="将报告写入文件（通过 write_report 工具输出）")
-    parser.add_argument("--model",  metavar="MODEL",
-                        help="覆盖 config.toml 中的模型名称")
-    parser.add_argument("--session", "-s", metavar="SESSION_ID",
-                        help="继续已有 OpenCode 会话（持久化记忆）")
-    parser.add_argument("--compare", action="store_true",
-                        help="启用比较模式（需同时指定第二个仓库）")
+    parser.add_argument("--output", "-o")
+    parser.add_argument("--model")
+    parser.add_argument("--session", "-s")
+    parser.add_argument("--compare", action="store_true")
 
-    src_b = parser.add_argument_group("比较模式：第二个仓库（--compare 时使用）")
-    bgroup = src_b.add_mutually_exclusive_group()
-    bgroup.add_argument("--repo-id-b",   metavar="ID")
-    bgroup.add_argument("--repo-path-b", metavar="PATH")
-    bgroup.add_argument("--url-b",       metavar="URL")
+    bgroup = parser.add_mutually_exclusive_group()
+    bgroup.add_argument("--repo-id-b")
+    bgroup.add_argument("--repo-path-b")
+    bgroup.add_argument("--url-b")
 
     args = parser.parse_args()
 
