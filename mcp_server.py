@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import config as _config
 from tools.mcp_tools import OSKernelMCPTools
 from tools.reference_db import ReferenceOSDatabase
+from report_html import write_html_sibling
 
 # CLI 参数解析
 
@@ -508,7 +509,20 @@ def _handle_write_report(arguments: dict) -> list[types.TextContent]:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
         _log(f"报告已写入：{p}")
-        return [types.TextContent(type="text", text=f"[完成] 报告已保存到 {p}。")]
+        msg = f"[完成] 报告已保存到 {p}。"
+        try:
+            repo_roots: list[Path] = []
+            for ctx in _contexts.values():
+                rp = getattr(ctx, "repo_path", None)
+                if rp:
+                    repo_roots.append(Path(rp))
+            html_path = write_html_sibling(p, content, repo_roots=repo_roots)
+            _log(f"HTML 报告已写入：{html_path}（repo_roots={len(repo_roots)}）")
+            msg += f" HTML 版本：{html_path}。"
+        except Exception as exc:
+            _log(f"生成 HTML 报告失败：{exc}")
+            msg += f" （HTML 生成失败：{exc}）"
+        return [types.TextContent(type="text", text=msg)]
     return [types.TextContent(type="text", text="[完成] 报告生成完毕。")]
 
 

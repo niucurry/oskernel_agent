@@ -163,6 +163,9 @@ def _run_opencode(user_request: str, session_id: str = "", output_file: str = ""
         p = Path(output_file)
         if p.exists():
             print(f"\n[完成] 报告已保存至：{output_file}")
+            html_p = p.with_suffix(".html")
+            if html_p.exists():
+                print(f"[完成] HTML 报告：{html_p}")
         else:
             print(f"[警告] 报告文件未生成，请检查 write_report 工具是否被调用。",
                   file=sys.stderr)
