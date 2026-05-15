@@ -32,7 +32,7 @@ _args, _ = _ap.parse_known_args()
 
 _MAX_STEPS = _args.max_steps
 
-# 多上下文存储（key="" 单仓库，key="a"/"b" 比较模式）
+# 分析上下文
 
 _contexts: dict[str, OSKernelMCPTools] = {}
 
@@ -167,15 +167,6 @@ app = Server("os-kernel-tools")
 
 _TOOL_DEFS_CACHE: list[types.Tool] | None = None
 
-_REPO_PARAM = {
-    "repo": {
-        "type": "string",
-        "description": "比较模式下指定仓库标签（'a' 或 'b'），单仓库模式留空",
-        "default": "",
-    }
-}
-
-
 def _make_tool_defs() -> list[types.Tool]:
     return [
         types.Tool(
@@ -183,17 +174,11 @@ def _make_tool_defs() -> list[types.Tool]:
             description=(
                 "初始化仓库分析（必须第一步调用）。"
                 "执行静态分析，构建符号索引和调用图，返回仓库代码地图。"
-                "比较模式下调用两次，分别传 label='a' 和 label='b'。"
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "repo_path": {"type": "string", "description": "仓库的绝对路径"},
-                    "label": {
-                        "type": "string",
-                        "description": "比较模式标签（'a'/'b'），单仓库留空",
-                        "default": "",
-                    },
                 },
                 "required": ["repo_path"],
             },
@@ -213,7 +198,6 @@ def _make_tool_defs() -> list[types.Tool]:
                     "path":       {"type": "string", "description": "相对仓库根目录的文件路径，如 os/src/task/mod.rs"},
                     "start_line": {"type": "integer", "description": "起始行号，从 1 开始（可选）"},
                     "end_line":   {"type": "integer", "description": "结束行号（可选）"},
-                    **_REPO_PARAM,
                 },
                 "required": ["path"],
             },
@@ -234,7 +218,6 @@ def _make_tool_defs() -> list[types.Tool]:
                     "file_glob":      {"type": "string", "description": "文件名 glob，如 \"*.rs\"、\"trap*\"（可选）"},
                     "case_sensitive": {"type": "boolean", "description": "是否大小写敏感，默认 false", "default": False},
                     "max_results":    {"type": "integer", "description": "命中数上限，默认 50，最大 500", "default": 50},
-                    **_REPO_PARAM,
                 },
                 "required": ["pattern"],
             },
@@ -250,7 +233,6 @@ def _make_tool_defs() -> list[types.Tool]:
                 "properties": {
                     "symbol_name":  {"type": "string", "description": "符号名称"},
                     "context_file": {"type": "string", "description": "辅助消歧的当前文件路径（可选）"},
-                    **_REPO_PARAM,
                 },
                 "required": ["symbol_name"],
             },
@@ -262,7 +244,6 @@ def _make_tool_defs() -> list[types.Tool]:
                 "type": "object",
                 "properties": {
                     "symbol_name": {"type": "string"},
-                    **_REPO_PARAM,
                 },
                 "required": ["symbol_name"],
             },
@@ -275,7 +256,7 @@ def _make_tool_defs() -> list[types.Tool]:
             ),
             inputSchema={
                 "type": "object",
-                "properties": {**_REPO_PARAM},
+                "properties": {},
                 "required": [],
             },
         ),
@@ -287,7 +268,6 @@ def _make_tool_defs() -> list[types.Tool]:
                 "properties": {
                     "entry_function": {"type": "string", "description": "入口函数名"},
                     "max_depth":      {"type": "integer", "default": 3, "description": "展开深度（默认 3）"},
-                    **_REPO_PARAM,
                 },
                 "required": ["entry_function"],
             },
@@ -302,16 +282,30 @@ def _make_tool_defs() -> list[types.Tool]:
                         "type": "string",
                         "enum": ["rcore-tutorial-v3", "rcore-tutorial-v2", "xv6-riscv", "ucore"],
                     },
-                    **_REPO_PARAM,
                 },
                 "required": ["reference_name"],
+            },
+        ),
+        types.Tool(
+            name="validate_refs",
+            description=(
+                "在调用 write_report 之前，验证报告草稿中所有 路径:行号 引用的文件是否真实存在于仓库磁盘。"
+                "对每个断链路径给出同文件名的候选实际路径，供你修正后再写报告。"
+                "必须在 write_report 之前调用，若有断链则先修正再写报告。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "完整报告草稿的 Markdown 文本"},
+                },
+                "required": ["content"],
             },
         ),
         types.Tool(
             name="write_report",
             description=(
                 "将完整的最终评审报告写入文件并返回完成信号。"
-                "所有分析完成后调用一次。如果用户指定了输出路径，传入 output_path。"
+                "调用前必须先用 validate_refs 验证引用路径，确认无断链后再写入。"
             ),
             inputSchema={
                 "type": "object",
@@ -340,6 +334,9 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     # initialize_analysis 和 write_report 不参与步数/去重统计
     if name == "initialize_analysis":
         return await _handle_initialize(arguments)
+
+    if name == "validate_refs":
+        return _handle_validate_refs(arguments)
 
     if name == "write_report":
         return _handle_write_report(arguments)
@@ -370,9 +367,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         or arguments.get("reference_name")
     )
 
-    # 重复调用检测（排除 repo 路由参数）
-    cache_args = {k: v for k, v in arguments.items() if k != "repo"}
-    cache_key  = (name, json.dumps(cache_args, sort_keys=True))
+    # 重复调用检测
+    cache_key = (name, json.dumps(arguments, sort_keys=True))
     if cache_key in _queried_cache:
         _consecutive_dup_count += 1
         hint = f"已调用过 {name}({sym!r})，结果同前，请勿重复调用。"
@@ -396,18 +392,15 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             msg += "\n\n[保护] 多次幻觉扩展，请直接输出最终报告。"
         return [types.TextContent(type="text", text=msg)]
 
-    # 选择上下文
-    label = arguments.get("repo", "")
-    ctx   = _get_context(label)
+    ctx = _get_context()
     if ctx is None:
         return [types.TextContent(type="text", text=(
             "[错误] 尚未初始化分析。请先调用 initialize_analysis(repo_path)。"
         ))]
 
     # 执行工具：放到工作线程，避免懒加载引擎阻塞 asyncio 事件循环
-    exec_args = {k: v for k, v in arguments.items() if k != "repo"}
     try:
-        result = await asyncio.to_thread(ctx.execute, name, exec_args)
+        result = await asyncio.to_thread(ctx.execute, name, arguments)
     except Exception as exc:
         return [types.TextContent(type="text", text=f"[工具执行错误] {name}: {exc}")]
 
@@ -428,7 +421,6 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
 async def _handle_initialize(arguments: dict) -> list[types.TextContent]:
     repo_path_str = arguments.get("repo_path", "").strip()
-    label         = arguments.get("label", "")
 
     if not repo_path_str:
         return [types.TextContent(type="text", text="[错误] repo_path 参数不能为空。")]
@@ -439,17 +431,17 @@ async def _handle_initialize(arguments: dict) -> list[types.TextContent]:
             type="text", text=f"[错误] 仓库路径不存在：{repo_path}"
         )]
 
-    _log(f"初始化分析（label={label!r}）：{repo_path}")
+    _log(f"初始化分析：{repo_path}")
 
-    # 重试时复用：同 label 已初始化且指向同一仓库 → 重新发送缓存的 Layer 2，
+    # 重试时复用：已初始化且指向同一仓库 → 重新发送缓存的 Layer 2，
     # 不重复执行静态分析、也不重复启动后台引擎。
-    existing = _contexts.get(label)
+    existing = _contexts.get("")
     if (existing is not None
             and getattr(existing, "repo_path", None) == str(repo_path)
             and getattr(existing, "_cached_init_response", None)):
         engine = existing.engine
         engine_state = "就绪" if getattr(engine, "is_ready", lambda: True)() else "后台初始化中"
-        _log(f"复用已初始化上下文（label={label!r}），引擎{engine_state}")
+        _log(f"复用已初始化上下文，引擎{engine_state}")
         return [types.TextContent(type="text", text=existing._cached_init_response)]
 
     try:
@@ -478,21 +470,20 @@ async def _handle_initialize(arguments: dict) -> list[types.TextContent]:
         ctx            = OSKernelMCPTools(
             str(repo_path), engine, level2_idx, profile, structure, ref_db
         )
-        _contexts[label] = ctx
+        _contexts[""] = ctx
 
         crate_roles = detect_crate_roles(str(repo_path), profile)
         layer2      = build_layer_2(structure, profile, level1_map, predicted_info, crate_roles)
 
-        label_tag = f"（仓库 {label.upper()}）" if label else ""
-        result    = (
-            f"[初始化完成{label_tag}] 静态结构已就绪。"
+        result = (
+            f"[初始化完成] 静态结构已就绪。"
             f"语义引擎正在后台启动（{predicted_info['engine']}）。\n"
             f"提示：可立即用 read_file/search_code/list_implemented_syscalls 开展"
             f"阶段一文档扫读与阶段二事实收集；首次符号查询将阻塞至引擎就绪。\n\n"
             f"{layer2}"
         )
         ctx._cached_init_response = result  # 供后续 initialize_analysis 重试时直接复用
-        _log(f"初始化成功（label={label!r}），Layer2 长度 {len(layer2)} 字符，引擎后台启动中")
+        _log(f"初始化成功，Layer2 长度 {len(layer2)} 字符，引擎后台启动中")
         return [types.TextContent(type="text", text=result)]
 
     except Exception as exc:
@@ -500,40 +491,182 @@ async def _handle_initialize(arguments: dict) -> list[types.TextContent]:
         return [types.TextContent(type="text", text=f"[初始化失败] {exc}")]
 
 
+def _handle_validate_refs(arguments: dict) -> list[types.TextContent]:
+    """扫描报告草稿中的所有 路径.ext:行号 引用，逐一核查磁盘可达性。
+
+    对每个找不到的路径，在仓库里搜索同文件名的实际位置作为修正建议。
+    """
+    import re as _re
+
+    content = arguments.get("content", "")
+    if not content:
+        return [types.TextContent(type="text", text="[错误] content 不能为空。")]
+
+    # 收集所有上下文中已初始化的仓库根目录
+    repo_roots: list[Path] = []
+    for ctx in _contexts.values():
+        rp = getattr(ctx, "repo_path", None)
+        if rp:
+            repo_roots.append(Path(rp))
+
+    if not repo_roots:
+        return [types.TextContent(type="text",
+            text="[错误] 尚未初始化仓库，请先调用 initialize_analysis。")]
+
+    # 提取所有 path/to/file.ext[:line[-line]] 引用，去重
+    _EXTS = r"c|h|cc|cpp|cxx|hpp|rs|S|s|ld|lds|toml|md|py|sh|mk|cfg|go|json|yaml|yml|txt"
+    ref_re = _re.compile(
+        rf"([A-Za-z0-9_./\-]+\.(?:{_EXTS}))(?::\d+(?:-\d+)?)?",
+        _re.MULTILINE,
+    )
+    seen: set[str] = set()
+    paths: list[str] = []
+    for m in ref_re.finditer(content):
+        fp = m.group(1)
+        if fp not in seen:
+            seen.add(fp)
+            paths.append(fp)
+
+    # 同时检测目录引用（路径以 / 结尾，或匹配常见目录模式但无文件扩展名）
+    _dir_re = _re.compile(
+        r"(?<![`\w])([A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+)/"
+        r"(?![A-Za-z0-9_.\-])",
+        _re.MULTILINE,
+    )
+    dir_refs: list[str] = []
+    for m in _dir_re.finditer(content):
+        dr = m.group(1) + "/"
+        if dr not in seen:
+            seen.add(dr)
+            dir_refs.append(dr)
+
+    if not paths and not dir_refs:
+        return [types.TextContent(type="text",
+            text="[validate_refs] 报告中未检测到任何文件引用，可直接调用 write_report。")]
+
+    valid: list[str] = []
+    broken: list[str] = []
+
+    for fp in paths:
+        found = False
+        p = Path(fp)
+        for root in repo_roots:
+            candidate = root / fp if not p.is_absolute() else p
+            if candidate.exists():
+                found = True
+                break
+            # 逐级剥前缀回退
+            parts = p.parts
+            for strip in range(1, len(parts)):
+                cand = root / Path(*parts[strip:])
+                if cand.exists():
+                    found = True
+                    break
+            if found:
+                break
+        if found:
+            valid.append(fp)
+        else:
+            broken.append(fp)
+
+    # 汇总目录引用错误
+    dir_lines: list[str] = []
+    if dir_refs:
+        dir_lines.append(
+            f"[validate_refs] 以下 {len(dir_refs)} 处引用了目录而非具体文件，"
+            f"必须改写为 文件路径:行号 形式：\n"
+        )
+        for dr in dir_refs:
+            dir_lines.append(
+                f"  目录引用（无效）：{dr}\n"
+                f"    → 用 search_code 搜索该结论中提到的函数/符号名，"
+                f"从返回的 文件:行号 中取得具体位置后填入报告；"
+                f"若搜索无结果，将该结论改写为\"未找到具体实现\""
+            )
+
+    if not broken:
+        if dir_lines:
+            return [types.TextContent(type="text", text="\n".join(dir_lines))]
+        return [types.TextContent(type="text",
+            text=f"[validate_refs] 全部 {len(valid)} 个引用路径均可访问，可以调用 write_report。")]
+
+    # 对断链路径搜索同文件名的候选位置
+    lines = [
+        f"[validate_refs] 共 {len(paths)} 个引用，{len(valid)} 个有效，"
+        f"{len(broken)} 个无法在磁盘找到，请修正后再调用 write_report：\n"
+    ]
+    for fp in broken:
+        fname = Path(fp).name
+        candidates: list[str] = []
+        for root in repo_roots:
+            for hit in root.rglob(fname):
+                try:
+                    rel = str(hit.relative_to(root))
+                    candidates.append(rel)
+                except ValueError:
+                    pass
+                if len(candidates) >= 5:
+                    break
+            if len(candidates) >= 5:
+                break
+        if candidates:
+            suggestion = "候选实际路径：" + "  |  ".join(candidates[:3])
+        else:
+            suggestion = "仓库中未找到同名文件，可能是幻觉路径，请用 search_code 搜索相关函数名定位"
+        lines.append(f"  断链：{fp}\n    {suggestion}")
+
+    return [types.TextContent(type="text", text="\n".join(dir_lines + lines))]
+
+
 def _handle_write_report(arguments: dict) -> list[types.TextContent]:
+    """把报告 Markdown 写到磁盘，并附带渲染一份 HTML。
+
+    核验由独立的 os-kernel-verifier agent 在主 agent 完成后单独执行，
+    本工具不再做任何证据校验。
+    """
     content     = arguments.get("content", "")
     output_path = arguments.get("output_path", "").strip()
 
-    if output_path:
-        p = Path(output_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
-        _log(f"报告已写入：{p}")
-        msg = f"[完成] 报告已保存到 {p}。"
-        try:
-            repo_roots: list[Path] = []
-            for ctx in _contexts.values():
-                rp = getattr(ctx, "repo_path", None)
-                if rp:
-                    repo_roots.append(Path(rp))
-            html_path = write_html_sibling(p, content, repo_roots=repo_roots)
-            _log(f"HTML 报告已写入：{html_path}（repo_roots={len(repo_roots)}）")
-            msg += f" HTML 版本：{html_path}。"
-        except Exception as exc:
-            _log(f"生成 HTML 报告失败：{exc}")
-            msg += f" （HTML 生成失败：{exc}）"
-        return [types.TextContent(type="text", text=msg)]
-    return [types.TextContent(type="text", text="[完成] 报告生成完毕。")]
+    if not output_path:
+        return [types.TextContent(type="text", text="[完成] 报告生成完毕。")]
+
+    p = Path(output_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content, encoding="utf-8")
+    _log(f"报告已写入：{p}")
+    msg = f"[完成] 报告已保存到 {p}。"
+
+    repo_roots: list[Path] = []
+    for ctx in _contexts.values():
+        rp = getattr(ctx, "repo_path", None)
+        if not rp:
+            continue
+        repo_root = Path(rp)
+        repo_roots.append(repo_root)
+        for src_rel in getattr(ctx, "structure", {}).get("source_roots_rel", []):
+            repo_roots.append(repo_root / src_rel)
+    try:
+        html_path, broken = write_html_sibling(p, content, repo_roots=repo_roots)
+        _log(f"HTML 报告已写入：{html_path}（repo_roots={len(repo_roots)}，断链={len(broken)}）")
+        msg += f" HTML 版本：{html_path}。"
+        if broken:
+            broken_list = "\n".join(f"  - {bp}" for bp in sorted(broken))
+            msg += (
+                f"\n\n[警告] HTML 中以下 {len(broken)} 个文件引用无法解析为磁盘路径，"
+                f"在报告里显示为红色断链，点击无法定位到正确源文件，"
+                f"请用 search_code 找到正确路径后重新调用 write_report 修正：\n"
+                f"{broken_list}"
+            )
+    except Exception as exc:
+        _log(f"生成 HTML 报告失败：{exc}")
+        msg += f" （HTML 生成失败：{exc}）"
+    return [types.TextContent(type="text", text=msg)]
 
 
 # 辅助函数
 
-def _get_context(label: str) -> OSKernelMCPTools | None:
-    if label in _contexts:
-        return _contexts[label]
-    if _contexts:
-        return next(iter(_contexts.values()))
-    return None
+def _get_context() -> OSKernelMCPTools | None:
+    return _contexts.get("")
 
 
 def _is_not_found(result) -> bool:

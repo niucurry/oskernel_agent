@@ -98,6 +98,11 @@ _EXTERNAL_URL = re.compile(r"^(?:[a-z][a-z0-9+.\-]*:|//|#|mailto:)", re.IGNORECA
 
 
 def _wrap_anchor(inner_html: str, url: str) -> str:
+    if url.startswith(_BROKEN_PREFIX):
+        real_url = url[len(_BROKEN_PREFIX):]
+        return (f'<a href="{html.escape(real_url, quote=True)}"'
+                f' class="file-jump file-broken" title="路径在仓库中未找到，点击为猜测位置">'
+                f'{inner_html}</a>')
     return f'<a href="{html.escape(url, quote=True)}" class="file-jump">{inner_html}</a>'
 
 
@@ -358,21 +363,34 @@ _JUMP_SCHEMES = {
     "file":    "file://{path}",
 }
 
+# 断链标记：resolver 在 URL 前加此前缀表示文件不存在，_wrap_anchor 据此选择样式
+_BROKEN_PREFIX = "\x00broken\x00"
+
 
 def make_file_link_resolver(
     repo_roots: list[Path] | None,
     scheme: str = "vscode",
+    broken_paths: set[str] | None = None,
 ) -> LinkResolver | None:
     """构造一个把 file:line 解析为可点击跳转 URL 的解析器。
 
     repo_roots：用来把相对路径还原为绝对路径的根目录列表（按顺序尝试）。
     scheme：跳转协议。默认 vscode（VS Code / Cursor 都注册了此 handler）。
-    若 repo_roots 为空且文件路径非绝对路径，则无法定位，解析失败返回 None。
+    broken_paths：若提供，解析失败的路径会被收集进此 set（供调用方统计）。
+
+    文件存在 → 返回正常 URL；文件不存在 → 返回带 _BROKEN_PREFIX 前缀的"猜测 URL"，
+    使引用仍可点击，但会以红色虚线样式显示，提示路径有误。
     """
     if not repo_roots:
         return None
     template = _JUMP_SCHEMES.get(scheme, _JUMP_SCHEMES["vscode"])
     roots = [Path(r).resolve() for r in repo_roots]
+
+    def _build_url(abs_path: str, line: str | None) -> str:
+        anchor = f":{line}:1" if (line and scheme != "file") else ""
+        from urllib.parse import quote
+        encoded = quote(abs_path.lstrip("/"), safe="/:")
+        return template.format(path="/" + encoded, anchor=anchor)
 
     def _resolve(filepath: str, line: str | None) -> str | None:
         candidate: Path | None = None
@@ -386,20 +404,30 @@ def make_file_link_resolver(
                 if cand.exists():
                     candidate = cand
                     break
-        if candidate is None:
-            return None
-        try:
-            abs_path = str(candidate.resolve())
-        except OSError:
-            abs_path = str(candidate)
-        # vscode:// 接受 :LINE:COL 形式；file:// 不支持行号
-        anchor = ""
-        if line and scheme != "file":
-            anchor = f":{line}:1"
-        # 路径里可能含空格 / 中文，做最小转义
-        from urllib.parse import quote
-        encoded_path = quote(abs_path.lstrip("/"), safe="/:")
-        return template.format(path="/" + encoded_path, anchor=anchor)
+            if candidate is None:
+                parts = p.parts
+                for strip in range(1, len(parts)):
+                    suffix = Path(*parts[strip:])
+                    for root in roots:
+                        cand = root / suffix
+                        if cand.exists():
+                            candidate = cand
+                            break
+                    if candidate is not None:
+                        break
+
+        if candidate is not None:
+            try:
+                abs_path = str(candidate.resolve())
+            except OSError:
+                abs_path = str(candidate)
+            return _build_url(abs_path, line)
+
+        # 文件在磁盘上找不到：生成"猜测路径"链接，加断链前缀以触发红色样式
+        if broken_paths is not None:
+            broken_paths.add(filepath)
+        best_guess = str((roots[0] / filepath).resolve())
+        return _BROKEN_PREFIX + _build_url(best_guess, line)
 
     return _resolve
 
@@ -409,8 +437,12 @@ def make_file_link_resolver(
 _EXTRA_CSS = """
 a.file-jump { border-bottom: 1px dashed currentColor; }
 a.file-jump:hover { background: rgba(9, 105, 218, 0.08); }
+a.file-broken { color: #cf222e; border-bottom: 1px dashed #cf222e; }
+a.file-broken:hover { background: rgba(207, 34, 46, 0.08); }
 @media (prefers-color-scheme: dark) {
     a.file-jump:hover { background: rgba(68, 147, 248, 0.12); }
+    a.file-broken { color: #ff7b72; border-bottom-color: #ff7b72; }
+    a.file-broken:hover { background: rgba(255, 123, 114, 0.12); }
 }
 """
 
@@ -420,8 +452,10 @@ def render_html(
     title: str = "评估报告",
     repo_roots: list[Path] | None = None,
     link_scheme: str = "vscode",
+    broken_paths: set[str] | None = None,
 ) -> str:
-    resolver = make_file_link_resolver(repo_roots, scheme=link_scheme)
+    resolver = make_file_link_resolver(repo_roots, scheme=link_scheme,
+                                       broken_paths=broken_paths)
     body = markdown_to_html_body(markdown_text, resolver=resolver)
     return (
         "<!DOCTYPE html>\n"
@@ -441,19 +475,22 @@ def write_html_sibling(
     markdown_text: str,
     repo_roots: list[Path] | None = None,
     link_scheme: str = "vscode",
-) -> Path:
-    """在 md_path 同目录写一份同名 .html，返回 html 路径。
+) -> tuple[Path, set[str]]:
+    """在 md_path 同目录写一份同名 .html，返回 (html路径, 无法解析的路径集合)。
 
     repo_roots 用来把报告中的相对路径解析为绝对路径，从而生成
-    可点击跳转的 vscode:// 链接。
+    可点击跳转的 vscode:// 链接。无法解析的路径在 HTML 中以红色断链样式显示，
+    同时通过第二个返回值告知调用方，以便在 write_report 响应里反馈给 LLM。
     """
+    broken: set[str] = set()
     html_path = md_path.with_suffix(".html")
     title = md_path.stem
     html_path.write_text(
         render_html(
             markdown_text, title=title,
             repo_roots=repo_roots, link_scheme=link_scheme,
+            broken_paths=broken,
         ),
         encoding="utf-8",
     )
-    return html_path
+    return html_path, broken

@@ -8,10 +8,6 @@ OS 内核代码分析智能体 — OpenCode 封装入口
      initialize_analysis → 静态分析 + 返回代码地图
      其他工具 → 符号查询、调用链分析、相似度比对
 
-前置条件：
-  运行一次 setup_opencode.py 以注册 agent 和 MCP server 到全局 OpenCode 配置。
-  也可直接使用 OpenCode：
-    opencode run --agent os-kernel-analyzer "分析 /path/to/repo"
 """
 
 import os
@@ -118,57 +114,162 @@ def _resolve_repo_path(url: str | None, repo_path_arg: str | None,
 
 # OpenCode 调用
 
-def _run_opencode(user_request: str, session_id: str = "", output_file: str = "") -> None:
-    """
-    启动 opencode run 子进程，将 LLM 推理和工具调用委托给 OpenCode 运行时。
+def _opencode_env() -> dict:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).parent)
+    local_bin = str(Path.home() / ".local" / "bin")
+    if local_bin not in env.get("PATH", ""):
+        env["PATH"] = local_bin + ":" + env.get("PATH", "")
+    return env
 
-    OpenCode 负责：
-      - LLM API 调用（使用 OPENAI_BASE_URL 重定向到 DeepSeek）
-      - 上下文窗口管理和长会话压缩
-      - 工具调用解析和 MCP server 通信
-      - 会话持久化（SQLite at ~/.local/share/opencode/opencode.db）
 
-    --dangerously-skip-permissions 说明：
-      自动批准未被明确拒绝的权限。我们已在 agent config 中明确拒绝
-      bash/edit/write，因此该标志只允许 MCP 工具调用通过，不影响安全性。
+def _run_opencode(user_request: str, session_id: str | None = None,
+                  continue_last: bool = False, output_file: str = "") -> None:
+    """向主分析 agent 发送一条消息并等待完成。
+
+    session_id: 仅在需要继续已有会话时传入（用户手动指定 --session）。
+    continue_last: True 时追加 --continue 以续接上一次会话（用于反馈修订循环）。
     """
     cmd = [
-        _OPENCODE,
-        "run",
+        _OPENCODE, "run",
         "--agent", "os-kernel-analyzer",
         "--dangerously-skip-permissions",
     ]
     if session_id:
         cmd += ["--session", session_id]
+    elif continue_last:
+        cmd += ["--continue"]
     cmd.append(user_request)
 
-    env = os.environ.copy()
-    # PYTHONPATH 让 MCP server 子进程能 import 项目模块
-    env["PYTHONPATH"] = str(Path(__file__).parent)
-    # 确保 opencode 和 venv Python 均在 PATH 中
-    local_bin = str(Path.home() / ".local" / "bin")
-    if local_bin not in env.get("PATH", ""):
-        env["PATH"] = local_bin + ":" + env.get("PATH", "")
-
-    print(f"\n[OpenCode] Agent 启动（模型：{config.api['model']}，"
-          f"会话：{session_id or '新建'}）\n")
-
-    # OpenCode 直接流式输出到用户终端
-    proc = subprocess.run(cmd, env=env)
-
+    label = session_id or ("续接上一会话" if continue_last else "新会话")
+    print(f"\n[OpenCode] 主 agent（{label}）\n")
+    proc = subprocess.run(cmd, env=_opencode_env())
     if proc.returncode not in (0, 1):
         print(f"[警告] opencode 退出码 {proc.returncode}，可能存在异常。", file=sys.stderr)
 
-    if output_file:
-        p = Path(output_file)
-        if p.exists():
-            print(f"\n[完成] 报告已保存至：{output_file}")
-            html_p = p.with_suffix(".html")
-            if html_p.exists():
-                print(f"[完成] HTML 报告：{html_p}")
-        else:
-            print(f"[警告] 报告文件未生成，请检查 write_report 工具是否被调用。",
-                  file=sys.stderr)
+    if output_file and not Path(output_file).exists():
+        print("[警告] 报告文件未生成，请检查 write_report 工具是否被调用。",
+              file=sys.stderr)
+
+
+def _run_verifier(report_path: str, repo_path: str) -> str:
+    """启动核验 agent，从临时文件读取结构化结果并返回。
+
+    核验 agent 被要求调用 write_report 将结果写入临时文件，
+    避免从 OpenCode 的 stdout（含工具调用日志）中解析结论。
+    """
+    import tempfile
+    import time
+
+    report_text = Path(report_path).read_text(encoding="utf-8")
+    if len(report_text) > 12000:
+        report_text = (
+            report_text[:12000]
+            + "\n\n...[报告已截断，后续内容请通过 read_file 读取报告文件]..."
+        )
+
+    # 为本次核验创建临时输出路径
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".md", prefix="verify_")
+    import os
+    os.close(tmp_fd)
+    Path(tmp_path).unlink()  # 让 write_report 自行创建，避免空文件干扰判断
+
+    request = (
+        f"请核验以下评审报告。仓库路径：{repo_path}\n"
+        f"核验报告路径：{tmp_path}\n\n"
+        f"报告全文：\n\n{report_text}"
+    )
+
+    cmd = [
+        _OPENCODE, "run",
+        "--agent", "os-kernel-verifier",
+        "--dangerously-skip-permissions",
+        request,
+    ]
+
+    proc = subprocess.Popen(
+        cmd, env=_opencode_env(),
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    stdout, _ = proc.communicate()
+
+    if proc.returncode not in (0, 1):
+        print(f"[警告] 核验 agent 退出码 {proc.returncode}。", file=sys.stderr)
+
+    # 优先从临时文件读取结构化结果
+    tmp = Path(tmp_path)
+    if tmp.exists() and tmp.stat().st_size > 0:
+        output = tmp.read_text(encoding="utf-8")
+        tmp.unlink(missing_ok=True)
+        print(f"[核验] 从临时文件读取核验结果（{len(output)} 字符）")
+        return output
+
+    # 临时文件不存在时降级：从 stdout 提取（打印末尾供调试）
+    print("[核验] 临时文件未生成，降级为解析 stdout。", file=sys.stderr)
+    tail = stdout.strip()[-3000:] if stdout.strip() else ""
+    if tail:
+        print(f"[核验 stdout 末尾]\n{tail}")
+    else:
+        print("[警告] 核验 agent 无任何输出。", file=sys.stderr)
+    return stdout
+
+
+def _has_issues(verifier_output: str) -> bool:
+    """判断核验结果里是否存在需要修改的问题。
+
+    检查两个章节：
+    - "无法访问的引用文件"：有实质内容则说明存在路径错误
+    - "需要补充依据的结论"：有实质内容则说明有内容不符或缺引用的问题
+
+    空输出视为核验失败（进程异常），返回 False 跳过修订，
+    但会在调用侧打印警告。
+    """
+    import re
+    if not verifier_output.strip():
+        return False
+
+    _empty = {"无", "无问题", "（无）", "暂无", "无缺乏依据的结论", "无需要补充依据的结论",
+              "无无法访问的引用文件", "全部文件路径均有效"}
+
+    for pattern in (
+        r"##\s*无法访问的引用文件.{0,20}\n(.*?)(?=\n##|\Z)",
+        r"##\s*(?:需要补充依据|缺乏依据).{0,30}\n(.*?)(?=\n##|\Z)",
+    ):
+        m = re.search(pattern, verifier_output, re.DOTALL)
+        if m:
+            body = m.group(1).strip()
+            if body and body not in _empty:
+                return True
+
+    # 如果输出里根本没有期望的章节标头，说明 LLM 没有按格式输出
+    if "## 无法访问的引用文件" not in verifier_output and \
+       "## 需要补充依据" not in verifier_output and \
+       "## 缺乏依据" not in verifier_output:
+        print("[核验] 输出中未找到预期章节标头，无法解析核验结果。", file=sys.stderr)
+
+    return False
+
+
+def _send_feedback(verifier_output: str, output_file: str) -> None:
+    """续接上一个会话，把核验结果发给主 agent 要求修订。
+
+    主 agent 有完整的历史上下文（知道自己分析了什么、报告写了什么），
+    只需重新 initialize_analysis 即可继续用工具查找缺失依据。
+    """
+    feedback = (
+        f"独立核验 agent 检查了你刚才生成的报告，发现以下问题：\n\n"
+        f"{verifier_output}\n\n"
+        f"请根据上述核验结果依次处理两类问题：\n"
+        f"  1. 【无法访问的引用文件】——这些文件路径在仓库中不存在，"
+        f"用 search_code 按函数名定位正确路径后更新报告中的 路径:行号；"
+        f"若确实不存在则改写为\"未找到相关实现\"。\n"
+        f"  2. 【需要补充依据的结论】——引用位置不支撑或完全没有引用的结论，"
+        f"用 read_file / search_code / find_symbol_definition 确认后补充正确的 路径:行号。\n\n"
+        f"步骤：先调用 initialize_analysis 重新初始化仓库上下文，"
+        f"逐条查找补充，完成后调用 write_report 将修订版保存到原路径（{output_file}）。"
+    )
+    _run_opencode(feedback, continue_last=True, output_file=output_file)
 
 
 # 主入口
@@ -186,28 +287,14 @@ if __name__ == "__main__":
     parser.add_argument("--output", "-o")
     parser.add_argument("--model")
     parser.add_argument("--session", "-s")
-    parser.add_argument("--compare", action="store_true")
-
-    bgroup = parser.add_mutually_exclusive_group()
-    bgroup.add_argument("--repo-id-b")
-    bgroup.add_argument("--repo-path-b")
-    bgroup.add_argument("--url-b")
 
     args = parser.parse_args()
-
-    if args.compare and not any([args.repo_id_b, args.repo_path_b, args.url_b]):
-        parser.error("--compare 需要同时指定第二个仓库（--repo-id-b / --repo-path-b / --url-b）")
 
     if args.model:
         config.api["model"] = args.model
 
     # 解析仓库路径（静态分析由 initialize_analysis 工具在 MCP server 端执行）
     repo_path_a, repo_name_a = _resolve_repo_path(args.url, args.repo_path, args.repo_id)
-
-    if args.compare:
-        repo_path_b, repo_name_b = _resolve_repo_path(
-            args.url_b, args.repo_path_b, args.repo_id_b
-        )
 
     # 报告输出路径：未指定 --output 时按 data/reports/<repo>_<时间戳>.md 自动生成
     if args.output:
@@ -217,11 +304,7 @@ if __name__ == "__main__":
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         reports_dir = Path(config.data.get("reports_dir", "./data/reports")).resolve()
         reports_dir.mkdir(parents=True, exist_ok=True)
-        if args.compare:
-            fname = f"compare_{repo_name_a}_vs_{repo_name_b}_{ts}.md"
-        else:
-            fname = f"{repo_name_a}_{ts}.md"
-        output_file = str(reports_dir / fname)
+        output_file = str(reports_dir / f"{repo_name_a}_{ts}.md")
 
     output_hint = (
         f"\n\n【报告输出要求（必须执行）】完成所有分析后，"
@@ -230,17 +313,41 @@ if __name__ == "__main__":
         f"\n不要把报告内容直接输出到对话中；只调用 write_report 工具即可。"
     )
 
-    if args.compare:
-        user_request = (
-            f"请比较项目 {repo_name_a}（路径：{repo_path_a}）"
-            f"和项目 {repo_name_b}（路径：{repo_path_b}）。"
-            f"{output_hint}"
-        )
-    else:
-        user_request = (
-            f"请分析项目 {repo_name_a}（路径：{repo_path_a}）。"
-            f"{output_hint}"
-        )
+    user_request = (
+        f"请分析项目 {repo_name_a}（路径：{repo_path_a}）。"
+        f"{output_hint}"
+    )
 
-    print(f"[agent] 报告将写入：{output_file}")
-    _run_opencode(user_request, session_id=args.session or "", output_file=output_file)
+    session_id = args.session or None
+    label = f"会话：{session_id}" if session_id else "新会话"
+    print(f"[agent] 报告将写入：{output_file}  {label}")
+    _run_opencode(user_request, session_id=session_id, output_file=output_file)
+
+    # 核验循环：核验 agent 静默检查，有问题则续接上一会话让主 agent 修订
+    MAX_REVISIONS = 2
+    primary_repo = str(repo_path_a)
+    for revision in range(MAX_REVISIONS + 1):
+        if not Path(output_file).exists():
+            print("[agent] 报告文件不存在，跳过核验。", file=sys.stderr)
+            break
+
+        print(f"\n[agent] 第 {revision + 1} 次核验中...", end=" ", flush=True)
+        verifier_output = _run_verifier(output_file, primary_repo)
+
+        if not _has_issues(verifier_output):
+            print("核验通过，无缺乏依据的结论。")
+            break
+
+        print("发现缺乏依据的结论。")
+        if revision == MAX_REVISIONS:
+            print(f"[agent] 已达最大修订轮数（{MAX_REVISIONS}），流程结束。")
+            break
+
+        print(f"[agent] 续接会话追加核验反馈，主 agent 继续修订...\n")
+        _send_feedback(verifier_output, output_file)
+
+    if Path(output_file).exists():
+        print(f"\n[完成] 最终报告：{output_file}")
+        html_p = Path(output_file).with_suffix(".html")
+        if html_p.exists():
+            print(f"[完成] HTML 报告：{html_p}")

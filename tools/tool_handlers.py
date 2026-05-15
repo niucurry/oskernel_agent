@@ -39,17 +39,18 @@ def read_file(
     - 未指定范围且文件较短：全部返回
     - 未指定范围且文件较长：HEAD + 省略说明 + TAIL
     """
-    full_path = Path(repo_path) / path.lstrip("/")
+    path_clean = re.sub(r":\d+(-\d+)?$", "", path.strip())
+    full_path = Path(repo_path) / path_clean.lstrip("/")
 
     if not full_path.exists():
         return (
-            f"[错误] 文件不存在：{path}\n"
+            f"[错误] 文件不存在：{path_clean}\n"
             f"请检查路径是否正确，可以先查看仓库结构地图确认。"
         )
 
     if full_path.is_dir():
         entries = sorted(full_path.iterdir(), key=lambda p: (p.is_file(), p.name))
-        lines = [f"[提示] {path} 是目录，不能直接读取。请指定目录下的某个文件："]
+        lines = [f"[提示] {path_clean} 是目录，不能直接读取。请指定目录下的某个文件："]
         for entry in entries[:60]:
             rel = str(entry.relative_to(Path(repo_path)))
             marker = "/" if entry.is_dir() else ""
