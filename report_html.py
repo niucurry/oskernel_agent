@@ -470,21 +470,20 @@ def render_html(
     )
 
 
-def write_html_sibling(
-    md_path: Path,
+def write_html(
+    html_path: Path,
     markdown_text: str,
     repo_roots: list[Path] | None = None,
     link_scheme: str = "vscode",
 ) -> tuple[Path, set[str]]:
-    """在 md_path 同目录写一份同名 .html，返回 (html路径, 无法解析的路径集合)。
+    """把 Markdown 渲染为 HTML 并写入 html_path，返回 (html路径, 无法解析的路径集合)。
 
     repo_roots 用来把报告中的相对路径解析为绝对路径，从而生成
     可点击跳转的 vscode:// 链接。无法解析的路径在 HTML 中以红色断链样式显示，
     同时通过第二个返回值告知调用方，以便在 write_report 响应里反馈给 LLM。
     """
     broken: set[str] = set()
-    html_path = md_path.with_suffix(".html")
-    title = md_path.stem
+    title = html_path.stem
     html_path.write_text(
         render_html(
             markdown_text, title=title,
@@ -494,3 +493,14 @@ def write_html_sibling(
         encoding="utf-8",
     )
     return html_path, broken
+
+
+def write_html_sibling(
+    md_path: Path,
+    markdown_text: str,
+    repo_roots: list[Path] | None = None,
+    link_scheme: str = "vscode",
+) -> tuple[Path, set[str]]:
+    """在 md_path 同目录写一份同名 .html，返回 (html路径, 无法解析的路径集合)。"""
+    html_path = md_path.with_suffix(".html")
+    return write_html(html_path, markdown_text, repo_roots=repo_roots, link_scheme=link_scheme)

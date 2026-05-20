@@ -8,7 +8,19 @@
 """
 
 import tomllib
+from enum import Enum
 from pathlib import Path
+
+
+class SessionType(str, Enum):
+    """多会话并行模式下的会话类型"""
+    FULL         = "full"          # 兼容模式：单会话完成完整分析
+    OVERVIEW     = "overview"      # SESSION_A：概览 + syscall + 构建系统
+    SUBSYS_CORE  = "subsys_core"   # SESSION_B1：进程/内存/文件系统
+    SUBSYS_INFRA = "subsys_infra"  # SESSION_B2：驱动/中断/IPC/同步/SMP/启动
+    ORIGINALITY  = "originality"   # SESSION_C：原创性分析
+    DOC_QUALITY  = "doc_quality"   # SESSION_D：文档质量
+    MERGE        = "merge"         # SESSION_MERGE：汇总合并
 
 
 #Layer 1: Role + task declaration
@@ -247,7 +259,7 @@ LAYER_3_WORKFLOW_ANALYZE = """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【工作流规范：必须严格按以下顺序执行】
 
-阶段一：文档先行扫读（建立项目先验，控制在 3–5 次工具调用以内）
+阶段一：文档先行扫读
   1. 从第②层"文档文件"列表中挑选关键文档：
      - 必读：README 类型（项目自述、整体架构）
      - 选读：design_doc / report 类型（仅在 README 不足以建立认知时读取）
@@ -304,12 +316,212 @@ LAYER_3_WORKFLOW_ANALYZE = """
      - 若返回"全部有效"→ 直接进入第11步
      - 若返回断链列表 → 用 search_code 找到正确路径后修正草稿，再次 validate_refs 确认
      validate_refs 不会写入任何文件，可以反复调用直到全部通过
- 11. 调用 write_report 工具把修正后的完整 Markdown 报告写入 output_path：
+ 11. 调用 write_report 工具把修正后的完整 Markdown 报告写入 output_path（工具自动渲染为 HTML 文件）：
         write_report(content="<完整报告 Markdown>", output_path="<用户消息中的路径>")
      这是工作流的最后一步。
      不要把完整报告内容直接打印到对话中——只通过 write_report 工具输出。
-     允许在对话中给用户一句简短确认（如"报告已写入 /path/to/report.md"）。
+     允许在对话中给用户一句简短确认（如"报告已写入 /path/to/report.html"）。
 """.strip()
+
+
+LAYER_3_WORKFLOW_OVERVIEW = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【工作流规范：SESSION_A — 项目概览 + 系统调用 + 构建系统】
+【本会话只负责产出 §1、§2、§7 三个章节，不要分析其他内容。
+
+步骤 1：文档快速扫读
+  - 从第②层"文档文件"列表中读取 README（若存在）
+  - 目的：补全 profile 中未涵盖的项目背景信息，如项目名称、自述描述
+  - 不需要深入分析文档内容，只摘取项目层面的关键信息
+
+步骤 2：系统调用数据收集
+  - 调用 list_implemented_syscalls()
+  - 对返回的 syscall 列表中的重点项（fork/clone, wait, execve, mmap, brk, ioctl, 文件系统相关），
+    各调用 find_symbol_definition() 查看实现入口（每个 1 次调用，总计约 5-7 次）
+
+步骤 3：构建系统分析
+  - 用 search_code 搜索 Makefile / Justfile / build.rs / .cargo/config
+  - 用 read_file 查看构建配置
+  - 用 search_code 搜索测试相关文件（test / tests 目录）
+
+步骤 4：输出
+  - 按照格式模板输出 §1 + §2 + §7 三个章节的 Markdown 段落
+  - 调用 write_report 写入指定路径
+""".strip()
+
+
+LAYER_3_WORKFLOW_SUBSYS_CORE = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【工作流规范：SESSION_B1 — 核心子系统分析（进程 / 内存 / 文件系统）】
+【本会话只负责产出 §3.1、§3.2、§3.3 三个子章节。
+
+步骤 1：文档先验建立
+  - 读取 README 和设计文档中关于进程管理、内存管理、文件系统的部分
+  - 记录文档声称的调度算法、内存分配策略、文件系统类型等
+  - 这些声称将在后续步骤中交叉验证
+
+步骤 2：进程管理分析
+  - find_symbol_definition() 查找进程控制结构体（TaskControlBlock / PCB / Process 等）
+  - find_symbol_definition() 查看调度器入口函数
+  - get_subsystem_call_chain() 分析调度流程
+  - 如文档声称特定调度算法（stride / CFS / round-robin），用 search_code 验证
+
+步骤 3：内存管理分析
+  - find_symbol_definition() 查找页表操作函数
+  - find_symbol_definition() 查找物理帧分配器
+  - search_code 搜索 COW（copy_on_write / cow / do_wp_page）
+  - search_code 搜索 lazy allocation（lazy_alloc / demand_page / page_fault + alloc）
+  - get_subsystem_call_chain() 分析内存分配路径
+
+步骤 4：文件系统分析
+  - find_symbol_definition() 查找 VFS 抽象层（如 Inode trait / File trait）
+  - find_symbol_definition() 查找具体文件系统实现（fat32 / ext4 等）
+  - get_subsystem_call_chain() 分析文件读写路径
+
+步骤 5：输出
+  - 按照格式模板输出 §3.1 + §3.2 + §3.3 的 Markdown 段落
+  - 每条技术结论必须带 file:line 引用
+  - 在段落末尾附加一个 `<!-- SESSION_META -->` 块，列出本会话产生的所有低置信度结论
+  - 调用 write_report 写入指定路径
+""".strip()
+
+
+LAYER_3_WORKFLOW_SUBSYS_INFRA = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【工作流规范：SESSION_B2 — 基础设施子系统分析】
+【本会话只负责产出 §3.4 ~ §3.9 六个子章节。
+
+步骤 1：文档先验建立
+  - 读取 README 中关于驱动、中断、IPC、同步、SMP、启动的部分
+  - 记录文档声称（若有）
+
+步骤 2：逐子系统分析
+
+  §3.4 设备驱动：
+  - 从第②层子系统地图定位驱动目录
+  - find_symbol_definition() 查看驱动初始化入口
+  - 若地图中注明"已折叠"，用 read_file 读取对应文件
+
+  §3.5 中断与异常处理：
+  - find_symbol_definition() 查找 trap_handler / trap_vector
+  - search_code 搜索 plic_init / timer_interrupt / page_fault / ecall
+  - get_subsystem_call_chain() 分析 trap 分发路径
+
+  §3.6 IPC：
+  - search_code 搜索 pipe / sys_pipe / sys_kill / signal_handler
+  - find_symbol_definition() 查看管道和信号实现
+  - search_code 搜索 shared_memory / shm
+
+  §3.7 同步原语：
+  - search_code 搜索 spin_lock / mutex_lock / semaphore / rwlock
+  - find_symbol_definition() 查看锁的实现结构
+
+  §3.8 SMP：
+  - search_code 搜索 hart_id / start_hart / ipi / per_cpu
+  - find_symbol_definition() 查看多核启动流程
+
+  §3.9 启动序列：
+  - find_symbol_definition() 查找 _start / rust_main / kernel_init
+  - search_code 搜索 sbi_call / bss_init
+  - get_subsystem_call_chain() 分析启动路径
+
+步骤 3：输出
+  - 按照格式模板输出 §3.4 ~ §3.9 的 Markdown 段落
+  - 段落末尾附加 `<!-- SESSION_META -->` 块，列出低置信度结论
+  - 调用 write_report 写入指定路径
+""".strip()
+
+
+LAYER_3_WORKFLOW_ORIGINALITY = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【工作流规范：SESSION_C — 原创性分析】
+【本会话只负责产出 §4 章节。
+
+步骤 1：参考 OS 确认
+  - 检查第②层 profile 中的 reference_os 字段
+  - 若无参考 OS，本章节输出"未识别到参考 OS，无法进行原创性对比分析"，然后结束
+
+步骤 2：原创性对比
+  - 调用 compare_with_reference_os()
+  - 获取函数级相似度数据
+
+步骤 3：深入验证关键差异点
+  - 对相似度 >90% 的函数，调用 find_symbol_definition() 抽查 2-3 个，确认是否确实高度继承
+  - 对当前仓库独有的函数，调用 find_symbol_definition() 抽查 2-3 个，确认是否为真正创新
+  - 对相似度 50-90% 的边界函数，择 1-2 个用 read_file 查看差异部分
+
+步骤 4：输出
+  - 按照格式模板输出 §4 的 Markdown 段落
+  - 分"高度继承 / 有修改 / 创新点"三个子节
+  - 段落末尾附加 `<!-- SESSION_META -->` 块
+  - 调用 write_report 写入指定路径
+""".strip()
+
+
+LAYER_3_WORKFLOW_DOC_QUALITY = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【工作流规范：SESSION_D — 文档质量评估】
+【本会话只负责产出 §5 章节。
+
+步骤 1：全量文档扫读
+  - 从第②层"文档文件"列表中读取所有文档（README、design_doc、report）
+  - 对每个文档：
+    - 若文件 ≤120 行：完整读取
+    - 若文件较长：先无范围读取获取摘要，再精读关键章节
+  - 记录文档覆盖范围（架构图？子系统说明？syscall 列表？API 文档？）
+
+步骤 2：摘取自我声称
+  - 从步骤 1 读取的文档内容中，摘取所有"声称实现了 X"的条目
+  - 每条记录：声称内容 + 文档位置（file:line）
+
+步骤 3：声称验证
+  - 对每条声称，用 find_symbol_definition() 或 search_code() 验证代码中是否存在对应实现
+  - 标注三种状态：已验证 / 不一致 / 未核对
+  - 若声称过多（>10 条），优先验证核心特性（调度算法、内存管理特性、文件系统类型），
+    其余标注"未核对"
+
+步骤 4：输出
+  - 按照格式模板输出 §5 的 Markdown 段落
+  - 分"文档覆盖范围 / 自我声称 / 一致性核对"三个部分
+  - 段落末尾附加 `<!-- SESSION_META -->` 块
+  - 调用 write_report 写入指定路径
+""".strip()
+
+
+LAYER_3_WORKFLOW_MERGE = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【工作流规范：SESSION_MERGE — 汇总合并】
+【本会话负责将所有分片合并为完整报告，并生成 §6 存疑项汇总。
+
+你将收到以下分片报告（通过第②层注入）：
+  - SESSION_A 输出：§1 + §2 + §7
+  - SESSION_B1 输出：§3.1 + §3.2 + §3.3
+  - SESSION_B2 输出：§3.4 ~ §3.9
+  - SESSION_C 输出：§4
+  - SESSION_D 输出：§5
+
+步骤 1：读取所有分片（通过 read_file 读取分片文件）
+
+步骤 2：生成 §6 存疑项汇总
+  - 从每个分片的 `<!-- SESSION_META -->` 块中提取 low_confidence_items 和 unresolved_items
+  - 按章节号排序
+  - 按原始模板格式组织存疑项列表
+
+步骤 3：合并
+  - 按 §1 → §2 → §3（合并 B1 + B2）→ §4 → §5 → §6 → §7 的顺序拼接
+  - §3 的合并方式：
+    - 使用 SESSION_B1 的 §3 章节标题（"## 3. 核心子系统分析"）
+    - 去掉 SESSION_B1 和 B2 中各自的"第一部分/第二部分"可选标题
+    - 子章节 §3.1-§3.9 按编号顺序拼接
+  - 移除所有分片中的 `<!-- SESSION_META -->` 块
+  - 确保章节编号连续、格式一致
+
+步骤 4：验证与输出
+  - 调用 validate_refs(content="<合并后完整报告>") 验证所有引用路径
+  - 若有断链，记录但不尝试修复（无工具权限），在 §6 中补充说明
+  - 调用 write_report 输出最终完整报告
+""".strip()
+
 
 #Layer 4: Hard constraints (anti-hallucination core)
 
@@ -360,8 +572,19 @@ LAYER_4_CONSTRAINTS = """
   - "syscall 入口在 syscall/mod.rs:21 的 syscall() 函数"
 
 要求：
-  - 位置写 file:line 或 file:line-line 形式，使用相对仓库根的路径
-  - 路径必须指向具体文件，不得引用目录（如 `xapi/src/fs/` 是错误的，必须写到文件级别如 `xapi/src/fs/fd_ops.rs:42`）
+  引用分两类，规则不同：
+
+  ① 模块定位描述（说明某子系统位于哪个目录）：允许使用目录路径
+      √ "VFS 层: xcore/src/fs/vfs/ 实现了类 Linux 的 VFS 设计"
+      但目录引用后必须紧跟具体文件的细节描述，不能止步于目录
+
+  ② 技术结论依据（对函数/算法/数据结构/行为的具体声明）：必须精确到 file:line
+      × 错误："stride 调度实现在 os/src/task/"（无行号，无法定位）
+      √ 正确："stride 调度实现（os/src/task/scheduler.rs:42）"
+
+  判断标准：描述「代码在哪里」→ 目录引用 OK；描述「代码做了什么」→ 必须 file:line
+
+  - 技术结论位置写 file:line 或 file:line-line 形式，使用相对仓库根的路径
   - 路径必须从工具返回文本中原样复制，禁止凭记忆重写或推断路径
     工具返回格式示例：
       find_symbol_definition → "文件：os/src/task/manager.rs  行：42-78"  → 引用写 os/src/task/manager.rs:42
@@ -371,11 +594,6 @@ LAYER_4_CONSTRAINTS = """
   - 文档类结论（如"README 声称 X"）：位置写文档文件:行号，
     实际内容由 read_file 读取得到
   - 整表统计类结论（如 syscall 覆盖率）：位置写"（来源：list_implemented_syscalls 工具）"
-
-报告写完后，另一个独立的核验 agent 会读取报告，
-对照仓库源码独立判断每条结论是否被你给出的位置所支撑。
-位置写错、行号越界、或源码内容与结论不符的，会被打回要求补充依据。
-所以宁可保守地多给一个位置，也不要随手编造行号。
 
 〔约束3：置信度标注〕
 对每个子系统的分析结论，标注置信度：
@@ -473,9 +691,6 @@ LAYER_5_FORMAT_ANALYZE = """
 注：本章每一条关于"功能/特性/算法/数据结构"的判断，
 都必须在结论文字里直接给出对应代码位置 file:line。例：
 "调度器使用 stride 算法（os/src/task/manager.rs:42-78）"。
-报告完成后会由独立的核验 agent 读取这些位置，
-并对照源码内容独立判断结论是否成立。
-
 ### 3.1 进程管理
 **核心数据结构**：{结构体名称}（{路径:起始行-结束行}）
 {列出关键字段}
@@ -593,3 +808,392 @@ LAYER_5_FORMAT_ANALYZE = """
 
 ─────────────── 报告模板结束 ───────────────
 """.strip()
+
+
+LAYER_5_FORMAT_OVERVIEW = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【输出格式规范：SESSION_A 分片】
+
+请严格按照以下格式输出。只输出 §1、§2、§7 三个章节。
+
+─────────────── 分片模板开始 ───────────────
+
+# 内核项目评审报告：{项目名称}
+
+## 1. 项目概览
+- 主要语言：{来自 profile}
+- 目标架构：{来自 profile}
+- 内核类型：{来自 profile}
+- 代码规模：{来自 profile.loc}
+- 疑似参考来源：{来自 profile.reference_os，含证据}
+
+## 2. 系统调用实现情况
+{直接引用 list_implemented_syscalls 工具的完整输出}
+覆盖率：{X}/{Y}（{百分比}）（来源：list_implemented_syscalls 工具）
+
+评审说明：重点关注以下 syscall 的实现质量，
+在每条描述末尾用括号给出实际位置 file:line：
+- fork/clone：{描述关键逻辑}（{路径:行号}）
+- wait/waitpid：{描述进程回收语义}（{路径:行号}）
+- execve：{描述 ELF 加载逻辑}（{路径:行号}）
+- mmap：{同上}
+- brk/sbrk：{描述堆增长机制}（{路径:行号}）
+- ioctl：{是否有扩展接口}（{路径:行号}）
+- 文件系统相关 syscall：{同上}
+
+## 7. 构建系统与可测试性（若可获取信息则填写，否则整节标"未分析"）
+**构建工具**：{Make / Just / Cargo 配置}（{路径:行号}）
+**用户态测试程序**：{是否包含，列出路径}
+**集成测试脚本**（如 QEMU 自动化运行）：{是/否，路径}
+
+<!-- SESSION_META
+session: overview
+low_confidence_items: []
+unresolved_items: []
+-->
+
+─────────────── 分片模板结束 ───────────────
+""".strip()
+
+
+LAYER_5_FORMAT_SUBSYS_CORE = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【输出格式规范：SESSION_B1 分片】
+
+请严格按照以下格式输出。只输出 §3.1、§3.2、§3.3 三个子章节。
+每条技术结论必须附 file:line 引用。
+
+─────────────── 分片模板开始 ───────────────
+
+## 3. 核心子系统分析（第一部分：进程 / 内存 / 文件系统）
+
+注：本章每一条关于"功能/特性/算法/数据结构"的判断，
+都必须在结论文字里直接给出对应代码位置 file:line。
+
+### 3.1 进程管理
+**核心数据结构**：{结构体名称}（{路径:起始行-结束行}）
+{列出关键字段}
+{如未查看，写"未查看详细字段"}
+
+**调度算法**：{算法名称}（入口 {路径:行号}）
+{引用 get_subsystem_call_chain 的结果展示调度流程，
+ 在每个关键调用点括号里附 路径:行号}
+
+**置信度**：{高/中/低}
+
+### 3.2 内存管理
+**分配策略**：{策略名称}（{路径:行号}）
+
+**页表实现**：{实现方式}（{路径:行号}）
+
+**是否实现 COW**：{是/否/未确认}
+  {若是，给出实现位置 file:line；若未确认，说明已查询的范围}
+
+**是否实现 lazy allocation**：{是/否/未确认}
+  {同上}
+
+**置信度**：{高/中/低}
+
+### 3.3 文件系统
+**支持格式**：{FAT32 / Ext4 / 其他}（{路径:行号}）
+
+**VFS 层**：{是否有抽象层}（{路径:行号}）
+
+**置信度**：{高/中/低}
+
+<!-- SESSION_META
+session: subsys_core
+low_confidence_items:
+  - "{章节号}: {结论摘要}"
+unresolved_items:
+  - "{章节号}: {工具返回未找到的项}"
+-->
+
+─────────────── 分片模板结束 ───────────────
+""".strip()
+
+
+LAYER_5_FORMAT_SUBSYS_INFRA = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【输出格式规范：SESSION_B2 分片】
+
+请严格按照以下格式输出。只输出 §3.4 ~ §3.9 六个子章节。
+
+─────────────── 分片模板开始 ───────────────
+
+## 3. 核心子系统分析（第二部分：基础设施）
+
+### 3.4 设备驱动
+{如果地图中该子系统"已折叠"，说明需要进一步查看}
+{每一条已查询到的驱动模块都标注 file:line}
+
+### 3.5 中断与异常处理
+**Trap 入口**：{函数名}（{路径:行号}）
+**外部中断（PLIC/CLINT）**：{是否初始化，如何分发}（{路径:行号}）
+**时钟中断**：{是否连接调度器抢占}（{路径:行号}）
+**Page Fault 处理**：{是否实现，处理方式}（{路径:行号}）
+**ecall 路由**：{入口函数及分发逻辑}（{路径:行号}）
+**置信度**：{高/中/低}
+
+### 3.6 进程间通信（IPC）
+**Pipe**：{是否实现，环形缓冲区 or 简单实现}（{路径:行号}）
+**Signal**：{是否实现，信号注册与递送逻辑}（{路径:行号}）
+**共享内存**：{是否实现}（{路径:行号}）
+**置信度**：{高/中/低}
+
+### 3.7 同步原语
+**SpinLock 实现**：{是否 SMP-safe}（{路径:行号}）
+**Mutex 实现**：{是否有阻塞语义}（{路径:行号}）
+**Semaphore / RwLock**：{是否实现}（{路径:行号}）
+**置信度**：{高/中/低}
+
+### 3.8 多核支持（SMP）
+**是否多核启动**：{是/否/未确认}（{路径:行号}）
+**Per-CPU 数据结构**：{是否存在}（{路径:行号}）
+**核间中断（IPI）**：{是否实现}（{路径:行号}）
+**置信度**：{高/中/低}
+
+### 3.9 启动序列
+**内核入口**：{函数名，如 _start / rust_main}（{路径:行号}）
+**SBI 接口使用**：{初始化阶段调用了哪些 SBI 服务}（{路径:行号}）
+**早期内存初始化**：{.bss 清零 / 页表建立顺序}（{路径:行号}）
+**置信度**：{高/中/低}
+
+<!-- SESSION_META
+session: subsys_infra
+low_confidence_items:
+  - "{章节号}: {结论摘要}"
+unresolved_items:
+  - "{章节号}: {工具返回未找到的项}"
+-->
+
+─────────────── 分片模板结束 ───────────────
+""".strip()
+
+
+LAYER_5_FORMAT_ORIGINALITY = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【输出格式规范：SESSION_C 分片】
+
+请严格按照以下格式输出。只输出 §4 章节。
+
+─────────────── 分片模板开始 ───────────────
+
+## 4. 原创性分析
+{引用 compare_with_reference_os 工具的输出}
+与 {参考OS} 的综合相似度：{百分比}
+
+### 高度继承的部分
+{列出相似度 >90% 的函数，每条附 file:line}
+
+### 有修改的部分
+{列出相似度 50-90% 的函数，同上格式}
+
+### 创新点
+{列出当前仓库独有的函数；每条附 file:line；
+未经 find_symbol_definition 确认内容的标"[待确认]"}
+
+<!-- SESSION_META
+session: originality
+low_confidence_items:
+  - "{结论摘要}"
+unresolved_items:
+  - "{未确认项}"
+-->
+
+─────────────── 分片模板结束 ───────────────
+""".strip()
+
+
+LAYER_5_FORMAT_DOC_QUALITY = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【输出格式规范：SESSION_D 分片】
+
+请严格按照以下格式输出。只输出 §5 章节。
+
+─────────────── 分片模板开始 ───────────────
+
+## 5. 文档质量
+{基于文档扫读结果评估}
+
+**文档覆盖范围**：
+  {列出已读取的文档文件及其内容范围（架构图？子系统说明？syscall 列表？）}
+  {如果地图中无任何文档文件，记录"未找到设计文档/README"}
+
+**文档自我声称的实现项**：
+  {列出文档中声称实现的关键特性；每条标出文档位置 file:line}
+
+**声称与代码的一致性核对**：
+  {对每条自我声称给出核对结果，三种状态之一}
+  - 已验证：{声称特性 X} 在代码中找到对应实现（{路径:行号}）
+  - 不一致：{声称特性 Y} 文档位置 {README.md:行号} 与代码实现 {路径:行号} 不符
+  - 未核对：{声称特性 Z} 因步数限制未深入查证，列入存疑项
+
+<!-- SESSION_META
+session: doc_quality
+low_confidence_items:
+  - "{结论摘要}"
+unresolved_items:
+  - "{未核对项}"
+-->
+
+─────────────── 分片模板结束 ───────────────
+""".strip()
+
+
+LAYER_5_FORMAT_MERGE = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【输出格式规范：SESSION_MERGE】
+
+你将收到多个分片报告文件。请按以下规则合并为完整报告。
+
+合并规则：
+1. 按 §1 → §2 → §3（合并 B1 + B2）→ §4 → §5 → §6 → §7 的顺序拼接
+2. §3 的合并方式：
+   - 使用 SESSION_B1 的 §3 章节标题（"## 3. 核心子系统分析"）
+   - 去掉 SESSION_B1 和 B2 中各自的"第一部分/第二部分"可选标题
+   - 在 §3 开头插入总述段落（从 B1 原始模板中保留）
+   - 子章节 §3.1-§3.9 按编号顺序拼接
+3. 生成 §6 存疑项汇总：
+   - 从所有分片的 `<!-- SESSION_META -->` 中提取 low_confidence_items 和 unresolved_items
+   - 按章节号排序
+   - 按原始模板格式组织存疑项列表
+4. 移除所有 `<!-- SESSION_META -->` 块
+5. 确保最终报告与 LAYER_5_FORMAT_ANALYZE 的完整模板结构一致
+
+─────────────── 合并模板结束 ───────────────
+""".strip()
+
+
+#Session config mapping
+
+_SESSION_CONFIG: dict[SessionType, tuple[str, str]] = {
+    SessionType.FULL:         (LAYER_3_WORKFLOW_ANALYZE,      LAYER_5_FORMAT_ANALYZE),
+    SessionType.OVERVIEW:     (LAYER_3_WORKFLOW_OVERVIEW,     LAYER_5_FORMAT_OVERVIEW),
+    SessionType.SUBSYS_CORE:  (LAYER_3_WORKFLOW_SUBSYS_CORE,  LAYER_5_FORMAT_SUBSYS_CORE),
+    SessionType.SUBSYS_INFRA: (LAYER_3_WORKFLOW_SUBSYS_INFRA, LAYER_5_FORMAT_SUBSYS_INFRA),
+    SessionType.ORIGINALITY:  (LAYER_3_WORKFLOW_ORIGINALITY,  LAYER_5_FORMAT_ORIGINALITY),
+    SessionType.DOC_QUALITY:  (LAYER_3_WORKFLOW_DOC_QUALITY,  LAYER_5_FORMAT_DOC_QUALITY),
+    SessionType.MERGE:        (LAYER_3_WORKFLOW_MERGE,        LAYER_5_FORMAT_MERGE),
+}
+
+_SESSION_TASK_DESC: dict[SessionType, str] = {
+    SessionType.FULL: "对一个操作系统内核项目进行全面的技术评审，生成完整的评审报告。",
+    SessionType.OVERVIEW: (
+        "对一个操作系统内核项目进行概览分析，"
+        "生成项目概览（§1）、系统调用实现情况（§2）和构建系统（§7）三个章节的报告分片。"
+    ),
+    SessionType.SUBSYS_CORE: (
+        "对一个操作系统内核项目的核心子系统进行深度分析，"
+        "生成进程管理（§3.1）、内存管理（§3.2）和文件系统（§3.3）三个子章节的报告分片。"
+    ),
+    SessionType.SUBSYS_INFRA: (
+        "对一个操作系统内核项目的基础设施子系统进行分析，"
+        "生成设备驱动（§3.4）、中断与异常处理（§3.5）、IPC（§3.6）、"
+        "同步原语（§3.7）、SMP（§3.8）和启动序列（§3.9）六个子章节的报告分片。"
+    ),
+    SessionType.ORIGINALITY: (
+        "对一个操作系统内核项目进行原创性分析，"
+        "与参考 OS 进行对比，生成原创性分析（§4）章节的报告分片。"
+    ),
+    SessionType.DOC_QUALITY: (
+        "对一个操作系统内核项目的文档质量进行评估，"
+        "检查文档声称与代码实现的一致性，生成文档质量（§5）章节的报告分片。"
+    ),
+    SessionType.MERGE: (
+        "将多个分会话产生的报告分片合并为一份完整的评审报告，"
+        "并生成存疑项汇总（§6）。"
+    ),
+}
+
+
+def build_prompt(
+    session_type: SessionType,
+    structure: dict,
+    profile: dict,
+    level1_map: str,
+    engine_info: dict,
+    crate_roles: dict | None = None,
+    is_degraded: bool = False,
+    fragment_paths: list[str] | None = None,
+) -> str:
+    """构建指定会话类型的完整提示词。
+
+    Args:
+        session_type: 会话类型
+        structure: 仓库结构探索结果
+        profile: 项目身份信息
+        level1_map: 仓库结构地图文本
+        engine_info: 解析引擎信息
+        crate_roles: Rust crate 角色映射（可选）
+        is_degraded: 是否使用降级引擎
+        fragment_paths: MERGE 会话用，分片文件路径列表
+
+    Returns:
+        组装好的完整提示词字符串
+    """
+    task_desc = _SESSION_TASK_DESC[session_type]
+    layer1 = LAYER_1_ROLE.format(task_description=task_desc)
+    layer2 = build_layer_2(structure, profile, level1_map, engine_info, crate_roles)
+
+    if session_type == SessionType.MERGE and fragment_paths:
+        fragment_info = format_fragment_paths(fragment_paths)
+        layer2 = layer2 + "\n\n" + fragment_info
+
+    layer3, layer5 = _SESSION_CONFIG[session_type]
+    layer4 = LAYER_4_CONSTRAINTS
+    if is_degraded:
+        layer4 = layer4 + "\n\n" + LAYER_4_DEGRADED_ENGINE_EXTRA
+
+    return "\n\n".join([layer1, layer2, layer3, layer4, layer5])
+
+
+def format_fragment_paths(paths: list[str]) -> str:
+    """格式化分片报告路径信息，注入 MERGE 会话的 Layer 2。"""
+    lines = [_BAR, "【分片报告文件位置】", ""]
+    session_labels = {
+        "overview":     "SESSION_A（§1+§2+§7）",
+        "subsys_core":  "SESSION_B1（§3.1-§3.3）",
+        "subsys_infra": "SESSION_B2（§3.4-§3.9）",
+        "originality":  "SESSION_C（§4）",
+        "doc_quality":  "SESSION_D（§5）",
+    }
+    for path in paths:
+        matched = False
+        for key, label in session_labels.items():
+            if key in path.lower():
+                lines.append(f"  {label} → {path}")
+                matched = True
+                break
+        if not matched:
+            lines.append(f"  未知分片 → {path}")
+    return "\n".join(lines)
+
+
+# 多会话模式的公共元数据（供 agent.py 和 setup_opencode.py 共用）
+
+SESSION_AGENT_NAMES: dict[SessionType, str] = {
+    SessionType.FULL:         "os-kernel-analyzer",
+    SessionType.OVERVIEW:     "os-kernel-overview",
+    SessionType.SUBSYS_CORE:  "os-kernel-subsys-core",
+    SessionType.SUBSYS_INFRA: "os-kernel-subsys-infra",
+    SessionType.ORIGINALITY:  "os-kernel-originality",
+    SessionType.DOC_QUALITY:  "os-kernel-doc-quality",
+    SessionType.MERGE:        "os-kernel-merge",
+}
+
+SESSION_FRAG_SUFFIX: dict[SessionType, str] = {
+    SessionType.OVERVIEW:     "overview",
+    SessionType.SUBSYS_CORE:  "subsys_core",
+    SessionType.SUBSYS_INFRA: "subsys_infra",
+    SessionType.ORIGINALITY:  "originality",
+    SessionType.DOC_QUALITY:  "doc_quality",
+}
+
+SESSION_SEQUENCE: list[SessionType] = [
+    SessionType.OVERVIEW,
+    SessionType.SUBSYS_CORE,
+    SessionType.SUBSYS_INFRA,
+    SessionType.ORIGINALITY,
+    SessionType.DOC_QUALITY,
+]

@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import config as _config
 from tools.mcp_tools import OSKernelMCPTools
 from tools.reference_db import ReferenceOSDatabase
-from report_html import write_html_sibling
+from report_html import write_html
 
 # CLI 参数解析
 
@@ -310,8 +310,8 @@ def _make_tool_defs() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "content":     {"type": "string", "description": "完整的 Markdown 报告文本"},
-                    "output_path": {"type": "string", "description": "输出文件路径（可选）"},
+                    "content":     {"type": "string", "description": "完整的 Markdown 报告文本（工具自动渲染为 HTML）"},
+                    "output_path": {"type": "string", "description": "输出文件路径（.html 或 .md 均可，最终保存为 HTML）"},
                 },
                 "required": ["content"],
             },
@@ -569,16 +569,23 @@ def _handle_validate_refs(arguments: dict) -> list[types.TextContent]:
         else:
             broken.append(fp)
 
-    # 汇总目录引用错误
+    # 目录引用：区分「模块定位」（目录存在，合法）和「幻觉路径」（目录不存在，报错）
     dir_lines: list[str] = []
-    if dir_refs:
+    phantom_dirs: list[str] = []
+    for dr in dir_refs:
+        dir_path = dr.rstrip("/")
+        exists = any((root / dir_path).is_dir() for root in repo_roots)
+        if not exists:
+            phantom_dirs.append(dr)
+
+    if phantom_dirs:
         dir_lines.append(
-            f"[validate_refs] 以下 {len(dir_refs)} 处引用了目录而非具体文件，"
-            f"必须改写为 文件路径:行号 形式：\n"
+            f"[validate_refs] 以下 {len(phantom_dirs)} 处目录引用在仓库中不存在（幻觉路径），"
+            f"请修正为真实路径或改写为 文件路径:行号 形式：\n"
         )
-        for dr in dir_refs:
+        for dr in phantom_dirs:
             dir_lines.append(
-                f"  目录引用（无效）：{dr}\n"
+                f"  目录不存在：{dr}\n"
                 f"    → 用 search_code 搜索该结论中提到的函数/符号名，"
                 f"从返回的 文件:行号 中取得具体位置后填入报告；"
                 f"若搜索无结果，将该结论改写为\"未找到具体实现\""
@@ -587,8 +594,10 @@ def _handle_validate_refs(arguments: dict) -> list[types.TextContent]:
     if not broken:
         if dir_lines:
             return [types.TextContent(type="text", text="\n".join(dir_lines))]
+        valid_dirs = len(dir_refs) - len(phantom_dirs)
+        extra = f"（另有 {valid_dirs} 处目录定位引用已跳过检查）" if valid_dirs else ""
         return [types.TextContent(type="text",
-            text=f"[validate_refs] 全部 {len(valid)} 个引用路径均可访问，可以调用 write_report。")]
+            text=f"[validate_refs] 全部 {len(valid)} 个文件引用路径均可访问{extra}，可以调用 write_report。")]
 
     # 对断链路径搜索同文件名的候选位置
     lines = [
@@ -619,11 +628,7 @@ def _handle_validate_refs(arguments: dict) -> list[types.TextContent]:
 
 
 def _handle_write_report(arguments: dict) -> list[types.TextContent]:
-    """把报告 Markdown 写到磁盘，并附带渲染一份 HTML。
-
-    核验由独立的 os-kernel-verifier agent 在主 agent 完成后单独执行，
-    本工具不再做任何证据校验。
-    """
+    """把报告 Markdown 渲染为 HTML 写到磁盘。"""
     content     = arguments.get("content", "")
     output_path = arguments.get("output_path", "").strip()
 
@@ -631,10 +636,9 @@ def _handle_write_report(arguments: dict) -> list[types.TextContent]:
         return [types.TextContent(type="text", text="[完成] 报告生成完毕。")]
 
     p = Path(output_path)
+    if p.suffix.lower() != ".html":
+        p = p.with_suffix(".html")
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content, encoding="utf-8")
-    _log(f"报告已写入：{p}")
-    msg = f"[完成] 报告已保存到 {p}。"
 
     repo_roots: list[Path] = []
     for ctx in _contexts.values():
@@ -646,9 +650,9 @@ def _handle_write_report(arguments: dict) -> list[types.TextContent]:
         for src_rel in getattr(ctx, "structure", {}).get("source_roots_rel", []):
             repo_roots.append(repo_root / src_rel)
     try:
-        html_path, broken = write_html_sibling(p, content, repo_roots=repo_roots)
+        html_path, broken = write_html(p, content, repo_roots=repo_roots)
         _log(f"HTML 报告已写入：{html_path}（repo_roots={len(repo_roots)}，断链={len(broken)}）")
-        msg += f" HTML 版本：{html_path}。"
+        msg = f"[完成] 报告已保存到 {html_path}。"
         if broken:
             broken_list = "\n".join(f"  - {bp}" for bp in sorted(broken))
             msg += (
@@ -659,7 +663,7 @@ def _handle_write_report(arguments: dict) -> list[types.TextContent]:
             )
     except Exception as exc:
         _log(f"生成 HTML 报告失败：{exc}")
-        msg += f" （HTML 生成失败：{exc}）"
+        msg = f"[完成] 报告生成完毕，但 HTML 渲染失败：{exc}"
     return [types.TextContent(type="text", text=msg)]
 
 
