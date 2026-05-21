@@ -1,7 +1,7 @@
 """
 离线构建参考 OS 代码指纹库。
 
-对每个参考 OS 运行一次，生成 data/reference_db/<name>.json。
+对每个参考 OS 运行一次，生成 reference_db/<name>.json。
 之后 compare_with_reference_os 工具会自动使用代码级相似度，而不再降级到函数名比对。
 
 用法：
@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.reference_db import ReferenceOSDatabase
 
-DEFAULT_DB_DIR = "data/reference_db"
+DEFAULT_DB_DIR = "reference_db"
 
 
 def build_one(ref_name: str, repo_path: str, db_dir: str) -> None:

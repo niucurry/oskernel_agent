@@ -124,14 +124,13 @@ pip install -r requirements.txt
 
 ## 二、配置
 
-编辑 `config.toml`（git-ignored，含 API Key）：
+本项目固定使用 **DeepSeek（`deepseek/deepseek-chat`）** 模型，不可更换。
+编辑 `config.toml`（git-ignored）时，你只需要关心两项：API 密钥与 `base_url`。
 
 ```toml
 [api]
-key        = "sk-..."                       # DeepSeek 或 OpenAI 兼容接口的密钥
-base_url   = "https://api.deepseek.com/v1"
-model      = "deepseek-chat"
-temperature = 0.1
+key      = "sk-..."                          # DeepSeek API Key
+base_url = "https://api.deepseek.com/v1"     # 官方接入点；如需走代理，改这里
 
 [data]
 repos_dir    = "./data/historical_repos"   # 克隆下来的仓库存放目录
@@ -145,8 +144,13 @@ repo_id = ""
 rust_analyzer_timeout = 120   # 等待 rust-analyzer 索引完成的秒数
 clangd_timeout        = 60    # 等待 clangd 索引完成的秒数
 max_call_depth        = 3     # get_call_chain 默认展开层数
+max_steps             = 200   # MCP 单会话工具调用预算
 skip_dirs = ["vendor", "third_party", "target"]
 ```
+
+> 不再支持自定义模型；`--model` 命令行参数已移除。
+> `base_url` 是唯一影响接入点的开关：填官方地址走官方，填代理地址走代理。
+> 改完 `config.toml` 后请重跑 `python setup_opencode.py` 让配置生效。
 
 ---
 
@@ -179,25 +183,6 @@ python agent.py --repo-id REPO_NAME --output report.md
 python agent.py --repo-path /path/to/repo > report.txt 2>&1
 ```
 
-### 覆盖模型
-
-```bash
-python agent.py --repo-id REPO_NAME --model deepseek-chat
-```
-
-### 比较两个仓库
-
-```bash
-# 比较两个已克隆的仓库
-python agent.py --compare --repo-id REPO_A --repo-id-b REPO_B
-
-# 比较两个远程仓库（自动克隆）
-python agent.py --compare --url URL_A --url-b URL_B
-
-# 混合：本地 + 远程
-python agent.py --compare --repo-path /path/to/a --url-b URL_B
-```
-
 ### 只克隆仓库（不分析）
 
 ```bash
@@ -224,14 +209,9 @@ python scripts/build_reference_db.py --reference rcore-tutorial-v3 --repo-path /
 | `--repo-id ID`                | 分析 `data/historical_repos/` 下的指定仓库 |
 | `--repo-path PATH`            | 分析任意本地路径下的仓库                     |
 | `--url URL`                   | 克隆远程仓库后分析                           |
-| `--output FILE` / `-o FILE` | 将报告写入文件（默认打印到终端）             |
-| `--model MODEL`               | 覆盖 config.toml 中的模型名称                |
-| `--compare`                   | 启用比较模式                                 |
-| `--repo-id-b ID`              | 比较模式：第二个仓库的文件夹名               |
-| `--repo-path-b PATH`          | 比较模式：第二个仓库的本地路径               |
-| `--url-b URL`                 | 比较模式：第二个仓库的远程地址               |
+| `--output FILE` / `-o FILE` | 将报告写入文件（默认写入 `data/reports/`）  |
 
-`--repo-id` / `--repo-path` / `--url` 三者互斥，`--repo-id-b` / `--repo-path-b` / `--url-b` 同理。
+`--repo-id` / `--repo-path` / `--url` 三者互斥。
 
 ### `fetch_single_repo.py`
 

@@ -523,6 +523,128 @@ LAYER_3_WORKFLOW_MERGE = """
 """.strip()
 
 
+#Layer V: 可视化输出（适用于所有会话）
+
+LAYER_VISUAL_OUTPUT = """
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【可视化输出规范】
+
+报告渲染为 HTML，已通过 CDN 引入 Mermaid（语义图）、ECharts（数据可视化）、
+Tailwind CSS（样式）和 Alpine.js（折叠/搜索）。你只需在 Markdown 中嵌入
+特定的围栏代码块，渲染器会自动识别并展示。
+
+围栏代码块约定（语言标识区分大小写，使用小写）：
+
+  ```mermaid
+  <Mermaid 文法的图>
+  ```
+    → 渲染为 Mermaid 图。用于状态机、序列图、类图、时间线等"语义图示"。
+
+  ```echarts
+  { "title": {...}, "series": [...] }   // 必须是合法 JSON
+  ```
+    → 渲染为 ECharts 图。用于数据可视化（仪表盘/环形/雷达/旭日/桑基/柱状）。
+    注意：键名与字符串必须用双引号；不要写注释；不要包裹 'option ='。
+
+  ```summary
+  - 关键数字 1: 值
+  - 关键数字 2: 值
+  - 关键数字 3: 值
+  ```
+    → 章节折叠时显示的摘要卡片。每个 H2 章节可放一个，作为折叠态预览。
+    内容用普通 Markdown，建议 2-4 条关键数字，避免大段文字。
+
+  ```html
+  <div class="grid grid-cols-3 gap-3">...</div>
+  ```
+    → 直接输出原始 HTML（信任 agent）。用于 Tailwind 样式的卡片/网格。
+
+【章节 → 图表类型推荐映射】
+推荐而非强制：当章节有可视化的客观数据时使用；数据稀疏时可省略。
+每个图表 *必须* 仅基于工具实际返回的数据，不得编造数字。
+
+  §1 项目概览        → ```summary``` 摘要 + Tailwind 指标卡片（```html```）
+                         可选 ```echarts``` gauge 仪表盘体现整体完成度
+  §2 syscall 覆盖率  → ```echarts``` 环形图（donut/pie），扇区为已实现 vs 未实现
+  §3 子系统总览段落  → ```echarts``` 雷达图，9 轴对应 9 个子系统的实现深度评分
+  §3.1 进程管理      → ```mermaid``` stateDiagram-v2 描绘进程状态机
+  §3.2 内存管理      → ```echarts``` sunburst 旭日图，按层次展开虚拟地址空间
+  §3.3 文件系统      → ```mermaid``` classDiagram 描绘 inode / superblock / VFS 类关系
+  §3.4 设备驱动      → ```echarts``` 水平柱状图，各驱动的 LOC 或文件数
+  §3.5 中断处理      → ```mermaid``` sequenceDiagram 展示 trap 分发流程
+  §3.6 IPC           → ```mermaid``` sequenceDiagram 展示管道 / 信号传递
+  §3.7 同步原语      → ```echarts``` 柱状图，各类锁的实现计数
+  §3.8 SMP           → ```mermaid``` sequenceDiagram 展示多 hart 启动握手
+  §3.9 启动序列      → ```mermaid``` timeline 关键启动阶段
+  §4 原创性分析      → ```echarts``` sankey 桑基图，参考 OS → 当前仓库的函数流转
+  §5 文档质量        → ```echarts``` 堆叠柱状图，每文档已验证/不一致/未核对的分布
+  §6 存疑项          → ```html``` Tailwind 表格 + 状态徽章
+  §7 构建系统        → ```html``` Tailwind 卡片摘要
+
+【硬性要求】
+  1. 图表数据必须来源于工具返回结果，禁止凭印象填写。
+  2. ECharts 块必须是合法 JSON（双引号、无注释、无尾逗号）。
+  3. 不要在一个章节里堆 3+ 张图；可视化是为辅助阅读，不要喧宾夺主。
+  4. 图表前后保留一句文字说明（数据来源 / 解读），不要让图表"孤立悬空"。
+  5. 不要在 ```mermaid``` 或 ```echarts``` 块内嵌套引用 file:line（图表不参与
+     断链校验）；具体的代码位置仍写在正文段落里。
+
+【ECharts 极简模板（按需复用，数值替换为工具返回的真实值）】
+
+环形图（§2 syscall 覆盖率）：
+  ```echarts
+  {
+    "title": {"text": "syscall 覆盖率", "left": "center"},
+    "tooltip": {"trigger": "item"},
+    "series": [{
+      "type": "pie",
+      "radius": ["45%", "70%"],
+      "data": [
+        {"name": "已实现", "value": 42},
+        {"name": "未实现", "value": 18}
+      ]
+    }]
+  }
+  ```
+
+雷达图（§3 子系统总览）：
+  ```echarts
+  {
+    "title": {"text": "子系统实现深度", "left": "center"},
+    "radar": {"indicator": [
+      {"name": "进程", "max": 5}, {"name": "内存", "max": 5},
+      {"name": "文件系统", "max": 5}, {"name": "驱动", "max": 5},
+      {"name": "中断", "max": 5}, {"name": "IPC", "max": 5},
+      {"name": "同步", "max": 5}, {"name": "SMP", "max": 5},
+      {"name": "启动", "max": 5}
+    ]},
+    "series": [{"type": "radar", "data": [{"value": [4,4,3,3,4,2,3,2,4], "name": "当前仓库"}]}]
+  }
+  ```
+
+桑基图（§4 原创性）：
+  ```echarts
+  {
+    "title": {"text": "函数原创性流转", "left": "center"},
+    "series": [{
+      "type": "sankey",
+      "data": [
+        {"name": "参考 OS"}, {"name": "当前仓库"},
+        {"name": "高度继承"}, {"name": "有修改"}, {"name": "创新"}
+      ],
+      "links": [
+        {"source": "参考 OS", "target": "高度继承", "value": 30},
+        {"source": "参考 OS", "target": "有修改",   "value": 12},
+        {"source": "高度继承", "target": "当前仓库", "value": 30},
+        {"source": "有修改",   "target": "当前仓库", "value": 12},
+        {"source": "创新",     "target": "当前仓库", "value": 8}
+      ]
+    }]
+  }
+  ```
+""".strip()
+
+
 #Layer 4: Hard constraints (anti-hallucination core)
 
 LAYER_4_CONSTRAINTS = """
@@ -1145,7 +1267,7 @@ def build_prompt(
     if is_degraded:
         layer4 = layer4 + "\n\n" + LAYER_4_DEGRADED_ENGINE_EXTRA
 
-    return "\n\n".join([layer1, layer2, layer3, layer4, layer5])
+    return "\n\n".join([layer1, layer2, layer3, layer4, layer5, LAYER_VISUAL_OUTPUT])
 
 
 def format_fragment_paths(paths: list[str]) -> str:

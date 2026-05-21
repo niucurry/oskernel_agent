@@ -218,12 +218,8 @@ if __name__ == "__main__":
     src.add_argument("--url")
 
     parser.add_argument("--output", "-o")
-    parser.add_argument("--model")
 
     args = parser.parse_args()
-
-    if args.model:
-        config.api["model"] = args.model
 
     repo_path_a, repo_name_a = _resolve_repo_path(args.url, args.repo_path, args.repo_id)
 

@@ -94,7 +94,7 @@ class ToolDispatcher:
         repo_path: str,
         profile: dict,
         structure: dict | None = None,
-        ref_db_dir: str = "data/reference_db",
+        ref_db_dir: str = "reference_db",
     ):
         self.engine = engine
         self.level2_index = level2_index        # 可为 None（降级模式）

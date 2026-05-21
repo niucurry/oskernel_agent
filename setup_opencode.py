@@ -100,28 +100,37 @@ def setup() -> None:
         sys.exit(1)
 
     import config
-    model     = config.api["model"]           # e.g. "deepseek/deepseek-chat"
+
+    # 模型锁定：本项目固定使用 DeepSeek（deepseek/deepseek-chat）。
+    # 用户在 config.toml 中只需配置 key 与 base_url。
+    PROVIDER_ID = "deepseek"
+    MODEL       = f"{PROVIDER_ID}/deepseek-chat"
+
     api_key   = config.api.get("key", "")
+    base_url  = config.api.get("base_url", "").strip()
     max_steps = config.engine.get("max_steps", 200)
 
-    # 将 API 密钥写入 OpenCode 认证文件（按 provider 提取，如 "deepseek"）
-    if api_key:
-        _AUTH_FILE = Path.home() / ".local" / "share" / "opencode" / "auth.json"
-        _AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            auth = json.loads(_AUTH_FILE.read_text(encoding="utf-8")) if _AUTH_FILE.exists() else {}
-        except json.JSONDecodeError:
-            auth = {}
-        provider_id = model.split("/")[0] if "/" in model else model
-        auth[provider_id] = {"type": "api", "key": api_key}
-        _AUTH_FILE.write_text(json.dumps(auth, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"[配置] 已写入 API 密钥到 {_AUTH_FILE}（provider: {provider_id}）")
+    if not api_key:
+        print("[错误] config.toml [api].key 未配置，请填写 DeepSeek API Key。",
+              file=sys.stderr)
+        sys.exit(1)
+
+    # 将 API 密钥写入 OpenCode 认证文件
+    _AUTH_FILE = Path.home() / ".local" / "share" / "opencode" / "auth.json"
+    _AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        auth = json.loads(_AUTH_FILE.read_text(encoding="utf-8")) if _AUTH_FILE.exists() else {}
+    except json.JSONDecodeError:
+        auth = {}
+    auth[PROVIDER_ID] = {"type": "api", "key": api_key}
+    _AUTH_FILE.write_text(json.dumps(auth, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[配置] 已写入 API 密钥到 {_AUTH_FILE}（provider: {PROVIDER_ID}）")
 
     system_prompt = _build_static_prompt()
     print(f"[配置] 静态系统提示词长度：{len(system_prompt)} 字符")
 
     agent_entry = {
-        "model":  model,
+        "model":  MODEL,
         "system": system_prompt,
         "permission": {
             "bash":  {"type": "deny"},
@@ -150,7 +159,20 @@ def setup() -> None:
 
     # 更新我们的 agent 和 MCP 条目（model 始终更新，不覆盖其他用户配置）
     existing.setdefault("$schema", "https://opencode.ai/config.json")
-    existing["model"] = model                                          # 始终更新
+    existing["model"] = MODEL                                          # 始终更新
+
+    # 若用户配置了自定义 base_url（非 DeepSeek 官方），写入 provider 覆盖，
+    # 这样 OpenCode 会用配置的 URL 发请求；官方地址则不需要覆盖。
+    if base_url and "api.deepseek.com" not in base_url:
+        existing.setdefault("provider", {})[PROVIDER_ID] = {
+            "options": {"baseURL": base_url},
+        }
+        print(f"[配置] 写入自定义 base_url 覆盖：{base_url}")
+    elif base_url:
+        # 即使是官方地址也写入一份，确保 OpenCode 使用用户期望的版本路径
+        existing.setdefault("provider", {})[PROVIDER_ID] = {
+            "options": {"baseURL": base_url},
+        }
 
     existing.setdefault("agent", {})["os-kernel-analyzer"] = agent_entry
 
@@ -162,7 +184,7 @@ def setup() -> None:
         agent_name = SESSION_AGENT_NAMES[session_type]
         prompt = _build_session_prompt(session_type)
         existing["agent"][agent_name] = {
-            "model": model,
+            "model": MODEL,
             "system": prompt,
             "permission": {
                 "bash":  {"type": "deny"},
