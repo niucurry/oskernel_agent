@@ -465,7 +465,7 @@ async def _handle_initialize(arguments: dict) -> list[types.TextContent]:
         predicted_info = _predict_engine_info(profile)
         engine         = _LazyEngine(str(repo_path), profile, level2_idx, predicted_info)
         ref_db         = ReferenceOSDatabase(
-            _config.data.get("reference_db_dir", "data/reference_db")
+            _config.data.get("reference_db_dir", "reference_db")
         )
         ctx            = OSKernelMCPTools(
             str(repo_path), engine, level2_idx, profile, structure, ref_db

@@ -1,0 +1,2322 @@
+{
+  "initlog": {
+    "body_normalized": "void initlog(int dev, struct superblock *sb) { if (sizeof(struct logheader) >= BSIZE) panic(\"STR\"); initlock(&log.lock, \"STR\"); log.start = sb->logstart; log.dev = dev; recover_from_log(); }",
+    "body_hash": "f3940f42b00c5a64dd04e449c4b12547",
+    "calls": [
+      "recover_from_log",
+      "panic",
+      "initlock"
+    ],
+    "file": "log.c",
+    "line_count": 11
+  },
+  "install_trans": {
+    "body_normalized": "static void install_trans(int recovering) { int tail; for (tail = 0; tail < log.lh.n; tail++) { if(recovering) { printf(\"STR\", tail, log.lh.block[tail]); } struct buf *lbuf = bread(log.dev, log.start+tail+1); struct buf *dbuf = bread(log.dev, log.lh.block[tail]); memmove(dbuf->data, lbuf->data, BSIZE); bwrite(dbuf); if(recovering == 0) bunpin(dbuf); brelse(lbuf); brelse(dbuf); } }",
+    "body_hash": "d017af968143d16d45056de57b9901bd",
+    "calls": [
+      "memmove",
+      "bread",
+      "brelse",
+      "bwrite",
+      "printf",
+      "bunpin"
+    ],
+    "file": "log.c",
+    "line_count": 19
+  },
+  "read_head": {
+    "body_normalized": "static void read_head(void) { struct buf *buf = bread(log.dev, log.start); struct logheader *lh = (struct logheader *) (buf->data); int i; log.lh.n = lh->n; for (i = 0; i < log.lh.n; i++) { log.lh.block[i] = lh->block[i]; } brelse(buf); }",
+    "body_hash": "f31fb87ca2620ddcc6bf5951cbb8ebf1",
+    "calls": [
+      "bread",
+      "brelse"
+    ],
+    "file": "log.c",
+    "line_count": 12
+  },
+  "write_head": {
+    "body_normalized": "static void write_head(void) { struct buf *buf = bread(log.dev, log.start); struct logheader *hb = (struct logheader *) (buf->data); int i; hb->n = log.lh.n; for (i = 0; i < log.lh.n; i++) { hb->block[i] = log.lh.block[i]; } bwrite(buf); brelse(buf); }",
+    "body_hash": "a76109ef7b598413592e8a7d1cda9bff",
+    "calls": [
+      "bread",
+      "bwrite",
+      "brelse"
+    ],
+    "file": "log.c",
+    "line_count": 13
+  },
+  "recover_from_log": {
+    "body_normalized": "static void recover_from_log(void) { read_head(); install_trans(1); log.lh.n = 0; write_head(); }",
+    "body_hash": "6ff4af42d7aca2f675cd78ea7f98d894",
+    "calls": [
+      "write_head",
+      "install_trans",
+      "read_head"
+    ],
+    "file": "log.c",
+    "line_count": 8
+  },
+  "begin_op": {
+    "body_normalized": "void begin_op(void) { acquire(&log.lock); while(1){ if(log.committing){ sleep(&log, &log.lock); } else if(log.lh.n + (log.outstanding+1)*MAXOPBLOCKS > LOGBLOCKS){ sleep(&log, &log.lock); } else { log.outstanding += 1; release(&log.lock); break; } } }",
+    "body_hash": "d753dc7db0f86d1165c1d8d1a6faea0d",
+    "calls": [
+      "release",
+      "acquire",
+      "sleep"
+    ],
+    "file": "log.c",
+    "line_count": 17
+  },
+  "end_op": {
+    "body_normalized": "void end_op(void) { int do_commit = 0; acquire(&log.lock); log.outstanding -= 1; if(log.committing) panic(\"STR\"); if(log.outstanding == 0){ do_commit = 1; log.committing = 1; } else { wakeup(&log); } release(&log.lock); if(do_commit){ commit(); acquire(&log.lock); log.committing = 0; wakeup(&log); release(&log.lock); } }",
+    "body_hash": "56db35909778c6b0d4b05b564f177a4a",
+    "calls": [
+      "panic",
+      "wakeup",
+      "commit",
+      "release",
+      "acquire"
+    ],
+    "file": "log.c",
+    "line_count": 30
+  },
+  "write_log": {
+    "body_normalized": "static void write_log(void) { int tail; for (tail = 0; tail < log.lh.n; tail++) { struct buf *to = bread(log.dev, log.start+tail+1); struct buf *from = bread(log.dev, log.lh.block[tail]); memmove(to->data, from->data, BSIZE); bwrite(to); brelse(from); brelse(to); } }",
+    "body_hash": "e29c39a1f68f21bbe1e35bca5f10687b",
+    "calls": [
+      "memmove",
+      "bread",
+      "bwrite",
+      "brelse"
+    ],
+    "file": "log.c",
+    "line_count": 14
+  },
+  "commit": {
+    "body_normalized": "static void commit() { if (log.lh.n > 0) { write_log(); write_head(); install_trans(0); log.lh.n = 0; write_head(); } }",
+    "body_hash": "6b21c93170016283b83760b45065e008",
+    "calls": [
+      "write_head",
+      "write_log",
+      "install_trans"
+    ],
+    "file": "log.c",
+    "line_count": 11
+  },
+  "log_write": {
+    "body_normalized": "void log_write(struct buf *b) { int i; acquire(&log.lock); if (log.lh.n >= LOGBLOCKS) panic(\"STR\"); if (log.outstanding < 1) panic(\"STR\"); for (i = 0; i < log.lh.n; i++) { if (log.lh.block[i] == b->blockno) break; } log.lh.block[i] = b->blockno; if (i == log.lh.n) { bpin(b); log.lh.n++; } release(&log.lock); }",
+    "body_hash": "fda37d61b624c7e74d816c7e6ce7b6a7",
+    "calls": [
+      "bpin",
+      "panic",
+      "release",
+      "acquire"
+    ],
+    "file": "log.c",
+    "line_count": 22
+  },
+  "fetchaddr": {
+    "body_normalized": "int fetchaddr(uint64 addr, uint64 *ip) { struct proc *p = myproc(); if(addr >= p->sz || addr+sizeof(uint64) > p->sz) return -1; if(copyin(p->pagetable, (char *)ip, addr, sizeof(*ip)) != 0) return -1; return 0; }",
+    "body_hash": "e6f590fc6344efc57814bbf924801163",
+    "calls": [
+      "myproc",
+      "copyin"
+    ],
+    "file": "syscall.c",
+    "line_count": 10
+  },
+  "fetchstr": {
+    "body_normalized": "int fetchstr(uint64 addr, char *buf, int max) { struct proc *p = myproc(); if(copyinstr(p->pagetable, buf, addr, max) < 0) return -1; return strlen(buf); }",
+    "body_hash": "00d7df7507bc2ca62f17345e834cfd75",
+    "calls": [
+      "copyinstr",
+      "myproc",
+      "strlen"
+    ],
+    "file": "syscall.c",
+    "line_count": 8
+  },
+  "argraw": {
+    "body_normalized": "static uint64 argraw(int n) { struct proc *p = myproc(); switch (n) { case 0: return p->trapframe->a0; case 1: return p->trapframe->a1; case NUM: return p->trapframe->a2; case NUM: return p->trapframe->a3; case NUM: return p->trapframe->a4; case NUM: return p->trapframe->a5; } panic(\"STR\"); return -1; }",
+    "body_hash": "83e37759f21c6c4308ec22b510878d95",
+    "calls": [
+      "myproc",
+      "panic"
+    ],
+    "file": "syscall.c",
+    "line_count": 21
+  },
+  "argint": {
+    "body_normalized": "void argint(int n, int *ip) { *ip = argraw(n); }",
+    "body_hash": "6a0d6f945a93bda19cc7b85d2a312a3d",
+    "calls": [
+      "argraw"
+    ],
+    "file": "syscall.c",
+    "line_count": 5
+  },
+  "argaddr": {
+    "body_normalized": "void argaddr(int n, uint64 *ip) { *ip = argraw(n); }",
+    "body_hash": "9a92656bf3e99633f45055a4409f42bb",
+    "calls": [
+      "argraw"
+    ],
+    "file": "syscall.c",
+    "line_count": 5
+  },
+  "argstr": {
+    "body_normalized": "int argstr(int n, char *buf, int max) { uint64 addr; argaddr(n, &addr); return fetchstr(addr, buf, max); }",
+    "body_hash": "e0611071b4833cde4585dd94dbae42a3",
+    "calls": [
+      "argaddr",
+      "fetchstr"
+    ],
+    "file": "syscall.c",
+    "line_count": 7
+  },
+  "syscall": {
+    "body_normalized": "void syscall(void) { int num; struct proc *p = myproc(); num = p->trapframe->a7; if(num > 0 && num < NELEM(syscalls) && syscalls[num]) { p->trapframe->a0 = syscalls[num](); } else { printf(\"STR\", p->pid, p->name, num); p->trapframe->a0 = -1; } }",
+    "body_hash": "96f85f56c57c1cbcce1f6d2c61a907e4",
+    "calls": [
+      "myproc",
+      "syscalls[num]",
+      "printf",
+      "NELEM"
+    ],
+    "file": "syscall.c",
+    "line_count": 17
+  },
+  "main": {
+    "body_normalized": "void main() { if(cpuid() == 0){ consoleinit(); printfinit(); printf(\"STR\"); printf(\"STR\"); printf(\"STR\"); kinit(); kvminit(); kvminithart(); procinit(); trapinit(); trapinithart(); plicinit(); plicinithart(); binit(); iinit(); fileinit(); virtio_disk_init(); userinit(); __atomic_thread_fence(__ATOMIC_SEQ_CST); started = 1; } else { while(started == 0) ; __atomic_thread_fence(__ATOMIC_SEQ_CST); printf(\"STR\", cpuid()); kvminithart(); trapinithart(); plicinithart(); } scheduler(); }",
+    "body_hash": "fa136deeb358792e0afc770c54784bfe",
+    "calls": [
+      "trapinithart",
+      "printfinit",
+      "kinit",
+      "procinit",
+      "consoleinit",
+      "iinit",
+      "scheduler",
+      "cpuid",
+      "userinit",
+      "plicinithart",
+      "fileinit",
+      "kvminit",
+      "plicinit",
+      "__atomic_thread_fence",
+      "binit",
+      "trapinit",
+      "virtio_disk_init",
+      "printf",
+      "kvminithart"
+    ],
+    "file": "main.c",
+    "line_count": 36
+  },
+  "trapinit": {
+    "body_normalized": "void trapinit(void) { initlock(&tickslock, \"STR\"); }",
+    "body_hash": "ffb359cd245ce9f4ab1d469ebcf5a636",
+    "calls": [
+      "initlock"
+    ],
+    "file": "trap.c",
+    "line_count": 5
+  },
+  "trapinithart": {
+    "body_normalized": "void trapinithart(void) { w_stvec((uint64)kernelvec); }",
+    "body_hash": "3494f148172a7f2ba3eaf59329214fea",
+    "calls": [
+      "w_stvec"
+    ],
+    "file": "trap.c",
+    "line_count": 5
+  },
+  "usertrap": {
+    "body_normalized": "uint64 usertrap(void) { int which_dev = 0; if((r_sstatus() & SSTATUS_SPP) != 0) panic(\"STR\"); w_stvec((uint64)kernelvec); struct proc *p = myproc(); p->trapframe->epc = r_sepc(); if(r_scause() == NUM){ if(killed(p)) kexit(-1); p->trapframe->epc += NUM; intr_on(); syscall(); } else if((which_dev = devintr()) != 0){ } else if((r_scause() == NUM || r_scause() == NUM) && vmfault(p->pagetable, r_stval(), (r_scause() == NUM)? 1 : 0) != 0) { } else { printf(\"STR\", r_scause(), p->pid); printf(\"STR\", r_sepc(), r_stval()); setkilled(p); } if(killed(p)) kexit(-1); if(which_dev == NUM) yield(); prepare_return(); uint64 satp = MAKE_SATP(p->pagetable); return satp; }",
+    "body_hash": "1450039063cf5e7b1873f531d45303e8",
+    "calls": [
+      "prepare_return",
+      "panic",
+      "w_stvec",
+      "devintr",
+      "intr_on",
+      "r_scause",
+      "r_sstatus",
+      "myproc",
+      "killed",
+      "syscall",
+      "r_stval",
+      "kexit",
+      "printf",
+      "setkilled",
+      "MAKE_SATP",
+      "vmfault",
+      "yield",
+      "r_sepc"
+    ],
+    "file": "trap.c",
+    "line_count": 58
+  },
+  "prepare_return": {
+    "body_normalized": "void prepare_return(void) { struct proc *p = myproc(); intr_off(); uint64 trampoline_uservec = TRAMPOLINE + (uservec - trampoline); w_stvec(trampoline_uservec); p->trapframe->kernel_satp = r_satp(); p->trapframe->kernel_sp = p->kstack + PGSIZE; p->trapframe->kernel_trap = (uint64)usertrap; p->trapframe->kernel_hartid = r_tp(); unsigned long x = r_sstatus(); x &= ~SSTATUS_SPP; x |= SSTATUS_SPIE; w_sstatus(x); w_sepc(p->trapframe->epc); }",
+    "body_hash": "d81daa77a24406683bf520eb9150d1d8",
+    "calls": [
+      "w_stvec",
+      "w_sstatus",
+      "intr_off",
+      "r_satp",
+      "r_tp",
+      "r_sstatus",
+      "myproc",
+      "w_sepc"
+    ],
+    "file": "trap.c",
+    "line_count": 33
+  },
+  "kerneltrap": {
+    "body_normalized": "void kerneltrap() { int which_dev = 0; uint64 sepc = r_sepc(); uint64 sstatus = r_sstatus(); uint64 scause = r_scause(); if((sstatus & SSTATUS_SPP) == 0) panic(\"STR\"); if(intr_get() != 0) panic(\"STR\"); if((which_dev = devintr()) == 0){ printf(\"STR\", scause, r_sepc(), r_stval()); panic(\"STR\"); } if(which_dev == NUM && myproc() != 0) yield(); w_sepc(sepc); w_sstatus(sstatus); }",
+    "body_hash": "bfa4140dd3daec83bc2754f43fc4924c",
+    "calls": [
+      "panic",
+      "w_sstatus",
+      "devintr",
+      "r_scause",
+      "r_sstatus",
+      "r_sepc",
+      "printf",
+      "myproc",
+      "r_stval",
+      "yield",
+      "w_sepc",
+      "intr_get"
+    ],
+    "file": "trap.c",
+    "line_count": 28
+  },
+  "clockintr": {
+    "body_normalized": "void clockintr() { if(cpuid() == 0){ acquire(&tickslock); ticks++; wakeup(&ticks); release(&tickslock); } w_stimecmp(r_time() + NUM); }",
+    "body_hash": "1c8424cff8f732de028bb2a92962f644",
+    "calls": [
+      "cpuid",
+      "w_stimecmp",
+      "wakeup",
+      "r_time",
+      "release",
+      "acquire"
+    ],
+    "file": "trap.c",
+    "line_count": 15
+  },
+  "devintr": {
+    "body_normalized": "int devintr() { uint64 scause = r_scause(); if(scause == 0x8000000000000009L){ int irq = plic_claim(); if(irq == UART0_IRQ){ uartintr(); } else if(irq == VIRTIO0_IRQ){ virtio_disk_intr(); } else if(irq){ printf(\"STR\", irq); } if(irq) plic_complete(irq); return 1; } else if(scause == 0x8000000000000005L){ clockintr(); return NUM; } else { return 0; } }",
+    "body_hash": "2e5ddd6348e49c58b61b18e5d213b964",
+    "calls": [
+      "virtio_disk_intr",
+      "plic_complete",
+      "uartintr",
+      "clockintr",
+      "r_scause",
+      "printf",
+      "plic_claim"
+    ],
+    "file": "trap.c",
+    "line_count": 34
+  },
+  "virtio_disk_init": {
+    "body_normalized": "void virtio_disk_init(void) { uint32 status = 0; initlock(&disk.vdisk_lock, \"STR\"); if(*R(VIRTIO_MMIO_MAGIC_VALUE) != 0x74726976 || *R(VIRTIO_MMIO_VERSION) != NUM || *R(VIRTIO_MMIO_DEVICE_ID) != NUM || *R(VIRTIO_MMIO_VENDOR_ID) != 0x554d4551){ panic(\"STR\"); } *R(VIRTIO_MMIO_STATUS) = status; status |= VIRTIO_CONFIG_S_ACKNOWLEDGE; *R(VIRTIO_MMIO_STATUS) = status; status |= VIRTIO_CONFIG_S_DRIVER; *R(VIRTIO_MMIO_STATUS) = status; uint64 features = *R(VIRTIO_MMIO_DEVICE_FEATURES); features &= ~(1 << VIRTIO_BLK_F_RO); features &= ~(1 << VIRTIO_BLK_F_SCSI); features &= ~(1 << VIRTIO_BLK_F_CONFIG_WCE); features &= ~(1 << VIRTIO_BLK_F_MQ); features &= ~(1 << VIRTIO_F_ANY_LAYOUT); features &= ~(1 << VIRTIO_RING_F_EVENT_IDX); features &= ~(1 << VIRTIO_RING_F_INDIRECT_DESC); *R(VIRTIO_MMIO_DRIVER_FEATURES) = features; status |= VIRTIO_CONFIG_S_FEATURES_OK; *R(VIRTIO_MMIO_STATUS) = status; status = *R(VIRTIO_MMIO_STATUS); if(!(status & VIRTIO_CONFIG_S_FEATURES_OK)) panic(\"STR\"); *R(VIRTIO_MMIO_QUEUE_SEL) = 0; if(*R(VIRTIO_MMIO_QUEUE_READY)) panic(\"STR\"); uint32 max = *R(VIRTIO_MMIO_QUEUE_NUM_MAX); if(max == 0) panic(\"STR\"); if(max < NUM) panic(\"STR\"); disk.desc = kalloc(); disk.avail = kalloc(); disk.used = kalloc(); if(!disk.desc || !disk.avail || !disk.used) panic(\"STR\"); memset(disk.desc, 0, PGSIZE); memset(disk.avail, 0, PGSIZE); memset(disk.used, 0, PGSIZE); *R(VIRTIO_MMIO_QUEUE_NUM) = NUM; *R(VIRTIO_MMIO_QUEUE_DESC_LOW) = (uint64)disk.desc; *R(VIRTIO_MMIO_QUEUE_DESC_HIGH) = (uint64)disk.desc >> NUM; *R(VIRTIO_MMIO_DRIVER_DESC_LOW) = (uint64)disk.avail; *R(VIRTIO_MMIO_DRIVER_DESC_HIGH) = (uint64)disk.avail >> NUM; *R(VIRTIO_MMIO_DEVICE_DESC_LOW) = (uint64)disk.used; *R(VIRTIO_MMIO_DEVICE_DESC_HIGH) = (uint64)disk.used >> NUM; *R(VIRTIO_MMIO_QUEUE_READY) = 0x1; for(int i = 0; i < NUM; i++) disk.free[i] = 1; status |= VIRTIO_CONFIG_S_DRIVER_OK; *R(VIRTIO_MMIO_STATUS) = status; }",
+    "body_hash": "04111c8072d0ce94f0b20d3bd3bc1457",
+    "calls": [
+      "kalloc",
+      "panic",
+      "initlock",
+      "R",
+      "memset"
+    ],
+    "file": "virtio_disk.c",
+    "line_count": 93
+  },
+  "alloc_desc": {
+    "body_normalized": "static int alloc_desc() { for(int i = 0; i < NUM; i++){ if(disk.free[i]){ disk.free[i] = 0; return i; } } return -1; }",
+    "body_hash": "1477f7376b76ee6447362c99796c8316",
+    "calls": [],
+    "file": "virtio_disk.c",
+    "line_count": 11
+  },
+  "free_desc": {
+    "body_normalized": "static void free_desc(int i) { if(i >= NUM) panic(\"STR\"); if(disk.free[i]) panic(\"STR\"); disk.desc[i].addr = 0; disk.desc[i].len = 0; disk.desc[i].flags = 0; disk.desc[i].next = 0; disk.free[i] = 1; wakeup(&disk.free[0]); }",
+    "body_hash": "f9e36f8aae066041557c60fc796f76e2",
+    "calls": [
+      "wakeup",
+      "panic"
+    ],
+    "file": "virtio_disk.c",
+    "line_count": 14
+  },
+  "free_chain": {
+    "body_normalized": "static void free_chain(int i) { while(1){ int flag = disk.desc[i].flags; int nxt = disk.desc[i].next; free_desc(i); if(flag & VRING_DESC_F_NEXT) i = nxt; else break; } }",
+    "body_hash": "2dd9dade22a22ebb952d50c1cdad213d",
+    "calls": [
+      "free_desc"
+    ],
+    "file": "virtio_disk.c",
+    "line_count": 13
+  },
+  "alloc3_desc": {
+    "body_normalized": "static int alloc3_desc(int *idx) { for(int i = 0; i < NUM; i++){ idx[i] = alloc_desc(); if(idx[i] < 0){ for(int j = 0; j < i; j++) free_desc(idx[j]); return -1; } } return 0; }",
+    "body_hash": "9f41b4448dc08371b9ea2589cfe1f875",
+    "calls": [
+      "free_desc",
+      "alloc_desc"
+    ],
+    "file": "virtio_disk.c",
+    "line_count": 13
+  },
+  "virtio_disk_rw": {
+    "body_normalized": "void virtio_disk_rw(struct buf *b, int write) { uint64 sector = b->blockno * (BSIZE / NUM); acquire(&disk.vdisk_lock); int idx[NUM]; while(1){ if(alloc3_desc(idx) == 0) { break; } sleep(&disk.free[0], &disk.vdisk_lock); } struct virtio_blk_req *buf0 = &disk.ops[idx[0]]; if(write) buf0->type = VIRTIO_BLK_T_OUT; else buf0->type = VIRTIO_BLK_T_IN; buf0->reserved = 0; buf0->sector = sector; disk.desc[idx[0]].addr = (uint64) buf0; disk.desc[idx[0]].len = sizeof(struct virtio_blk_req); disk.desc[idx[0]].flags = VRING_DESC_F_NEXT; disk.desc[idx[0]].next = idx[1]; disk.desc[idx[1]].addr = (uint64) b->data; disk.desc[idx[1]].len = BSIZE; if(write) disk.desc[idx[1]].flags = 0; else disk.desc[idx[1]].flags = VRING_DESC_F_WRITE; disk.desc[idx[1]].flags |= VRING_DESC_F_NEXT; disk.desc[idx[1]].next = idx[NUM]; disk.info[idx[0]].status = 0xff; disk.desc[idx[NUM]].addr = (uint64) &disk.info[idx[0]].status; disk.desc[idx[NUM]].len = 1; disk.desc[idx[NUM]].flags = VRING_DESC_F_WRITE; disk.desc[idx[NUM]].next = 0; b->disk = 1; disk.info[idx[0]].b = b; disk.avail->ring[disk.avail->idx % NUM] = idx[0]; __atomic_thread_fence(__ATOMIC_SEQ_CST); disk.avail->idx += 1; __atomic_thread_fence(__ATOMIC_SEQ_CST); *R(VIRTIO_MMIO_QUEUE_NOTIFY) = 0; while(b->disk == 1) { sleep(b, &disk.vdisk_lock); } disk.info[idx[0]].b = 0; free_chain(idx[0]); release(&disk.vdisk_lock); }",
+    "body_hash": "ca83e30964b70697a12cada7e626fd2e",
+    "calls": [
+      "free_chain",
+      "sleep",
+      "alloc3_desc",
+      "R",
+      "__atomic_thread_fence",
+      "release",
+      "acquire"
+    ],
+    "file": "virtio_disk.c",
+    "line_count": 78
+  },
+  "virtio_disk_intr": {
+    "body_normalized": "void virtio_disk_intr() { acquire(&disk.vdisk_lock); *R(VIRTIO_MMIO_INTERRUPT_ACK) = *R(VIRTIO_MMIO_INTERRUPT_STATUS) & 0x3; __atomic_thread_fence(__ATOMIC_SEQ_CST); while(disk.used_idx != disk.used->idx){ __atomic_thread_fence(__ATOMIC_SEQ_CST); int id = disk.used->ring[disk.used_idx % NUM].id; if(disk.info[id].status != 0) panic(\"STR\"); struct buf *b = disk.info[id].b; b->disk = 0; wakeup(b); disk.used_idx += 1; } release(&disk.vdisk_lock); }",
+    "body_hash": "5180e189a393aeac4670b6e5752d5107",
+    "calls": [
+      "panic",
+      "wakeup",
+      "R",
+      "__atomic_thread_fence",
+      "release",
+      "acquire"
+    ],
+    "file": "virtio_disk.c",
+    "line_count": 34
+  },
+  "consputc": {
+    "body_normalized": "void consputc(int c) { if(c == BACKSPACE){ uartputc_sync('STR'); uartputc_sync('STR'); uartputc_sync('STR'); } else { uartputc_sync(c); } }",
+    "body_hash": "9bb602424338190d6b428bbf023214d2",
+    "calls": [
+      "uartputc_sync"
+    ],
+    "file": "console.c",
+    "line_count": 10
+  },
+  "consolewrite": {
+    "body_normalized": "int consolewrite(int user_src, uint64 src, int n) { char buf[NUM]; int i = 0; while(i < n){ int nn = sizeof(buf); if(nn > n - i) nn = n - i; if(either_copyin(buf, user_src, src+i, nn) == -1) break; uartwrite(buf, nn); i += nn; } return i; }",
+    "body_hash": "341e55a765c289dfd2cfcfee0d3f1f26",
+    "calls": [
+      "either_copyin",
+      "uartwrite"
+    ],
+    "file": "console.c",
+    "line_count": 18
+  },
+  "consoleread": {
+    "body_normalized": "int consoleread(int user_dst, uint64 dst, int n) { uint target; int c; char cbuf; target = n; acquire(&cons.lock); while(n > 0){ while(cons.r == cons.w){ if(killed(myproc())){ release(&cons.lock); return -1; } sleep(&cons.r, &cons.lock); } c = cons.buf[cons.r++ % INPUT_BUF_SIZE]; if(c == C('STR')){ if(n < target){ cons.r--; } break; } cbuf = c; if(either_copyout(user_dst, dst, &cbuf, 1) == -1) break; dst++; --n; if(c == 'STR'){ break; } } release(&cons.lock); return target - n; }",
+    "body_hash": "458398c2dc3905c180a143dd66e77c95",
+    "calls": [
+      "either_copyout",
+      "sleep",
+      "myproc",
+      "killed",
+      "C",
+      "release",
+      "acquire"
+    ],
+    "file": "console.c",
+    "line_count": 49
+  },
+  "consoleintr": {
+    "body_normalized": "void consoleintr(int c) { acquire(&cons.lock); switch(c){ case C('STR'): procdump(); break; case C('STR'): while(cons.e != cons.w && cons.buf[(cons.e-1) % INPUT_BUF_SIZE] != 'STR'){ cons.e--; consputc(BACKSPACE); } break; case C('STR'): case 'STR': if(cons.e != cons.w){ cons.e--; consputc(BACKSPACE); } break; default: if(c != 0 && cons.e-cons.r < INPUT_BUF_SIZE){ c = (c == 'STR') ? 'STR' : c; consputc(c); cons.buf[cons.e++ % INPUT_BUF_SIZE] = c; if(c == 'STR' || c == C('STR') || cons.e-cons.r == INPUT_BUF_SIZE){ cons.w = cons.e; wakeup(&cons.r); } } break; } release(&cons.lock); }",
+    "body_hash": "7e079bee1742d53359c415de252bd28f",
+    "calls": [
+      "consputc",
+      "wakeup",
+      "procdump",
+      "C",
+      "release",
+      "acquire"
+    ],
+    "file": "console.c",
+    "line_count": 45
+  },
+  "consoleinit": {
+    "body_normalized": "void consoleinit(void) { initlock(&cons.lock, \"STR\"); uartinit(); devsw[CONSOLE].read = consoleread; devsw[CONSOLE].write = consolewrite; }",
+    "body_hash": "175901136a3a933ef533f55ceb28a8b0",
+    "calls": [
+      "uartinit",
+      "initlock"
+    ],
+    "file": "console.c",
+    "line_count": 12
+  },
+  "flags2perm": {
+    "body_normalized": "int flags2perm(int flags) { int perm = 0; if(flags & 0x1) perm = PTE_X; if(flags & 0x2) perm |= PTE_W; return perm; }",
+    "body_hash": "4bc9f1e5df2e621b2489e36b65366e40",
+    "calls": [],
+    "file": "exec.c",
+    "line_count": 9
+  },
+  "kexec": {
+    "body_normalized": "int kexec(char *path, char **argv) { char *s, *last; int i, off; uint64 argc, sz = 0, sp, ustack[MAXARG], stackbase; struct elfhdr elf; struct inode *ip; struct proghdr ph; pagetable_t pagetable = 0, oldpagetable; struct proc *p = myproc(); begin_op(); if((ip = namei(path)) == 0){ end_op(); return -1; } ilock(ip); if(readi(ip, 0, (uint64)&elf, 0, sizeof(elf)) != sizeof(elf)) goto bad; if(elf.magic != ELF_MAGIC) goto bad; if((pagetable = proc_pagetable(p)) == 0) goto bad; for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){ if(readi(ip, 0, (uint64)&ph, off, sizeof(ph)) != sizeof(ph)) goto bad; if(ph.type != ELF_PROG_LOAD) continue; if(ph.memsz < ph.filesz) goto bad; if(ph.vaddr + ph.memsz < ph.vaddr) goto bad; if(ph.vaddr % PGSIZE != 0) goto bad; uint64 sz1; if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz, flags2perm(ph.flags))) == 0) goto bad; sz = sz1; if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0) goto bad; } iunlockput(ip); end_op(); ip = 0; p = myproc(); uint64 oldsz = p->sz; sz = PGROUNDUP(sz); uint64 sz1; if((sz1 = uvmalloc(pagetable, sz, sz + (USERSTACK+1)*PGSIZE, PTE_W)) == 0) goto bad; sz = sz1; uvmclear(pagetable, sz-(USERSTACK+1)*PGSIZE); sp = sz; stackbase = sp - USERSTACK*PGSIZE; for(argc = 0; argv[argc]; argc++) { if(argc >= MAXARG) goto bad; sp -= strlen(argv[argc]) + 1; sp -= sp % NUM; if(sp < stackbase) goto bad; if(copyout(pagetable, sp, argv[argc], strlen(argv[argc]) + 1) < 0) goto bad; ustack[argc] = sp; } ustack[argc] = 0; sp -= (argc+1) * sizeof(uint64); sp -= sp % NUM; if(sp < stackbase) goto bad; if(copyout(pagetable, sp, (char *)ustack, (argc+1)*sizeof(uint64)) < 0) goto bad; p->trapframe->a1 = sp; for(last=s=path; *s; s++) if(*s == 'STR') last = s+1; safestrcpy(p->name, last, sizeof(p->name)); oldpagetable = p->pagetable; p->pagetable = pagetable; p->sz = sz; p->trapframe->epc = elf.entry; p->trapframe->sp = sp; proc_freepagetable(oldpagetable, oldsz); return argc; bad: if(pagetable) proc_freepagetable(pagetable, sz); if(ip){ iunlockput(ip); end_op(); } return -1; }",
+    "body_hash": "c9107b34615452de65e395137346eb1c",
+    "calls": [
+      "readi",
+      "uvmclear",
+      "flags2perm",
+      "PGROUNDUP",
+      "safestrcpy",
+      "ilock",
+      "copyout",
+      "proc_freepagetable",
+      "myproc",
+      "iunlockput",
+      "end_op",
+      "namei",
+      "proc_pagetable",
+      "strlen",
+      "uvmalloc",
+      "begin_op",
+      "loadseg"
+    ],
+    "file": "exec.c",
+    "line_count": 123
+  },
+  "loadseg": {
+    "body_normalized": "static int loadseg(pagetable_t pagetable, uint64 va, struct inode *ip, uint offset, uint sz) { uint i, n; uint64 pa; for(i = 0; i < sz; i += PGSIZE){ pa = walkaddr(pagetable, va + i); if(pa == 0) panic(\"STR\"); if(sz - i < PGSIZE) n = sz - i; else n = PGSIZE; if(readi(ip, 0, (uint64)pa, offset+i, n) != n) return -1; } return 0; }",
+    "body_hash": "0170617327f8a477e7d2c55ff6f730e4",
+    "calls": [
+      "readi",
+      "walkaddr",
+      "panic"
+    ],
+    "file": "exec.c",
+    "line_count": 20
+  },
+  "pipealloc": {
+    "body_normalized": "int pipealloc(struct file **f0, struct file **f1) { struct pipe *pi; pi = 0; *f0 = *f1 = 0; if((*f0 = filealloc()) == 0 || (*f1 = filealloc()) == 0) goto bad; if((pi = (struct pipe*)kalloc()) == 0) goto bad; pi->readopen = 1; pi->writeopen = 1; pi->nwrite = 0; pi->nread = 0; initlock(&pi->lock, \"STR\"); (*f0)->type = FD_PIPE; (*f0)->readable = 1; (*f0)->writable = 0; (*f0)->pipe = pi; (*f1)->type = FD_PIPE; (*f1)->readable = 0; (*f1)->writable = 1; (*f1)->pipe = pi; return 0; bad: if(pi) kfree((char*)pi); if(*f0) fileclose(*f0); if(*f1) fileclose(*f1); return -1; }",
+    "body_hash": "6d5e58c011cf45fc4db23fdc8f4743f7",
+    "calls": [
+      "kalloc",
+      "fileclose",
+      "initlock",
+      "filealloc",
+      "kfree"
+    ],
+    "file": "pipe.c",
+    "line_count": 35
+  },
+  "pipeclose": {
+    "body_normalized": "void pipeclose(struct pipe *pi, int writable) { acquire(&pi->lock); if(writable){ pi->writeopen = 0; wakeup(&pi->nread); } else { pi->readopen = 0; wakeup(&pi->nwrite); } if(pi->readopen == 0 && pi->writeopen == 0){ release(&pi->lock); kfree((char*)pi); } else release(&pi->lock); }",
+    "body_hash": "2d30eab78706a0a922ca3eea8f4173f9",
+    "calls": [
+      "wakeup",
+      "kfree",
+      "release",
+      "acquire"
+    ],
+    "file": "pipe.c",
+    "line_count": 17
+  },
+  "pipewrite": {
+    "body_normalized": "int pipewrite(struct pipe *pi, uint64 addr, int n) { int i = 0; struct proc *pr = myproc(); acquire(&pi->lock); while(i < n){ if(pi->readopen == 0 || killed(pr)){ release(&pi->lock); return -1; } if(pi->nwrite == pi->nread + PIPESIZE){ wakeup(&pi->nread); sleep(&pi->nwrite, &pi->lock); } else { char ch; if(copyin(pr->pagetable, &ch, addr + i, 1) == -1) break; pi->data[pi->nwrite++ % PIPESIZE] = ch; i++; } } wakeup(&pi->nread); release(&pi->lock); return i; }",
+    "body_hash": "fd324c6d700a240436b7aef41f8cf8d9",
+    "calls": [
+      "sleep",
+      "myproc",
+      "killed",
+      "copyin",
+      "wakeup",
+      "release",
+      "acquire"
+    ],
+    "file": "pipe.c",
+    "line_count": 28
+  },
+  "piperead": {
+    "body_normalized": "int piperead(struct pipe *pi, uint64 addr, int n) { int i; struct proc *pr = myproc(); char ch; acquire(&pi->lock); while(pi->nread == pi->nwrite && pi->writeopen){ if(killed(pr)){ release(&pi->lock); return -1; } sleep(&pi->nread, &pi->lock); } for(i = 0; i < n; i++){ if(pi->nread == pi->nwrite) break; ch = pi->data[pi->nread % PIPESIZE]; if(copyout(pr->pagetable, addr + i, &ch, 1) == -1) { if(i == 0) i = -1; break; } pi->nread++; } wakeup(&pi->nwrite); release(&pi->lock); return i; }",
+    "body_hash": "a3dad6e7cf00d6b2aee8be97482c7fd6",
+    "calls": [
+      "sleep",
+      "copyout",
+      "myproc",
+      "killed",
+      "wakeup",
+      "release",
+      "acquire"
+    ],
+    "file": "pipe.c",
+    "line_count": 30
+  },
+  "memset": {
+    "body_normalized": "void* memset(void *dst, int c, uint n) { char *cdst = (char *) dst; int i; for(i = 0; i < n; i++){ cdst[i] = c; } return dst; }",
+    "body_hash": "b18215384a0525bad70e169d044a06c2",
+    "calls": [],
+    "file": "string.c",
+    "line_count": 10
+  },
+  "memcmp": {
+    "body_normalized": "int memcmp(const void *v1, const void *v2, uint n) { const uchar *s1, *s2; s1 = v1; s2 = v2; while(n-- > 0){ if(*s1 != *s2) return *s1 - *s2; s1++, s2++; } return 0; }",
+    "body_hash": "d7b9f1c7917a32184e631cc04c2c631d",
+    "calls": [],
+    "file": "string.c",
+    "line_count": 15
+  },
+  "memmove": {
+    "body_normalized": "void* memmove(void *dst, const void *src, uint n) { const char *s; char *d; if(n == 0) return dst; s = src; d = dst; if(s < d && s + n > d){ s += n; d += n; while(n-- > 0) *--d = *--s; } else while(n-- > 0) *d++ = *s++; return dst; }",
+    "body_hash": "0b038a8b6886b7b40e4cce714844e222",
+    "calls": [],
+    "file": "string.c",
+    "line_count": 22
+  },
+  "memcpy": {
+    "body_normalized": "void* memcpy(void *dst, const void *src, uint n) { return memmove(dst, src, n); }",
+    "body_hash": "54fb2c7ede8da00cefd5ec3a0342c786",
+    "calls": [
+      "memmove"
+    ],
+    "file": "string.c",
+    "line_count": 5
+  },
+  "strncmp": {
+    "body_normalized": "int strncmp(const char *p, const char *q, uint n) { while(n > 0 && *p && *p == *q) n--, p++, q++; if(n == 0) return 0; return (uchar)*p - (uchar)*q; }",
+    "body_hash": "daaa5e21c20b3166b7176fc7957c7c9b",
+    "calls": [],
+    "file": "string.c",
+    "line_count": 9
+  },
+  "strncpy": {
+    "body_normalized": "char* strncpy(char *s, const char *t, int n) { char *os; os = s; while(n-- > 0 && (*s++ = *t++) != 0) ; while(n-- > 0) *s++ = 0; return os; }",
+    "body_hash": "c974766baafbba095ffad9232192a49e",
+    "calls": [],
+    "file": "string.c",
+    "line_count": 12
+  },
+  "safestrcpy": {
+    "body_normalized": "char* safestrcpy(char *s, const char *t, int n) { char *os; os = s; if(n <= 0) return os; while(--n > 0 && (*s++ = *t++) != 0) ; *s = 0; return os; }",
+    "body_hash": "7eee3b085b446724f1f6c54c0707d1fb",
+    "calls": [],
+    "file": "string.c",
+    "line_count": 13
+  },
+  "strlen": {
+    "body_normalized": "int strlen(const char *s) { int n; for(n = 0; s[n]; n++) ; return n; }",
+    "body_hash": "fc4615f82cc66aa5501434c0b814a652",
+    "calls": [],
+    "file": "string.c",
+    "line_count": 9
+  },
+  "proc_mapstacks": {
+    "body_normalized": "void proc_mapstacks(pagetable_t kpgtbl) { struct proc *p; for(p = proc; p < &proc[NPROC]; p++) { char *pa = kalloc(); if(pa == 0) panic(\"STR\"); uint64 va = KSTACK((int) (p - proc)); kvmmap(kpgtbl, va, (uint64)pa, PGSIZE, PTE_R | PTE_W); } }",
+    "body_hash": "0f5f0e5082d18e7ca77ed51114c101df",
+    "calls": [
+      "kalloc",
+      "panic",
+      "kvmmap",
+      "KSTACK"
+    ],
+    "file": "proc.c",
+    "line_count": 13
+  },
+  "procinit": {
+    "body_normalized": "void procinit(void) { struct proc *p; initlock(&pid_lock, \"STR\"); initlock(&wait_lock, \"STR\"); for(p = proc; p < &proc[NPROC]; p++) { initlock(&p->lock, \"STR\"); p->state = UNUSED; p->kstack = KSTACK((int) (p - proc)); } }",
+    "body_hash": "0164429e1120cb3e09ee938af52a63c7",
+    "calls": [
+      "KSTACK",
+      "initlock"
+    ],
+    "file": "proc.c",
+    "line_count": 13
+  },
+  "cpuid": {
+    "body_normalized": "int cpuid() { int id = r_tp(); return id; }",
+    "body_hash": "7efe1f32423870ba8c9865223bb12acc",
+    "calls": [
+      "r_tp"
+    ],
+    "file": "proc.c",
+    "line_count": 6
+  },
+  "mycpu": {
+    "body_normalized": "struct cpu* mycpu(void) { int id = cpuid(); struct cpu *c = &cpus[id]; return c; }",
+    "body_hash": "059544d77e479f1e7ccc6094a8624995",
+    "calls": [
+      "cpuid"
+    ],
+    "file": "proc.c",
+    "line_count": 7
+  },
+  "myproc": {
+    "body_normalized": "struct proc* myproc(void) { push_off(); struct cpu *c = mycpu(); struct proc *p = c->proc; pop_off(); return p; }",
+    "body_hash": "a5b2e5ebc0cf1c1f64360ba065a43020",
+    "calls": [
+      "pop_off",
+      "mycpu",
+      "push_off"
+    ],
+    "file": "proc.c",
+    "line_count": 9
+  },
+  "allocpid": {
+    "body_normalized": "int allocpid() { int pid; acquire(&pid_lock); pid = nextpid; nextpid = nextpid + 1; release(&pid_lock); return pid; }",
+    "body_hash": "49df76b3cd9c58ec51bdeb508d02778e",
+    "calls": [
+      "release",
+      "acquire"
+    ],
+    "file": "proc.c",
+    "line_count": 12
+  },
+  "allocproc": {
+    "body_normalized": "static struct proc* allocproc(void) { struct proc *p; for(p = proc; p < &proc[NPROC]; p++) { acquire(&p->lock); if(p->state == UNUSED) { goto found; } else { release(&p->lock); } } return 0; found: p->pid = allocpid(); p->state = USED; if((p->trapframe = (struct trapframe *)kalloc()) == 0){ freeproc(p); release(&p->lock); return 0; } p->pagetable = proc_pagetable(p); if(p->pagetable == 0){ freeproc(p); release(&p->lock); return 0; } memset(&p->context, 0, sizeof(p->context)); p->context.ra = (uint64)forkret; p->context.sp = p->kstack + PGSIZE; return p; }",
+    "body_hash": "683d5e55f9566949955772ab260b29ed",
+    "calls": [
+      "kalloc",
+      "allocpid",
+      "memset",
+      "freeproc",
+      "proc_pagetable",
+      "release",
+      "acquire"
+    ],
+    "file": "proc.c",
+    "line_count": 42
+  },
+  "freeproc": {
+    "body_normalized": "static void freeproc(struct proc *p) { if(p->trapframe) kfree((void*)p->trapframe); p->trapframe = 0; if(p->pagetable) proc_freepagetable(p->pagetable, p->sz); p->pagetable = 0; p->sz = 0; p->pid = 0; p->parent = 0; p->name[0] = 0; p->chan = 0; p->killed = 0; p->xstate = 0; p->state = UNUSED; }",
+    "body_hash": "fedd0238a59a9fe477ab4c3035459a6d",
+    "calls": [
+      "proc_freepagetable",
+      "kfree"
+    ],
+    "file": "proc.c",
+    "line_count": 18
+  },
+  "proc_pagetable": {
+    "body_normalized": "pagetable_t proc_pagetable(struct proc *p) { pagetable_t pagetable; pagetable = uvmcreate(); if(pagetable == 0) return 0; if(mappages(pagetable, TRAMPOLINE, PGSIZE, (uint64)trampoline, PTE_R | PTE_X) < 0){ uvmfree(pagetable, 0); return 0; } if(mappages(pagetable, TRAPFRAME, PGSIZE, (uint64)(p->trapframe), PTE_R | PTE_W) < 0){ uvmunmap(pagetable, TRAMPOLINE, 1, 0); uvmfree(pagetable, 0); return 0; } return pagetable; }",
+    "body_hash": "5d4733fbbc81a0b30a6f950c0ca6be42",
+    "calls": [
+      "uvmcreate",
+      "mappages",
+      "uvmfree",
+      "uvmunmap"
+    ],
+    "file": "proc.c",
+    "line_count": 31
+  },
+  "proc_freepagetable": {
+    "body_normalized": "void proc_freepagetable(pagetable_t pagetable, uint64 sz) { uvmunmap(pagetable, TRAMPOLINE, 1, 0); uvmunmap(pagetable, TRAPFRAME, 1, 0); uvmfree(pagetable, sz); }",
+    "body_hash": "8a777c5b1a844d61d36ac9d017055db9",
+    "calls": [
+      "uvmunmap",
+      "uvmfree"
+    ],
+    "file": "proc.c",
+    "line_count": 7
+  },
+  "userinit": {
+    "body_normalized": "void userinit(void) { struct proc *p; p = allocproc(); initproc = p; p->cwd = namei(\"STR\"); p->state = RUNNABLE; release(&p->lock); }",
+    "body_hash": "49dc53c103d378645c9282bf69ade458",
+    "calls": [
+      "release",
+      "namei",
+      "allocproc"
+    ],
+    "file": "proc.c",
+    "line_count": 14
+  },
+  "growproc": {
+    "body_normalized": "int growproc(int n) { uint64 sz; struct proc *p = myproc(); sz = p->sz; if(n > 0){ if(sz + n > TRAPFRAME) { return -1; } if((sz = uvmalloc(p->pagetable, sz, sz + n, PTE_W)) == 0) { return -1; } } else if(n < 0){ sz = uvmdealloc(p->pagetable, sz, sz + n); } p->sz = sz; return 0; }",
+    "body_hash": "6f07bcd589bf16c643c600dab834e625",
+    "calls": [
+      "uvmalloc",
+      "myproc",
+      "uvmdealloc"
+    ],
+    "file": "proc.c",
+    "line_count": 20
+  },
+  "kfork": {
+    "body_normalized": "int kfork(void) { int i, pid; struct proc *np; struct proc *p = myproc(); if((np = allocproc()) == 0){ return -1; } if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){ freeproc(np); release(&np->lock); return -1; } np->sz = p->sz; *(np->trapframe) = *(p->trapframe); np->trapframe->a0 = 0; for(i = 0; i < NOFILE; i++) if(p->ofile[i]) np->ofile[i] = filedup(p->ofile[i]); np->cwd = idup(p->cwd); safestrcpy(np->name, p->name, sizeof(p->name)); pid = np->pid; release(&np->lock); acquire(&wait_lock); np->parent = p; release(&wait_lock); acquire(&np->lock); np->state = RUNNABLE; release(&np->lock); return pid; }",
+    "body_hash": "81ccba712b64fb9f15f8ec5ee0e1b54f",
+    "calls": [
+      "idup",
+      "filedup",
+      "uvmcopy",
+      "safestrcpy",
+      "myproc",
+      "freeproc",
+      "allocproc",
+      "release",
+      "acquire"
+    ],
+    "file": "proc.c",
+    "line_count": 48
+  },
+  "reparent": {
+    "body_normalized": "void reparent(struct proc *p) { struct proc *pp; for(pp = proc; pp < &proc[NPROC]; pp++){ if(pp->parent == p){ pp->parent = initproc; wakeup(initproc); } } }",
+    "body_hash": "82f1f29b5efbdfcb289feff2ea822d44",
+    "calls": [
+      "wakeup"
+    ],
+    "file": "proc.c",
+    "line_count": 12
+  },
+  "kexit": {
+    "body_normalized": "void kexit(int status) { struct proc *p = myproc(); if(p == initproc) panic(\"STR\"); for(int fd = 0; fd < NOFILE; fd++){ if(p->ofile[fd]){ struct file *f = p->ofile[fd]; fileclose(f); p->ofile[fd] = 0; } } begin_op(); iput(p->cwd); end_op(); p->cwd = 0; acquire(&wait_lock); reparent(p); wakeup(p->parent); acquire(&p->lock); p->xstate = status; p->state = ZOMBIE; release(&wait_lock); sched(); panic(\"STR\"); }",
+    "body_hash": "1fab3ab2a40e033919456a548323810c",
+    "calls": [
+      "panic",
+      "fileclose",
+      "myproc",
+      "end_op",
+      "sched",
+      "wakeup",
+      "begin_op",
+      "reparent",
+      "iput",
+      "release",
+      "acquire"
+    ],
+    "file": "proc.c",
+    "line_count": 41
+  },
+  "kwait": {
+    "body_normalized": "int kwait(uint64 addr) { struct proc *pp; int havekids, pid; struct proc *p = myproc(); acquire(&wait_lock); for(;;){ havekids = 0; for(pp = proc; pp < &proc[NPROC]; pp++){ if(pp->parent == p){ acquire(&pp->lock); havekids = 1; if(pp->state == ZOMBIE){ pid = pp->pid; if(addr != 0 && copyout(p->pagetable, addr, (char *)&pp->xstate, sizeof(pp->xstate)) < 0) { release(&pp->lock); release(&wait_lock); return -1; } freeproc(pp); release(&pp->lock); release(&wait_lock); return pid; } release(&pp->lock); } } if(!havekids || killed(p)){ release(&wait_lock); return -1; } sleep(p, &wait_lock); } }",
+    "body_hash": "e19bc61a81a567c512c0a5f31da35977",
+    "calls": [
+      "copyout",
+      "sleep",
+      "myproc",
+      "freeproc",
+      "killed",
+      "release",
+      "acquire"
+    ],
+    "file": "proc.c",
+    "line_count": 46
+  },
+  "scheduler": {
+    "body_normalized": "void scheduler(void) { struct proc *p; struct cpu *c = mycpu(); c->proc = 0; for(;;){ intr_on(); intr_off(); int found = 0; for(p = proc; p < &proc[NPROC]; p++) { acquire(&p->lock); if(p->state == RUNNABLE) { p->state = RUNNING; c->proc = p; swtch(&c->context, &p->context); c->proc = 0; found = 1; } release(&p->lock); } if(found == 0) { asm volatile(\"STR\"); } } }",
+    "body_hash": "911227fee99e56053bf3b6b2a21d78d7",
+    "calls": [
+      "swtch",
+      "intr_off",
+      "intr_on",
+      "mycpu",
+      "release",
+      "acquire"
+    ],
+    "file": "proc.c",
+    "line_count": 40
+  },
+  "sched": {
+    "body_normalized": "void sched(void) { int intena; struct proc *p = myproc(); if(!holding(&p->lock)) panic(\"STR\"); if(mycpu()->noff != 1) panic(\"STR\"); if(p->state == RUNNING) panic(\"STR\"); if(intr_get()) panic(\"STR\"); intena = mycpu()->intena; swtch(&p->context, &mycpu()->context); mycpu()->intena = intena; }",
+    "body_hash": "9657966b79a5bccd23d4a911ca16c48b",
+    "calls": [
+      "panic",
+      "swtch",
+      "myproc",
+      "holding",
+      "mycpu",
+      "intr_get"
+    ],
+    "file": "proc.c",
+    "line_count": 19
+  },
+  "yield": {
+    "body_normalized": "void yield(void) { struct proc *p = myproc(); acquire(&p->lock); p->state = RUNNABLE; sched(); release(&p->lock); }",
+    "body_hash": "63cad8bfdd9b1a0c9e4ef2033368c160",
+    "calls": [
+      "myproc",
+      "sched",
+      "release",
+      "acquire"
+    ],
+    "file": "proc.c",
+    "line_count": 9
+  },
+  "forkret": {
+    "body_normalized": "void forkret(void) { extern char userret[]; static int first = 1; struct proc *p = myproc(); release(&p->lock); if (first) { fsinit(ROOTDEV); first = 0; __atomic_thread_fence(__ATOMIC_SEQ_CST); p->trapframe->a0 = kexec(\"STR\", (char *[]){ \"STR\", 0 }); if (p->trapframe->a0 == -1) { panic(\"STR\"); } } prepare_return(); uint64 satp = MAKE_SATP(p->pagetable); uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline); ((void (*)(uint64))trampoline_userret)(satp); }",
+    "body_hash": "8c125a46d7f1fe0c643e2f5fcbdc039c",
+    "calls": [
+      "prepare_return",
+      "panic",
+      "fsinit",
+      "kexec",
+      "myproc",
+      "MAKE_SATP",
+      "__atomic_thread_fence",
+      "release"
+    ],
+    "file": "proc.c",
+    "line_count": 34
+  },
+  "sleep": {
+    "body_normalized": "void sleep(void *chan, struct spinlock *lk) { struct proc *p = myproc(); acquire(&p->lock); release(lk); p->chan = chan; p->state = SLEEPING; sched(); p->chan = 0; release(&p->lock); acquire(lk); }",
+    "body_hash": "b4498148b5d4f3667f95441eca86993c",
+    "calls": [
+      "myproc",
+      "sched",
+      "release",
+      "acquire"
+    ],
+    "file": "proc.c",
+    "line_count": 28
+  },
+  "wakeup": {
+    "body_normalized": "void wakeup(void *chan) { struct proc *p; for(p = proc; p < &proc[NPROC]; p++) { if(p != myproc()){ acquire(&p->lock); if(p->state == SLEEPING && p->chan == chan) { p->state = RUNNABLE; } release(&p->lock); } } }",
+    "body_hash": "a14a2fb988b2a9efa727897c3ec8a3c0",
+    "calls": [
+      "myproc",
+      "release",
+      "acquire"
+    ],
+    "file": "proc.c",
+    "line_count": 15
+  },
+  "kkill": {
+    "body_normalized": "int kkill(int pid) { struct proc *p; for(p = proc; p < &proc[NPROC]; p++){ acquire(&p->lock); if(p->pid == pid){ p->killed = 1; if(p->state == SLEEPING){ p->state = RUNNABLE; } release(&p->lock); return 0; } release(&p->lock); } return -1; }",
+    "body_hash": "b509e7cdb1f1e95277a69a5cc7f5ff7b",
+    "calls": [
+      "release",
+      "acquire"
+    ],
+    "file": "proc.c",
+    "line_count": 20
+  },
+  "setkilled": {
+    "body_normalized": "void setkilled(struct proc *p) { acquire(&p->lock); p->killed = 1; release(&p->lock); }",
+    "body_hash": "aaa3ca9300a16de0900b3211fc7d32c4",
+    "calls": [
+      "release",
+      "acquire"
+    ],
+    "file": "proc.c",
+    "line_count": 7
+  },
+  "killed": {
+    "body_normalized": "int killed(struct proc *p) { int k; acquire(&p->lock); k = p->killed; release(&p->lock); return k; }",
+    "body_hash": "93964d56858fc10f16e89847e4d93b14",
+    "calls": [
+      "release",
+      "acquire"
+    ],
+    "file": "proc.c",
+    "line_count": 10
+  },
+  "either_copyout": {
+    "body_normalized": "int either_copyout(int user_dst, uint64 dst, void *src, uint64 len) { struct proc *p = myproc(); if(user_dst){ return copyout(p->pagetable, dst, src, len); } else { memmove((char *)dst, src, len); return 0; } }",
+    "body_hash": "87741b6870cc8bbe29679a966fce0452",
+    "calls": [
+      "memmove",
+      "myproc",
+      "copyout"
+    ],
+    "file": "proc.c",
+    "line_count": 11
+  },
+  "either_copyin": {
+    "body_normalized": "int either_copyin(void *dst, int user_src, uint64 src, uint64 len) { struct proc *p = myproc(); if(user_src){ return copyin(p->pagetable, dst, src, len); } else { memmove(dst, (char*)src, len); return 0; } }",
+    "body_hash": "3e52989606acd36f6c97b1d3d83cf44d",
+    "calls": [
+      "myproc",
+      "copyin",
+      "memmove"
+    ],
+    "file": "proc.c",
+    "line_count": 11
+  },
+  "procdump": {
+    "body_normalized": "void procdump(void) { static char *states[] = { [UNUSED] \"STR\", [USED] \"STR\", [SLEEPING] \"STR\", [RUNNABLE] \"STR\", [RUNNING] \"STR\", [ZOMBIE] \"STR\" }; struct proc *p; char *state; printf(\"STR\"); for(p = proc; p < &proc[NPROC]; p++){ if(p->state == UNUSED) continue; if(p->state >= 0 && p->state < NELEM(states) && states[p->state]) state = states[p->state]; else state = \"STR\"; printf(\"STR\", p->pid, state, p->name); printf(\"STR\"); } }",
+    "body_hash": "9c14b7b36b0de7af020e049ade4fabab",
+    "calls": [
+      "printf",
+      "NELEM"
+    ],
+    "file": "proc.c",
+    "line_count": 26
+  },
+  "readsb": {
+    "body_normalized": "static void readsb(int dev, struct superblock *sb) { struct buf *bp; bp = bread(dev, 1); memmove(sb, bp->data, sizeof(*sb)); brelse(bp); }",
+    "body_hash": "2eede683278f4025945e6cea3d8cea48",
+    "calls": [
+      "memmove",
+      "bread",
+      "brelse"
+    ],
+    "file": "fs.c",
+    "line_count": 9
+  },
+  "fsinit": {
+    "body_normalized": "void fsinit(int dev) { readsb(dev, &sb); if(sb.magic != FSMAGIC) panic(\"STR\"); initlog(dev, &sb); ireclaim(dev); }",
+    "body_hash": "0e1d3d70c0d93334101763cadb7f27cb",
+    "calls": [
+      "readsb",
+      "initlog",
+      "panic",
+      "ireclaim"
+    ],
+    "file": "fs.c",
+    "line_count": 8
+  },
+  "bzero": {
+    "body_normalized": "static void bzero(int dev, int bno) { struct buf *bp; bp = bread(dev, bno); memset(bp->data, 0, BSIZE); log_write(bp); brelse(bp); }",
+    "body_hash": "7f37d5ec5b8dd8cf8455978d29b82018",
+    "calls": [
+      "log_write",
+      "bread",
+      "memset",
+      "brelse"
+    ],
+    "file": "fs.c",
+    "line_count": 10
+  },
+  "balloc": {
+    "body_normalized": "static uint balloc(uint dev) { int b, bi, m; struct buf *bp; bp = 0; for(b = 0; b < sb.size; b += BPB){ bp = bread(dev, BBLOCK(b, sb)); for(bi = 0; bi < BPB && b + bi < sb.size; bi++){ m = 1 << (bi % NUM); if((bp->data[bi/NUM] & m) == 0){ bp->data[bi/NUM] |= m; log_write(bp); brelse(bp); bzero(dev, b + bi); return b + bi; } } brelse(bp); } printf(\"STR\"); return 0; }",
+    "body_hash": "e974bed0fd6da14f9ead38f746f34873",
+    "calls": [
+      "bread",
+      "brelse",
+      "bzero",
+      "printf",
+      "log_write",
+      "BBLOCK"
+    ],
+    "file": "fs.c",
+    "line_count": 24
+  },
+  "bfree": {
+    "body_normalized": "static void bfree(int dev, uint b) { struct buf *bp; int bi, m; bp = bread(dev, BBLOCK(b, sb)); bi = b % BPB; m = 1 << (bi % NUM); if((bp->data[bi/NUM] & m) == 0) panic(\"STR\"); bp->data[bi/NUM] &= ~m; log_write(bp); brelse(bp); }",
+    "body_hash": "410c3b361ac77f6aeb7e9b6b2cd86b60",
+    "calls": [
+      "bread",
+      "panic",
+      "brelse",
+      "log_write",
+      "BBLOCK"
+    ],
+    "file": "fs.c",
+    "line_count": 15
+  },
+  "iinit": {
+    "body_normalized": "void iinit() { int i = 0; initlock(&itable.lock, \"STR\"); for(i = 0; i < NINODE; i++) { initsleeplock(&itable.inode[i].lock, \"STR\"); } }",
+    "body_hash": "c276a469941748b0177d0280be3ca402",
+    "calls": [
+      "initsleeplock",
+      "initlock"
+    ],
+    "file": "fs.c",
+    "line_count": 10
+  },
+  "ialloc": {
+    "body_normalized": "struct inode* ialloc(uint dev, short type) { int inum; struct buf *bp; struct dinode *dip; for(inum = 1; inum < sb.ninodes; inum++){ bp = bread(dev, IBLOCK(inum, sb)); dip = (struct dinode*)bp->data + inum%IPB; if(dip->type == 0){ memset(dip, 0, sizeof(*dip)); dip->type = type; log_write(bp); brelse(bp); return iget(dev, inum); } brelse(bp); } printf(\"STR\"); return 0; }",
+    "body_hash": "f9da3c6664dee81fa45d54c200e1cd1c",
+    "calls": [
+      "bread",
+      "iget",
+      "brelse",
+      "printf",
+      "log_write",
+      "IBLOCK",
+      "memset"
+    ],
+    "file": "fs.c",
+    "line_count": 22
+  },
+  "iupdate": {
+    "body_normalized": "void iupdate(struct inode *ip) { struct buf *bp; struct dinode *dip; bp = bread(ip->dev, IBLOCK(ip->inum, sb)); dip = (struct dinode*)bp->data + ip->inum%IPB; dip->type = ip->type; dip->major = ip->major; dip->minor = ip->minor; dip->nlink = ip->nlink; dip->size = ip->size; memmove(dip->addrs, ip->addrs, sizeof(ip->addrs)); log_write(bp); brelse(bp); }",
+    "body_hash": "d6ea1c25b861df26aabd206b44594764",
+    "calls": [
+      "memmove",
+      "bread",
+      "brelse",
+      "log_write",
+      "IBLOCK"
+    ],
+    "file": "fs.c",
+    "line_count": 17
+  },
+  "iget": {
+    "body_normalized": "static struct inode* iget(uint dev, uint inum) { struct inode *ip, *empty; acquire(&itable.lock); empty = 0; for(ip = &itable.inode[0]; ip < &itable.inode[NINODE]; ip++){ if(ip->ref > 0 && ip->dev == dev && ip->inum == inum){ ip->ref++; release(&itable.lock); return ip; } if(empty == 0 && ip->ref == 0) empty = ip; } if(empty == 0) panic(\"STR\"); ip = empty; ip->dev = dev; ip->inum = inum; ip->ref = 1; ip->valid = 0; release(&itable.lock); return ip; }",
+    "body_hash": "9fa5cf0867da89f3a9fd0f0c85d03dc2",
+    "calls": [
+      "panic",
+      "release",
+      "acquire"
+    ],
+    "file": "fs.c",
+    "line_count": 32
+  },
+  "idup": {
+    "body_normalized": "struct inode* idup(struct inode *ip) { acquire(&itable.lock); ip->ref++; release(&itable.lock); return ip; }",
+    "body_hash": "7948af3328c5943016976424c0ecc8f4",
+    "calls": [
+      "release",
+      "acquire"
+    ],
+    "file": "fs.c",
+    "line_count": 8
+  },
+  "ilock": {
+    "body_normalized": "void ilock(struct inode *ip) { struct buf *bp; struct dinode *dip; if(ip == 0 || ip->ref < 1) panic(\"STR\"); acquiresleep(&ip->lock); if(ip->valid == 0){ bp = bread(ip->dev, IBLOCK(ip->inum, sb)); dip = (struct dinode*)bp->data + ip->inum%IPB; ip->type = dip->type; ip->major = dip->major; ip->minor = dip->minor; ip->nlink = dip->nlink; ip->size = dip->size; memmove(ip->addrs, dip->addrs, sizeof(ip->addrs)); brelse(bp); ip->valid = 1; if(ip->type == 0) panic(\"STR\"); } }",
+    "body_hash": "e6dc5034754e1e0fd9259fb582b6fd00",
+    "calls": [
+      "acquiresleep",
+      "memmove",
+      "bread",
+      "panic",
+      "brelse",
+      "IBLOCK"
+    ],
+    "file": "fs.c",
+    "line_count": 26
+  },
+  "iunlock": {
+    "body_normalized": "void iunlock(struct inode *ip) { if(ip == 0 || !holdingsleep(&ip->lock) || ip->ref < 1) panic(\"STR\"); releasesleep(&ip->lock); }",
+    "body_hash": "d9c7e58a31bece9095b43e9c9b204380",
+    "calls": [
+      "releasesleep",
+      "holdingsleep",
+      "panic"
+    ],
+    "file": "fs.c",
+    "line_count": 8
+  },
+  "iput": {
+    "body_normalized": "void iput(struct inode *ip) { acquire(&itable.lock); if(ip->ref == 1 && ip->valid && ip->nlink == 0){ acquiresleep(&ip->lock); release(&itable.lock); itrunc(ip); ip->type = 0; iupdate(ip); ip->valid = 0; releasesleep(&ip->lock); acquire(&itable.lock); } ip->ref--; release(&itable.lock); }",
+    "body_hash": "6d227c979c4597e0dbfe2b175dd930fa",
+    "calls": [
+      "acquiresleep",
+      "itrunc",
+      "releasesleep",
+      "iupdate",
+      "release",
+      "acquire"
+    ],
+    "file": "fs.c",
+    "line_count": 27
+  },
+  "iunlockput": {
+    "body_normalized": "void iunlockput(struct inode *ip) { iunlock(ip); iput(ip); }",
+    "body_hash": "692626f92b394c0eb9dfccb5b004a2af",
+    "calls": [
+      "iput",
+      "iunlock"
+    ],
+    "file": "fs.c",
+    "line_count": 6
+  },
+  "ireclaim": {
+    "body_normalized": "void ireclaim(int dev) { for (int inum = 1; inum < sb.ninodes; inum++) { struct inode *ip = 0; struct buf *bp = bread(dev, IBLOCK(inum, sb)); struct dinode *dip = (struct dinode *)bp->data + inum % IPB; if (dip->type != 0 && dip->nlink == 0) { printf(\"STR\", inum); ip = iget(dev, inum); } brelse(bp); if (ip) { begin_op(); ilock(ip); iunlock(ip); iput(ip); end_op(); } } }",
+    "body_hash": "7047ed43e481822023999425efea9f31",
+    "calls": [
+      "bread",
+      "iget",
+      "brelse",
+      "ilock",
+      "iput",
+      "printf",
+      "end_op",
+      "iunlock",
+      "begin_op",
+      "IBLOCK"
+    ],
+    "file": "fs.c",
+    "line_count": 21
+  },
+  "bmap": {
+    "body_normalized": "static uint bmap(struct inode *ip, uint bn) { uint addr, *a; struct buf *bp; if(bn < NDIRECT){ if((addr = ip->addrs[bn]) == 0){ addr = balloc(ip->dev); if(addr == 0) return 0; ip->addrs[bn] = addr; } return addr; } bn -= NDIRECT; if(bn < NINDIRECT){ if((addr = ip->addrs[NDIRECT]) == 0){ addr = balloc(ip->dev); if(addr == 0) return 0; ip->addrs[NDIRECT] = addr; } bp = bread(ip->dev, addr); a = (uint*)bp->data; if((addr = a[bn]) == 0){ addr = balloc(ip->dev); if(addr){ a[bn] = addr; log_write(bp); } } brelse(bp); return addr; } panic(\"STR\"); }",
+    "body_hash": "faff1a947b56c55418331904dfd81c07",
+    "calls": [
+      "bread",
+      "panic",
+      "brelse",
+      "log_write",
+      "balloc"
+    ],
+    "file": "fs.c",
+    "line_count": 40
+  },
+  "itrunc": {
+    "body_normalized": "void itrunc(struct inode *ip) { int i, j; struct buf *bp; uint *a; for(i = 0; i < NDIRECT; i++){ if(ip->addrs[i]){ bfree(ip->dev, ip->addrs[i]); ip->addrs[i] = 0; } } if(ip->addrs[NDIRECT]){ bp = bread(ip->dev, ip->addrs[NDIRECT]); a = (uint*)bp->data; for(j = 0; j < NINDIRECT; j++){ if(a[j]) bfree(ip->dev, a[j]); } brelse(bp); bfree(ip->dev, ip->addrs[NDIRECT]); ip->addrs[NDIRECT] = 0; } ip->size = 0; iupdate(ip); }",
+    "body_hash": "e74208562076f3d27f929b6468261f72",
+    "calls": [
+      "bfree",
+      "bread",
+      "iupdate",
+      "brelse"
+    ],
+    "file": "fs.c",
+    "line_count": 29
+  },
+  "stati": {
+    "body_normalized": "void stati(struct inode *ip, struct stat *st) { st->dev = ip->dev; st->ino = ip->inum; st->type = ip->type; st->nlink = ip->nlink; st->size = ip->size; }",
+    "body_hash": "c0026adb51656772da03a2f8acae9b18",
+    "calls": [],
+    "file": "fs.c",
+    "line_count": 9
+  },
+  "readi": {
+    "body_normalized": "int readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n) { uint tot, m; struct buf *bp; if(off > ip->size || off + n < off) return 0; if(off + n > ip->size) n = ip->size - off; for(tot=0; tot<n; tot+=m, off+=m, dst+=m){ uint addr = bmap(ip, off/BSIZE); if(addr == 0) break; bp = bread(ip->dev, addr); m = min(n - tot, BSIZE - off%BSIZE); if(either_copyout(user_dst, dst, bp->data + (off % BSIZE), m) == -1) { brelse(bp); tot = -1; break; } brelse(bp); } return tot; }",
+    "body_hash": "649055c0991cfb0595809a4e66892614",
+    "calls": [
+      "either_copyout",
+      "bread",
+      "brelse",
+      "min",
+      "bmap"
+    ],
+    "file": "fs.c",
+    "line_count": 26
+  },
+  "writei": {
+    "body_normalized": "int writei(struct inode *ip, int user_src, uint64 src, uint off, uint n) { uint tot, m; struct buf *bp; if(off > ip->size || off + n < off) return -1; if(off + n > MAXFILE*BSIZE) return -1; for(tot=0; tot<n; tot+=m, off+=m, src+=m){ uint addr = bmap(ip, off/BSIZE); if(addr == 0) break; bp = bread(ip->dev, addr); m = min(n - tot, BSIZE - off%BSIZE); if(either_copyin(bp->data + (off % BSIZE), user_src, src, m) == -1) { brelse(bp); break; } log_write(bp); brelse(bp); } if(off > ip->size) ip->size = off; iupdate(ip); return tot; }",
+    "body_hash": "8e97e0675b246da0288e4b25b08c8b5a",
+    "calls": [
+      "bread",
+      "iupdate",
+      "brelse",
+      "min",
+      "bmap",
+      "either_copyin",
+      "log_write"
+    ],
+    "file": "fs.c",
+    "line_count": 35
+  },
+  "namecmp": {
+    "body_normalized": "int namecmp(const char *s, const char *t) { return strncmp(s, t, DIRSIZ); }",
+    "body_hash": "6649455cf264e8930fddfb47fe0e6354",
+    "calls": [
+      "strncmp"
+    ],
+    "file": "fs.c",
+    "line_count": 5
+  },
+  "dirlookup": {
+    "body_normalized": "struct inode* dirlookup(struct inode *dp, char *name, uint *poff) { uint off, inum; struct dirent de; if(dp->type != T_DIR) panic(\"STR\"); for(off = 0; off < dp->size; off += sizeof(de)){ if(readi(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de)) panic(\"STR\"); if(de.inum == 0) continue; if(namecmp(name, de.name) == 0){ if(poff) *poff = off; inum = de.inum; return iget(dp->dev, inum); } } return 0; }",
+    "body_hash": "dace2e14fd2ce2d28c4b09791db74b8d",
+    "calls": [
+      "namecmp",
+      "readi",
+      "panic",
+      "iget"
+    ],
+    "file": "fs.c",
+    "line_count": 25
+  },
+  "dirlink": {
+    "body_normalized": "int dirlink(struct inode *dp, char *name, uint inum) { int off; struct dirent de; struct inode *ip; if((ip = dirlookup(dp, name, 0)) != 0){ iput(ip); return -1; } for(off = 0; off < dp->size; off += sizeof(de)){ if(readi(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de)) panic(\"STR\"); if(de.inum == 0) break; } strncpy(de.name, name, DIRSIZ); de.inum = inum; if(writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de)) return -1; return 0; }",
+    "body_hash": "aadf62ddc5813b4d8ec3fe9304244070",
+    "calls": [
+      "strncpy",
+      "panic",
+      "readi",
+      "dirlookup",
+      "writei",
+      "iput"
+    ],
+    "file": "fs.c",
+    "line_count": 28
+  },
+  "skipelem": {
+    "body_normalized": "static char* skipelem(char *path, char *name) { char *s; int len; while(*path == 'STR') path++; if(*path == 0) return 0; s = path; while(*path != 'STR' && *path != 0) path++; len = path - s; if(len >= DIRSIZ) memmove(name, s, DIRSIZ); else { memmove(name, s, len); name[len] = 0; } while(*path == 'STR') path++; return path; }",
+    "body_hash": "01c14335371ac689f0c652f3351ab469",
+    "calls": [
+      "memmove"
+    ],
+    "file": "fs.c",
+    "line_count": 24
+  },
+  "namex": {
+    "body_normalized": "static struct inode* namex(char *path, int nameiparent, char *name) { struct inode *ip, *next; if(*path == 'STR') ip = iget(ROOTDEV, ROOTINO); else ip = idup(myproc()->cwd); while((path = skipelem(path, name)) != 0){ ilock(ip); if(ip->type != T_DIR){ iunlockput(ip); return 0; } if(nameiparent && *path == 'STR'){ iunlock(ip); return ip; } if((next = dirlookup(ip, name, 0)) == 0){ iunlockput(ip); return 0; } iunlockput(ip); ip = next; } if(nameiparent){ iput(ip); return 0; } return ip; }",
+    "body_hash": "ea36d1279ea3eeb01a17049450bc4e4c",
+    "calls": [
+      "idup",
+      "iget",
+      "ilock",
+      "myproc",
+      "iunlockput",
+      "dirlookup",
+      "iunlock",
+      "iput",
+      "skipelem"
+    ],
+    "file": "fs.c",
+    "line_count": 34
+  },
+  "namei": {
+    "body_normalized": "struct inode* namei(char *path) { char name[DIRSIZ]; return namex(path, 0, name); }",
+    "body_hash": "00a00ec056dfec6ce0ab0758f9900746",
+    "calls": [
+      "namex"
+    ],
+    "file": "fs.c",
+    "line_count": 6
+  },
+  "nameiparent": {
+    "body_normalized": "struct inode* nameiparent(char *path, char *name) { return namex(path, 1, name); }",
+    "body_hash": "6d58b00eeaf61e80267e86624e081d8e",
+    "calls": [
+      "namex"
+    ],
+    "file": "fs.c",
+    "line_count": 5
+  },
+  "fileinit": {
+    "body_normalized": "void fileinit(void) { initlock(&ftable.lock, \"STR\"); }",
+    "body_hash": "6ef9303049599ae429650d6da7c2a973",
+    "calls": [
+      "initlock"
+    ],
+    "file": "file.c",
+    "line_count": 5
+  },
+  "filealloc": {
+    "body_normalized": "struct file* filealloc(void) { struct file *f; acquire(&ftable.lock); for(f = ftable.file; f < ftable.file + NFILE; f++){ if(f->ref == 0){ f->ref = 1; release(&ftable.lock); return f; } } release(&ftable.lock); return 0; }",
+    "body_hash": "ceb23d7bda92186184d054c427951025",
+    "calls": [
+      "release",
+      "acquire"
+    ],
+    "file": "file.c",
+    "line_count": 16
+  },
+  "filedup": {
+    "body_normalized": "struct file* filedup(struct file *f) { acquire(&ftable.lock); if(f->ref < 1) panic(\"STR\"); f->ref++; release(&ftable.lock); return f; }",
+    "body_hash": "f9f8b02c38de2b815cfb817a311f4a29",
+    "calls": [
+      "panic",
+      "release",
+      "acquire"
+    ],
+    "file": "file.c",
+    "line_count": 10
+  },
+  "fileclose": {
+    "body_normalized": "void fileclose(struct file *f) { struct file ff; acquire(&ftable.lock); if(f->ref < 1) panic(\"STR\"); if(--f->ref > 0){ release(&ftable.lock); return; } ff = *f; f->ref = 0; f->type = FD_NONE; release(&ftable.lock); if(ff.type == FD_PIPE){ pipeclose(ff.pipe, ff.writable); } else if(ff.type == FD_INODE || ff.type == FD_DEVICE){ begin_op(); iput(ff.ip); end_op(); } }",
+    "body_hash": "632e658e053c5018677d572ee7d1a219",
+    "calls": [
+      "pipeclose",
+      "panic",
+      "end_op",
+      "begin_op",
+      "iput",
+      "release",
+      "acquire"
+    ],
+    "file": "file.c",
+    "line_count": 25
+  },
+  "filestat": {
+    "body_normalized": "int filestat(struct file *f, uint64 addr) { struct proc *p = myproc(); struct stat st; if(f->type == FD_INODE || f->type == FD_DEVICE){ ilock(f->ip); stati(f->ip, &st); iunlock(f->ip); if(copyout(p->pagetable, addr, (char *)&st, sizeof(st)) < 0) return -1; return 0; } return -1; }",
+    "body_hash": "4e792d2eaf549d23a19f7cb419b7eddb",
+    "calls": [
+      "ilock",
+      "copyout",
+      "myproc",
+      "iunlock",
+      "stati"
+    ],
+    "file": "file.c",
+    "line_count": 16
+  },
+  "fileread": {
+    "body_normalized": "int fileread(struct file *f, uint64 addr, int n) { int r = 0; if(f->readable == 0) return -1; if(f->type == FD_PIPE){ r = piperead(f->pipe, addr, n); } else if(f->type == FD_DEVICE){ if(f->major < 0 || f->major >= NDEV || !devsw[f->major].read) return -1; r = devsw[f->major].read(1, addr, n); } else if(f->type == FD_INODE){ ilock(f->ip); if((r = readi(f->ip, 1, addr, f->off, n)) > 0) f->off += r; iunlock(f->ip); } else { panic(\"STR\"); } return r; }",
+    "body_hash": "5d92e69e502292102d2a1d1966dc9b76",
+    "calls": [
+      "readi",
+      "panic",
+      "piperead",
+      "ilock",
+      "read",
+      "iunlock"
+    ],
+    "file": "file.c",
+    "line_count": 25
+  },
+  "filewrite": {
+    "body_normalized": "int filewrite(struct file *f, uint64 addr, int n) { int r, ret = 0; if(f->writable == 0) return -1; if(f->type == FD_PIPE){ ret = pipewrite(f->pipe, addr, n); } else if(f->type == FD_DEVICE){ if(f->major < 0 || f->major >= NDEV || !devsw[f->major].write) return -1; ret = devsw[f->major].write(1, addr, n); } else if(f->type == FD_INODE){ int max = ((MAXOPBLOCKS-1-1-NUM) / NUM) * BSIZE; int i = 0; while(i < n){ int n1 = n - i; if(n1 > max) n1 = max; begin_op(); ilock(f->ip); if ((r = writei(f->ip, 1, addr + i, f->off, n1)) > 0) f->off += r; iunlock(f->ip); end_op(); if(r != n1){ break; } i += r; } ret = (i == n ? n : -1); } else { panic(\"STR\"); } return ret; }",
+    "body_hash": "afeef19abd0954cc47ad0ae337586daf",
+    "calls": [
+      "panic",
+      "ilock",
+      "writei",
+      "end_op",
+      "iunlock",
+      "begin_op",
+      "write",
+      "pipewrite"
+    ],
+    "file": "file.c",
+    "line_count": 46
+  },
+  "argfd": {
+    "body_normalized": "static int argfd(int n, int *pfd, struct file **pf) { int fd; struct file *f; argint(n, &fd); if(fd < 0 || fd >= NOFILE || (f=myproc()->ofile[fd]) == 0) return -1; if(pfd) *pfd = fd; if(pf) *pf = f; return 0; }",
+    "body_hash": "12a3ad760788a719eecd4c2597d866d4",
+    "calls": [
+      "myproc",
+      "argint"
+    ],
+    "file": "sysfile.c",
+    "line_count": 15
+  },
+  "fdalloc": {
+    "body_normalized": "static int fdalloc(struct file *f) { int fd; struct proc *p = myproc(); for(fd = 0; fd < NOFILE; fd++){ if(p->ofile[fd] == 0){ p->ofile[fd] = f; return fd; } } return -1; }",
+    "body_hash": "a831fac2915726939ea52d02aebfdda2",
+    "calls": [
+      "myproc"
+    ],
+    "file": "sysfile.c",
+    "line_count": 14
+  },
+  "sys_dup": {
+    "body_normalized": "uint64 sys_dup(void) { struct file *f; int fd; if(argfd(0, 0, &f) < 0) return -1; if((fd=fdalloc(f)) < 0) return -1; filedup(f); return fd; }",
+    "body_hash": "b104be4b28799cba25fd97cd24bf7568",
+    "calls": [
+      "fdalloc",
+      "filedup",
+      "argfd"
+    ],
+    "file": "sysfile.c",
+    "line_count": 13
+  },
+  "sys_read": {
+    "body_normalized": "uint64 sys_read(void) { struct file *f; int n; uint64 p; argaddr(1, &p); argint(NUM, &n); if(argfd(0, 0, &f) < 0) return -1; return fileread(f, p, n); }",
+    "body_hash": "33bd9605d3a35e865442dc4cf6e3d40a",
+    "calls": [
+      "fileread",
+      "argaddr",
+      "argfd",
+      "argint"
+    ],
+    "file": "sysfile.c",
+    "line_count": 13
+  },
+  "sys_write": {
+    "body_normalized": "uint64 sys_write(void) { struct file *f; int n; uint64 p; argaddr(1, &p); argint(NUM, &n); if(argfd(0, 0, &f) < 0) return -1; return filewrite(f, p, n); }",
+    "body_hash": "2c80892140595460a7beb4efab84cc51",
+    "calls": [
+      "argaddr",
+      "argfd",
+      "argint",
+      "filewrite"
+    ],
+    "file": "sysfile.c",
+    "line_count": 14
+  },
+  "sys_close": {
+    "body_normalized": "uint64 sys_close(void) { int fd; struct file *f; if(argfd(0, &fd, &f) < 0) return -1; myproc()->ofile[fd] = 0; fileclose(f); return 0; }",
+    "body_hash": "fa39280dc11dceb040c02aa95f9c1092",
+    "calls": [
+      "myproc",
+      "argfd",
+      "fileclose"
+    ],
+    "file": "sysfile.c",
+    "line_count": 12
+  },
+  "sys_fstat": {
+    "body_normalized": "uint64 sys_fstat(void) { struct file *f; uint64 st; argaddr(1, &st); if(argfd(0, 0, &f) < 0) return -1; return filestat(f, st); }",
+    "body_hash": "5019f5f757739341db8844753ba6cf7e",
+    "calls": [
+      "filestat",
+      "argaddr",
+      "argfd"
+    ],
+    "file": "sysfile.c",
+    "line_count": 11
+  },
+  "sys_link": {
+    "body_normalized": "uint64 sys_link(void) { char name[DIRSIZ], new[MAXPATH], old[MAXPATH]; struct inode *dp, *ip; if(argstr(0, old, MAXPATH) < 0 || argstr(1, new, MAXPATH) < 0) return -1; begin_op(); if((ip = namei(old)) == 0){ end_op(); return -1; } ilock(ip); if(ip->type == T_DIR){ iunlockput(ip); end_op(); return -1; } ip->nlink++; iupdate(ip); iunlock(ip); if((dp = nameiparent(new, name)) == 0) goto bad; ilock(dp); if(dp->dev != ip->dev || dirlink(dp, name, ip->inum) < 0){ iunlockput(dp); goto bad; } iunlockput(dp); iput(ip); end_op(); return 0; bad: ilock(ip); ip->nlink--; iupdate(ip); iunlockput(ip); end_op(); return -1; }",
+    "body_hash": "478a20f441df61c10029bb25a9d54891",
+    "calls": [
+      "nameiparent",
+      "iupdate",
+      "ilock",
+      "iunlockput",
+      "end_op",
+      "dirlink",
+      "namei",
+      "iunlock",
+      "begin_op",
+      "iput",
+      "argstr"
+    ],
+    "file": "sysfile.c",
+    "line_count": 48
+  },
+  "isdirempty": {
+    "body_normalized": "static int isdirempty(struct inode *dp) { int off; struct dirent de; for(off=NUM*sizeof(de); off<dp->size; off+=sizeof(de)){ if(readi(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de)) panic(\"STR\"); if(de.inum != 0) return 0; } return 1; }",
+    "body_hash": "607cf21ec9470d1ebdbed8dc31e6704a",
+    "calls": [
+      "readi",
+      "panic"
+    ],
+    "file": "sysfile.c",
+    "line_count": 14
+  },
+  "sys_unlink": {
+    "body_normalized": "uint64 sys_unlink(void) { struct inode *ip, *dp; struct dirent de; char name[DIRSIZ], path[MAXPATH]; uint off; if(argstr(0, path, MAXPATH) < 0) return -1; begin_op(); if((dp = nameiparent(path, name)) == 0){ end_op(); return -1; } ilock(dp); if(namecmp(name, \"STR\") == 0 || namecmp(name, \"STR\") == 0) goto bad; if((ip = dirlookup(dp, name, &off)) == 0) goto bad; ilock(ip); if(ip->nlink < 1) panic(\"STR\"); if(ip->type == T_DIR && !isdirempty(ip)){ iunlockput(ip); goto bad; } memset(&de, 0, sizeof(de)); if(writei(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de)) panic(\"STR\"); if(ip->type == T_DIR){ dp->nlink--; iupdate(dp); } iunlockput(dp); ip->nlink--; iupdate(ip); iunlockput(ip); end_op(); return 0; bad: iunlockput(dp); end_op(); return -1; }",
+    "body_hash": "c0ba0638fc36c24bf280d0e87e987989",
+    "calls": [
+      "namecmp",
+      "argstr",
+      "panic",
+      "iupdate",
+      "ilock",
+      "isdirempty",
+      "iunlockput",
+      "end_op",
+      "dirlookup",
+      "writei",
+      "begin_op",
+      "memset",
+      "nameiparent"
+    ],
+    "file": "sysfile.c",
+    "line_count": 56
+  },
+  "create": {
+    "body_normalized": "static struct inode* create(char *path, short type, short major, short minor) { struct inode *ip, *dp; char name[DIRSIZ]; if((dp = nameiparent(path, name)) == 0) return 0; ilock(dp); if((ip = dirlookup(dp, name, 0)) != 0){ iunlockput(dp); ilock(ip); if(type == T_FILE && (ip->type == T_FILE || ip->type == T_DEVICE)) return ip; iunlockput(ip); return 0; } if((ip = ialloc(dp->dev, type)) == 0){ iunlockput(dp); return 0; } ilock(ip); ip->major = major; ip->minor = minor; ip->nlink = 1; iupdate(ip); if(type == T_DIR){ if(dirlink(ip, \"STR\", ip->inum) < 0 || dirlink(ip, \"STR\", dp->inum) < 0) goto fail; } if(dirlink(dp, name, ip->inum) < 0) goto fail; if(type == T_DIR){ dp->nlink++; iupdate(dp); } iunlockput(dp); return ip; fail: ip->nlink = 0; iupdate(ip); iunlockput(ip); iunlockput(dp); return 0; }",
+    "body_hash": "93b312e09be70d66c026264bc6fc8c38",
+    "calls": [
+      "iupdate",
+      "ilock",
+      "ialloc",
+      "iunlockput",
+      "dirlookup",
+      "dirlink",
+      "nameiparent"
+    ],
+    "file": "sysfile.c",
+    "line_count": 58
+  },
+  "sys_open": {
+    "body_normalized": "uint64 sys_open(void) { char path[MAXPATH]; int fd, omode; struct file *f; struct inode *ip; int n; argint(1, &omode); if((n = argstr(0, path, MAXPATH)) < 0) return -1; begin_op(); if(omode & O_CREATE){ ip = create(path, T_FILE, 0, 0); if(ip == 0){ end_op(); return -1; } } else { if((ip = namei(path)) == 0){ end_op(); return -1; } ilock(ip); if(ip->type == T_DIR && omode != O_RDONLY){ iunlockput(ip); end_op(); return -1; } } if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){ iunlockput(ip); end_op(); return -1; } if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){ if(f) fileclose(f); iunlockput(ip); end_op(); return -1; } if(ip->type == T_DEVICE){ f->type = FD_DEVICE; f->major = ip->major; } else { f->type = FD_INODE; f->off = 0; } f->ip = ip; f->readable = !(omode & O_WRONLY); f->writable = (omode & O_WRONLY) || (omode & O_RDWR); if((omode & O_TRUNC) && ip->type == T_FILE){ itrunc(ip); } iunlock(ip); end_op(); return fd; }",
+    "body_hash": "77be9ad094b5f822d1c0d87e87c3d941",
+    "calls": [
+      "itrunc",
+      "fileclose",
+      "fdalloc",
+      "create",
+      "ilock",
+      "filealloc",
+      "iunlockput",
+      "end_op",
+      "namei",
+      "iunlock",
+      "begin_op",
+      "argint",
+      "argstr"
+    ],
+    "file": "sysfile.c",
+    "line_count": 68
+  },
+  "sys_mkdir": {
+    "body_normalized": "uint64 sys_mkdir(void) { char path[MAXPATH]; struct inode *ip; begin_op(); if(argstr(0, path, MAXPATH) < 0 || (ip = create(path, T_DIR, 0, 0)) == 0){ end_op(); return -1; } iunlockput(ip); end_op(); return 0; }",
+    "body_hash": "51e5b824133300980be00f406b7188cd",
+    "calls": [
+      "create",
+      "iunlockput",
+      "end_op",
+      "begin_op",
+      "argstr"
+    ],
+    "file": "sysfile.c",
+    "line_count": 15
+  },
+  "sys_mknod": {
+    "body_normalized": "uint64 sys_mknod(void) { struct inode *ip; char path[MAXPATH]; int major, minor; begin_op(); argint(1, &major); argint(NUM, &minor); if((argstr(0, path, MAXPATH)) < 0 || (ip = create(path, T_DEVICE, major, minor)) == 0){ end_op(); return -1; } iunlockput(ip); end_op(); return 0; }",
+    "body_hash": "6d1f5e3bcb29f2df295a0b0c071278ea",
+    "calls": [
+      "create",
+      "iunlockput",
+      "end_op",
+      "begin_op",
+      "argint",
+      "argstr"
+    ],
+    "file": "sysfile.c",
+    "line_count": 19
+  },
+  "sys_chdir": {
+    "body_normalized": "uint64 sys_chdir(void) { char path[MAXPATH]; struct inode *ip; struct proc *p = myproc(); begin_op(); if(argstr(0, path, MAXPATH) < 0 || (ip = namei(path)) == 0){ end_op(); return -1; } ilock(ip); if(ip->type != T_DIR){ iunlockput(ip); end_op(); return -1; } iunlock(ip); iput(p->cwd); end_op(); p->cwd = ip; return 0; }",
+    "body_hash": "60172b1b7ddc4f90b00a6065581cf100",
+    "calls": [
+      "ilock",
+      "myproc",
+      "iunlockput",
+      "end_op",
+      "namei",
+      "iunlock",
+      "begin_op",
+      "iput",
+      "argstr"
+    ],
+    "file": "sysfile.c",
+    "line_count": 24
+  },
+  "sys_exec": {
+    "body_normalized": "uint64 sys_exec(void) { char path[MAXPATH], *argv[MAXARG]; int i; uint64 uargv, uarg; argaddr(1, &uargv); if(argstr(0, path, MAXPATH) < 0) { return -1; } memset(argv, 0, sizeof(argv)); for(i=0;; i++){ if(i >= NELEM(argv)){ goto bad; } if(fetchaddr(uargv+sizeof(uint64)*i, (uint64*)&uarg) < 0){ goto bad; } if(uarg == 0){ argv[i] = 0; break; } argv[i] = kalloc(); if(argv[i] == 0) goto bad; if(fetchstr(uarg, argv[i], PGSIZE) < 0) goto bad; } int ret = kexec(path, argv); for(i = 0; i < NELEM(argv) && argv[i] != 0; i++) kfree(argv[i]); return ret; bad: for(i = 0; i < NELEM(argv) && argv[i] != 0; i++) kfree(argv[i]); return -1; }",
+    "body_hash": "0113571975d27c8f3eab72a407df0079",
+    "calls": [
+      "fetchaddr",
+      "kalloc",
+      "kexec",
+      "kfree",
+      "NELEM",
+      "argaddr",
+      "fetchstr",
+      "memset",
+      "argstr"
+    ],
+    "file": "sysfile.c",
+    "line_count": 42
+  },
+  "sys_pipe": {
+    "body_normalized": "uint64 sys_pipe(void) { uint64 fdarray; struct file *rf, *wf; int fd0, fd1; struct proc *p = myproc(); argaddr(0, &fdarray); if(pipealloc(&rf, &wf) < 0) return -1; fd0 = -1; if((fd0 = fdalloc(rf)) < 0 || (fd1 = fdalloc(wf)) < 0){ if(fd0 >= 0) p->ofile[fd0] = 0; fileclose(rf); fileclose(wf); return -1; } if(copyout(p->pagetable, fdarray, (char*)&fd0, sizeof(fd0)) < 0 || copyout(p->pagetable, fdarray+sizeof(fd0), (char *)&fd1, sizeof(fd1)) < 0){ p->ofile[fd0] = 0; p->ofile[fd1] = 0; fileclose(rf); fileclose(wf); return -1; } return 0; }",
+    "body_hash": "eb52fa3c0df3153d70015b7e1a39766c",
+    "calls": [
+      "fileclose",
+      "fdalloc",
+      "copyout",
+      "myproc",
+      "pipealloc",
+      "argaddr"
+    ],
+    "file": "sysfile.c",
+    "line_count": 29
+  },
+  "binit": {
+    "body_normalized": "void binit(void) { struct buf *b; initlock(&bcache.lock, \"STR\"); bcache.head.prev = &bcache.head; bcache.head.next = &bcache.head; for(b = bcache.buf; b < bcache.buf+NBUF; b++){ b->next = bcache.head.next; b->prev = &bcache.head; initsleeplock(&b->lock, \"STR\"); bcache.head.next->prev = b; bcache.head.next = b; } }",
+    "body_hash": "c8f1bb0578027a509b0b1ba68ac4f602",
+    "calls": [
+      "initsleeplock",
+      "initlock"
+    ],
+    "file": "bio.c",
+    "line_count": 18
+  },
+  "bget": {
+    "body_normalized": "static struct buf* bget(uint dev, uint blockno) { struct buf *b; acquire(&bcache.lock); for(b = bcache.head.next; b != &bcache.head; b = b->next){ if(b->dev == dev && b->blockno == blockno){ b->refcnt++; release(&bcache.lock); acquiresleep(&b->lock); return b; } } for(b = bcache.head.prev; b != &bcache.head; b = b->prev){ if(b->refcnt == 0) { b->dev = dev; b->blockno = blockno; b->valid = 0; b->refcnt = 1; release(&bcache.lock); acquiresleep(&b->lock); return b; } } panic(\"STR\"); }",
+    "body_hash": "15b8225d5e3ab07ff93edc9bf5dfd154",
+    "calls": [
+      "acquiresleep",
+      "panic",
+      "release",
+      "acquire"
+    ],
+    "file": "bio.c",
+    "line_count": 32
+  },
+  "bread": {
+    "body_normalized": "struct buf* bread(uint dev, uint blockno) { struct buf *b; b = bget(dev, blockno); if(!b->valid) { virtio_disk_rw(b, 0); b->valid = 1; } return b; }",
+    "body_hash": "125f03765f90130837913163f577e1e0",
+    "calls": [
+      "virtio_disk_rw",
+      "bget"
+    ],
+    "file": "bio.c",
+    "line_count": 12
+  },
+  "bwrite": {
+    "body_normalized": "void bwrite(struct buf *b) { if(!holdingsleep(&b->lock)) panic(\"STR\"); virtio_disk_rw(b, 1); }",
+    "body_hash": "e0b5cd835d760c2d69fb9135f0b1628a",
+    "calls": [
+      "virtio_disk_rw",
+      "holdingsleep",
+      "panic"
+    ],
+    "file": "bio.c",
+    "line_count": 7
+  },
+  "brelse": {
+    "body_normalized": "void brelse(struct buf *b) { if(!holdingsleep(&b->lock)) panic(\"STR\"); releasesleep(&b->lock); acquire(&bcache.lock); b->refcnt--; if (b->refcnt == 0) { b->next->prev = b->prev; b->prev->next = b->next; b->next = bcache.head.next; b->prev = &bcache.head; bcache.head.next->prev = b; bcache.head.next = b; } release(&bcache.lock); }",
+    "body_hash": "209927438f251bec4e51e84f2bb8b648",
+    "calls": [
+      "releasesleep",
+      "panic",
+      "holdingsleep",
+      "release",
+      "acquire"
+    ],
+    "file": "bio.c",
+    "line_count": 22
+  },
+  "bpin": {
+    "body_normalized": "void bpin(struct buf *b) { acquire(&bcache.lock); b->refcnt++; release(&bcache.lock); }",
+    "body_hash": "5544bb93c05177a84f63d542f44d9817",
+    "calls": [
+      "release",
+      "acquire"
+    ],
+    "file": "bio.c",
+    "line_count": 6
+  },
+  "bunpin": {
+    "body_normalized": "void bunpin(struct buf *b) { acquire(&bcache.lock); b->refcnt--; release(&bcache.lock); }",
+    "body_hash": "a23bd6d54996c7a2f9183fa3c0cd3bf1",
+    "calls": [
+      "release",
+      "acquire"
+    ],
+    "file": "bio.c",
+    "line_count": 6
+  },
+  "plicinit": {
+    "body_normalized": "void plicinit(void) { *(uint32*)(PLIC + UART0_IRQ*NUM) = 1; *(uint32*)(PLIC + VIRTIO0_IRQ*NUM) = 1; }",
+    "body_hash": "614a3f7a8eaec2baee81f4ae0c252a11",
+    "calls": [],
+    "file": "plic.c",
+    "line_count": 7
+  },
+  "plicinithart": {
+    "body_normalized": "void plicinithart(void) { int hart = cpuid(); *(uint32*)PLIC_SENABLE(hart) = (1 << UART0_IRQ) | (1 << VIRTIO0_IRQ); *(uint32*)PLIC_SPRIORITY(hart) = 0; }",
+    "body_hash": "27b9da89efff5e42e2bee295fd120c28",
+    "calls": [
+      "PLIC_SPRIORITY",
+      "cpuid",
+      "PLIC_SENABLE"
+    ],
+    "file": "plic.c",
+    "line_count": 12
+  },
+  "plic_claim": {
+    "body_normalized": "int plic_claim(void) { int hart = cpuid(); int irq = *(uint32*)PLIC_SCLAIM(hart); return irq; }",
+    "body_hash": "e49c06fe0d0e48dd7d613d98cf752d40",
+    "calls": [
+      "PLIC_SCLAIM",
+      "cpuid"
+    ],
+    "file": "plic.c",
+    "line_count": 7
+  },
+  "plic_complete": {
+    "body_normalized": "void plic_complete(int irq) { int hart = cpuid(); *(uint32*)PLIC_SCLAIM(hart) = irq; }",
+    "body_hash": "dbf7aec553318fc5abbfa0be79705879",
+    "calls": [
+      "PLIC_SCLAIM",
+      "cpuid"
+    ],
+    "file": "plic.c",
+    "line_count": 6
+  },
+  "initsleeplock": {
+    "body_normalized": "void initsleeplock(struct sleeplock *lk, char *name) { initlock(&lk->lk, \"STR\"); lk->name = name; lk->locked = 0; lk->pid = 0; }",
+    "body_hash": "5c8031ccaeab1f490b07b7de1bb0eef5",
+    "calls": [
+      "initlock"
+    ],
+    "file": "sleeplock.c",
+    "line_count": 8
+  },
+  "acquiresleep": {
+    "body_normalized": "void acquiresleep(struct sleeplock *lk) { acquire(&lk->lk); while (lk->locked) { sleep(lk, &lk->lk); } lk->locked = 1; lk->pid = myproc()->pid; release(&lk->lk); }",
+    "body_hash": "c759dc92901ed2934e4557f20a73f5ec",
+    "calls": [
+      "myproc",
+      "release",
+      "acquire",
+      "sleep"
+    ],
+    "file": "sleeplock.c",
+    "line_count": 11
+  },
+  "releasesleep": {
+    "body_normalized": "void releasesleep(struct sleeplock *lk) { acquire(&lk->lk); lk->locked = 0; lk->pid = 0; wakeup(lk); release(&lk->lk); }",
+    "body_hash": "39c0bd7db426cdbbb416397e48ca40be",
+    "calls": [
+      "wakeup",
+      "release",
+      "acquire"
+    ],
+    "file": "sleeplock.c",
+    "line_count": 9
+  },
+  "holdingsleep": {
+    "body_normalized": "int holdingsleep(struct sleeplock *lk) { int r; acquire(&lk->lk); r = lk->locked && (lk->pid == myproc()->pid); release(&lk->lk); return r; }",
+    "body_hash": "2ca85da8019e857e5796411f0bd1d26a",
+    "calls": [
+      "myproc",
+      "release",
+      "acquire"
+    ],
+    "file": "sleeplock.c",
+    "line_count": 10
+  },
+  "kvmmake": {
+    "body_normalized": "pagetable_t kvmmake(void) { pagetable_t kpgtbl; kpgtbl = (pagetable_t) kalloc(); memset(kpgtbl, 0, PGSIZE); kvmmap(kpgtbl, UART0, UART0, PGSIZE, PTE_R | PTE_W); kvmmap(kpgtbl, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W); kvmmap(kpgtbl, PLIC, PLIC, 0x4000000, PTE_R | PTE_W); kvmmap(kpgtbl, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X); kvmmap(kpgtbl, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W); kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X); proc_mapstacks(kpgtbl); return kpgtbl; }",
+    "body_hash": "151dd8b2082ebf7d060bdb0d41c7cef8",
+    "calls": [
+      "kvmmap",
+      "kalloc",
+      "memset",
+      "proc_mapstacks"
+    ],
+    "file": "vm.c",
+    "line_count": 32
+  },
+  "kvmmap": {
+    "body_normalized": "void kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm) { if(mappages(kpgtbl, va, sz, pa, perm) != 0) panic(\"STR\"); }",
+    "body_hash": "db12b2fd93618a48dd984e882f3db1b1",
+    "calls": [
+      "mappages",
+      "panic"
+    ],
+    "file": "vm.c",
+    "line_count": 6
+  },
+  "kvminit": {
+    "body_normalized": "void kvminit(void) { kernel_pagetable = kvmmake(); }",
+    "body_hash": "ac3c69c128bb85cc6f0c817218cba6c3",
+    "calls": [
+      "kvmmake"
+    ],
+    "file": "vm.c",
+    "line_count": 5
+  },
+  "kvminithart": {
+    "body_normalized": "void kvminithart() { sfence_vma(); w_satp(MAKE_SATP(kernel_pagetable)); sfence_vma(); }",
+    "body_hash": "32de26bcc64e5136142bd99d6ec630f2",
+    "calls": [
+      "sfence_vma",
+      "w_satp",
+      "MAKE_SATP"
+    ],
+    "file": "vm.c",
+    "line_count": 11
+  },
+  "walk": {
+    "body_normalized": "pte_t * walk(pagetable_t pagetable, uint64 va, int alloc) { if(va >= MAXVA) panic(\"STR\"); for(int level = NUM; level > 0; level--) { pte_t *pte = &pagetable[PX(level, va)]; if(*pte & PTE_V) { pagetable = (pagetable_t)PTE2PA(*pte); } else { if(!alloc || (pagetable = (pde_t*)kalloc()) == 0) return 0; memset(pagetable, 0, PGSIZE); *pte = PA2PTE(pagetable) | PTE_V; } } return &pagetable[PX(0, va)]; }",
+    "body_hash": "96d3cdd1395bccf7a0f2c6ca11cfa7c0",
+    "calls": [
+      "kalloc",
+      "panic",
+      "PA2PTE",
+      "PX",
+      "PTE2PA",
+      "memset"
+    ],
+    "file": "vm.c",
+    "line_count": 19
+  },
+  "walkaddr": {
+    "body_normalized": "uint64 walkaddr(pagetable_t pagetable, uint64 va) { pte_t *pte; uint64 pa; if(va >= MAXVA) return 0; pte = walk(pagetable, va, 0); if(pte == 0) return 0; if((*pte & PTE_V) == 0) return 0; if((*pte & PTE_U) == 0) return 0; pa = PTE2PA(*pte); return pa; }",
+    "body_hash": "56bb705afe24455b90d6a944311949bf",
+    "calls": [
+      "walk",
+      "PTE2PA"
+    ],
+    "file": "vm.c",
+    "line_count": 19
+  },
+  "mappages": {
+    "body_normalized": "int mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm) { uint64 a, last; pte_t *pte; if((va % PGSIZE) != 0) panic(\"STR\"); if((size % PGSIZE) != 0) panic(\"STR\"); if(size == 0) panic(\"STR\"); a = va; last = va + size - PGSIZE; for(;;){ if((pte = walk(pagetable, a, 1)) == 0) return -1; if(*pte & PTE_V) panic(\"STR\"); *pte = PA2PTE(pa) | perm | PTE_V; if(a == last) break; a += PGSIZE; pa += PGSIZE; } return 0; }",
+    "body_hash": "54eff95d41b72e00087b7772cbd9303c",
+    "calls": [
+      "walk",
+      "panic",
+      "PA2PTE"
+    ],
+    "file": "vm.c",
+    "line_count": 30
+  },
+  "uvmcreate": {
+    "body_normalized": "pagetable_t uvmcreate() { pagetable_t pagetable; pagetable = (pagetable_t) kalloc(); if(pagetable == 0) return 0; memset(pagetable, 0, PGSIZE); return pagetable; }",
+    "body_hash": "2d3cc53a6a10576141ed9fa408be6cbb",
+    "calls": [
+      "kalloc",
+      "memset"
+    ],
+    "file": "vm.c",
+    "line_count": 10
+  },
+  "uvmunmap": {
+    "body_normalized": "void uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free) { uint64 a; pte_t *pte; if((va % PGSIZE) != 0) panic(\"STR\"); for(a = va; a < va + npages*PGSIZE; a += PGSIZE){ if((pte = walk(pagetable, a, 0)) == 0) continue; if((*pte & PTE_V) == 0) continue; if(do_free){ uint64 pa = PTE2PA(*pte); kfree((void*)pa); } *pte = 0; } }",
+    "body_hash": "813069b221915e768d09a4cecfb2235f",
+    "calls": [
+      "kfree",
+      "walk",
+      "panic",
+      "PTE2PA"
+    ],
+    "file": "vm.c",
+    "line_count": 21
+  },
+  "uvmalloc": {
+    "body_normalized": "uint64 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm) { char *mem; uint64 a; if(newsz < oldsz) return oldsz; oldsz = PGROUNDUP(oldsz); for(a = oldsz; a < newsz; a += PGSIZE){ mem = kalloc(); if(mem == 0){ uvmdealloc(pagetable, a, oldsz); return 0; } memset(mem, 0, PGSIZE); if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_R|PTE_U|xperm) != 0){ kfree(mem); uvmdealloc(pagetable, a, oldsz); return 0; } } return newsz; }",
+    "body_hash": "e41fc61d0d0af854e29833aa823bfa7d",
+    "calls": [
+      "uvmdealloc",
+      "kalloc",
+      "mappages",
+      "PGROUNDUP",
+      "kfree",
+      "memset"
+    ],
+    "file": "vm.c",
+    "line_count": 25
+  },
+  "uvmdealloc": {
+    "body_normalized": "uint64 uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz) { if(newsz >= oldsz) return oldsz; if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){ int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE; uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1); } return newsz; }",
+    "body_hash": "60bd6a57d3cc9f603f65314e1ef9616b",
+    "calls": [
+      "PGROUNDUP",
+      "uvmunmap"
+    ],
+    "file": "vm.c",
+    "line_count": 13
+  },
+  "freewalk": {
+    "body_normalized": "void freewalk(pagetable_t pagetable) { for(int i = 0; i < NUM; i++){ pte_t pte = pagetable[i]; if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){ uint64 child = PTE2PA(pte); freewalk((pagetable_t)child); pagetable[i] = 0; } else if(pte & PTE_V){ panic(\"STR\"); } } kfree((void*)pagetable); }",
+    "body_hash": "d6eaa5ec53eaa34158b76628250c345b",
+    "calls": [
+      "kfree",
+      "freewalk",
+      "panic",
+      "PTE2PA"
+    ],
+    "file": "vm.c",
+    "line_count": 17
+  },
+  "uvmfree": {
+    "body_normalized": "void uvmfree(pagetable_t pagetable, uint64 sz) { if(sz > 0) uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 1); freewalk(pagetable); }",
+    "body_hash": "1408bd65f939c57f4d0aa5abc7a2c28d",
+    "calls": [
+      "PGROUNDUP",
+      "freewalk",
+      "uvmunmap"
+    ],
+    "file": "vm.c",
+    "line_count": 7
+  },
+  "uvmcopy": {
+    "body_normalized": "int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz) { pte_t *pte; uint64 pa, i; uint flags; char *mem; for(i = 0; i < sz; i += PGSIZE){ if((pte = walk(old, i, 0)) == 0) continue; if((*pte & PTE_V) == 0) continue; pa = PTE2PA(*pte); flags = PTE_FLAGS(*pte); if((mem = kalloc()) == 0) goto err; memmove(mem, (char*)pa, PGSIZE); if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){ kfree(mem); goto err; } } return 0; err: uvmunmap(new, 0, i / PGSIZE, 1); return -1; }",
+    "body_hash": "56d82a7e4e080a96b27b75d9b12952d3",
+    "calls": [
+      "memmove",
+      "walk",
+      "kalloc",
+      "mappages",
+      "PTE_FLAGS",
+      "uvmunmap",
+      "kfree",
+      "PTE2PA"
+    ],
+    "file": "vm.c",
+    "line_count": 29
+  },
+  "uvmclear": {
+    "body_normalized": "void uvmclear(pagetable_t pagetable, uint64 va) { pte_t *pte; pte = walk(pagetable, va, 0); if(pte == 0) panic(\"STR\"); *pte &= ~PTE_U; }",
+    "body_hash": "99770d68d8f9de1f80e6b749c26238d5",
+    "calls": [
+      "walk",
+      "panic"
+    ],
+    "file": "vm.c",
+    "line_count": 10
+  },
+  "copyout": {
+    "body_normalized": "int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len) { uint64 n, va0, pa0; pte_t *pte; while(len > 0){ va0 = PGROUNDDOWN(dstva); if(va0 >= MAXVA) return -1; pa0 = walkaddr(pagetable, va0); if(pa0 == 0) { if((pa0 = vmfault(pagetable, va0, 0)) == 0) { return -1; } } pte = walk(pagetable, va0, 0); if((*pte & PTE_W) == 0) return -1; n = PGSIZE - (dstva - va0); if(n > len) n = len; memmove((void *)(pa0 + (dstva - va0)), src, n); len -= n; src += n; dstva = va0 + PGSIZE; } return 0; }",
+    "body_hash": "d51e86b42c1aca82b4e001beeea0d381",
+    "calls": [
+      "memmove",
+      "walk",
+      "walkaddr",
+      "PGROUNDDOWN",
+      "vmfault"
+    ],
+    "file": "vm.c",
+    "line_count": 34
+  },
+  "copyin": {
+    "body_normalized": "int copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len) { uint64 n, va0, pa0; while(len > 0){ va0 = PGROUNDDOWN(srcva); pa0 = walkaddr(pagetable, va0); if(pa0 == 0) { if((pa0 = vmfault(pagetable, va0, 0)) == 0) { return -1; } } n = PGSIZE - (srcva - va0); if(n > len) n = len; memmove(dst, (void *)(pa0 + (srcva - va0)), n); len -= n; dst += n; srcva = va0 + PGSIZE; } return 0; }",
+    "body_hash": "72bb8f9007464b90bff181feaa5b80fe",
+    "calls": [
+      "vmfault",
+      "walkaddr",
+      "PGROUNDDOWN",
+      "memmove"
+    ],
+    "file": "vm.c",
+    "line_count": 24
+  },
+  "copyinstr": {
+    "body_normalized": "int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max) { uint64 n, va0, pa0; int got_null = 0; while(got_null == 0 && max > 0){ va0 = PGROUNDDOWN(srcva); pa0 = walkaddr(pagetable, va0); if(pa0 == 0) return -1; n = PGSIZE - (srcva - va0); if(n > max) n = max; char *p = (char *) (pa0 + (srcva - va0)); while(n > 0){ if(*p == 'STR'){ *dst = 'STR'; got_null = 1; break; } else { *dst = *p; } --n; --max; p++; dst++; } srcva = va0 + PGSIZE; } if(got_null){ return 0; } else { return -1; } }",
+    "body_hash": "0fea4441ce5d0b558aabe30583ce5fd8",
+    "calls": [
+      "walkaddr",
+      "PGROUNDDOWN"
+    ],
+    "file": "vm.c",
+    "line_count": 38
+  },
+  "vmfault": {
+    "body_normalized": "uint64 vmfault(pagetable_t pagetable, uint64 va, int read) { uint64 mem; struct proc *p = myproc(); if (va >= p->sz) return 0; va = PGROUNDDOWN(va); if(ismapped(pagetable, va)) { return 0; } mem = (uint64) kalloc(); if(mem == 0) return 0; memset((void *) mem, 0, PGSIZE); if (mappages(p->pagetable, va, PGSIZE, mem, PTE_W|PTE_U|PTE_R) != 0) { kfree((void *)mem); return 0; } return mem; }",
+    "body_hash": "cbf2074a9f4b4277af0e8c70cc1fda0a",
+    "calls": [
+      "kalloc",
+      "mappages",
+      "ismapped",
+      "PGROUNDDOWN",
+      "myproc",
+      "kfree",
+      "memset"
+    ],
+    "file": "vm.c",
+    "line_count": 22
+  },
+  "ismapped": {
+    "body_normalized": "int ismapped(pagetable_t pagetable, uint64 va) { pte_t *pte = walk(pagetable, va, 0); if (pte == 0) { return 0; } if (*pte & PTE_V){ return 1; } return 0; }",
+    "body_hash": "3c8ff59c281d2d49d2b2f7651ae9d5b9",
+    "calls": [
+      "walk"
+    ],
+    "file": "vm.c",
+    "line_count": 12
+  },
+  "printint": {
+    "body_normalized": "static void printint(long long xx, int base, int sign) { char buf[NUM]; int i; unsigned long long x; if(sign && (sign = (xx < 0))) x = -xx; else x = xx; i = 0; do { buf[i++] = digits[x % base]; } while((x /= base) != 0); if(sign) buf[i++] = 'STR'; while(--i >= 0) consputc(buf[i]); }",
+    "body_hash": "32e56b9de93e061aa30b516bdca27af9",
+    "calls": [
+      "consputc"
+    ],
+    "file": "printf.c",
+    "line_count": 23
+  },
+  "printptr": {
+    "body_normalized": "static void printptr(uint64 x) { int i; consputc('STR'); consputc('STR'); for (i = 0; i < (sizeof(uint64) * NUM); i++, x <<= NUM) consputc(digits[x >> (sizeof(uint64) * NUM - NUM)]); }",
+    "body_hash": "52f2f605175d22ea8edccde6da1cb49b",
+    "calls": [
+      "consputc"
+    ],
+    "file": "printf.c",
+    "line_count": 9
+  },
+  "printf": {
+    "body_normalized": "int printf(char *fmt, ...) { va_list ap; int i, cx, c0, c1, c2; char *s; if(panicking == 0) acquire(&pr.lock); va_start(ap, fmt); for(i = 0; (cx = fmt[i] & 0xff) != 0; i++){ if(cx != 'STR'){ consputc(cx); continue; } i++; c0 = fmt[i+0] & 0xff; c1 = c2 = 0; if(c0) c1 = fmt[i+1] & 0xff; if(c1) c2 = fmt[i+NUM] & 0xff; if(c0 == 'STR'){ printint(va_arg(ap, int), NUM, 1); } else if(c0 == 'STR' && c1 == 'STR'){ printint(va_arg(ap, uint64), NUM, 1); i += 1; } else if(c0 == 'STR' && c1 == 'STR' && c2 == 'STR'){ printint(va_arg(ap, uint64), NUM, 1); i += NUM; } else if(c0 == 'STR'){ printint(va_arg(ap, uint32), NUM, 0); } else if(c0 == 'STR' && c1 == 'STR'){ printint(va_arg(ap, uint64), NUM, 0); i += 1; } else if(c0 == 'STR' && c1 == 'STR' && c2 == 'STR'){ printint(va_arg(ap, uint64), NUM, 0); i += NUM; } else if(c0 == 'STR'){ printint(va_arg(ap, uint32), NUM, 0); } else if(c0 == 'STR' && c1 == 'STR'){ printint(va_arg(ap, uint64), NUM, 0); i += 1; } else if(c0 == 'STR' && c1 == 'STR' && c2 == 'STR'){ printint(va_arg(ap, uint64), NUM, 0); i += NUM; } else if(c0 == 'STR'){ printptr(va_arg(ap, uint64)); } else if(c0 == 'STR'){ consputc(va_arg(ap, uint)); } else if(c0 == 'STR'){ if((s = va_arg(ap, char*)) == 0) s = \"STR\"; for(; *s; s++) consputc(*s); } else if(c0 == 'STR'){ consputc('STR'); } else if(c0 == 0){ break; } else { consputc('STR'); consputc(c0); } } va_end(ap); if(panicking == 0) release(&pr.lock); return 0; }",
+    "body_hash": "a6cea41367f602b7ed5a47fcedb7b63d",
+    "calls": [
+      "consputc",
+      "va_arg",
+      "printint",
+      "va_end",
+      "va_start",
+      "release",
+      "acquire",
+      "printptr"
+    ],
+    "file": "printf.c",
+    "line_count": 72
+  },
+  "panic": {
+    "body_normalized": "void panic(char *s) { panicking = 1; printf(\"STR\"); printf(\"STR\", s); panicked = 1; for(;;) ; }",
+    "body_hash": "c63425892dc81248f94f516e237c1664",
+    "calls": [
+      "printf"
+    ],
+    "file": "printf.c",
+    "line_count": 10
+  },
+  "printfinit": {
+    "body_normalized": "void printfinit(void) { initlock(&pr.lock, \"STR\"); }",
+    "body_hash": "8f3adcfcecf091ee3c2adf4195d99b80",
+    "calls": [
+      "initlock"
+    ],
+    "file": "printf.c",
+    "line_count": 5
+  },
+  "start": {
+    "body_normalized": "void start() { unsigned long x = r_mstatus(); x &= ~MSTATUS_MPP_MASK; x |= MSTATUS_MPP_S; w_mstatus(x); w_mepc((uint64)main); w_satp(0); w_medeleg(0xffff); w_mideleg(0xffff); w_sie(r_sie() | SIE_SEIE | SIE_STIE); w_pmpaddr0(0x3fffffffffffffull); w_pmpcfg0(0xf); timerinit(); int id = r_mhartid(); w_tp(id); asm volatile(\"STR\"); }",
+    "body_hash": "2713089c1bb7829f28929a82e6df0e0a",
+    "calls": [
+      "w_mepc",
+      "w_mideleg",
+      "w_pmpaddr0",
+      "w_sie",
+      "w_pmpcfg0",
+      "r_mstatus",
+      "w_medeleg",
+      "w_satp",
+      "timerinit",
+      "r_mhartid",
+      "r_sie",
+      "w_mstatus",
+      "w_tp"
+    ],
+    "file": "start.c",
+    "line_count": 36
+  },
+  "timerinit": {
+    "body_normalized": "void timerinit() { w_menvcfg(r_menvcfg() | (1L << NUM)); w_mcounteren(r_mcounteren() | NUM); w_stimecmp(r_time() + NUM); }",
+    "body_hash": "b7cb04093bb30cadef8708e81b5244fa",
+    "calls": [
+      "w_menvcfg",
+      "w_stimecmp",
+      "r_menvcfg",
+      "r_time",
+      "r_mcounteren",
+      "w_mcounteren"
+    ],
+    "file": "start.c",
+    "line_count": 12
+  },
+  "sys_exit": {
+    "body_normalized": "uint64 sys_exit(void) { int n; argint(0, &n); kexit(n); return 0; }",
+    "body_hash": "e767bbfa6c0da31fe1aadee1f48ac544",
+    "calls": [
+      "argint",
+      "kexit"
+    ],
+    "file": "sysproc.c",
+    "line_count": 8
+  },
+  "sys_getpid": {
+    "body_normalized": "uint64 sys_getpid(void) { return myproc()->pid; }",
+    "body_hash": "b5dcd2c47e76d632080893f14391a482",
+    "calls": [
+      "myproc"
+    ],
+    "file": "sysproc.c",
+    "line_count": 5
+  },
+  "sys_fork": {
+    "body_normalized": "uint64 sys_fork(void) { return kfork(); }",
+    "body_hash": "70eddeaa3f4ea1e39bfe9882515a25b9",
+    "calls": [
+      "kfork"
+    ],
+    "file": "sysproc.c",
+    "line_count": 5
+  },
+  "sys_wait": {
+    "body_normalized": "uint64 sys_wait(void) { uint64 p; argaddr(0, &p); return kwait(p); }",
+    "body_hash": "e57aa2d9f24a3a4d0a0284fa4dd158f4",
+    "calls": [
+      "kwait",
+      "argaddr"
+    ],
+    "file": "sysproc.c",
+    "line_count": 7
+  },
+  "sys_sbrk": {
+    "body_normalized": "uint64 sys_sbrk(void) { uint64 addr; int t; int n; argint(0, &n); argint(1, &t); addr = myproc()->sz; if(t == SBRK_EAGER || n < 0) { if(growproc(n) < 0) { return -1; } } else { if(addr + n < addr) return -1; if(addr + n > TRAPFRAME) return -1; myproc()->sz += n; } return addr; }",
+    "body_hash": "75305d131b1faa5f817c19d27f37deb1",
+    "calls": [
+      "myproc",
+      "argint",
+      "growproc"
+    ],
+    "file": "sysproc.c",
+    "line_count": 27
+  },
+  "sys_pause": {
+    "body_normalized": "uint64 sys_pause(void) { int n; uint ticks0; argint(0, &n); if(n < 0) n = 0; acquire(&tickslock); ticks0 = ticks; while(ticks - ticks0 < n){ if(killed(myproc())){ release(&tickslock); return -1; } sleep(&ticks, &tickslock); } release(&tickslock); return 0; }",
+    "body_hash": "e5adf2a6e8afc0e0012eb3d7b11cf98e",
+    "calls": [
+      "sleep",
+      "myproc",
+      "killed",
+      "argint",
+      "release",
+      "acquire"
+    ],
+    "file": "sysproc.c",
+    "line_count": 21
+  },
+  "sys_kill": {
+    "body_normalized": "uint64 sys_kill(void) { int pid; argint(0, &pid); return kkill(pid); }",
+    "body_hash": "3901e0e831d1ef1c856bd98e03c4264a",
+    "calls": [
+      "kkill",
+      "argint"
+    ],
+    "file": "sysproc.c",
+    "line_count": 8
+  },
+  "sys_uptime": {
+    "body_normalized": "uint64 sys_uptime(void) { uint xticks; acquire(&tickslock); xticks = ticks; release(&tickslock); return xticks; }",
+    "body_hash": "b3b33ebc2a16553710f64804483d2665",
+    "calls": [
+      "release",
+      "acquire"
+    ],
+    "file": "sysproc.c",
+    "line_count": 10
+  },
+  "initlock": {
+    "body_normalized": "void initlock(struct spinlock *lk, char *name) { lk->name = name; lk->locked = 0; lk->cpu = 0; }",
+    "body_hash": "811340f208e5b373afef04e9ff8b73d0",
+    "calls": [],
+    "file": "spinlock.c",
+    "line_count": 7
+  },
+  "acquire": {
+    "body_normalized": "void acquire(struct spinlock *lk) { push_off(); if(holding(lk)) panic(\"STR\"); while(__atomic_exchange_n(&lk->locked, 1, __ATOMIC_ACQUIRE) != 0) ; lk->cpu = mycpu(); }",
+    "body_hash": "f8576645c4afc3624f2bcea980dda2bb",
+    "calls": [
+      "panic",
+      "holding",
+      "mycpu",
+      "__atomic_exchange_n",
+      "push_off"
+    ],
+    "file": "spinlock.c",
+    "line_count": 22
+  },
+  "release": {
+    "body_normalized": "void release(struct spinlock *lk) { if(!holding(lk)) panic(\"STR\"); lk->cpu = 0; __atomic_store_n(&lk->locked, 0, __ATOMIC_RELEASE); pop_off(); }",
+    "body_hash": "f15ec7286bd17d06e82f2bf456b69f81",
+    "calls": [
+      "pop_off",
+      "holding",
+      "panic",
+      "__atomic_store_n"
+    ],
+    "file": "spinlock.c",
+    "line_count": 31
+  },
+  "holding": {
+    "body_normalized": "int holding(struct spinlock *lk) { int r; r = (lk->locked && lk->cpu == mycpu()); return r; }",
+    "body_hash": "b88ebeb57b4b9727c3350e2176bb1177",
+    "calls": [
+      "mycpu"
+    ],
+    "file": "spinlock.c",
+    "line_count": 7
+  },
+  "push_off": {
+    "body_normalized": "void push_off(void) { int old = intr_get(); intr_off(); if(mycpu()->noff == 0) mycpu()->intena = old; mycpu()->noff += 1; }",
+    "body_hash": "3158abd4408a35c8721377f9b9dcb463",
+    "calls": [
+      "intr_off",
+      "intr_get",
+      "mycpu"
+    ],
+    "file": "spinlock.c",
+    "line_count": 13
+  },
+  "pop_off": {
+    "body_normalized": "void pop_off(void) { struct cpu *c = mycpu(); if(intr_get()) panic(\"STR\"); if(c->noff < 1) panic(\"STR\"); c->noff -= 1; if(c->noff == 0 && c->intena) intr_on(); }",
+    "body_hash": "27c8d07860f254c28f8b94b588b3be79",
+    "calls": [
+      "panic",
+      "intr_on",
+      "intr_get",
+      "mycpu"
+    ],
+    "file": "spinlock.c",
+    "line_count": 12
+  },
+  "kinit": {
+    "body_normalized": "void kinit() { initlock(&kmem.lock, \"STR\"); freerange(end, (void*)PHYSTOP); }",
+    "body_hash": "d8c0819fcdde64e9251cfdf910b915ba",
+    "calls": [
+      "freerange",
+      "initlock"
+    ],
+    "file": "kalloc.c",
+    "line_count": 6
+  },
+  "freerange": {
+    "body_normalized": "void freerange(void *pa_start, void *pa_end) { char *p; p = (char*)PGROUNDUP((uint64)pa_start); for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE) kfree(p); }",
+    "body_hash": "7b00484de671dd04c6eaa81edc023e2b",
+    "calls": [
+      "kfree",
+      "PGROUNDUP"
+    ],
+    "file": "kalloc.c",
+    "line_count": 8
+  },
+  "kfree": {
+    "body_normalized": "void kfree(void *pa) { struct run *r; if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP) panic(\"STR\"); memset(pa, 1, PGSIZE); r = (struct run*)pa; acquire(&kmem.lock); r->next = kmem.freelist; kmem.freelist = r; release(&kmem.lock); }",
+    "body_hash": "44306017ccc7514c079b5f75d4d65553",
+    "calls": [
+      "release",
+      "panic",
+      "memset",
+      "acquire"
+    ],
+    "file": "kalloc.c",
+    "line_count": 18
+  },
+  "kalloc": {
+    "body_normalized": "void * kalloc(void) { struct run *r; acquire(&kmem.lock); r = kmem.freelist; if(r) kmem.freelist = r->next; release(&kmem.lock); if(r) memset((char*)r, NUM, PGSIZE); return (void*)r; }",
+    "body_hash": "c993b12c6d848b597bb171812a7ba448",
+    "calls": [
+      "memset",
+      "release",
+      "acquire"
+    ],
+    "file": "kalloc.c",
+    "line_count": 15
+  },
+  "uartinit": {
+    "body_normalized": "void uartinit(void) { WriteReg(IER, 0x00); WriteReg(LCR, LCR_BAUD_LATCH); WriteReg(0, 0x03); WriteReg(1, 0x00); WriteReg(LCR, LCR_EIGHT_BITS); WriteReg(FCR, FCR_FIFO_ENABLE | FCR_FIFO_CLEAR); WriteReg(IER, IER_TX_ENABLE | IER_RX_ENABLE); initlock(&tx_lock, \"STR\"); }",
+    "body_hash": "9442a3d7080640f5a28716b1774e85c4",
+    "calls": [
+      "WriteReg",
+      "initlock"
+    ],
+    "file": "uart.c",
+    "line_count": 27
+  },
+  "uartwrite": {
+    "body_normalized": "void uartwrite(char buf[], int n) { acquire(&tx_lock); int i = 0; while(i < n){ while(tx_busy != 0){ sleep(&tx_chan, &tx_lock); } WriteReg(THR, buf[i]); i += 1; tx_busy = 1; } release(&tx_lock); }",
+    "body_hash": "5fea0c976ffb6a7494898013e32d4d68",
+    "calls": [
+      "WriteReg",
+      "release",
+      "acquire",
+      "sleep"
+    ],
+    "file": "uart.c",
+    "line_count": 20
+  },
+  "uartputc_sync": {
+    "body_normalized": "void uartputc_sync(int c) { if(panicking == 0) push_off(); if(panicked){ for(;;) ; } while((ReadReg(LSR) & LSR_TX_IDLE) == 0) ; WriteReg(THR, c); if(panicking == 0) pop_off(); }",
+    "body_hash": "8987d60dba92dd832601e75a57e3e2d3",
+    "calls": [
+      "pop_off",
+      "ReadReg",
+      "WriteReg",
+      "push_off"
+    ],
+    "file": "uart.c",
+    "line_count": 19
+  },
+  "uartgetc": {
+    "body_normalized": "static int uartgetc(void) { if(ReadReg(LSR) & LSR_RX_READY){ return ReadReg(RHR); } else { return -1; } }",
+    "body_hash": "aa25b793b4c75ec7bb0a2dfab37bc6b2",
+    "calls": [
+      "ReadReg"
+    ],
+    "file": "uart.c",
+    "line_count": 10
+  },
+  "uartintr": {
+    "body_normalized": "void uartintr(void) { ReadReg(ISR); acquire(&tx_lock); if(ReadReg(LSR) & LSR_TX_IDLE){ tx_busy = 0; wakeup(&tx_chan); } release(&tx_lock); while(1){ int c = uartgetc(); if(c == -1) break; consoleintr(c); } }",
+    "body_hash": "d3e70fa6267e6a67cda1f17e3398af04",
+    "calls": [
+      "ReadReg",
+      "wakeup",
+      "consoleintr",
+      "uartgetc",
+      "release",
+      "acquire"
+    ],
+    "file": "uart.c",
+    "line_count": 21
+  }
+}

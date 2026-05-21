@@ -1,0 +1,1458 @@
+{
+  "main": {
+    "body_normalized": "fn main() { println!(\"STR\"); if let Ok(user_img) = std::env::var(\"STR\") { println!(\"STR\", user_img); } gen_link_user_asm().unwrap(); }",
+    "body_hash": "89b65366fcbd19c0a98dc32ef67760fa",
+    "calls": [
+      "println",
+      "gen_link_user_asm",
+      "var",
+      "unwrap"
+    ],
+    "file": "build.rs",
+    "line_count": 7
+  },
+  "gen_link_user_asm": {
+    "body_normalized": "fn gen_link_user_asm() -> Result<()> { let mut f = File::create(\"STR\").unwrap(); let user_img = std::env::var(\"STR\").unwrap(); let local: DateTime<Local> = Local::now(); writeln!(f, \"STR\")?; writeln!(f, \"STR\", local.to_string())?; writeln!( f, r#\"STR\"{}\"STR\"#, user_img )?; Ok(()) }",
+    "body_hash": "dc8e5a9d2ff8e3848795442044952746",
+    "calls": [
+      "",
+      "writeln",
+      "var",
+      "create",
+      "now",
+      "unwrap",
+      "!(\n    ",
+      "img_sta"
+    ],
+    "file": "build.rs",
+    "line_count": 23
+  },
+  "syscall": {
+    "body_normalized": "fn syscall(tf: &mut TrapFrame) { tf.sepc += NUM; let ret = crate::syscall::syscall(tf.x[NUM], [tf.x[NUM], tf.x[NUM], tf.x[NUM]], tf); tf.x[NUM] = ret as usize; }",
+    "body_hash": "8a12581f1dd625e65e5746beda990b7e",
+    "calls": [
+      "syscall"
+    ],
+    "file": "src/interrupt.rs",
+    "line_count": 5
+  },
+  "sys_open": {
+    "body_normalized": "fn sys_open(path: *const u8, flags: i32) -> isize { let thread = process::current_thread_mut(); let fd = thread.alloc_fd() as isize; thread.ofile[fd as usize] .as_ref() .unwrap() .lock() .open_file(unsafe { from_cstr(path) }, flags); fd }",
+    "body_hash": "2db7b8e4bc7ec95ca50cd68191f2fe79",
+    "calls": [
+      "lock",
+      "from_cstr",
+      "current_thread_mut",
+      "as_ref",
+      "unwrap",
+      "alloc_fd",
+      "open_file"
+    ],
+    "file": "src/syscall.rs",
+    "line_count": 10
+  },
+  "sys_close": {
+    "body_normalized": "fn sys_close(fd: i32) -> isize { let thread = process::current_thread_mut(); assert!(thread.ofile[fd as usize].is_some()); thread.dealloc_fd(fd); 0 }",
+    "body_hash": "9c58b73fc77a93490b198403125b34ab",
+    "calls": [
+      "assert",
+      "current_thread_mut",
+      "dealloc_fd"
+    ],
+    "file": "src/syscall.rs",
+    "line_count": 6
+  },
+  "sys_exit": {
+    "body_normalized": "fn sys_exit(code: usize) { process::exit(code); }",
+    "body_hash": "5991995a255be83b7ceee673728555c1",
+    "calls": [
+      "exit"
+    ],
+    "file": "src/syscall.rs",
+    "line_count": 3
+  },
+  "sys_read": {
+    "body_normalized": "unsafe fn sys_read(fd: usize, base: *mut u8, len: usize) -> isize { if fd == 0 { *base = crate::fs::stdio::STDIN.pop() as u8; 1 } else { let thread = process::current_thread_mut(); assert!(thread.ofile[fd].is_some()); let mut file = thread.ofile[fd as usize].as_ref().unwrap().lock(); assert!(file.get_readable()); match file.get_fdtype() { FileDescriptorType::FdInode => { let mut offset = file.get_offset(); let s = file .inode .clone() .unwrap() .read_at(offset, core::slice::from_raw_parts_mut(base, len)) .unwrap(); offset += s; file.set_offset(offset); s as isize } _ => { panic!(\"STR\"); } } } } unsafe fn sy",
+    "body_hash": "c68a08a0ec4d292d9eb0b157dbe03575",
+    "calls": [
+      "rom_raw_parts_mut(base, len))\n ",
+      "lock();\n   ",
+      "et_rea",
+      "unwrap();\n          ",
+      ".ofile",
+      "unwrap()\n           ",
+      "t(offset);\n    ",
+      "t();\n          ",
+      "pop() as u8;\n    ",
+      "read_at(offset, core:",
+      "e() {\n         ",
+      "lock();\n        as",
+      " not ",
+      "nt_thread_mut();\n        as",
+      "clone()\n           ",
+      "lo"
+    ],
+    "file": "src/syscall.rs",
+    "line_count": 31
+  },
+  "usize, ba": {
+    "body_normalized": "write(fd: usize, base: *const u8, len: usize) -> isize { if fd == 1 { assert!(len == 1); crate::io::putchar(*base as char); 1 } else { let thread = process::current_thread_mut(); assert!(thread.ofile[fd].is_some()); let mut file = thread.ofile[fd as usize].as_ref().unwrap().lock(); assert!(file.get_writable()); match file.get_fdtype() { FileDescriptorType::FdInode => { let mut offset = file.get_offset(); let s = file .inode .clone() .unwrap() .write_at(offset, core::slice::from_raw_parts(base, len)) .unwrap(); offset += s; file.set_offset(offset); s as isize } _ => { panic!(\"STR\"); } } } } pub unsafe f",
+    "body_hash": "ec419fc9306dce4c27bb45d07c2d7f03",
+    "calls": [
+      "write_at(offset, core:",
+      "lock();\n   ",
+      "unwrap();\n          ",
+      ".ofile",
+      "char(*base as char",
+      " 1);\n ",
+      "unwrap()\n           ",
+      "t();\n          ",
+      "t(offset);\n    ",
+      "rom_raw_parts(base, len))\n ",
+      "e() {\n         ",
+      "lock();\n        as",
+      " not ",
+      "nt_thread_mut();\n        as",
+      "clone()\n           ",
+      "et_wri",
+      "lo"
+    ],
+    "file": "src/syscall.rs",
+    "line_count": 31
+  },
+  "const u8)": {
+    "body_normalized": "from_cstr(s: *const u8) -> &'static str { use core::{slice, str}; let len = (0usize..).find(|&i| *s.add(i) == 0).unwrap(); str::from_utf8(slice::from_raw_parts(s, len)).unwrap() } fn sys_exec(",
+    "body_hash": "c079dce8540b1cbb3a274042b1bdc855",
+    "calls": [
+      "unwrap()\n}\n\nfn sys_e",
+      "unwr",
+      "f",
+      "add(i",
+      "from_r"
+    ],
+    "file": "src/syscall.rs",
+    "line_count": 7
+  },
+  " *const ": {
+    "body_normalized": "th: *const u8) -> isize { let valid = process::execute(unsafe { from_cstr(path) }, Some(process::current_tid())); if valid { process::yield_now(); } 0 }",
+    "body_hash": "379aa8f45da2f8704fb51cb813cf147c",
+    "calls": [
+      "nt_tid()));\n    if v",
+      "curr",
+      ") }, Some",
+      "te(unsafe { from",
+      "_now();\n    }\n    "
+    ],
+    "file": "src/syscall.rs",
+    "line_count": 8
+  },
+  "panic": {
+    "body_normalized": "fn panic(info: &PanicInfo) -> ! { println!(\"STR\", info); loop {} }",
+    "body_hash": "2832868b0e7c43d7855a09b87ec931f0",
+    "calls": [
+      "println"
+    ],
+    "file": "src/lang_items.rs",
+    "line_count": 4
+  },
+  "abort": {
+    "body_normalized": "extern \"STR\" fn abort() -> ! { panic!(\"STR\"); }",
+    "body_hash": "818786513669566cac68278eea89f7dd",
+    "calls": [
+      "panic"
+    ],
+    "file": "src/lang_items.rs",
+    "line_count": 3
+  },
+  "switch": {
+    "body_normalized": "pub unsafe extern \"STR\" fn switch(&mut self, _target: &mut Context) { llvm_asm!(include_str!(\"STR\") :::: \"STR\"); }",
+    "body_hash": "013474440c9f115d528f9746e98f389e",
+    "calls": [
+      "llvm_asm"
+    ],
+    "file": "src/context.rs",
+    "line_count": 3
+  },
+  "null": {
+    "body_normalized": "pub fn null() -> Context { Context { content_addr: 0 } }",
+    "body_hash": "7a70bc02b251525cb0136779676bc12c",
+    "calls": [],
+    "file": "src/context.rs",
+    "line_count": 3
+  },
+  "new_kernel_thread": {
+    "body_normalized": "fn new_kernel_thread(entry: usize, kstack_top: usize, satp: usize) -> ContextContent { ContextContent { ra: __trapret as usize, satp, s: [0; NUM], tf: { let mut tf: TrapFrame = unsafe { zeroed() }; tf.x[NUM] = kstack_top; tf.sepc = entry; tf.sstatus = sstatus::read(); tf.sstatus.set_spp(sstatus::SPP::Supervisor); tf.sstatus.set_spie(true); tf.sstatus.set_sie(false); tf }, } }",
+    "body_hash": "46f28db36a854bb2ca73d9e0f1851216",
+    "calls": [
+      "zeroed",
+      "set_spp",
+      "set_sie",
+      "set_spie",
+      "read"
+    ],
+    "file": "src/context.rs",
+    "line_count": 17
+  },
+  "append_initial_arguments": {
+    "body_normalized": "pub fn append_initial_arguments(&self, args: [usize; NUM]) { unsafe { self.context.append_initial_arguments(args); } }",
+    "body_hash": "e6e1a68ad6bf085b09fa7eec92a6b104",
+    "calls": [
+      "append_initial_arguments"
+    ],
+    "file": "src/process/structs.rs",
+    "line_count": 5
+  },
+  "new_user_thread": {
+    "body_normalized": "fn new_user_thread(entry: usize, ustack_top: usize, satp: usize) -> Self { ContextContent { ra: __trapret as usize, satp, s: [0; NUM], tf: { let mut tf: TrapFrame = unsafe { zeroed() }; tf.x[NUM] = ustack_top; tf.sepc = entry; tf.sstatus = sstatus::read(); tf.sstatus.set_spie(true); tf.sstatus.set_sie(false); tf.sstatus.set_spp(sstatus::SPP::User); tf }, } }",
+    "body_hash": "184c7650dd14c01f31f139d71c9e9a4e",
+    "calls": [
+      "zeroed",
+      "set_spp",
+      "set_sie",
+      "set_spie",
+      "read"
+    ],
+    "file": "src/context.rs",
+    "line_count": 17
+  },
+  "push_at": {
+    "body_normalized": "unsafe fn push_at(self, stack_top: usize) -> Context { let ptr = (stack_top as *mut ContextContent).sub(1); *ptr = self; Context { content_addr: ptr as usize, } }",
+    "body_hash": "c10d2db2c4efd9acd3f0f75ca25cc661",
+    "calls": [
+      "sub"
+    ],
+    "file": "src/context.rs",
+    "line_count": 7
+  },
+  "putchar": {
+    "body_normalized": "pub fn putchar(ch: char) { sbi::console_putchar(ch as u8 as usize); }",
+    "body_hash": "d25fa2ccb4d9b10870eed51a5847cb50",
+    "calls": [
+      "console_putchar"
+    ],
+    "file": "src/io.rs",
+    "line_count": 3
+  },
+  "puts": {
+    "body_normalized": "pub fn puts(s: &str) { for ch in s.chars() { putchar(ch); } }",
+    "body_hash": "6fe743f2739e4aa1a65de663b8816dc8",
+    "calls": [
+      "putchar",
+      "chars"
+    ],
+    "file": "src/io.rs",
+    "line_count": 5
+  },
+  "write_str": {
+    "body_normalized": "fn write_str(&mut self, s: &str) -> fmt::Result { puts(s); Ok(()) }",
+    "body_hash": "748a7d168b74231797ab1b07c8fa38bd",
+    "calls": [
+      "puts",
+      "Ok"
+    ],
+    "file": "src/io.rs",
+    "line_count": 4
+  },
+  "_print": {
+    "body_normalized": "pub fn _print(args: fmt::Arguments) { Stdout.write_fmt(args).unwrap(); }",
+    "body_hash": "0f24c964eb817418073e19fd32b971fa",
+    "calls": [
+      "write_fmt",
+      "unwrap"
+    ],
+    "file": "src/io.rs",
+    "line_count": 3
+  },
+  "option() -> Op": {
+    "body_normalized": "etchar_option() -> Option<char> { let c = sbi::console_getchar() as isize; match c { -1 => None, c => Some(c as u8 as char), } }",
+    "body_hash": "f4b4c194dd124b3595fefe63b4d82225",
+    "calls": [
+      "sole_getchar() as is",
+      "s u8"
+    ],
+    "file": "src/io.rs",
+    "line_count": 8
+  },
+  "rust_main": {
+    "body_normalized": "pub extern \"STR\" fn rust_main() -> ! { extern \"STR\" { fn end(); } crate::memory::init( ((end as usize - KERNEL_BEGIN_VADDR + KERNEL_BEGIN_PADDR) >> NUM) + 1, PHYSICAL_MEMORY_END >> NUM, ); crate::interrupt::init(); crate::fs::init(); crate::process::init(); crate::timer::init(); crate::process::run(); loop {} }",
+    "body_hash": "d687e8f9c2bc698495729ccd6293415a",
+    "calls": [
+      "run",
+      "init"
+    ],
+    "file": "src/init.rs",
+    "line_count": 15
+  },
+  "init": {
+    "body_normalized": "pub fn init(&mut self, l: usize, r: usize) { self.offset = l - 1; self.n = r - l; self.m = 1; while self.m < self.n + NUM { self.m <<= 1; } for i in 1..(self.m << 1) { self.a[i] = 1; } for i in 1..self.n { self.a[self.m + i] = 0; } for i in (1..self.m).rev() { self.a[i] = self.a[i << 1] & self.a[(i << 1) | 1]; } }",
+    "body_hash": "88d45d3498f73c3ad7ebb796071ea1ac",
+    "calls": [
+      "rev"
+    ],
+    "file": "src/memory/frame_allocator.rs",
+    "line_count": 17
+  },
+  "init_external_interrupt": {
+    "body_normalized": "pub unsafe fn init_external_interrupt() { let hart0_s_mode_interrupt_enables: *mut u32 = access_pa_via_va(0x0c00_2080) as *mut u32; const SERIAL: u32 = 0xa; hart0_s_mode_interrupt_enables.write_volatile(1 << SERIAL); }",
+    "body_hash": "c56a3b6415517177082bbd79da2485d5",
+    "calls": [
+      "access_pa_via_va",
+      "write_volatile"
+    ],
+    "file": "src/interrupt.rs",
+    "line_count": 5
+  },
+  "enable_serial_interrupt": {
+    "body_normalized": "pub unsafe fn enable_serial_interrupt() { let uart16550: *mut u8 = access_pa_via_va(0x10000000) as *mut u8; uart16550.add(NUM).write_volatile(0x0B); uart16550.add(1).write_volatile(0x01); }",
+    "body_hash": "0875cdf6d5bff1fedaeb5c252ad83275",
+    "calls": [
+      "add",
+      "access_pa_via_va",
+      "write_volatile"
+    ],
+    "file": "src/interrupt.rs",
+    "line_count": 5
+  },
+  "rust_trap": {
+    "body_normalized": "pub fn rust_trap(tf: &mut TrapFrame) { match tf.scause.cause() { Trap::Exception(Exception::Breakpoint) => breakpoint(&mut tf.sepc), Trap::Interrupt(Interrupt::SupervisorTimer) => super_timer(), Trap::Exception(Exception::InstructionPageFault) => page_fault(tf), Trap::Exception(Exception::LoadPageFault) => page_fault(tf), Trap::Exception(Exception::StorePageFault) => page_fault(tf), Trap::Exception(Exception::UserEnvCall) => syscall(tf), Trap::Interrupt(Interrupt::SupervisorExternal) => external(), _ => panic!(\"STR\"), } }",
+    "body_hash": "c08b0f18498ab5f8980ae4cd0f3fe6a5",
+    "calls": [
+      "page_fault",
+      "external",
+      "super_timer",
+      "breakpoint",
+      "cause",
+      "panic",
+      "syscall"
+    ],
+    "file": "src/interrupt.rs",
+    "line_count": 12
+  },
+  "breakpoint": {
+    "body_normalized": "fn breakpoint(sepc: &mut usize) { println!(\"STR\", sepc); *sepc += NUM; }",
+    "body_hash": "60de673c922d3aca0e646a2b01042394",
+    "calls": [
+      "println"
+    ],
+    "file": "src/interrupt.rs",
+    "line_count": 4
+  },
+  "super_timer": {
+    "body_normalized": "fn super_timer() { clock_set_next_event(); tick(); }",
+    "body_hash": "efd88169b4e334692c85250094b2e379",
+    "calls": [
+      "tick",
+      "clock_set_next_event"
+    ],
+    "file": "src/interrupt.rs",
+    "line_count": 4
+  },
+  "page_fault": {
+    "body_normalized": "fn page_fault(tf: &mut TrapFrame) { println!( \"STR\", tf.scause.cause(), tf.stval, tf.sepc ); panic!(\"STR\"); }",
+    "body_hash": "cab05d03161e5f95075d6e53b8518af9",
+    "calls": [
+      "println",
+      "panic"
+    ],
+    "file": "src/interrupt.rs",
+    "line_count": 9
+  },
+  "external": {
+    "body_normalized": "fn external() { let _ = try_serial(); }",
+    "body_hash": "b2dd2344981b3a596a96e793bdf19622",
+    "calls": [
+      "try_serial"
+    ],
+    "file": "src/interrupt.rs",
+    "line_count": 3
+  },
+  "try_serial": {
+    "body_normalized": "fn try_serial() -> bool { match super::io::getchar_option() { Some(ch) => { if ch == 'STR' { crate::fs::stdio::STDIN.push('STR'); } else { crate::fs::stdio::STDIN.push(ch); } true } None => false, } }",
+    "body_hash": "672d210202d515a0abf623df313a428c",
+    "calls": [
+      "push",
+      "getchar_option"
+    ],
+    "file": "src/interrupt.rs",
+    "line_count": 13
+  },
+  "disable_and_store": {
+    "body_normalized": "pub fn disable_and_store() -> usize { let sstatus: usize; unsafe { llvm_asm!(\"STR\" : \"STR\"(sstatus) ::: \"STR\"); } sstatus }",
+    "body_hash": "74aa5c16e6b24024089efa3b18197203",
+    "calls": [
+      "llvm_asm"
+    ],
+    "file": "src/interrupt.rs",
+    "line_count": 7
+  },
+  "restore": {
+    "body_normalized": "pub fn restore(flags: usize) { unsafe { llvm_asm!(\"STR\" :: \"STR\"(flags) :: \"STR\"); } }",
+    "body_hash": "faf66ae86ca4141b583f064665839834",
+    "calls": [
+      "llvm_asm"
+    ],
+    "file": "src/interrupt.rs",
+    "line_count": 5
+  },
+  "enable_and_wfi": {
+    "body_normalized": "pub fn enable_and_wfi() { unsafe { llvm_asm!(\"STR\" :::: \"STR\"); } }",
+    "body_hash": "c7b10191811abd5ea79a2df158f78a03",
+    "calls": [
+      "llvm_asm"
+    ],
+    "file": "src/interrupt.rs",
+    "line_count": 5
+  },
+  "clock_set_next_event": {
+    "body_normalized": "pub fn clock_set_next_event() { set_timer(get_cycle() + TIMEBASE); }",
+    "body_hash": "7ce08388990dc2ca28a9f51e32607420",
+    "calls": [
+      "get_cycle",
+      "set_timer"
+    ],
+    "file": "src/timer.rs",
+    "line_count": 3
+  },
+  "get_cycle": {
+    "body_normalized": "fn get_cycle() -> u64 { time::read() as u64 }",
+    "body_hash": "747a936b511413e006bdc81a0fb9e81d",
+    "calls": [
+      "read"
+    ],
+    "file": "src/timer.rs",
+    "line_count": 3
+  },
+  "sbi_call": {
+    "body_normalized": "fn sbi_call(which: usize, arg0: usize, arg1: usize, arg2: usize) -> usize { let ret; unsafe { llvm_asm!(\"STR\" : \"STR\" (ret) : \"STR\" (arg0), \"STR\" (arg1), \"STR\" (arg2), \"STR\" (which) : \"STR\" : \"STR\"); } ret }",
+    "body_hash": "9c9eb6fc4198ae356daeff14c07b5682",
+    "calls": [
+      "llvm_asm"
+    ],
+    "file": "src/sbi.rs",
+    "line_count": 11
+  },
+  "console_putchar": {
+    "body_normalized": "pub fn console_putchar(ch: usize) { sbi_call(SBI_CONSOLE_PUTCHAR, ch, 0, 0); }",
+    "body_hash": "8132fae8b66398274816855f8b69724c",
+    "calls": [
+      "sbi_call"
+    ],
+    "file": "src/sbi.rs",
+    "line_count": 3
+  },
+  "console_getchar": {
+    "body_normalized": "pub fn console_getchar() -> usize { sbi_call(SBI_CONSOLE_GETCHAR, 0, 0, 0) }",
+    "body_hash": "95e45cbd588da7132f8d7f9c71ed0793",
+    "calls": [
+      "sbi_call"
+    ],
+    "file": "src/sbi.rs",
+    "line_count": 3
+  },
+  "shutdown": {
+    "body_normalized": "pub fn shutdown() -> ! { sbi_call(SBI_SHUTDOWN, 0, 0, 0); unreachable!() }",
+    "body_hash": "0afc70781ab365d80ae938159c74b6b1",
+    "calls": [
+      "unreachable",
+      "sbi_call"
+    ],
+    "file": "src/sbi.rs",
+    "line_count": 4
+  },
+  "set_timer": {
+    "body_normalized": "pub fn set_timer(stime_value: u64) { #[cfg(target_pointer_width = \"STR\")] sbi_call( SBI_SET_TIMER, stime_value as usize, (stime_value >> NUM) as usize, 0, ); #[cfg(target_pointer_width = \"STR\")] sbi_call(SBI_SET_TIMER, stime_value as usize, 0, 0); }",
+    "body_hash": "a09da4cbd8bb623695262f19fca5a56d",
+    "calls": [
+      "sbi_call"
+    ],
+    "file": "src/sbi.rs",
+    "line_count": 11
+  },
+  "clear_ipi": {
+    "body_normalized": "pub fn clear_ipi() { sbi_call(SBI_CLEAR_IPI, 0, 0, 0); }",
+    "body_hash": "5650e4ec96cdd14859bcef308522805c",
+    "calls": [
+      "sbi_call"
+    ],
+    "file": "src/sbi.rs",
+    "line_count": 3
+  },
+  "send_ipi": {
+    "body_normalized": "pub fn send_ipi(hart_mask: usize) { sbi_call(SBI_SEND_IPI, &hart_mask as *const _ as usize, 0, 0); }",
+    "body_hash": "2f108672bd7ed8502dfd03abe33fd043",
+    "calls": [
+      "sbi_call"
+    ],
+    "file": "src/sbi.rs",
+    "line_count": 3
+  },
+  "remote_fence_i": {
+    "body_normalized": "pub fn remote_fence_i(hart_mask: usize) { sbi_call(SBI_REMOTE_FENCE_I, &hart_mask as *const _ as usize, 0, 0); }",
+    "body_hash": "3e914205954460a1960c15f30e1e88b4",
+    "calls": [
+      "sbi_call"
+    ],
+    "file": "src/sbi.rs",
+    "line_count": 3
+  },
+  "remote_sfence_vma": {
+    "body_normalized": "pub fn remote_sfence_vma(hart_mask: usize, _start: usize, _size: usize) { sbi_call(SBI_REMOTE_SFENCE_VMA, &hart_mask as *const _ as usize, 0, 0); }",
+    "body_hash": "efceac238804a2b2dbc117f8aefe9e21",
+    "calls": [
+      "sbi_call"
+    ],
+    "file": "src/sbi.rs",
+    "line_count": 3
+  },
+  "remote_sfence_vma_asid": {
+    "body_normalized": "pub fn remote_sfence_vma_asid(hart_mask: usize, _start: usize, _size: usize, _asid: usize) { sbi_call( SBI_REMOTE_SFENCE_VMA_ASID, &hart_mask as *const _ as usize, 0, 0, ); }",
+    "body_hash": "2510543c745658113d2f53c77c609507",
+    "calls": [
+      "sbi_call"
+    ],
+    "file": "src/sbi.rs",
+    "line_count": 8
+  },
+  "default": {
+    "body_normalized": "pub fn default() -> Self { File { fdtype: FileDescriptorType::FdNone, readable: false, writable: false, inode: None, offset: 0, } }",
+    "body_hash": "a58d6fdd465a4c820e61b0863b3166c1",
+    "calls": [],
+    "file": "src/fs/file.rs",
+    "line_count": 9
+  },
+  "set_readable": {
+    "body_normalized": "pub fn set_readable(&mut self, v: bool) { self.readable = v; }",
+    "body_hash": "2ae3c0c2278f0e467b0fd9f847281c3e",
+    "calls": [],
+    "file": "src/fs/file.rs",
+    "line_count": 3
+  },
+  "set_writable": {
+    "body_normalized": "pub fn set_writable(&mut self, value: bool) { self.0.flags_mut().set(EF::WRITABLE, value); }",
+    "body_hash": "ccb1e0ada43b17dd0418b9dbf3b5be60",
+    "calls": [
+      "flags_mut",
+      "set"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "get_readable": {
+    "body_normalized": "pub fn get_readable(&self) -> bool { self.readable }",
+    "body_hash": "6d753bcfc93d232f32e6db4c453e1340",
+    "calls": [],
+    "file": "src/fs/file.rs",
+    "line_count": 3
+  },
+  "get_writable": {
+    "body_normalized": "pub fn get_writable(&self) -> bool { self.writable }",
+    "body_hash": "cbc5ed7ff625ed13b64324f47a56eaeb",
+    "calls": [],
+    "file": "src/fs/file.rs",
+    "line_count": 3
+  },
+  "set_fdtype": {
+    "body_normalized": "pub fn set_fdtype(&mut self, t: FileDescriptorType) { self.fdtype = t; }",
+    "body_hash": "4a2000ebfb1f860233e5994826fa7f3d",
+    "calls": [],
+    "file": "src/fs/file.rs",
+    "line_count": 3
+  },
+  "get_fdtype": {
+    "body_normalized": "pub fn get_fdtype(&self) -> FileDescriptorType { self.fdtype }",
+    "body_hash": "2b6dfdb75d91f892e9a7e12e122fe45a",
+    "calls": [],
+    "file": "src/fs/file.rs",
+    "line_count": 3
+  },
+  "set_offset": {
+    "body_normalized": "pub fn set_offset(&mut self, o: usize) { self.offset = o; }",
+    "body_hash": "67084956fa8ae6f8e3993e7428edc592",
+    "calls": [],
+    "file": "src/fs/file.rs",
+    "line_count": 3
+  },
+  "get_offset": {
+    "body_normalized": "pub fn get_offset(&self) -> usize { self.offset }",
+    "body_hash": "aefe4ba15bd22ab816e94354c2dc9735",
+    "calls": [],
+    "file": "src/fs/file.rs",
+    "line_count": 3
+  },
+  "open_file": {
+    "body_normalized": "pub fn open_file(&mut self, path: &'static str, flags: i32) { self.set_fdtype(FileDescriptorType::FdInode); self.set_readable(true); if (flags & 1) > 0 { self.set_readable(false); } if (flags & NUM) > 0 { self.set_writable(true); } unsafe { self.inode = Some(ROOT_INODE.lookup(path).unwrap().clone()); } self.set_offset(0); }",
+    "body_hash": "7fe82986d419861f731aa4cfb38f6596",
+    "calls": [
+      "clone",
+      "Some",
+      "set_fdtype",
+      "set_readable",
+      "unwrap",
+      "set_offset",
+      "lookup",
+      "set_writable"
+    ],
+    "file": "src/fs/file.rs",
+    "line_count": 14
+  },
+  "new": {
+    "body_normalized": "pub fn new() -> Self { let mut memory_set = MemorySet { areas: Vec::new(), page_table: PageTableImpl::new_bare(), }; memory_set.map_kernel_and_physical_memory(); memory_set }",
+    "body_hash": "5facf46d5d4b430cc6720d3d7c0e6466",
+    "calls": [
+      "map_kernel_and_physical_memory",
+      "new",
+      "new_bare"
+    ],
+    "file": "src/memory/memory_set/mod.rs",
+    "line_count": 8
+  },
+  "push": {
+    "body_normalized": "pub fn push( &mut self, start: usize, end: usize, attr: MemoryAttr, handler: impl MemoryHandler, data: Option<(usize, usize)>, ) { assert!(start <= end, \"STR\"); assert!(self.test_free_area(start, end), \"STR\"); let area = MemoryArea::new(start, end, Box::new(handler), attr); area.map(&mut self.page_table); if let Some((src, length)) = data { area.page_copy(&mut self.page_table, src, length); } self.areas.push(area); }",
+    "body_hash": "4699c7387ed01de6f6fa2d1d22c98ef7",
+    "calls": [
+      "page_copy",
+      "map",
+      "assert",
+      "push",
+      "new"
+    ],
+    "file": "src/memory/memory_set/mod.rs",
+    "line_count": 17
+  },
+  "pop": {
+    "body_normalized": "fn pop(&mut self) -> Option<Tid> { let ret = self.threads[0].next; if ret != 0 { let next = self.threads[ret].next; let prev = self.threads[ret].prev; self.threads[next].prev = prev; self.threads[prev].next = next; self.threads[ret].prev = 0; self.threads[ret].next = 0; self.threads[ret].valid = false; self.current = ret; Some(ret - 1) } else { None } }",
+    "body_hash": "62b67341f0be42e1bdd9328e4d50bca4",
+    "calls": [
+      "Some"
+    ],
+    "file": "src/process/scheduler.rs",
+    "line_count": 16
+  },
+  "read_as_vec": {
+    "body_normalized": "fn read_as_vec(&self) -> Result<Vec<u8>> { let size = self.metadata()?.size; let mut buf = Vec::with_capacity(size); unsafe { buf.set_len(size); } self.read_at(0, buf.as_mut_slice())?; Ok(buf) }",
+    "body_hash": "749a7f79997c85195679914508e812be",
+    "calls": [
+      "Ok",
+      "set_len",
+      "with_capacity",
+      "as_mut_slice",
+      "read_at",
+      "metadata"
+    ],
+    "file": "src/fs/mod.rs",
+    "line_count": 9
+  },
+  "read_at": {
+    "body_normalized": "fn read_at(&self, offset: usize, buf: &mut [u8]) -> Result<usize> { let slice = self.0.read(); let len = buf.len().min(slice.len() - offset); buf[..len].copy_from_slice(&slice[offset..offset + len]); Ok(len) }",
+    "body_hash": "e5d16a3d6061c704e87bb706f4420aac",
+    "calls": [
+      "Ok",
+      "min",
+      "len",
+      "read",
+      "copy_from_slice"
+    ],
+    "file": "src/fs/device.rs",
+    "line_count": 6
+  },
+  "write_at": {
+    "body_normalized": "fn write_at(&self, offset: usize, buf: &[u8]) -> Result<usize> { let mut slice = self.0.write(); let len = buf.len().min(slice.len() - offset); slice[offset..offset + len].copy_from_slice(&buf[..len]); Ok(len) }",
+    "body_hash": "5ade5f11a1588fe1e028adb0a64da16e",
+    "calls": [
+      "Ok",
+      "min",
+      "write",
+      "len",
+      "copy_from_slice"
+    ],
+    "file": "src/fs/device.rs",
+    "line_count": 6
+  },
+  "sync": {
+    "body_normalized": "fn sync(&self) -> Result<()> { Ok(()) }",
+    "body_hash": "ebf856e368e1610de9e79289db3d91b5",
+    "calls": [
+      "Ok"
+    ],
+    "file": "src/fs/device.rs",
+    "line_count": 3
+  },
+  "ool ": {
+    "body_normalized": "> bool { let tid = self.current; if tid != 0 { self.threads[tid].time -= 1; return self.threads[tid].time == 0; } true } fn exit(&mut s",
+    "body_hash": "3dae8c6a962f0c05d7d85add497af38b",
+    "calls": [],
+    "file": "src/process/scheduler.rs",
+    "line_count": 10
+  },
+  " Tid": {
+    "body_normalized": "id: Tid) { let tid = tid + 1; if self.current == tid { self.current = 0; } } }",
+    "body_hash": "cda1da1ac1b643396b0d0dde46747330",
+    "calls": [],
+    "file": "src/process/scheduler.rs",
+    "line_count": 8
+  },
+  "inner": {
+    "body_normalized": "fn inner(&self) -> &mut ProcessorInner { unsafe { &mut *self.inner.get() } .as_mut() .expect(\"STR\") }",
+    "body_hash": "72442843d1a58a53066943fe64a11284",
+    "calls": [
+      "get",
+      "as_mut",
+      "expect"
+    ],
+    "file": "src/process/processor.rs",
+    "line_count": 5
+  },
+  "add_thread": {
+    "body_normalized": "pub fn add_thread(&self, thread: Box<Thread>) { self.inner().pool.add(thread); }",
+    "body_hash": "c241af9ec41236ea48e649b29328a72d",
+    "calls": [
+      "add",
+      "inner"
+    ],
+    "file": "src/process/processor.rs",
+    "line_count": 3
+  },
+  "idle_main": {
+    "body_normalized": "pub fn idle_main(&self) -> ! { let inner = self.inner(); disable_and_store(); loop { if let Some(thread) = inner.pool.acquire() { inner.current = Some(thread); inner .idle .switch_to(&mut *inner.current.as_mut().unwrap().1); let (tid, thread) = inner.current.take().unwrap(); inner.pool.retrieve(tid, thread); } else { enable_and_wfi(); disable_and_store(); } } }",
+    "body_hash": "5b198e429e5b3abfe1f0821e1c4a2344",
+    "calls": [
+      "disable_and_store",
+      "acquire",
+      "retrieve",
+      "enable_and_wfi",
+      "Some",
+      "take",
+      "unwrap",
+      "as_mut",
+      "switch_to",
+      "inner"
+    ],
+    "file": "src/process/processor.rs",
+    "line_count": 21
+  },
+  "tick": {
+    "body_normalized": "pub fn tick(&mut self) -> bool { self.scheduler.tick() }",
+    "body_hash": "a4b96617b91ebd1435cbe7f42eed5e68",
+    "calls": [
+      "tick"
+    ],
+    "file": "src/process/thread_pool.rs",
+    "line_count": 3
+  },
+  "exit": {
+    "body_normalized": "pub fn exit(&mut self, tid: Tid) { self.threads[tid] = None; self.scheduler.exit(tid); }",
+    "body_hash": "8774c12c7684c2452e5562b90f87a870",
+    "calls": [
+      "exit"
+    ],
+    "file": "src/process/thread_pool.rs",
+    "line_count": 4
+  },
+  "run": {
+    "body_normalized": "pub fn run() { CPU.run(); }",
+    "body_hash": "0d628abc1cba0c56a3839bbd534247fb",
+    "calls": [
+      "run"
+    ],
+    "file": "src/process/mod.rs",
+    "line_count": 3
+  },
+  "yield_now": {
+    "body_normalized": "pub fn yield_now() { CPU.yield_now(); }",
+    "body_hash": "a5d1aa3fe75255f0a3da29950d9016dd",
+    "calls": [
+      "yield_now"
+    ],
+    "file": "src/process/mod.rs",
+    "line_count": 3
+  },
+  "wake_up": {
+    "body_normalized": "pub fn wake_up(tid: Tid) { CPU.wake_up(tid); }",
+    "body_hash": "9cd53c5bcd4392c2b6882eb5f8207634",
+    "calls": [
+      "wake_up"
+    ],
+    "file": "src/process/mod.rs",
+    "line_count": 3
+  },
+  "current_tid": {
+    "body_normalized": "pub fn current_tid() -> usize { CPU.current_tid() }",
+    "body_hash": "c9afeee10bbe01c2d3baaea6104b5349",
+    "calls": [
+      "current_tid"
+    ],
+    "file": "src/process/mod.rs",
+    "line_count": 3
+  },
+  "current_thread_mut": {
+    "body_normalized": "pub fn current_thread_mut() -> &'static mut Thread { CPU.current_thread_mut() }",
+    "body_hash": "37c28c4e41ab9622590bb85ebf8bd506",
+    "calls": [
+      "current_thread_mut"
+    ],
+    "file": "src/process/mod.rs",
+    "line_count": 3
+  },
+  "execute": {
+    "body_normalized": "pub fn execute(&self) -> bool { self.0.flags().contains(EF::EXECUTABLE) }",
+    "body_hash": "f8b6dc6a76df88e9b1f3ad35a7ffe156",
+    "calls": [
+      "contains",
+      "flags"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "switch_to": {
+    "body_normalized": "pub fn switch_to(&mut self, target: &mut Thread) { unsafe { self.context.switch(&mut target.context); } }",
+    "body_hash": "2935a5f28b250e1d2ae132947af400ca",
+    "calls": [
+      "switch"
+    ],
+    "file": "src/process/structs.rs",
+    "line_count": 5
+  },
+  "new_kernel": {
+    "body_normalized": "pub fn new_kernel(entry: usize) -> Box<Thread> { unsafe { let kstack_ = KernelStack::new(); Box::new(Thread { context: Context::new_kernel_thread(entry, kstack_.top(), satp::read().bits()), kstack: kstack_, wait: None, ofile: [None; NOFILE], }) } }",
+    "body_hash": "1381aca127218eece9deeb39aa1ad559",
+    "calls": [
+      "new_kernel_thread",
+      "top",
+      "bits",
+      "read",
+      "new"
+    ],
+    "file": "src/process/structs.rs",
+    "line_count": 11
+  },
+  "get_boot_thread": {
+    "body_normalized": "pub fn get_boot_thread() -> Box<Thread> { Box::new(Thread { context: Context::null(), kstack: KernelStack::new_empty(), wait: None, ofile: [None; NOFILE], }) }",
+    "body_hash": "053eab4c0d57c887cc7cb06333fb5e4d",
+    "calls": [
+      "null",
+      "new",
+      "new_empty"
+    ],
+    "file": "src/process/structs.rs",
+    "line_count": 8
+  },
+  "new_user": {
+    "body_normalized": "pub unsafe fn new_user(data: &[u8], wait_thread: Option<Tid>) -> Box<Thread> { let elf = ElfFile::new(data).expect(\"STR\"); match elf.header.pt2.type_().as_type() { header::Type::Executable => { } header::Type::SharedObject => { panic!(\"STR\"); } _ => { panic!(\"STR\"); } } let entry_addr = elf.header.pt2.entry_point() as usize; let mut vm = elf.make_memory_set(); let ustack_top = { let (ustack_bottom, ustack_top) = (USER_STACK_OFFSET, USER_STACK_OFFSET + USER_STACK_SIZE); vm.push( ustack_bottom, ustack_top, MemoryAttr::default().set_user(), ByFrame::new(), None, ); ustack_top }; let kstack = KernelStack::new(); let mut thread = Thread { context: Context::new_user_thread(entry_addr, ustack_top, kstack.top(), vm.token()), kstack, wait: wait_thread, ofile: [None; NOFILE], }; for i in 0..NUM { thread.ofile[i] = Some(Arc::new(Mutex::new(File::default()))); } Box::new(thread) }",
+    "body_hash": "86c889e921fc93c73152035cc3203819",
+    "calls": [
+      "token",
+      "Some",
+      "type_",
+      "set_user",
+      "top",
+      "as_type",
+      "panic",
+      "make_memory_set",
+      "push",
+      "expect",
+      "default",
+      "new",
+      "entry_point",
+      "new_user_thread"
+    ],
+    "file": "src/process/structs.rs",
+    "line_count": 43
+  },
+  "self) ->": {
+    "body_normalized": "d(&mut self) -> i32 { let mut fd = 0; for i in 0usize..NOFILE { if self.ofile[i].is_none() { fd = i; break; } } self.ofile[fd] = Some(Arc::new(Mutex::new(File::default()))); fd as i32 }",
+    "body_hash": "63a37633538096fc90ac0e8f889ca956",
+    "calls": [
+      "new(Fi",
+      "Mute",
+      "is_none() {\n         ",
+      "default",
+      "))));\n       "
+    ],
+    "file": "src/process/structs.rs",
+    "line_count": 12
+  },
+  "2) {\n     ": {
+    "body_normalized": "fd: i32) { assert!(self.ofile[fd as usize].is_some()); self.ofile[fd as usize] = None; } } pub struct KernelStack(u",
+    "body_hash": "5f69908749c2cb1f92b31ceda6b217f8",
+    "calls": [
+      "ze].is"
+    ],
+    "file": "src/process/structs.rs",
+    "line_count": 7
+  },
+  "bot": {
+    "body_normalized": "let bottom = unsafe { alloc(Layout::from_size_align(KERNEL_STACK_SIZE, KERNEL_STACK_SIZE).unwrap()) as usize }; KernelStack(bottom) } pub fn new_empty() -> S",
+    "body_hash": "ab39c2aa3362889009a7a3014965472b",
+    "calls": [
+      "unwrap()) as usize\n        };\n    ",
+      "EL_STACK_SIZE, KERNEL_S",
+      "  pub fn ne",
+      "n(KER"
+    ],
+    "file": "src/process/structs.rs",
+    "line_count": 6
+  },
+  "  KernelS": {
+    "body_normalized": "KernelStack(0) } pub fn top(&self) -> us",
+    "body_hash": "5461644fadf8af8ef4e970a234f122bc",
+    "calls": [
+      " fn top(&se"
+    ],
+    "file": "src/process/structs.rs",
+    "line_count": 4
+  },
+  "  s": {
+    "body_normalized": "self.0 + KERNEL_STACK_SIZE } } impl Drop for KernelStac",
+    "body_hash": "84d650fb630e7f3e503cd744f3f12713",
+    "calls": [],
+    "file": "src/process/structs.rs",
+    "line_count": 6
+  },
+  " sel": {
+    "body_normalized": "if self.0 != 0 { unsafe { dealloc( self.0 as _, Layout::from_size_align(KERNEL_STACK_SIZE, KERNEL_STACK_SIZE).unwrap(), ); } } } } trait ElfExt { fn ma",
+    "body_hash": "504c18fe607482922efd8f41c3cc7426",
+    "calls": [
+      "EL_STACK_SIZE, KERNEL_S",
+      "0",
+      "unwrap(),\n                );\n     "
+    ],
+    "file": "src/process/structs.rs",
+    "line_count": 13
+  },
+  "morySet {\n     ": {
+    "body_normalized": "MemorySet { let mut memory_set = MemorySet::new(); for ph in self.program_iter() { if ph.get_type() != Ok(Type::Load) { continue; } let vaddr = ph.virtual_addr() as usize; let mem_size = ph.mem_size() as usize; let data = match ph.get_data(self).unwrap() { SegmentData::Undefined(data) => data, _ => unreachable!(), }; memory_set.push( vaddr, vaddr + mem_size, ph.flags().to_attr(), ByFrame::new(), Some((data.as_ptr() as usize, data.len())), ); } memory_set } } trait ToMemoryAttr {",
+    "body_hash": "5d281def441f42ee3210988677790917",
+    "calls": [
+      "ad) {\n     ",
+      "\n          ",
+      "        let",
+      "     vaddr,\n   ",
+      "        ",
+      "};\n\n       ",
+      ", da",
+      "len())),\n ",
+      "\n       ",
+      "            let",
+      "\n                Segment",
+      "          ByFrame:",
+      "get_t",
+      "p",
+      "    Some((da",
+      "  "
+    ],
+    "file": "src/process/structs.rs",
+    "line_count": 27
+  },
+  " {\n    ": {
+    "body_normalized": "ttr { let mut flags = MemoryAttr::default().set_user(); if self.is_execute() { flags = flags.set_execute(); } flags } }",
+    "body_hash": "5cf518407c05c5b88e3aa6d7784443dc",
+    "calls": [
+      "is_execu",
+      " }\n        flags\n",
+      "    flags = fla",
+      "er();\n        if se"
+    ],
+    "file": "src/process/structs.rs",
+    "line_count": 9
+  },
+  "alloc_tid": {
+    "body_normalized": "fn alloc_tid(&self) -> Tid { for (i, info) in self.threads.iter().enumerate() { if info.is_none() { return i; } } panic!(\"STR\"); }",
+    "body_hash": "6ac126cf899ca794526469e635cb729e",
+    "calls": [
+      "is_none",
+      "enumerate",
+      "iter",
+      "panic"
+    ],
+    "file": "src/process/thread_pool.rs",
+    "line_count": 8
+  },
+  "add": {
+    "body_normalized": "pub fn add(&mut self, _thread: Box<Thread>) { let tid = self.alloc_tid(); self.threads[tid] = Some(ThreadInfo { status: Status::Ready, thread: Some(_thread), }); self.scheduler.push(tid); }",
+    "body_hash": "98783b9cd8ae88c80637aa619e4157db",
+    "calls": [
+      "Some",
+      "alloc_tid",
+      "push"
+    ],
+    "file": "src/process/thread_pool.rs",
+    "line_count": 8
+  },
+  "acquire": {
+    "body_normalized": "pub fn acquire(&mut self) -> Option<(Tid, Box<Thread>)> { if let Some(tid) = self.scheduler.pop() { let mut thread_info = self.threads[tid].as_mut().expect(\"STR\"); thread_info.status = Status::Running(tid); Some((tid, thread_info.thread.take().expect(\"STR\"))) } else { None } }",
+    "body_hash": "f2939cd8d1610d9ec9d3272f9b1d618e",
+    "calls": [
+      "Some",
+      "pop",
+      "take",
+      "expect",
+      "as_mut",
+      "Running"
+    ],
+    "file": "src/process/thread_pool.rs",
+    "line_count": 9
+  },
+  "retrieve": {
+    "body_normalized": "pub fn retrieve(&mut self, tid: Tid, thread: Box<Thread>) { if self.threads[tid].is_none() { return; } let mut thread_info = self.threads[tid].as_mut().expect(\"STR\"); thread_info.thread = Some(thread); if let Status::Running(_) = thread_info.status { thread_info.status = Status::Ready; self.scheduler.push(tid); } }",
+    "body_hash": "3eb53e57f9872bc881e2b693d12d3b7d",
+    "calls": [
+      "Some",
+      "push",
+      "expect",
+      "is_none",
+      "as_mut"
+    ],
+    "file": "src/process/thread_pool.rs",
+    "line_count": 11
+  },
+  "wakeup": {
+    "body_normalized": "pub fn wakeup(&mut self, tid: Tid) { let proc = self.threads[tid] .as_mut() .expect(\"STR\"); proc.status = Status::Ready; self.scheduler.push(tid); }",
+    "body_hash": "16fc82fbc9764d061fe41e9d37dc7821",
+    "calls": [
+      "push",
+      "as_mut",
+      "expect"
+    ],
+    "file": "src/process/thread_pool.rs",
+    "line_count": 7
+  },
+  "wait": {
+    "body_normalized": "pub fn wait(&self) { self.wait_queue.lock().push_back(current_tid()); yield_now(); }",
+    "body_hash": "d545bdc0ad41f71557adae6f4ad50cde",
+    "calls": [
+      "yield_now",
+      "lock",
+      "current_tid",
+      "push_back"
+    ],
+    "file": "src/sync/condvar.rs",
+    "line_count": 4
+  },
+  "notify": {
+    "body_normalized": "pub fn notify(&self) { let tid = self.wait_queue.lock().pop_front(); if let Some(tid) = tid { wake_up(tid); } }",
+    "body_hash": "400100ce52f89dca70ad02464c59a8ed",
+    "calls": [
+      "pop_front",
+      "lock",
+      "wake_up"
+    ],
+    "file": "src/sync/condvar.rs",
+    "line_count": 7
+  },
+  "alloc_frame": {
+    "body_normalized": "pub fn alloc_frame() -> Option<Frame> { Some(Frame::of_ppn(FRAME_ALLOCATOR.lock().alloc())) }",
+    "body_hash": "715b15af2df4a4bb5141a265b90874c1",
+    "calls": [
+      "of_ppn",
+      "lock",
+      "alloc",
+      "Some"
+    ],
+    "file": "src/memory/mod.rs",
+    "line_count": 3
+  },
+  "dealloc_frame": {
+    "body_normalized": "pub fn dealloc_frame(f: Frame) { FRAME_ALLOCATOR.lock().dealloc(f.number()) }",
+    "body_hash": "c4aaa72b1d0c0feb4123cb192b6b0438",
+    "calls": [
+      "lock",
+      "dealloc",
+      "number"
+    ],
+    "file": "src/memory/mod.rs",
+    "line_count": 3
+  },
+  "init_heap": {
+    "body_normalized": "fn init_heap() { static mut HEAP: [u8; KERNEL_HEAP_SIZE] = [0; KERNEL_HEAP_SIZE]; unsafe { DYNAMIC_ALLOCATOR .lock() .init(HEAP.as_ptr() as usize, KERNEL_HEAP_SIZE); } }",
+    "body_hash": "116be61d6ac7ebb10a4fa1571155b465",
+    "calls": [
+      "lock",
+      "as_ptr",
+      "init"
+    ],
+    "file": "src/memory/mod.rs",
+    "line_count": 8
+  },
+  "access_pa_via_va": {
+    "body_normalized": "pub fn access_pa_via_va(pa: usize) -> usize { pa + PHYSICAL_MEMORY_OFFSET }",
+    "body_hash": "7bf0d0217bc869b996c9f3d959ecaea1",
+    "calls": [],
+    "file": "src/memory/mod.rs",
+    "line_count": 3
+  },
+  "kernel_remap": {
+    "body_normalized": "pub fn kernel_remap() { let mut memory_set = MemorySet::new(); extern \"STR\" { fn bootstack(); fn bootstacktop(); } memory_set.push( bootstack as usize, bootstacktop as usize, MemoryAttr::default(), Linear::new(PHYSICAL_MEMORY_OFFSET), None, ); memory_set.push( access_pa_via_va(0x0c00_2000), access_pa_via_va(0x0c00_3000), MemoryAttr::default(), Linear::new(PHYSICAL_MEMORY_OFFSET), None, ); memory_set.push( access_pa_via_va(0x1000_0000), access_pa_via_va(0x1000_1000), MemoryAttr::default(), Linear::new(PHYSICAL_MEMORY_OFFSET), None, ); unsafe { memory_set.activate(); } }",
+    "body_hash": "0742ce0bec20107f3f410aa6cc380679",
+    "calls": [
+      "push",
+      "default",
+      "activate",
+      "new",
+      "access_pa_via_va"
+    ],
+    "file": "src/memory/mod.rs",
+    "line_count": 33
+  },
+  "alloc_error_handler": {
+    "body_normalized": "fn alloc_error_handler(_: core::alloc::Layout) -> ! { panic!(\"STR\"); }",
+    "body_hash": "6d9f5aa6abd70365c384eedf521fdd02",
+    "calls": [
+      "panic"
+    ],
+    "file": "src/memory/mod.rs",
+    "line_count": 3
+  },
+  "alloc": {
+    "body_normalized": "fn alloc(&mut self) -> Option<Frame> { alloc_frame() }",
+    "body_hash": "1af1703182b41b963f847fc597a1e676",
+    "calls": [
+      "alloc_frame"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "dealloc": {
+    "body_normalized": "fn dealloc(&mut self, frame: Frame) { dealloc_frame(frame) }",
+    "body_hash": "0a530086fc193858d44ef6ca0a56591b",
+    "calls": [
+      "dealloc_frame"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "update": {
+    "body_normalized": "pub fn update(&mut self) { unsafe { sfence_vma(0, self.1.start_address().as_usize()); } }",
+    "body_hash": "e2fb0d9fb8ee72e5c8dc5df4878a4928",
+    "calls": [
+      "start_address",
+      "as_usize",
+      "sfence_vma"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 5
+  },
+  "accessed": {
+    "body_normalized": "pub fn accessed(&self) -> bool { self.0.flags().contains(EF::ACCESSED) }",
+    "body_hash": "c9491bced159e07a026c78838c3907a0",
+    "calls": [
+      "contains",
+      "flags"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "clear_accessed": {
+    "body_normalized": "pub fn clear_accessed(&mut self) { self.0.flags_mut().remove(EF::ACCESSED); }",
+    "body_hash": "b8047a64b6c0480426f732b9d194d80a",
+    "calls": [
+      "remove",
+      "flags_mut"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "dirty": {
+    "body_normalized": "pub fn dirty(&self) -> bool { self.0.flags().contains(EF::DIRTY) }",
+    "body_hash": "b574aef4c5d69a94a3395313287897a9",
+    "calls": [
+      "contains",
+      "flags"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "clear_dirty": {
+    "body_normalized": "pub fn clear_dirty(&mut self) { self.0.flags_mut().remove(EF::DIRTY); }",
+    "body_hash": "9d5c88637416bc6c724f9d64cf43a787",
+    "calls": [
+      "remove",
+      "flags_mut"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "writable": {
+    "body_normalized": "pub fn writable(&self) -> bool { self.0.flags().contains(EF::WRITABLE) }",
+    "body_hash": "e1158b23710abea5928cbf86a019d67f",
+    "calls": [
+      "contains",
+      "flags"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "present": {
+    "body_normalized": "pub fn present(&self) -> bool { self.0.flags().contains(EF::VALID | EF::READABLE) }",
+    "body_hash": "53219ba52e073af4bcd8c6cd1a632358",
+    "calls": [
+      "contains",
+      "flags"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "set_present": {
+    "body_normalized": "pub fn set_present(&mut self, value: bool) { self.0.flags_mut().set(EF::VALID | EF::READABLE, value); }",
+    "body_hash": "af62fc863f0f74d3337503a9185bea6c",
+    "calls": [
+      "flags_mut",
+      "set"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "user": {
+    "body_normalized": "pub fn user(&self) -> bool { self.0.flags().contains(EF::USER) }",
+    "body_hash": "e125aadbee464161d6bc65cf3555fb42",
+    "calls": [
+      "contains",
+      "flags"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "set_user": {
+    "body_normalized": "pub fn set_user(mut self) -> Self { self.user = true; self }",
+    "body_hash": "babe6737fcf2343714de6d6cb4d69c87",
+    "calls": [],
+    "file": "src/memory/memory_set/attr.rs",
+    "line_count": 4
+  },
+  "set_execute": {
+    "body_normalized": "pub fn set_execute(mut self) -> Self { self.execute = true; self }",
+    "body_hash": "b8c5c8cfa7d6011842c91ca69622405f",
+    "calls": [],
+    "file": "src/memory/memory_set/attr.rs",
+    "line_count": 4
+  },
+  "target": {
+    "body_normalized": "pub fn target(&self) -> usize { self.0.addr().as_usize() }",
+    "body_hash": "a287ebab219ec0902691abb9411bc07a",
+    "calls": [
+      "addr",
+      "as_usize"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "set_target": {
+    "body_normalized": "pub fn set_target(&mut self, target: usize) { let flags = self.0.flags(); let frame = Frame::of_addr(PhysAddr::new(target)); self.0.set(frame, flags); }",
+    "body_hash": "6ef588b3019b5a8fc0d31d35093bd389",
+    "calls": [
+      "new",
+      "of_addr",
+      "set",
+      "flags"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 5
+  },
+  "new_bare": {
+    "body_normalized": "pub fn new_bare() -> Self { let frame = alloc_frame().expect(\"STR\"); let paddr = frame.start_address().as_usize(); let table = unsafe { &mut *(access_pa_via_va(paddr) as *mut PageTableEntryArray) }; table.zero(); PageTableImpl { page_table: Rv39PageTable::new(table, PHYSICAL_MEMORY_OFFSET), root_frame: frame, entry: None, } }",
+    "body_hash": "02d2c5e84c3b82059b2a05c7762fb3de",
+    "calls": [
+      "zero",
+      "alloc_frame",
+      "start_address",
+      "as_usize",
+      "expect",
+      "new",
+      "access_pa_via_va"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 12
+  },
+  "map": {
+    "body_normalized": "pub fn map(&self, pt: &mut PageTableImpl) { for page in PageRange::new(self.start, self.end) { self.handler.map(pt, page, &self.attr); } }",
+    "body_hash": "ad2ef0fbd770189758a93b2f76a5e78e",
+    "calls": [
+      "map",
+      "new"
+    ],
+    "file": "src/memory/memory_set/area.rs",
+    "line_count": 5
+  },
+  "unmap": {
+    "body_normalized": "fn unmap(&self, pt: &mut PageTableImpl) { for page in PageRange::new(self.start, self.end) { self.handler.unmap(pt, page); } }",
+    "body_hash": "39eefa742d114b110f5e063cefe71a2b",
+    "calls": [
+      "new",
+      "unmap"
+    ],
+    "file": "src/memory/memory_set/area.rs",
+    "line_count": 5
+  },
+  "get_entry": {
+    "body_normalized": "pub fn get_entry(&mut self, va: usize) -> Option<&mut PageEntry> { let page = Page::of_addr(VirtAddr::new(va)); if let Ok(e) = self.page_table.ref_entry(page) { let e = unsafe { &mut *(e as *mut PageTableEntry) }; self.entry = Some(PageEntry(e, page)); Some(self.entry.as_mut().unwrap()) } else { None } }",
+    "body_hash": "f4476e556814cee8aec11bffd36624a7",
+    "calls": [
+      "Some",
+      "PageEntry",
+      "ref_entry",
+      "unwrap",
+      "as_mut",
+      "new",
+      "of_addr"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 10
+  },
+  "token": {
+    "body_normalized": "pub fn token(&self) -> usize { self.root_frame.number() | (NUM << NUM) }",
+    "body_hash": "aabc9c9d283651f76a16ab00b22f9b63",
+    "calls": [
+      "number"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "set_token": {
+    "body_normalized": "unsafe fn set_token(token: usize) { llvm_asm!(\"STR\" :: \"STR\"(token) :: \"STR\"); }",
+    "body_hash": "0f538de0d109b4e30310ce8b2855a728",
+    "calls": [
+      "llvm_asm"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "active_token": {
+    "body_normalized": "fn active_token() -> usize { satp::read().bits() }",
+    "body_hash": "2fb250b33c0235a304c06a86d001cf69",
+    "calls": [
+      "read",
+      "bits"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 3
+  },
+  "flush_tlb": {
+    "body_normalized": "fn flush_tlb() { unsafe { sfence_vma_all(); } }",
+    "body_hash": "441e08ff249ac932b2182d8ee1a21a1c",
+    "calls": [
+      "sfence_vma_all"
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 5
+  },
+  "activate": {
+    "body_normalized": "pub unsafe fn activate(&self) { self.page_table.activate(); }",
+    "body_hash": "a7234623cf7cd1cc27812fab9ad247bb",
+    "calls": [
+      "activate"
+    ],
+    "file": "src/memory/memory_set/mod.rs",
+    "line_count": 3
+  },
+  "usiz": {
+    "body_normalized": "on<usize> { if self.start < self.end { let page = self.start << NUM; self.start += 1; Some(page) } else { None } } } impl PageRange { p",
+    "body_hash": "a77bc015b91d0559b817031a1230d70e",
+    "calls": [
+      "{\n  "
+    ],
+    "file": "src/memory/paging.rs",
+    "line_count": 13
+  },
+  "_ad": {
+    "body_normalized": "ze, end_addr: usize) -> Self { PageRange { start: start_addr / PAGE_SIZE, end: (end_addr - 1) / PAGE_SIZE + 1, } } }",
+    "body_hash": "ff71537c44ddb79e36848c76daa9bf58",
+    "calls": [],
+    "file": "src/memory/paging.rs",
+    "line_count": 8
+  },
+  "set_readonly": {
+    "body_normalized": "pub fn set_readonly(mut self) -> Self { self.readonly = true; self }",
+    "body_hash": "41749a62bab90b7d53bdc87414505905",
+    "calls": [],
+    "file": "src/memory/memory_set/attr.rs",
+    "line_count": 4
+  },
+  "apply": {
+    "body_normalized": "pub fn apply(&self, entry: &mut PageEntry) { entry.set_present(true); entry.set_user(self.user); entry.set_writable(!self.readonly); entry.set_execute(self.execute); }",
+    "body_hash": "4da4ac39d99db468e47865562082d571",
+    "calls": [
+      "set_execute",
+      "set_user",
+      "set_writable",
+      "set_present"
+    ],
+    "file": "src/memory/memory_set/attr.rs",
+    "line_count": 6
+  },
+  "clone": {
+    "body_normalized": "fn clone(&self) -> Box<dyn MemoryHandler> { self.box_clone() }",
+    "body_hash": "0a231de32f64ed7075b4d7eaefff106e",
+    "calls": [
+      "box_clone"
+    ],
+    "file": "src/memory/memory_set/handler.rs",
+    "line_count": 3
+  },
+  "box_clone": {
+    "body_normalized": "fn box_clone(&self) -> Box<dyn MemoryHandler> { Box::new(self.clone()) }",
+    "body_hash": "18a4f3fad7664b83c7de6b04765a45e0",
+    "calls": [
+      "new",
+      "clone"
+    ],
+    "file": "src/memory/memory_set/handler.rs",
+    "line_count": 3
+  },
+  "page_copy": {
+    "body_normalized": "pub fn page_copy(&self, pt: &mut PageTableImpl, src: usize, length: usize) { let mut l = length; let mut s = src; for page in PageRange::new(self.start, self.end) { self.handler .page_copy(pt, page, s, if l < PAGE_SIZE { l } else { PAGE_SIZE }); s += PAGE_SIZE; if l >= PAGE_SIZE { l -= PAGE_SIZE; } } }",
+    "body_hash": "2022ea6784f712258c2841d4a8d34b0b",
+    "calls": [
+      "page_copy",
+      "new"
+    ],
+    "file": "src/memory/memory_set/area.rs",
+    "line_count": 12
+  },
+  "is_overlap_with": {
+    "body_normalized": "pub fn is_overlap_with(&self, start_addr: usize, end_addr: usize) -> bool { let p1 = self.start / PAGE_SIZE; let p2 = (self.end - 1) / PAGE_SIZE + 1; let p3 = start_addr / PAGE_SIZE; let p4 = (end_addr - 1) / PAGE_SIZE + 1; !((p1 >= p4) || (p2 <= p3)) }",
+    "body_hash": "b435a73af2922ee6f24495551c9ef742",
+    "calls": [],
+    "file": "src/memory/memory_set/area.rs",
+    "line_count": 7
+  },
+  "test_free_area": {
+    "body_normalized": "fn test_free_area(&self, start: usize, end: usize) -> bool { self.areas .iter() .find(|area| area.is_overlap_with(start, end)) .is_none() }",
+    "body_hash": "98d745afa86cc340f4f571d2ae8e8127",
+    "calls": [
+      "is_none",
+      "iter",
+      "find",
+      "is_overlap_with"
+    ],
+    "file": "src/memory/memory_set/mod.rs",
+    "line_count": 6
+  },
+  "map_kernel_and_physical_memory": {
+    "body_normalized": "pub fn map_kernel_and_physical_memory(&mut self) { extern \"STR\" { fn stext(); fn etext(); fn srodata(); fn erodata(); fn sdata(); fn edata(); fn sbss(); fn ebss(); fn end(); } let offset = PHYSICAL_MEMORY_OFFSET; self.push( stext as usize, etext as usize, MemoryAttr::default().set_readonly().set_execute(), Linear::new(offset), None, ); self.push( srodata as usize, erodata as usize, MemoryAttr::default().set_readonly(), Linear::new(offset), None, ); self.push( sdata as usize, edata as usize, MemoryAttr::default(), Linear::new(offset), None, ); self.push( sbss as usize, ebss as usize, MemoryAttr::default(), Linear::new(offset), None, ); self.push( (end as usize / PAGE_SIZE + 1) * PAGE_SIZE, access_pa_via_va(PHYSICAL_MEMORY_END), MemoryAttr::default(), Linear::new(offset), None, ); } pub fn token(&self) -> usize {",
+    "body_hash": "ab12624cdd4b26ae1a2fc400bd6f0bca",
+    "calls": [
+      "           Memor",
+      "set_execute(),",
+      "       );\n ",
+      "size,\n   ",
+      "set_execute(),\n            Li",
+      "AGE_SIZE ",
+      "ly(),\n            L",
+      "s usize,\n",
+      "new(offset),\n   ",
+      "usize,\n  ",
+      "new(offs",
+      " None,\n    "
+    ],
+    "file": "src/memory/memory_set/mod.rs",
+    "line_count": 57
+  },
+  "e_tab": {
+    "body_normalized": "elf.page_table.token() } }",
+    "body_hash": "30740664c694d85b0cc2a3e4cc2f942a",
+    "calls": [
+      ""
+    ],
+    "file": "src/memory/memory_set/mod.rs",
+    "line_count": 4
+  }
+}

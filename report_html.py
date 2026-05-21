@@ -1,12 +1,25 @@
 """
 报告 HTML 渲染。
 
-把 write_report 收到的 Markdown 文本转成一个独立的、带样式的 HTML 文件
+把 write_report 收到的 Markdown 文本转成一个独立的、带样式的 HTML 文件。
+
+新增能力（全部通过 CDN 单标签引入，无构建流程）：
+  - Tailwind CSS（含 typography 插件）作为整体样式系统
+  - Mermaid 用于语义图示（状态机/时序图/类图/时间线）
+  - ECharts 用于数据可视化（仪表盘/环形/雷达/旭日/桑基/堆叠柱状等）
+  - Alpine.js 提供交互（折叠、TOC 联动、搜索过滤）
+
+约定（供 prompts 端指导 agent）：
+  ```mermaid     ... ```   → 渲染为 Mermaid 图
+  ```echarts     {...} ``` → 渲染为 ECharts（内容为 option 的 JSON）
+  ```summary     ...   ``` → 渲染为章节摘要卡片（折叠态展示）
+  ```html        ...   ``` → 原样输出 HTML（用于 Tailwind 卡片等）
 """
 
 from __future__ import annotations
 
 import html
+import json
 import re
 from pathlib import Path
 from typing import Callable, Optional
@@ -15,63 +28,129 @@ from typing import Callable, Optional
 LinkResolver = Callable[[str, Optional[str]], Optional[str]]
 
 
-_CSS = """
+# CDN 资源
+
+_CDN_HEAD = """
+<script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  const dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: dark ? 'dark' : 'default',
+    securityLevel: 'loose',
+    flowchart: { useMaxWidth: true },
+    sequence:  { useMaxWidth: true },
+  });
+  window.__renderMermaid = () => {
+    const nodes = document.querySelectorAll('.mermaid:not([data-processed])');
+    if (nodes.length) mermaid.run({ nodes });
+  };
+  document.addEventListener('DOMContentLoaded', () => window.__renderMermaid());
+  document.addEventListener('section:opened', () => setTimeout(window.__renderMermaid, 30));
+</script>
+"""
+
+_INIT_SCRIPT = """
+<script>
+(function() {
+  function initECharts() {
+    if (typeof echarts === 'undefined') { setTimeout(initECharts, 100); return; }
+    document.querySelectorAll('.echarts-chart:not([data-rendered])').forEach(function(el) {
+      var dataEl = el.querySelector('script[type="application/json"]');
+      if (!dataEl) return;
+      try {
+        var option = JSON.parse(dataEl.textContent);
+        if (!el.style.height) el.style.height = '360px';
+        var chart = echarts.init(el, null, { renderer: 'canvas' });
+        chart.setOption(option);
+        el.setAttribute('data-rendered', '1');
+        el.__chart = chart;
+        window.addEventListener('resize', function () { chart.resize(); });
+      } catch (e) {
+        el.innerHTML = '<div class="text-red-600 text-sm p-2 border border-red-300 rounded">ECharts 配置 JSON 解析失败: ' + e.message + '</div>';
+      }
+    });
+  }
+
+  function initScrollSpy() {
+    var links = document.querySelectorAll('.toc-link');
+    var sections = document.querySelectorAll('section[data-section-id]');
+    if (!('IntersectionObserver' in window) || !links.length || !sections.length) return;
+    var byId = {};
+    links.forEach(function(a) {
+      var id = a.getAttribute('href');
+      if (id) byId[id.replace(/^#/, '')] = a;
+    });
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(e) {
+        if (e.isIntersecting) {
+          var id = e.target.getAttribute('data-section-id');
+          Object.keys(byId).forEach(function(k) { byId[k].classList.remove('toc-active'); });
+          if (byId[id]) byId[id].classList.add('toc-active');
+        }
+      });
+    }, { rootMargin: '-30% 0px -60% 0px', threshold: 0 });
+    sections.forEach(function(s) { observer.observe(s); });
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    initECharts();
+    initScrollSpy();
+  });
+
+  document.addEventListener('section:opened', function() {
+    setTimeout(initECharts, 30);
+  });
+})();
+</script>
+"""
+
+
+# 自定义 CSS
+
+_CUSTOM_CSS = """
 :root { color-scheme: light dark; }
-body {
-    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
-                 Helvetica, Arial, sans-serif;
-    max-width: 920px;
-    margin: 2rem auto;
-    padding: 0 1.2rem 4rem;
-    line-height: 1.65;
-    color: #1f2328;
-    background: #ffffff;
+html, body {
+  font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+               Helvetica, Arial, sans-serif;
 }
-h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin-top: 1.8em; margin-bottom: 0.6em; }
-h1 { font-size: 2em; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3em; }
-h2 { font-size: 1.5em; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3em; }
-h3 { font-size: 1.25em; }
-p { margin: 0.8em 0; }
-a { color: #0969da; text-decoration: none; }
-a:hover { text-decoration: underline; }
-code {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    background: rgba(175, 184, 193, 0.2);
-    padding: 0.15em 0.35em;
-    border-radius: 4px;
-    font-size: 0.92em;
+.toc-link.toc-active {
+  background: rgb(59 130 246 / 0.12);
+  color: rgb(37 99 235);
+  border-left-color: rgb(37 99 235);
 }
-pre {
-    background: #f6f8fa;
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    padding: 12px 14px;
-    overflow-x: auto;
-}
-pre code { background: transparent; padding: 0; border-radius: 0; font-size: 0.9em; }
-blockquote {
-    margin: 0.8em 0;
-    padding: 0.2em 1em;
-    color: #59636e;
-    border-left: 4px solid #d0d7de;
-    background: #f6f8fa;
-}
-ul, ol { padding-left: 1.6em; margin: 0.6em 0; }
-li { margin: 0.25em 0; }
-table { border-collapse: collapse; margin: 1em 0; display: block; overflow-x: auto; }
-th, td { border: 1px solid #d0d7de; padding: 6px 12px; }
-th { background: #f6f8fa; font-weight: 600; }
-hr { border: none; border-top: 1px solid #d0d7de; margin: 2em 0; }
 @media (prefers-color-scheme: dark) {
-    body { background: #0d1117; color: #e6edf3; }
-    h1, h2 { border-bottom-color: #30363d; }
-    a { color: #4493f8; }
-    code { background: rgba(110, 118, 129, 0.4); }
-    pre { background: #161b22; border-color: #30363d; }
-    blockquote { background: #161b22; border-left-color: #30363d; color: #9198a1; }
-    th, td { border-color: #30363d; }
-    th { background: #161b22; }
-    hr { border-top-color: #30363d; }
+  .toc-link.toc-active {
+    background: rgb(96 165 250 / 0.18);
+    color: rgb(147 197 253);
+    border-left-color: rgb(147 197 253);
+  }
+}
+a.file-jump { border-bottom: 1px dashed currentColor; text-decoration: none; }
+a.file-jump:hover { background: rgba(9, 105, 218, 0.08); }
+a.file-broken { color: #cf222e; border-bottom: 1px dashed #cf222e; }
+a.file-broken:hover { background: rgba(207, 34, 46, 0.08); }
+@media (prefers-color-scheme: dark) {
+  a.file-jump:hover { background: rgba(68, 147, 248, 0.12); }
+  a.file-broken { color: #ff7b72; border-bottom-color: #ff7b72; }
+  a.file-broken:hover { background: rgba(255, 123, 114, 0.12); }
+}
+.section-header { cursor: pointer; user-select: none; }
+.section-header:hover .toggle-icon { opacity: 1; }
+.toggle-icon { opacity: 0.55; transition: opacity 0.15s, transform 0.15s; display: inline-block; width: 1em; }
+.section-header[data-open="false"] .toggle-icon { transform: rotate(-90deg); }
+.mermaid { background: transparent; text-align: center; margin: 1rem 0; }
+.echarts-chart { width: 100%; min-height: 320px; margin: 1rem 0; }
+.section-summary-card { margin: 0.5rem 0 1rem; }
+.section-summary-card p:first-child { margin-top: 0; }
+.section-summary-card p:last-child { margin-bottom: 0; }
+@media print {
+  .toc-sidebar, .toc-controls { display: none !important; }
+  main { margin-left: 0 !important; }
+  section [x-show] { display: block !important; }
 }
 """
 
@@ -83,15 +162,14 @@ _BOLD        = re.compile(r"\*\*([^*\n]+?)\*\*")
 _ITALIC      = re.compile(r"(?<!\*)\*([^*\n]+?)\*(?!\*)")
 _LINK        = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 
-# 报告中常见的"文件引用"形式：可带相对路径、可附 :LINE 或 :LINE-LINE 或 #LLINE
 _FILEREF_EXTS = (
     "c|h|cc|cpp|cxx|hpp|hh|hxx|rs|S|s|asm|ld|lds|"
     "toml|md|py|sh|mk|cfg|conf|ini|"
     "go|java|js|ts|json|yaml|yml|txt|rst"
 )
 _FILEREF_RE = re.compile(
-    rf"([A-Za-z0-9_./\-]+\.(?:{_FILEREF_EXTS}))"      # 路径
-    rf"(?:(?::|#L)(\d+)(?:-L?(\d+))?)?"                # 起始行  结束行
+    rf"([A-Za-z0-9_./\-]+\.(?:{_FILEREF_EXTS}))"
+    rf"(?:(?::|#L)(\d+)(?:-L?(\d+))?)?"
 )
 _FILEREF_FULL = re.compile(rf"^{_FILEREF_RE.pattern}$")
 _EXTERNAL_URL = re.compile(r"^(?:[a-z][a-z0-9+.\-]*:|//|#|mailto:)", re.IGNORECASE)
@@ -107,7 +185,6 @@ def _wrap_anchor(inner_html: str, url: str) -> str:
 
 
 def _rewrite_link_url(url: str, resolver: LinkResolver | None) -> str | None:
-    """若 URL 看起来像本地文件相对路径（可能带 #Lnn 或 :nn），尝试用 resolver 重写。"""
     if not resolver: return None
     if _EXTERNAL_URL.match(url): return None
     m = _FILEREF_FULL.match(url)
@@ -116,7 +193,6 @@ def _rewrite_link_url(url: str, resolver: LinkResolver | None) -> str | None:
 
 
 def _render_inline(text: str, resolver: LinkResolver | None = None) -> str:
-    # 先抠出行内代码段（按占位符替换），避免其中的 * 被误识别
     code_slots: list[str] = []
 
     def _stash_code(m: re.Match) -> str:
@@ -147,9 +223,7 @@ def _render_inline(text: str, resolver: LinkResolver | None = None) -> str:
 
     text = _LINK.sub(_link_sub, text)
 
-    # 在普通文本（非代码、非已成型 <a>）中，把裸露的 path:line 包成跳转链接
     if resolver:
-        # 已渲染的 <a>...</a> 用占位符暂存，避免重复包裹
         anchor_slots: list[str] = []
 
         def _stash_anchor(m: re.Match) -> str:
@@ -198,6 +272,40 @@ def _looks_like_table(lines: list[str], i: int) -> bool:
     return bool(_TABLE_SEP.match(lines[i + 1]))
 
 
+def _render_fence(lang: str, content: str, resolver: LinkResolver | None) -> str:
+    """根据语言标签渲染围栏代码块。"""
+    lang_l = (lang or "").lower()
+
+    if lang_l == "mermaid":
+        # mermaid 自己解析 textContent，HTML 转义不会破坏其语法
+        return f'<pre class="mermaid">{html.escape(content)}</pre>'
+
+    if lang_l == "echarts":
+        # 校验 JSON；失败时仍然嵌入原文以便页面侧报错可读
+        try:
+            json.loads(content)
+            payload = content
+        except Exception:
+            payload = content  # 让前端给出可读错误
+        safe = payload.replace("</", "<\\/")
+        return (
+            '<div class="echarts-chart">'
+            f'<script type="application/json">{safe}</script>'
+            '</div>'
+        )
+
+    if lang_l == "summary":
+        inner = markdown_to_html_body(content, resolver)
+        return f'<aside class="section-summary-card not-prose">{inner}</aside>'
+
+    if lang_l == "html":
+        # 信任 agent：原样输出，用于 Tailwind 卡片等
+        return f'<div class="not-prose">{content}</div>'
+
+    cls = f' class="language-{html.escape(lang, quote=True)}"' if lang else ""
+    return f"<pre><code{cls}>{html.escape(content)}</code></pre>"
+
+
 def markdown_to_html_body(md: str, resolver: LinkResolver | None = None) -> str:
     lines = md.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     out: list[str] = []
@@ -207,7 +315,6 @@ def markdown_to_html_body(md: str, resolver: LinkResolver | None = None) -> str:
     while i < n:
         line = lines[i]
 
-        # 代码围栏
         m = _FENCE_RE.match(line)
         if m:
             fence = m.group(1)
@@ -217,23 +324,20 @@ def markdown_to_html_body(md: str, resolver: LinkResolver | None = None) -> str:
             while i < n and not (lines[i].startswith(fence) and lines[i].strip() == lines[i].rstrip()):
                 buf.append(lines[i])
                 i += 1
-            if i < n: i += 1  # 跳过收尾围栏
-            cls = f' class="language-{html.escape(lang, quote=True)}"' if lang else ""
-            out.append(f"<pre><code{cls}>{html.escape(chr(10).join(buf))}</code></pre>")
+            if i < n: i += 1
+            content = "\n".join(buf)
+            out.append(_render_fence(lang, content, resolver))
             continue
 
-        # 空行
         if not line.strip():
             i += 1
             continue
 
-        # 水平线
         if _HR_RE.match(line):
             out.append("<hr/>")
             i += 1
             continue
 
-        # 标题
         m = _HEADING_RE.match(line)
         if m:
             level = len(m.group(1))
@@ -241,10 +345,9 @@ def markdown_to_html_body(md: str, resolver: LinkResolver | None = None) -> str:
             i += 1
             continue
 
-        # 表格
         if _looks_like_table(lines, i):
             header = _split_row(lines[i])
-            i += 2  # 跳过表头与分隔
+            i += 2
             rows: list[list[str]] = []
             while i < n and lines[i].strip() and "|" in lines[i]:
                 rows.append(_split_row(lines[i]))
@@ -260,7 +363,6 @@ def markdown_to_html_body(md: str, resolver: LinkResolver | None = None) -> str:
             out.append("</tbody></table>")
             continue
 
-        # 引用块
         if _BQ_RE.match(line):
             buf = []
             while i < n and _BQ_RE.match(lines[i]):
@@ -270,12 +372,10 @@ def markdown_to_html_body(md: str, resolver: LinkResolver | None = None) -> str:
             out.append(f"<blockquote>{inner}</blockquote>")
             continue
 
-        # 列表（有序 / 无序，支持嵌套按缩进对齐）
         if _OL_RE.match(line) or _UL_RE.match(line):
             i = _consume_list(lines, i, out, base_indent=-1, resolver=resolver)
             continue
 
-        # 段落：把后续未中断的行合并
         buf = [line]
         i += 1
         while i < n and lines[i].strip() and not (
@@ -301,7 +401,6 @@ def _consume_list(
     base_indent: int,
     resolver: LinkResolver | None = None,
 ) -> int:
-    """从 lines[i] 开始消费同级或更深缩进的列表项，写入 out。返回下一行索引。"""
     first = lines[i]
     m_ol = _OL_RE.match(first)
     m_ul = _UL_RE.match(first)
@@ -316,7 +415,6 @@ def _consume_list(
     while i < n:
         line = lines[i]
         if not line.strip():
-            # 列表内允许空行，但若空行后不再是同级列表项就结束
             j = i + 1
             while j < n and not lines[j].strip():
                 j += 1
@@ -336,8 +434,6 @@ def _consume_list(
         if cur_indent < indent:
             break
         if cur_indent > indent:
-            # 嵌套：交给递归（把上一项的 </li> 暂缓）
-            # 简化：把嵌套块作为独立子列表追加在最近一项内
             sub_buf: list[str] = []
             i = _consume_list(lines, i, sub_buf, base_indent=indent, resolver=resolver)
             if out and out[-1].endswith("</li>"):
@@ -354,6 +450,150 @@ def _consume_list(
     return i
 
 
+# 章节分段与 TOC
+
+_H2_BLOCK = re.compile(r"<h2>(.*?)</h2>", re.DOTALL)
+_H3_BLOCK = re.compile(r"<h3>(.*?)</h3>", re.DOTALL)
+_SUMMARY_BLOCK = re.compile(
+    r'<aside class="section-summary-card not-prose">(.*?)</aside>',
+    re.DOTALL,
+)
+
+
+def _strip_tags(s: str) -> str:
+    return re.sub(r"<[^>]+>", "", s).strip()
+
+
+def _slugify(title: str, idx: int) -> str:
+    """优先用 '1.2' 这种章节号生成稳定 id；否则退化为 sec-N。"""
+    m = re.match(r"^\s*(\d+(?:\.\d+)*)", title)
+    if m:
+        return "sec-" + m.group(1).replace(".", "-")
+    return f"sec-{idx}"
+
+
+def _split_h2_sections(body: str) -> list[tuple[str | None, str]]:
+    """把 body 按 <h2> 切分为 [(h2_html or None, content), ...]。"""
+    positions: list[tuple[int, int, str]] = []
+    for m in _H2_BLOCK.finditer(body):
+        positions.append((m.start(), m.end(), m.group(0)))
+    if not positions:
+        return [(None, body)]
+    chunks: list[tuple[str | None, str]] = []
+    prefix = body[: positions[0][0]]
+    if prefix.strip():
+        chunks.append((None, prefix))
+    for i, (start, end, h2_html) in enumerate(positions):
+        next_start = positions[i + 1][0] if i + 1 < len(positions) else len(body)
+        content = body[end:next_start]
+        chunks.append((h2_html, content))
+    return chunks
+
+
+def _wrap_h3_subsections(content: str) -> str:
+    """把 content 中每个 <h3> 段落包成可折叠子区块。"""
+    positions: list[tuple[int, int, str]] = []
+    for m in _H3_BLOCK.finditer(content):
+        positions.append((m.start(), m.end(), m.group(0)))
+    if not positions:
+        return content
+
+    out: list[str] = []
+    prefix = content[: positions[0][0]]
+    if prefix.strip():
+        out.append(prefix)
+
+    for i, (start, end, h3_html) in enumerate(positions):
+        next_start = positions[i + 1][0] if i + 1 < len(positions) else len(content)
+        sub_body = content[end:next_start]
+        title_text = _strip_tags(h3_html)
+        slug = _slugify(title_text, i)
+        key = f"sub-{slug}"
+        h3_with_id = h3_html.replace("<h3>", f'<h3 id="{slug}" class="!mt-0">', 1)
+        out.append(
+            f'<div class="subsection border-l-2 border-slate-200 dark:border-slate-700 pl-3 my-3" '
+            f'x-data="{{open: (localStorage.getItem({key!r})!==\'0\')}}" '
+            f'x-init="$watch(\'open\', v => localStorage.setItem({key!r}, v ? \'1\' : \'0\'))" '
+            f'@expand-all.window="open=true" '
+            f'@collapse-all.window="open=false">'
+            f'<div class="section-header flex items-baseline gap-1" '
+            f':data-open="open" @click="open=!open; if(open) $dispatch(\'section:opened\')">'
+            f'<span class="toggle-icon">▾</span>'
+            f'<div class="flex-1">{h3_with_id}</div>'
+            f'</div>'
+            f'<div x-show="open" x-transition.duration.150ms class="subsection-body">{sub_body}</div>'
+            f'</div>'
+        )
+    return "".join(out)
+
+
+def _build_sections_and_toc(body: str) -> tuple[str, list[dict]]:
+    """返回 (重新组装后的 body_html, toc 条目列表)。"""
+    chunks = _split_h2_sections(body)
+    out: list[str] = []
+    toc: list[dict] = []
+
+    for idx, (h2_html, content) in enumerate(chunks):
+        if h2_html is None:
+            out.append(content)
+            continue
+        title = _strip_tags(h2_html)
+        slug = _slugify(title, idx)
+        toc.append({"id": slug, "title": title})
+
+        # 抽出可选的摘要卡片
+        summary_html = ""
+        m = _SUMMARY_BLOCK.search(content)
+        if m:
+            summary_html = m.group(0)
+            content = content[: m.start()] + content[m.end():]
+
+        content = _wrap_h3_subsections(content)
+        h2_with_id = h2_html.replace("<h2>", f'<h2 id="{slug}" class="!mt-0">', 1)
+        store_key = f"sec-{slug}"
+
+        summary_block = (
+            f'<div x-show="!open" class="opacity-90">{summary_html}</div>'
+            if summary_html else ""
+        )
+
+        out.append(
+            f'<section data-section-id="{slug}" class="report-section my-6 rounded-lg '
+            f'border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/40 '
+            f'shadow-sm p-4 md:p-5" '
+            f'x-data="{{open: (localStorage.getItem({store_key!r})!==\'0\')}}" '
+            f'x-init="$watch(\'open\', v => localStorage.setItem({store_key!r}, v ? \'1\' : \'0\'))" '
+            f'@expand-all.window="open=true" '
+            f'@collapse-all.window="open=false">'
+            f'<div class="section-header flex items-baseline gap-2" '
+            f':data-open="open" @click="open=!open; if(open) $dispatch(\'section:opened\')">'
+            f'<span class="toggle-icon text-slate-500">▾</span>'
+            f'<div class="flex-1">{h2_with_id}</div>'
+            f'</div>'
+            f'{summary_block}'
+            f'<div x-show="open" x-transition.duration.150ms class="section-body">{content}</div>'
+            f'</section>'
+        )
+
+    return "\n".join(out), toc
+
+
+def _render_toc(toc: list[dict]) -> str:
+    if not toc:
+        return ""
+    items = []
+    for entry in toc:
+        title_safe = html.escape(entry["title"])
+        items.append(
+            f'<a href="#{entry["id"]}" class="toc-link block py-1.5 px-2 text-sm '
+            f'border-l-2 border-transparent hover:bg-slate-100 dark:hover:bg-slate-700/60 '
+            f'text-slate-700 dark:text-slate-300" '
+            f'x-show="!search || {json.dumps(entry["title"].lower())}.includes(search.toLowerCase())">'
+            f'{title_safe}</a>'
+        )
+    return "\n".join(items)
+
+
 # 文件跳转链接
 
 _JUMP_SCHEMES = {
@@ -363,7 +603,6 @@ _JUMP_SCHEMES = {
     "file":    "file://{path}",
 }
 
-# 断链标记：resolver 在 URL 前加此前缀表示文件不存在，_wrap_anchor 据此选择样式
 _BROKEN_PREFIX = "\x00broken\x00"
 
 
@@ -372,15 +611,7 @@ def make_file_link_resolver(
     scheme: str = "vscode",
     broken_paths: set[str] | None = None,
 ) -> LinkResolver | None:
-    """构造一个把 file:line 解析为可点击跳转 URL 的解析器。
-
-    repo_roots：用来把相对路径还原为绝对路径的根目录列表（按顺序尝试）。
-    scheme：跳转协议。默认 vscode（VS Code / Cursor 都注册了此 handler）。
-    broken_paths：若提供，解析失败的路径会被收集进此 set（供调用方统计）。
-
-    文件存在 → 返回正常 URL；文件不存在 → 返回带 _BROKEN_PREFIX 前缀的"猜测 URL"，
-    使引用仍可点击，但会以红色虚线样式显示，提示路径有误。
-    """
+    """构造一个把 file:line 解析为可点击跳转 URL 的解析器。"""
     if not repo_roots:
         return None
     template = _JUMP_SCHEMES.get(scheme, _JUMP_SCHEMES["vscode"])
@@ -423,7 +654,6 @@ def make_file_link_resolver(
                 abs_path = str(candidate)
             return _build_url(abs_path, line)
 
-        # 文件在磁盘上找不到：生成"猜测路径"链接，加断链前缀以触发红色样式
         if broken_paths is not None:
             broken_paths.add(filepath)
         best_guess = str((roots[0] / filepath).resolve())
@@ -434,19 +664,6 @@ def make_file_link_resolver(
 
 # 对外入口
 
-_EXTRA_CSS = """
-a.file-jump { border-bottom: 1px dashed currentColor; }
-a.file-jump:hover { background: rgba(9, 105, 218, 0.08); }
-a.file-broken { color: #cf222e; border-bottom: 1px dashed #cf222e; }
-a.file-broken:hover { background: rgba(207, 34, 46, 0.08); }
-@media (prefers-color-scheme: dark) {
-    a.file-jump:hover { background: rgba(68, 147, 248, 0.12); }
-    a.file-broken { color: #ff7b72; border-bottom-color: #ff7b72; }
-    a.file-broken:hover { background: rgba(255, 123, 114, 0.12); }
-}
-"""
-
-
 def render_html(
     markdown_text: str,
     title: str = "评估报告",
@@ -456,16 +673,58 @@ def render_html(
 ) -> str:
     resolver = make_file_link_resolver(repo_roots, scheme=link_scheme,
                                        broken_paths=broken_paths)
-    body = markdown_to_html_body(markdown_text, resolver=resolver)
+    raw_body = markdown_to_html_body(markdown_text, resolver=resolver)
+    body_html, toc = _build_sections_and_toc(raw_body)
+    toc_items = _render_toc(toc)
+
+    title_safe = html.escape(title)
+    has_toc = bool(toc)
+
+    toc_aside = ""
+    main_class = "max-w-5xl mx-auto p-6 md:p-10"
+    if has_toc:
+        main_class = "ml-0 md:ml-64 max-w-5xl px-4 md:px-10 py-6 md:py-10"
+        toc_aside = f"""
+<aside class="toc-sidebar hidden md:flex md:flex-col fixed top-0 left-0 h-screen w-64
+              border-r border-slate-200 dark:border-slate-700
+              bg-slate-50 dark:bg-slate-900/70 p-4 overflow-y-auto z-10">
+  <div class="text-xs uppercase tracking-wider text-slate-500 mb-2">目录</div>
+  <div class="toc-controls flex gap-2 mb-2">
+    <button class="text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+            @click="$dispatch('expand-all')">全部展开</button>
+    <button class="text-xs px-2 py-1 rounded bg-slate-300 dark:bg-slate-600 text-slate-800 dark:text-slate-100
+                   hover:bg-slate-400 dark:hover:bg-slate-500"
+            @click="$dispatch('collapse-all')">全部收起</button>
+  </div>
+  <input type="text" placeholder="过滤章节..." x-model="search"
+         class="w-full mb-2 px-2 py-1 text-sm border rounded
+                bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600
+                focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+  <nav class="toc-nav flex-1 overflow-y-auto">
+    {toc_items}
+  </nav>
+</aside>"""
+
     return (
         "<!DOCTYPE html>\n"
         '<html lang="zh-CN">\n<head>\n'
         '<meta charset="utf-8"/>\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1"/>\n'
-        f"<title>{html.escape(title)}</title>\n"
-        f"<style>{_CSS}{_EXTRA_CSS}</style>\n"
-        "</head>\n<body>\n"
-        f"{body}\n"
+        f"<title>{title_safe}</title>\n"
+        f"{_CDN_HEAD}\n"
+        f"<style>{_CUSTOM_CSS}</style>\n"
+        "</head>\n"
+        '<body class="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100" '
+        'x-data="{ search: \'\' }">\n'
+        f"{toc_aside}\n"
+        f'<main class="{main_class}">\n'
+        '<article class="prose dark:prose-invert prose-slate max-w-none '
+        'prose-headings:scroll-mt-6 prose-pre:bg-slate-100 dark:prose-pre:bg-slate-800 '
+        'prose-a:text-blue-600 dark:prose-a:text-blue-400">\n'
+        f"{body_html}\n"
+        "</article>\n"
+        "</main>\n"
+        f"{_INIT_SCRIPT}\n"
         "</body>\n</html>\n"
     )
 
@@ -476,12 +735,7 @@ def write_html(
     repo_roots: list[Path] | None = None,
     link_scheme: str = "vscode",
 ) -> tuple[Path, set[str]]:
-    """把 Markdown 渲染为 HTML 并写入 html_path，返回 (html路径, 无法解析的路径集合)。
-
-    repo_roots 用来把报告中的相对路径解析为绝对路径，从而生成
-    可点击跳转的 vscode:// 链接。无法解析的路径在 HTML 中以红色断链样式显示，
-    同时通过第二个返回值告知调用方，以便在 write_report 响应里反馈给 LLM。
-    """
+    """把 Markdown 渲染为 HTML 并写入 html_path，返回 (html路径, 无法解析的路径集合)。"""
     broken: set[str] = set()
     title = html_path.stem
     html_path.write_text(

@@ -1,13 +1,21 @@
 {
   "$schema": "https://opencode.ai/config.json",
 
-  "model": "openai/deepseek-chat",
+  "model": "deepseek/deepseek-chat",
+
+  "provider": {
+    "deepseek": {
+      "options": {
+        "baseURL": "https://api.deepseek.com/v1"
+      }
+    }
+  },
 
   "agent": {
     "os-kernel-analyzer": {
-      "model": "openai/deepseek-chat",
+      "model": "deepseek/deepseek-chat",
 
-      "system": "[此字段由 agent.py 在运行时动态生成：包含 5 层系统提示词（角色声明 + 仓库结构分析 + 工作流规范 + 硬性约束 + 输出格式模板）]",
+      "system": "[此字段由 setup_opencode.py 写入：包含五层系统提示词（角色 + 仓库结构 + 工作流 + 硬性约束 + 输出格式）+ 可视化输出规范]",
 
       "permission": {
         "bash":  { "type": "deny" },
@@ -24,9 +32,7 @@
       "command": [
         "/abs/path/to/.venv/bin/python",
         "/abs/path/to/mcp_server.py",
-        "--repo-path",   "/abs/path/to/repo",
-        "--max-steps",   "200",
-        "--output-file", "/abs/path/to/report.md"
+        "--max-steps", "200"
       ]
     }
   }
