@@ -63,7 +63,12 @@ class OSKernelMCPTools(ToolDispatcher):
         case_sensitive: bool = False,
         max_results: int = 50,
     ) -> str:
-        return _search_code(self.repo_path, pattern, file_glob, case_sensitive, max_results)
+        # 把持久化 SymbolDB 传入，使 search_code 优先走 FTS5
+        db = getattr(self.level2_index, "db", None)
+        return _search_code(
+            self.repo_path, pattern, file_glob, case_sensitive, max_results,
+            symbol_db=db,
+        )
 
     #统一路由
 
@@ -76,6 +81,9 @@ class OSKernelMCPTools(ToolDispatcher):
             "find_symbol_references":    self.find_symbol_references,
             "list_implemented_syscalls": self.list_implemented_syscalls,
             "get_subsystem_call_chain":  self.get_subsystem_call_chain,
+            "find_entry_symbol":         self.find_entry_symbol,
+            "expand_callees":            self.expand_callees,
+            "get_index_status":          self.get_index_status,
             "compare_with_reference_os": self.compare_with_reference_os,
         }
 

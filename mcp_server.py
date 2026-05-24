@@ -273,6 +273,47 @@ def _make_tool_defs() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="find_entry_symbol",
+            description=(
+                "轻量符号存在性检查：返回 file:line 和 kind，不读取源码、不展开调用树。"
+                "适合在 expand_callees 之前先验证符号是否存在，避免对幻觉名称做昂贵的调用树展开。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "符号名（通常是函数名）"},
+                },
+                "required": ["name"],
+            },
+        ),
+        types.Tool(
+            name="expand_callees",
+            description=(
+                "展开某符号的调用树（最大 5 层）。"
+                "假定符号已存在；如不确定请先调用 find_entry_symbol。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name":      {"type": "string", "description": "入口函数名"},
+                    "max_depth": {"type": "integer", "default": 3, "description": "展开深度（默认 3，最大 5）"},
+                },
+                "required": ["name"],
+            },
+        ),
+        types.Tool(
+            name="get_index_status",
+            description=(
+                "返回当前 SQLite 索引的健康度：符号总数、FTS 行数、磁盘占用、上次索引时间、语义引擎状态。"
+                "用于诊断 search_code 是否走 FTS5 快路径、初始化是否复用了缓存。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        types.Tool(
             name="compare_with_reference_os",
             description="将当前仓库与参考 OS（rCore/xv6/uCore）进行函数级相似度比对。",
             inputSchema={
@@ -454,7 +495,10 @@ async def _handle_initialize(arguments: dict) -> list[types.TextContent]:
             from parser.os_tools import build_repo_map
             structure              = _build_structure(repo_path)
             profile                = build_profile(str(repo_path), structure)
-            level1_map, level2_idx = build_repo_map(str(repo_path), structure, profile)
+            cache_dir              = _config.data.get("cache_dir", "data/cache")
+            level1_map, level2_idx = build_repo_map(
+                str(repo_path), structure, profile, cache_dir=cache_dir
+            )
             profile["repo_name"]   = repo_path.name
             return structure, profile, level1_map, level2_idx
 

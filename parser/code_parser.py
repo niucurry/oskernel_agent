@@ -480,20 +480,6 @@ def find_doc_files(repo_path: Path) -> dict[str, list[str]]:
     return {k: v for k, v in found.items() if v}
 
 
-def annotate_doc_readers(doc_files: dict[str, list[str]]) -> dict[str, list[dict]]:
-    """为每个文档条目附加读取器类型，返回 {doc_type: [{path, reader}]}"""
-    result: dict[str, list[dict]] = {}
-    for doc_type, paths in doc_files.items():
-        result[doc_type] = [
-            {
-                "path": path,
-                "reader": _EXT_TO_READER.get(Path(path).suffix.lower(), "text_reader"),
-            }
-            for path in paths
-        ]
-    return result
-
-
 def detect_naming_style(repo_path: Path) -> str:
     """采样最多 20 个源文件，判断仓库整体命名风格"""
     snake_count = camel_count = 0
@@ -830,23 +816,6 @@ def detect_build_env(repo_path: str) -> str:
     return "unknown"
 
 
-def analyze_structure_depth(repo_path: Path) -> str:
-    """根据源文件的平均目录深度判断项目结构层级"""
-    depths = [
-        len(f.relative_to(repo_path).parts)
-        for ext in ("*.c", "*.rs")
-        for f in repo_path.rglob(ext)
-    ]
-    if not depths:
-        return "unknown"
-    avg = sum(depths) / len(depths)
-    if avg <= 2:
-        return "flat"
-    if avg <= 4:
-        return "shallow"
-    return "deep"
-
-
 def detect_anomalies(structure: dict, repo_path: Path) -> list[str]:
     """根据预分析结构体生成需注入 System Prompt 的异常警告列表"""
     anomalies = []
@@ -882,137 +851,6 @@ def detect_anomalies(structure: dict, repo_path: Path) -> list[str]:
         anomalies.append("命名风格混杂（CamelCase 与 snake_case 并存），代码可能来自多个不同来源")
 
     return anomalies
-
-
-_DOC_TYPE_LABELS: dict[str, str] = {
-    "readme":     "README",
-    "design_doc": "设计文档",
-    "report":     "技术报告",
-    "slides":     "幻灯片",
-    "changelog":  "更新日志",
-}
-
-_READER_NOTES: dict[str, str] = {
-    "pdf_reader":  "（需使用 PDF 读取工具）",
-    "docx_reader": "（需使用 DOCX 读取工具）",
-    "pptx_reader": "（需使用 PPTX 读取工具）",
-}
-
-
-def build_repo_profile(repo_path: Path) -> str:
-    """组装所有静态分析结果，返回可直接注入 System Prompt 的结构描述文本"""
-    rt = repo_path if isinstance(repo_path, Path) else Path(repo_path)
-
-    source_roots_rel = find_source_roots(rt)
-    source_roots_abs = [str(rt / r) for r in source_roots_rel]
-
-    all_depths = [
-        len(f.relative_to(rt).parts)
-        for ext in ("*.c", "*.rs")
-        for f in rt.rglob(ext)
-    ]
-    avg_depth = sum(all_depths) / len(all_depths) if all_depths else 0.0
-    if not all_depths:
-        depth_label = "unknown"
-    elif avg_depth <= 2:
-        depth_label = "flat"
-    elif avg_depth <= 4:
-        depth_label = "shallow"
-    else:
-        depth_label = "deep"
-
-    naming = detect_naming_style(rt)
-    lang_info = detect_primary_language(source_roots_abs)
-    subsystem_map = classify_files_by_content(str(rt), source_roots_rel)
-    doc_files = find_doc_files(rt)
-    annotated = annotate_doc_readers(doc_files)
-
-    structure = {
-        "doc_files":           doc_files,
-        "subsystem_locations": subsystem_map,
-        "structure_depth":     depth_label,
-        "source_roots":        source_roots_abs,
-        "naming_style":        naming,
-    }
-    anomalies = detect_anomalies(structure, rt)
-    ref_os = detect_reference_os(str(rt), structure)
-    kernel_type = detect_kernel_type(str(rt), structure)
-    arch_list = detect_target_arch(str(rt))
-
-    output: list[str] = ["仓库结构探索结果（确定性分析，非 LLM 推断）", ""]
-
-    if source_roots_rel:
-        root_parts = [f"{source_roots_rel[0]}（主要）"] + \
-                     [f"{r}（次要）" for r in source_roots_rel[1:]]
-        output.append(f"源码根目录：{'，'.join(root_parts)}")
-    else:
-        output.append("源码根目录：（未检测到）")
-
-    output.append(f"目录风格：{depth_label}（平均深度 {avg_depth:.1f} 层）")
-    output.append(f"命名风格：{naming}")
-
-    primary = lang_info["primary"]
-    secondary = lang_info["secondary"]
-    has_asm = lang_info["has_assembly"]
-    loc_parts = "、".join(f"{k} {v}行" for k, v in lang_info["loc"].items() if k != "asm")
-    asm_note = f"（含汇编 {lang_info['loc'].get('asm', 0)} 行）" if has_asm else ""
-    lang_line = f"主语言：{primary}"
-    if secondary:
-        lang_line += f"（次要：{secondary}）"
-    lang_line += f"  {loc_parts}{asm_note}"
-    output.append(lang_line)
-    output.append("")
-
-    ref_name = ref_os["name"] or "独立实现"
-    ref_conf = ref_os["confidence"]
-    output.append(f"参考OS溯源：{ref_name}（置信度：{ref_conf}）")
-    for ev in ref_os["evidence"]:
-        output.append(f"  · {ev}")
-    output.append("")
-
-    output.append(f"内核类型：{kernel_type['type']}")
-    for ev in kernel_type["evidence"]:
-        output.append(f"  · {ev}")
-    output.append("")
-
-    if len(arch_list) > 1:
-        output.append(f"目标架构：{' + '.join(arch_list)}（双架构）")
-    else:
-        output.append(f"目标架构：{arch_list[0]}")
-    output.append("")
-
-    output.append("子系统文件定位（按内容关键词识别，非路径名）：")
-    for subsystem, files in subsystem_map.items():
-        if not files:
-            output.append(f"  {subsystem}：未找到明显的{subsystem}代码")
-            continue
-        for i, entry in enumerate(files[:3]):
-            score = entry["score"]
-            confidence = "高" if score >= 5 else "中" if score >= 3 else "低"
-            if i == 0:
-                output.append(f"  {subsystem}：{entry['file']}（置信度：{confidence}，命中{score}个关键词）")
-            else:
-                output.append(f"    {entry['file']}（置信度：{confidence}，命中{score}个关键词）")
-    output.append("")
-
-    output.append("文档文件：")
-    if annotated:
-        for doc_type, entries in annotated.items():
-            label = _DOC_TYPE_LABELS.get(doc_type, doc_type)
-            for entry in entries:
-                note = _READER_NOTES.get(entry["reader"], "")
-                note_str = f"  {note}" if note else ""
-                output.append(f"  {label:<8} {entry['path']}{note_str}")
-    else:
-        output.append("  （未找到任何文档文件）")
-    output.append("")
-
-    if anomalies:
-        output.append("异常警告（分析时请特别注意）：")
-        for anomaly in anomalies:
-            output.append(f"  - {anomaly}")
-
-    return "\n".join(output)
 
 
 def build_profile(repo_path: str, structure: dict) -> dict:

@@ -445,11 +445,76 @@ class ToolDispatcher:
 
         return "\n".join(lines)
 
-    # T5: get_subsystem_call_chain
+    # T5a: find_entry_symbol — 轻量"符号存在性检查"
+
+    def find_entry_symbol(self, name: str) -> str:
+        """只确认符号是否存在并返回位置，不展开调用链。
+
+        与 find_symbol_definition 的区别：后者读取并返回完整源码（可能数十行），
+        本工具仅返回 file:line + kind（<100 token），让 LLM 决定是否要再调用
+        expand_callees 展开调用树。配合 expand_callees 使用，可避免对不存在的
+        符号做昂贵的调用树展开。
+        """
+        func_syms = self._get_func_symbols()
+        info = func_syms.get(name)
+        if info:
+            return (
+                f"## 符号 {name} 存在\n"
+                f"位置：{info['file']}:{info['start_line']}\n"
+                f"类型：function\n\n"
+                f"下一步：用 expand_callees('{name}') 展开调用树，"
+                f"或 find_symbol_definition('{name}') 查看完整源码。"
+            )
+
+        # 降级：level2_index 模糊查找
+        if self.level2_index:
+            candidates = self.level2_index.lookup_symbol(name)
+            if candidates:
+                c = candidates[0]
+                return (
+                    f"## 符号 {name} 存在\n"
+                    f"位置：{c['file']}:{c['line']}\n"
+                    f"类型：{c.get('kind', '未知')}\n\n"
+                    f"下一步：用 expand_callees('{name}') 展开调用树，"
+                    f"或 find_symbol_definition('{name}') 查看完整源码。"
+                )
+            similar = self.level2_index.search_symbols(name)
+            if similar:
+                hints = ", ".join(f"`{s['name']}`" for s in similar[:5])
+                return (
+                    f"[未找到] '{name}' 不在索引中。"
+                    f"相似符号：{hints}"
+                )
+
+        return (
+            f"[未找到] '{name}' 不在索引中。"
+            f"可能是宏生成、外部依赖或拼写有误。"
+        )
+
+    # T5b: expand_callees — 已知存在前提下展开调用树
+
+    def expand_callees(self, name: str, max_depth: int = 3) -> str:
+        """假定符号存在，专注调用树展开（最多 5 层）。"""
+        max_depth = min(max_depth, 5)
+        chain = self.engine.get_call_chain(name, max_depth)
+
+        entry_val = chain.get(name) if chain else None
+        if not chain or entry_val is None or (
+            isinstance(entry_val, dict) and entry_val.get("__not_found__")
+        ):
+            return (
+                f"[未找到] 入口函数 '{name}' 不在索引中。"
+                f"建议先用 find_entry_symbol('{name}') 确认它是否存在。"
+            )
+
+        return self._render_call_tree(name, chain, max_depth)
+
+    # T5: get_subsystem_call_chain（保留为外壳，内部转调 find_entry_symbol + expand_callees）
 
     def get_subsystem_call_chain(
         self, entry_function: str, max_depth: int = 3
     ) -> str:
+        """旧入口：判存 + 展开打包。新代码请用 find_entry_symbol + expand_callees。"""
         max_depth = min(max_depth, 5)
         chain = self.engine.get_call_chain(entry_function, max_depth)
 
@@ -464,7 +529,10 @@ class ToolDispatcher:
                 f"[未找到] 入口函数 '{entry_function}' 不在索引中。\n"
                 f"建议：先调用 find_symbol_definition('{entry_function}') 确认它是否存在。"
             )
+        return self._render_call_tree(entry_function, chain, max_depth)
 
+    def _render_call_tree(self, entry_function: str, chain: dict, max_depth: int) -> str:
+        """共享的调用树渲染逻辑（同时被 get_subsystem_call_chain 和 expand_callees 使用）。"""
         func_syms = self._get_func_symbols()
         tree_lines: list[str] = []
         total_nodes = [0]
@@ -797,3 +865,29 @@ class ToolDispatcher:
         return {"rust": "rust", "c": "c"}.get(
             self.profile.get("primary_lang", ""), ""
         )
+
+    # T7: get_index_status — 暴露 SQLite/FTS 索引健康度
+
+    def get_index_status(self) -> str:
+        """返回当前索引的统计信息（符号数、FTS 行数、磁盘占用、上次索引时间）。"""
+        db = getattr(self.level2_index, "db", None)
+        if db is None:
+            return (
+                "[未启用持久化索引] 当前 Level2Index 未挂接 SymbolDB。"
+                "可能是 build_repo_map 未被正常调用。"
+            )
+        s = db.stats()
+        db_kb = (s.get("db_size", 0) or 0) // 1024
+        lines = [
+            "## 索引状态",
+            f"符号总数：{s['symbols']}",
+            f"FTS 行数：{s['fts_rows']}",
+            f"已索引文件：{s['files']}",
+            f"数据库大小：{db_kb} KB（{s['db_path']}）",
+            f"主语言：{s['primary_lang'] or '未知'}",
+            f"上次索引：{s['indexed_at'] or '未知'}",
+        ]
+        engine_info = self.engine.get_engine_info()
+        lines.append(f"语义引擎：{engine_info.get('engine', '?')}"
+                     f"（精度 {engine_info.get('precision', '?')}）")
+        return "\n".join(lines)

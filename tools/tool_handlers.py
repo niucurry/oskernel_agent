@@ -140,33 +140,97 @@ _SEARCH_MAX_LINE_LEN = 240   # 单行内容超长时截断
 _SEARCH_DEFAULT_MAX  = 50    # 默认返回上限
 
 
+_REGEX_METACHARS = set(".+*?[]{}|^$()\\")
+
+
+def _looks_like_regex(pattern: str) -> bool:
+    """简单启发：含正则元字符即视为正则模式，否则按关键词走 FTS5。"""
+    return any(ch in _REGEX_METACHARS for ch in pattern)
+
+
 def search_code(
     repo_path: str,
     pattern: str,
     file_glob: str | None = None,
     case_sensitive: bool = False,
     max_results: int = _SEARCH_DEFAULT_MAX,
+    symbol_db=None,
 ) -> str:
-    """在仓库内做正则文本搜索。
+    """在仓库内搜索代码。
 
-    - pattern         Python 正则表达式
+    - pattern         关键词或 Python 正则表达式
     - file_glob       文件名匹配模式（如 "*.rs"、"trap*"），不带目录时只匹配 basename
-    - case_sensitive  默认大小写不敏感
+    - case_sensitive  默认大小写不敏感（仅对正则路径生效；FTS5 自带 unicode61 大小写归一）
     - max_results     命中数上限，默认 50
+    - symbol_db       可选 SymbolDB 实例；存在且 pattern 为纯关键词时走 FTS5
 
-    跳过 _SKIP_DIRS、二进制文件、超长行；返回 file:line | content 列表。
+    优先走 SQLite FTS5（毫秒级）；含正则元字符或 FTS5 不可用时降级到逐行正则扫描。
     """
     if not pattern:
         return "[错误] 搜索模式不能为空。"
 
+    if max_results <= 0 or max_results > 500:
+        max_results = _SEARCH_DEFAULT_MAX
+
+    # FTS5 快路径：关键词搜索且 symbol_db 可用
+    if symbol_db is not None and not _looks_like_regex(pattern):
+        try:
+            return _search_via_fts(symbol_db, pattern, file_glob, max_results)
+        except Exception as exc:
+            # FTS 失败不应阻塞工具；降级到正则扫描
+            return _search_via_regex(
+                repo_path, pattern, file_glob, case_sensitive, max_results,
+                fts_error=str(exc),
+            )
+
+    return _search_via_regex(repo_path, pattern, file_glob, case_sensitive, max_results)
+
+
+def _search_via_fts(
+    symbol_db,
+    pattern: str,
+    file_glob: str | None,
+    max_results: int,
+) -> str:
+    """FTS5 全文搜索路径。"""
+    # FTS5 短语查询：用双引号包裹，避免特殊词被拆成 OR
+    fts_query = f'"{pattern}"' if " " in pattern else pattern
+    hits = symbol_db.fts_search(fts_query, file_glob=file_glob, limit=max_results)
+    if not hits:
+        glob_part = f"，glob={file_glob}" if file_glob else ""
+        return f"[未找到] 模式 {pattern!r} 在 FTS 索引中无匹配{glob_part}。"
+
+    lines = []
+    for h in hits:
+        content = h["content"].rstrip()
+        if len(content) > _SEARCH_MAX_LINE_LEN:
+            content = content[:_SEARCH_MAX_LINE_LEN] + " …"
+        lines.append(f"{h['file']}:{h['line']} | {content}")
+
+    truncated = len(hits) >= max_results
+    header = (
+        f"搜索 {pattern!r}（FTS5"
+        f"{'，glob=' + file_glob if file_glob else ''}）"
+        f"命中 {len(hits)} 条"
+        f"{'（已达上限，结果被截断）' if truncated else ''}：\n"
+    )
+    return header + "\n".join(lines)
+
+
+def _search_via_regex(
+    repo_path: str,
+    pattern: str,
+    file_glob: str | None,
+    case_sensitive: bool,
+    max_results: int,
+    fts_error: str | None = None,
+) -> str:
+    """正则线性扫描路径（FTS5 不可用或正则模式）。"""
     try:
         flags = 0 if case_sensitive else re.IGNORECASE
         regex = re.compile(pattern, flags)
     except re.error as exc:
         return f"[错误] 正则表达式编译失败：{exc}"
-
-    if max_results <= 0 or max_results > 500:
-        max_results = _SEARCH_DEFAULT_MAX
 
     root = Path(repo_path)
     if not root.exists():
@@ -226,9 +290,10 @@ def search_code(
             f"{'，glob=' + file_glob if file_glob else ''}）。"
         )
 
+    fts_note = f"，FTS5 降级：{fts_error}" if fts_error else ""
     header = (
-        f"搜索 {pattern!r}（大小写{'敏感' if case_sensitive else '不敏感'}"
-        f"{'，glob=' + file_glob if file_glob else ''}）"
+        f"搜索 {pattern!r}（正则扫描，大小写{'敏感' if case_sensitive else '不敏感'}"
+        f"{'，glob=' + file_glob if file_glob else ''}{fts_note}）"
         f"命中 {len(hits)} 条"
         f"{'（已达上限，结果被截断）' if truncated else ''}：\n"
     )

@@ -7,6 +7,7 @@ base_url = "https://api.deepseek.com/v1"   # DeepSeek 官方接入点；如需�
 [data]
 repos_dir    = "./data/historical_repos"
 metadata_dir = "./data/metadata"
+cache_dir    = "./data/cache"   # 持久化符号索引 / FTS5 数据库（按仓库 hash 分文件）
 
 [target]
 # 可选：填写后 python agent.py 不带参数时使用此仓库；留空则要求命令行传入 --repo-id / --repo-path / --url
