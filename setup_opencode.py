@@ -201,13 +201,6 @@ def setup() -> None:
         encoding="utf-8",
     )
     print(f"[完成] 全局配置已写入：{_GLOBAL_CFG}")
-    print()
-    print("现在可以直接使用 OpenCode：")
-    print('  opencode run --agent os-kernel-analyzer "分析 /path/to/repo"')
-    print()
-    print("或使用 agent.py 封装（支持 --repo-id / --url 等参数）：")
-    print("  python agent.py --repo-id REPO_NAME")
-    print("  python agent.py --url https://gitlab.example.com/repo.git")
 
 
 if __name__ == "__main__":

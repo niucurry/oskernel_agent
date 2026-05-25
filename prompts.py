@@ -23,7 +23,7 @@ class SessionType(str, Enum):
     MERGE        = "merge"         # SESSION_MERGE：汇总合并
 
 
-#Layer 1: Role + task declaration
+#第一层：角色与任务声明
 
 LAYER_1_ROLE = """你是一位资深的操作系统内核评审专家，具备以下专业背景：
 - 深入理解 RISC-V / LoongArch 架构的特权级机制
@@ -38,7 +38,7 @@ LAYER_1_ROLE = """你是一位资深的操作系统内核评审专家，具备�
 不做翻译，以保持准确性。""".strip()
 
 
-#Layer 2: Deterministic fact injection
+#第二层：确定性事实注入
 
 def build_layer_2(
     structure: dict,
@@ -119,7 +119,7 @@ def format_crate_roles(crate_roles: dict) -> str:
     return "\n".join(lines)
 
 
-#Section helpers
+#章节辅助函数
 
 def _format_subsystem_locations(locations: dict) -> str:
     lines = []
@@ -152,7 +152,7 @@ def _format_doc_files(doc_files: dict) -> str:
     lines = []
     for doc_type, entries in doc_files.items():
         label = _DOC_LABELS.get(doc_type, doc_type)
-        # entries is either list[str] or list[dict] depending on caller
+        # entries 可能是 list[str] 或 list[dict]，取决于调用方
         for entry in entries:
             path = entry if isinstance(entry, str) else entry.get("path", str(entry))
             lines.append(f"  {label:<8} → {path}")
@@ -182,7 +182,7 @@ def _format_loc(loc: dict) -> str:
     return "，".join(f"{lang} {count} 行" for lang, count in loc.items())
 
 
-#Rust workspace: crate role detection
+#Rust 工作区：crate 角色检测
 
 _CRATE_ROLE_MAP = {
     "os":             "内核主体",
@@ -253,11 +253,21 @@ def detect_crate_roles(repo_path: str, profile: dict) -> dict | None:
     return roles or None
 
 
-#Layer 3: Workflow spec
+#第三层：工作流规范
 
 LAYER_3_WORKFLOW_ANALYZE = """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【工作流规范：必须严格按以下顺序执行】
+
+工具调用模式（重要）：
+  调用链相关工具分两步进行，避免对不存在的符号做昂贵的调用树展开。
+    - 不确定符号是否存在 → 先 find_entry_symbol(name) 做轻量探测（<100 token）
+    - 确认存在后 → expand_callees(name, max_depth=3) 展开调用树
+  若符号刚通过 find_symbol_definition 拿到过（已确认存在），可直接 expand_callees。
+  旧入口 get_subsystem_call_chain 仍兼容，等价于上述两步合并；新流程优先使用拆分版。
+
+  诊断工具：
+    - get_index_status() 查看符号库大小、FTS 行数、缓存是否命中（用于排查"符号找不到"是否真的不存在还是索引异常）
 
 阶段一：文档先行扫读
   1. 从第②层"文档文件"列表中挑选关键文档：
@@ -291,7 +301,7 @@ LAYER_3_WORKFLOW_ANALYZE = """
 
      对每个子系统：
      a. 调用 find_symbol_definition() 查看核心函数的实际实现
-     b. 调用 get_subsystem_call_chain() 分析关键算法的执行路径
+     b. 调用 expand_callees() 分析关键算法的执行路径（符号已在 a 步确认存在）
      c. 如有需要，调用 find_symbol_references() 理解调用关系
      d. 重点交叉验证阶段一记录的"自我声称"：
         声称的特性是否真实存在？声称的位置是否准确？
@@ -363,7 +373,7 @@ LAYER_3_WORKFLOW_SUBSYS_CORE = """
 步骤 2：进程管理分析
   - find_symbol_definition() 查找进程控制结构体（TaskControlBlock / PCB / Process 等）
   - find_symbol_definition() 查看调度器入口函数
-  - get_subsystem_call_chain() 分析调度流程
+  - expand_callees() 分析调度流程
   - 如文档声称特定调度算法（stride / CFS / round-robin），用 search_code 验证
 
 步骤 3：内存管理分析
@@ -371,12 +381,12 @@ LAYER_3_WORKFLOW_SUBSYS_CORE = """
   - find_symbol_definition() 查找物理帧分配器
   - search_code 搜索 COW（copy_on_write / cow / do_wp_page）
   - search_code 搜索 lazy allocation（lazy_alloc / demand_page / page_fault + alloc）
-  - get_subsystem_call_chain() 分析内存分配路径
+  - expand_callees() 分析内存分配路径
 
 步骤 4：文件系统分析
   - find_symbol_definition() 查找 VFS 抽象层（如 Inode trait / File trait）
   - find_symbol_definition() 查找具体文件系统实现（fat32 / ext4 等）
-  - get_subsystem_call_chain() 分析文件读写路径
+  - expand_callees() 分析文件读写路径
 
 步骤 5：输出
   - 按照格式模板输出 §3.1 + §3.2 + §3.3 的 Markdown 段落
@@ -405,7 +415,7 @@ LAYER_3_WORKFLOW_SUBSYS_INFRA = """
   §3.5 中断与异常处理：
   - find_symbol_definition() 查找 trap_handler / trap_vector
   - search_code 搜索 plic_init / timer_interrupt / page_fault / ecall
-  - get_subsystem_call_chain() 分析 trap 分发路径
+  - expand_callees() 分析 trap 分发路径
 
   §3.6 IPC：
   - search_code 搜索 pipe / sys_pipe / sys_kill / signal_handler
@@ -423,7 +433,7 @@ LAYER_3_WORKFLOW_SUBSYS_INFRA = """
   §3.9 启动序列：
   - find_symbol_definition() 查找 _start / rust_main / kernel_init
   - search_code 搜索 sbi_call / bss_init
-  - get_subsystem_call_chain() 分析启动路径
+  - expand_callees() 分析启动路径
 
 步骤 3：输出
   - 按照格式模板输出 §3.4 ~ §3.9 的 Markdown 段落
@@ -523,7 +533,7 @@ LAYER_3_WORKFLOW_MERGE = """
 """.strip()
 
 
-#Layer V: 可视化输出（适用于所有会话）
+#第五层（可视化）：可视化输出（适用于所有会话）
 
 LAYER_VISUAL_OUTPUT = """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -645,7 +655,7 @@ Tailwind CSS（样式）和 Alpine.js（折叠/搜索）。你只需在 Markdown
 """.strip()
 
 
-#Layer 4: Hard constraints (anti-hallucination core)
+#第四层：硬性约束（防幻觉核心）
 
 LAYER_4_CONSTRAINTS = """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -654,8 +664,9 @@ LAYER_4_CONSTRAINTS = """
 〔约束1：禁止未查询即描述〕
 报告中所有对代码、文档、注释的描述，都必须基于 MCP 工具实际返回的内容。
 合法的证据来源仅限以下几类：
-  - find_symbol_definition / find_symbol_references / get_subsystem_call_chain
-    返回的符号源码、调用链、引用位置
+  - find_symbol_definition / find_symbol_references / find_entry_symbol
+    返回的符号源码、定义位置、引用位置
+  - expand_callees / get_subsystem_call_chain 返回的调用链
   - list_implemented_syscalls / compare_with_reference_os 返回的统计与对比数据
   - read_file 返回的文件内容（源码、README、设计文档均可）
   - search_code 返回的文本匹配命中（file:line:内容）
@@ -673,7 +684,7 @@ LAYER_4_CONSTRAINTS = """
   正面示例：
     "do_fork 函数（os/src/task/mod.rs:87）调用了 copy_mm
      复制地址空间，随后调用 alloc_pid 分配新进程 ID"
-    → 基于 find_symbol_definition 或 get_subsystem_call_chain 的实际返回。
+    → 基于 find_symbol_definition 或 expand_callees 的实际返回。
 
   另一正面示例（文档评估）：
     "README 声明实现了 stride 调度（来源：read_file README.md:42），
@@ -681,9 +692,13 @@ LAYER_4_CONSTRAINTS = """
     → read_file 返回的文档内容是合法证据，可直接引用。
 
 工具间分工提示：
-  - 想看精确语义（定义、调用关系）→ find_symbol_definition / get_subsystem_call_chain
-  - 想读文档或某段已知位置的源码 → read_file
-  - 想找标记、字符串、模糊关键字 → search_code
+  - 仅验证符号存在性 → find_entry_symbol（轻量，<100 token，建议在不确定名称时先用）
+  - 看精确定义、完整源码 → find_symbol_definition
+  - 看调用关系（callees）→ expand_callees（已知符号存在时）
+  - 看引用方（callers）→ find_symbol_references
+  - 读文档或某段已知位置的源码 → read_file
+  - 找标记、字符串、模糊关键字 → search_code（关键词走 FTS5 毫秒级，含正则元字符时自动降级）
+  - 排查索引异常（"符号找不到"是否索引问题）→ get_index_status
   - 工具返回的内容已经足够说明问题时，不要为了"再确认一次"重复调用同类工具
 
 〔约束2：每条结论必须给出代码位置引用，且路径必须原样复制自工具输出〕
@@ -753,7 +768,7 @@ LAYER_4_DEGRADED_ENGINE_EXTRA = """
 当前使用 tree-sitter 降级引擎，以下约束额外生效：
 
 〔额外约束A：调用关系的精度限制〕
-get_subsystem_call_chain 和 find_symbol_references
+expand_callees / get_subsystem_call_chain 和 find_symbol_references
 返回的调用关系基于函数名文本匹配，存在以下风险：
   - 同名函数混淆（如多个文件都有 init() 函数）
   - 遗漏通过函数指针或宏的间接调用
@@ -774,7 +789,7 @@ tree-sitter 无法做类型推断，因此：
   原本中置信度 → 标注为低置信度
 """.strip()
 
-#Layer 5: Output format template
+#第五层：输出格式模板
 
 LAYER_5_FORMAT_ANALYZE = """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -819,7 +834,7 @@ LAYER_5_FORMAT_ANALYZE = """
 {如未查看，写"未查看详细字段"}
 
 **调度算法**：{算法名称}（入口 {路径:行号}）
-{引用 get_subsystem_call_chain 的结果展示调度流程，
+{引用 expand_callees 的结果展示调度流程，
  在每个关键调用点括号里附 路径:行号}
 
 **置信度**：{高/中/低}
@@ -998,7 +1013,7 @@ LAYER_5_FORMAT_SUBSYS_CORE = """
 {如未查看，写"未查看详细字段"}
 
 **调度算法**：{算法名称}（入口 {路径:行号}）
-{引用 get_subsystem_call_chain 的结果展示调度流程，
+{引用 expand_callees 的结果展示调度流程，
  在每个关键调用点括号里附 路径:行号}
 
 **置信度**：{高/中/低}
@@ -1187,7 +1202,7 @@ LAYER_5_FORMAT_MERGE = """
 """.strip()
 
 
-#Session config mapping
+#会话配置映射
 
 _SESSION_CONFIG: dict[SessionType, tuple[str, str]] = {
     SessionType.FULL:         (LAYER_3_WORKFLOW_ANALYZE,      LAYER_5_FORMAT_ANALYZE),
