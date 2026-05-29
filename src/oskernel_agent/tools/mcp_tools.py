@@ -11,10 +11,10 @@ OSKernelMCPTools：MCP 工具集的统一入口。
   3. 工具内部主动限制返回量（截断 + 摘要）
 """
 
-from tools.tool_dispatcher import ToolDispatcher
-from tools.tool_handlers import read_file as _read_file
-from tools.tool_handlers import search_code as _search_code
-from tools.reference_db import ReferenceOSDatabase
+from .tool_dispatcher import ToolDispatcher
+from .tool_handlers import read_file as _read_file
+from .tool_handlers import search_code as _search_code
+from .reference_db import ReferenceOSDatabase
 
 
 class OSKernelMCPTools(ToolDispatcher):
@@ -85,6 +85,7 @@ class OSKernelMCPTools(ToolDispatcher):
             "expand_callees":            self.expand_callees,
             "get_index_status":          self.get_index_status,
             "compare_with_reference_os": self.compare_with_reference_os,
+            "analyze_subtree":           self.analyze_subtree,
         }
 
         func = dispatch.get(tool_name)

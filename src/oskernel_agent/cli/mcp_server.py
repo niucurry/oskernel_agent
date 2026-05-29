@@ -17,12 +17,10 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp import types
 
-sys.path.insert(0, str(Path(__file__).parent))
-
-import config as _config
-from tools.mcp_tools import OSKernelMCPTools
-from tools.reference_db import ReferenceOSDatabase
-from report_html import write_html
+from .. import config as _config
+from ..tools.mcp_tools import OSKernelMCPTools
+from ..tools.reference_db import ReferenceOSDatabase
+from ..reports.html import write_html
 
 # CLI 参数解析
 
@@ -85,7 +83,7 @@ class _LazyEngine:
 
     def _init(self) -> None:
         try:
-            from agent import select_engine
+            from .agent import select_engine
             self._engine = select_engine(*self._args)
             info = self._engine.get_engine_info()
             _log(f"[lazy-engine] 就绪：{info.get('engine')}（精度 {info.get('precision')}）")
@@ -314,6 +312,29 @@ def _make_tool_defs() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="analyze_subtree",
+            description=(
+                "枚举某个子树（subtree_path 及其所有子目录）下的全部符号"
+                "（函数 / 结构体 / typedef / 宏 / trait 等），并基于全局调用图"
+                "构建子树内的调用关系，同时标注跨子树的外部依赖。"
+                "适合 DIR agent 在分析某层级时一次性获得『立体代码地图』。"
+                "跨子树需要看外部符号定义或文件内容时，仍调用 "
+                "find_symbol_definition / read_file（全局有效）。"
+                "依赖：已经调用过 initialize_analysis。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "subtree_path": {
+                        "type": "string",
+                        "description": "相对仓库根的子树路径（如 'kernel' 或 'os/src'）；"
+                                       "传空字符串表示整个仓库。",
+                    },
+                },
+                "required": ["subtree_path"],
+            },
+        ),
+        types.Tool(
             name="compare_with_reference_os",
             description="将当前仓库与参考 OS（rCore/xv6/uCore）进行函数级相似度比对。",
             inputSchema={
@@ -486,13 +507,13 @@ async def _handle_initialize(arguments: dict) -> list[types.TextContent]:
         return [types.TextContent(type="text", text=existing._cached_init_response)]
 
     try:
-        from prompts import build_layer_2, detect_crate_roles
+        from ..prompts.builder import build_layer_2, detect_crate_roles
 
         # 静态分析（ctags + tree-sitter 调用图）放到工作线程，避免阻塞 asyncio 事件循环
         def _static_analysis():
-            from agent import _build_structure
-            from parser.code_parser import build_profile
-            from parser.os_tools import build_repo_map
+            from .agent import _build_structure
+            from ..parsers.code_parser import build_profile
+            from ..parsers.os_tools import build_repo_map
             structure              = _build_structure(repo_path)
             profile                = build_profile(str(repo_path), structure)
             cache_dir              = _config.data.get("cache_dir", "data/cache")
@@ -694,8 +715,10 @@ def _handle_write_report(arguments: dict) -> list[types.TextContent]:
         for src_rel in getattr(ctx, "structure", {}).get("source_roots_rel", []):
             repo_roots.append(repo_root / src_rel)
     try:
+        md_path = p.with_suffix(".md")
+        md_path.write_text(content, encoding="utf-8")
         html_path, broken = write_html(p, content, repo_roots=repo_roots)
-        _log(f"HTML 报告已写入：{html_path}（repo_roots={len(repo_roots)}，断链={len(broken)}）")
+        _log(f"HTML 报告已写入：{html_path}（同名 .md 已保存，repo_roots={len(repo_roots)}，断链={len(broken)}）")
         msg = f"[完成] 报告已保存到 {html_path}。"
         if broken:
             broken_list = "\n".join(f"  - {bp}" for bp in sorted(broken))

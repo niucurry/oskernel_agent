@@ -138,7 +138,7 @@ class SymbolDB:
         classify_fn,
     ) -> dict[str, int]:
         """全量写入符号表和 FTS5 表。返回 {total, level1, level2, discarded, fts_rows}。"""
-        from parser.code_parser import classify_symbol  # 防循环
+        from .code_parser import classify_symbol  # 防循环
 
         c = self.conn
         c.execute("DELETE FROM symbols")

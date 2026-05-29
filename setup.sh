@@ -48,6 +48,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 python3 -m venv "$SCRIPT_DIR/.venv"
 "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip -q
 "$SCRIPT_DIR/.venv/bin/pip" install -r "$SCRIPT_DIR/requirements.txt"
+# 以可编辑模式安装本项目，使 `import oskernel_agent` 与 `python -m oskernel_agent.cli.*` 可用
+"$SCRIPT_DIR/.venv/bin/pip" install -e "$SCRIPT_DIR" -q
 
 # 验证安装
 echo "[4/6] 验证安装..."
@@ -91,16 +93,12 @@ EOF
 
 # OpenCode 全局配置注册
 echo ""
-echo "[5/6] 注册 os-kernel-analyzer 到 OpenCode 全局配置..."
+echo "[5/6] 注册多会话 agents 到 OpenCode 全局配置..."
 "$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/setup_opencode.py"
 
 echo ""
-echo "完成！使用方式："
-echo "  直接使用 OpenCode："
-echo '    opencode run --agent os-kernel-analyzer "分析 /path/to/repo"'
-echo ""
-echo "  或通过封装脚本（支持 --repo-id / --url / --repo-path 等参数）："
-echo "    source .venv/bin/activate"
-echo "    python agent.py --url https://gitlab.example.com/repo.git"
-echo "    python agent.py --repo-path /path/to/local/repo"
-echo "    python agent.py --repo-id REPO_NAME"
+echo "完成！使用方式（多会话流水线，单次跑全分析 + 格式审查 + 合并）："
+echo "  source .venv/bin/activate"
+echo "  python agent.py --url https://gitlab.example.com/repo.git"
+echo "  python agent.py --repo-path /path/to/local/repo"
+echo "  python agent.py --repo-id REPO_NAME"

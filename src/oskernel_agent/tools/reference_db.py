@@ -133,7 +133,7 @@ class ReferenceOSDatabase:
 
         返回构建的函数数量。
         """
-        from engines.path_c import TreeSitterEngine
+        from ..engines.path_c import TreeSitterEngine
 
         # 探测语言
         c_files  = len(list(Path(repo_path).rglob("*.c")))
