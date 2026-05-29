@@ -3,8 +3,8 @@ import re
 import subprocess
 import threading
 
-from engines.lsp_base import LspEngine
-from parser.code_parser import find_function_calls
+from .lsp_base import LspEngine
+from ..parsers.code_parser import find_function_calls
 
 # rust-analyzer 用来标记索引结束的 token 关键词
 _RA_INDEXING_TOKENS = {"Indexing", "Roots Scanned", "Loading"}

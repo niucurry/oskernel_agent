@@ -5,3 +5,4 @@ tree-sitter==0.25.2
 tree-sitter-c==0.24.1
 tree-sitter-rust==0.24.2
 mcp[cli]>=1.0.0
+rich>=13.0

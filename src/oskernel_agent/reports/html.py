@@ -144,6 +144,9 @@ a.file-broken:hover { background: rgba(207, 34, 46, 0.08); }
 .section-header[data-open="false"] .toggle-icon { transform: rotate(-90deg); }
 .mermaid { background: transparent; text-align: center; margin: 1rem 0; }
 .echarts-chart { width: 100%; min-height: 320px; margin: 1rem 0; }
+/* pre 兜底：阻止 ASCII 字符画或长行撑破窄屏布局 */
+pre:not(.mermaid) { overflow-x: auto; max-width: 100%; }
+pre:not(.mermaid) > code { white-space: pre; }
 .section-summary-card { margin: 0.5rem 0 1rem; }
 .section-summary-card p:first-child { margin-top: 0; }
 .section-summary-card p:last-child { margin-bottom: 0; }
@@ -464,12 +467,50 @@ def _strip_tags(s: str) -> str:
     return re.sub(r"<[^>]+>", "", s).strip()
 
 
-def _slugify(title: str, idx: int) -> str:
-    """优先用 '1.2' 这种章节号生成稳定 id；否则退化为 sec-N。"""
+def _slugify(title: str, idx: int, prefix: str = "", parent_slug: str = "") -> str:
+    """优先用 '1.2' 这种章节号生成稳定 id；否则退化时使用 parent_slug 作为兜底命名空间。
+
+    prefix 用于把不同子报告隔离到独立命名空间，避免跨子报告 id 冲突。
+    parent_slug 用于 H3 在标题无章节号时回退 `{parent_slug}-sub-{idx}`，避免
+    与同层级其他 H3 / 跨章节 H2 冲突（如 `sec-0`、`sec-1` 这种全局孤儿）。
+    """
     m = re.match(r"^\s*(\d+(?:\.\d+)*)", title)
     if m:
-        return "sec-" + m.group(1).replace(".", "-")
-    return f"sec-{idx}"
+        base = "sec-" + m.group(1).replace(".", "-")
+    elif parent_slug:
+        # 无章节号且有父 slug → 用父 slug 作为命名空间
+        return f"{parent_slug}-sub-{idx}"
+    else:
+        base = f"sec-{idx}"
+    return f"{prefix}-{base}" if prefix else base
+
+
+_FRAGMENT_MARKER_RE = re.compile(
+    r"^[ \t]*<!--\s*FRAGMENT:([A-Za-z0-9_\-]+)\s*-->[ \t]*$",
+    re.MULTILINE,
+)
+
+
+def _split_md_by_fragments(md: str) -> list[tuple[str, str]]:
+    """按 <!--FRAGMENT:xxx--> 标记把 markdown 拆成 [(prefix, text), ...]。
+
+    标记行本身不会出现在返回的 text 里；标记前的内容前缀为空（视为公共 header）。
+    无标记时返回 [("", md)]，调用方可据此走单段路径。
+    """
+    matches = list(_FRAGMENT_MARKER_RE.finditer(md))
+    if not matches:
+        return [("", md)]
+    parts: list[tuple[str, str]] = []
+    head = md[: matches[0].start()].strip("\n")
+    if head:
+        parts.append(("", head))
+    for i, m in enumerate(matches):
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(md)
+        chunk = md[start:end].strip("\n")
+        if chunk:
+            parts.append((m.group(1), chunk))
+    return parts
 
 
 def _split_h2_sections(body: str) -> list[tuple[str | None, str]]:
@@ -490,24 +531,31 @@ def _split_h2_sections(body: str) -> list[tuple[str | None, str]]:
     return chunks
 
 
-def _wrap_h3_subsections(content: str) -> str:
-    """把 content 中每个 <h3> 段落包成可折叠子区块。"""
+def _wrap_h3_subsections(content: str, slug_prefix: str = "",
+                          parent_slug: str = "") -> tuple[str, list[dict]]:
+    """把 content 中每个 <h3> 段落包成可折叠子区块。
+
+    返回 (重组后的 html, [{id, title}] 子节列表) — 子节列表用于追加到 TOC。
+    parent_slug 是当前 H2 的 slug，作为 H3 无章节号时的兜底命名空间。
+    """
     positions: list[tuple[int, int, str]] = []
     for m in _H3_BLOCK.finditer(content):
         positions.append((m.start(), m.end(), m.group(0)))
     if not positions:
-        return content
+        return content, []
 
     out: list[str] = []
-    prefix = content[: positions[0][0]]
-    if prefix.strip():
-        out.append(prefix)
+    sub_entries: list[dict] = []
+    head = content[: positions[0][0]]
+    if head.strip():
+        out.append(head)
 
     for i, (start, end, h3_html) in enumerate(positions):
         next_start = positions[i + 1][0] if i + 1 < len(positions) else len(content)
         sub_body = content[end:next_start]
         title_text = _strip_tags(h3_html)
-        slug = _slugify(title_text, i)
+        slug = _slugify(title_text, i, prefix=slug_prefix, parent_slug=parent_slug)
+        sub_entries.append({"id": slug, "title": title_text})
         key = f"sub-{slug}"
         h3_with_id = h3_html.replace("<h3>", f'<h3 id="{slug}" class="!mt-0">', 1)
         out.append(
@@ -524,10 +572,10 @@ def _wrap_h3_subsections(content: str) -> str:
             f'<div x-show="open" x-transition.duration.150ms class="subsection-body">{sub_body}</div>'
             f'</div>'
         )
-    return "".join(out)
+    return "".join(out), sub_entries
 
 
-def _build_sections_and_toc(body: str) -> tuple[str, list[dict]]:
+def _build_sections_and_toc(body: str, slug_prefix: str = "") -> tuple[str, list[dict]]:
     """返回 (重新组装后的 body_html, toc 条目列表)。"""
     chunks = _split_h2_sections(body)
     out: list[str] = []
@@ -538,7 +586,7 @@ def _build_sections_and_toc(body: str) -> tuple[str, list[dict]]:
             out.append(content)
             continue
         title = _strip_tags(h2_html)
-        slug = _slugify(title, idx)
+        slug = _slugify(title, idx, prefix=slug_prefix)
         toc.append({"id": slug, "title": title})
 
         # 抽出可选的摘要卡片
@@ -548,7 +596,11 @@ def _build_sections_and_toc(body: str) -> tuple[str, list[dict]]:
             summary_html = m.group(0)
             content = content[: m.start()] + content[m.end():]
 
-        content = _wrap_h3_subsections(content)
+        content, sub_entries = _wrap_h3_subsections(
+            content, slug_prefix=slug_prefix, parent_slug=slug
+        )
+        for sub in sub_entries:
+            toc.append({"id": sub["id"], "title": sub["title"], "level": 3})
         h2_with_id = h2_html.replace("<h2>", f'<h2 id="{slug}" class="!mt-0">', 1)
         store_key = f"sec-{slug}"
 
@@ -578,17 +630,43 @@ def _build_sections_and_toc(body: str) -> tuple[str, list[dict]]:
     return "\n".join(out), toc
 
 
+_FRAGMENT_LABELS: dict[str, str] = {
+    "overview":      "§1 项目总览",
+    "subsys_core":   "§2 核心子系统",
+    "subsys_infra":  "§3 基础设施",
+    "originality":   "§4 原创性分析",
+    "doc_quality":   "§5 文档质量",
+}
+
+
 def _render_toc(toc: list[dict]) -> str:
     if not toc:
         return ""
-    items = []
+    items: list[str] = []
+    last_group: str | None = None
     for entry in toc:
+        group = entry.get("group", "") or ""
+        if group != last_group:
+            if group:
+                label = _FRAGMENT_LABELS.get(group, group)
+                label_safe = html.escape(label)
+                items.append(
+                    f'<a href="#fragment-{html.escape(group, quote=True)}" '
+                    f'class="toc-group-label block mt-3 mb-1 px-2 py-1 text-[11px] '
+                    f'uppercase tracking-wider font-semibold '
+                    f'text-slate-500 dark:text-slate-400 '
+                    f'border-b border-slate-200 dark:border-slate-700 '
+                    f'hover:text-slate-700 dark:hover:text-slate-200">'
+                    f'{label_safe}</a>'
+                )
+            last_group = group
         title_safe = html.escape(entry["title"])
+        is_sub = entry.get("level") == 3
+        indent_cls = "pl-6 text-[13px] text-slate-600 dark:text-slate-400" if is_sub else "px-2 text-sm text-slate-700 dark:text-slate-300"
         items.append(
-            f'<a href="#{entry["id"]}" class="toc-link block py-1.5 px-2 text-sm '
-            f'border-l-2 border-transparent hover:bg-slate-100 dark:hover:bg-slate-700/60 '
-            f'text-slate-700 dark:text-slate-300" '
-            f'x-show="!search || {json.dumps(entry["title"].lower())}.includes(search.toLowerCase())">'
+            f'<a href="#{entry["id"]}" class="toc-link block py-1 {indent_cls} '
+            f'border-l-2 border-transparent hover:bg-slate-100 dark:hover:bg-slate-700/60" '
+            f'x-show="{html.escape(f"""!search || {json.dumps(entry["title"].lower())}.includes(search.toLowerCase())""", quote=True)}">'
             f'{title_safe}</a>'
         )
     return "\n".join(items)
@@ -673,8 +751,31 @@ def render_html(
 ) -> str:
     resolver = make_file_link_resolver(repo_roots, scheme=link_scheme,
                                        broken_paths=broken_paths)
-    raw_body = markdown_to_html_body(markdown_text, resolver=resolver)
-    body_html, toc = _build_sections_and_toc(raw_body)
+    fragments = _split_md_by_fragments(markdown_text)
+    if len(fragments) == 1 and fragments[0][0] == "":
+        # 单段路径：保留旧行为
+        raw_body = markdown_to_html_body(markdown_text, resolver=resolver)
+        body_html, toc = _build_sections_and_toc(raw_body)
+    else:
+        body_segments: list[str] = []
+        toc: list[dict] = []
+        for prefix, chunk_md in fragments:
+            chunk_html = markdown_to_html_body(chunk_md, resolver=resolver)
+            seg_body, seg_toc = _build_sections_and_toc(chunk_html, slug_prefix=prefix)
+            if prefix:
+                # 给该子报告下的每个 TOC 条目打上 group 标签，渲染时画分组
+                # 分隔线；fragment 起始处再加一个可跳锚（点击 group 标签即可
+                # 跳到该子报告头部）。
+                for entry in seg_toc:
+                    entry["group"] = prefix
+                if seg_toc:
+                    seg_body = (
+                        f'<div id="fragment-{prefix}" class="fragment-anchor" '
+                        f'aria-hidden="true"></div>\n' + seg_body
+                    )
+            body_segments.append(seg_body)
+            toc.extend(seg_toc)
+        body_html = "\n".join(body_segments)
     toc_items = _render_toc(toc)
 
     title_safe = html.escape(title)

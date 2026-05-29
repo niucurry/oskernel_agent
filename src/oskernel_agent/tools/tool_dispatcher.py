@@ -15,8 +15,8 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-from tools.reference_db import ReferenceOSDatabase, compute_similarity
-from tools.tool_handlers import compare_with_reference_os as _name_based_compare
+from .reference_db import ReferenceOSDatabase, compute_similarity
+from .tool_handlers import compare_with_reference_os as _name_based_compare
 
 # T4 模块级常量
 
@@ -592,6 +592,12 @@ class ToolDispatcher:
     # T6: compare_with_reference_os
 
     def compare_with_reference_os(self, reference_name: str) -> str:
+        # 引擎尚未就绪时直接降级，避免 _LazyEngine._wait() 阻塞整个请求超时
+        if not getattr(self.engine, "is_ready", lambda: True)():
+            return (
+                "[注意] 语义引擎尚未就绪，改用函数名集合比对（精度较低，引擎就绪后可重试）。\n\n"
+                + _name_based_compare(self.repo_path, reference_name)
+            )
         # 优先使用代码级指纹库
         if self.ref_database.is_available(reference_name):
             return self._compare_with_db(reference_name)
@@ -611,16 +617,38 @@ class ToolDispatcher:
                 if name not in current_funcs:
                     current_funcs[name] = entry
         elif self.level2_index:
-            for sym_name, entries in self.level2_index._by_name.items():
-                func_entries = [e for e in entries if e.get("kind") == "function"]
-                if func_entries:
-                    defn = self.engine.go_to_definition(sym_name)
-                    if defn:
-                        current_funcs[sym_name] = {
-                            "body": defn["body"],
-                            "file": defn["file"],
-                            "calls": [],
-                        }
+            ref_names_set = set(ref_db)
+            # 以参考库符号为驱动：仅对交集函数调用 go_to_definition（获取函数体做代码级比对）。
+            # 旧实现遍历仓库全量符号（N+1 SQL + N×LSP），这里降为至多 len(ref_db) 次。
+            for sym_name in ref_names_set:
+                entries = self.level2_index._by_name.get(sym_name)
+                if not entries:
+                    continue
+                if not any(e.get("kind") == "function" for e in entries):
+                    continue
+                defn = self.engine.go_to_definition(sym_name)
+                if defn:
+                    current_funcs[sym_name] = {
+                        "body": defn["body"],
+                        "file": defn["file"],
+                        "calls": [],
+                    }
+            # new_funcs 需要仓库全量函数名；用单次 SQL 批量取，不再逐符号查询
+            try:
+                _sym_db = getattr(self.level2_index, "_db", None)
+                if _sym_db is not None:
+                    for row in _sym_db.conn.execute(
+                        "SELECT DISTINCT name, file FROM symbols WHERE kind='function'"
+                    ):
+                        fn_name, fn_file = row[0], row[1]
+                        if fn_name not in current_funcs:
+                            current_funcs[fn_name] = {
+                                "body": "",
+                                "file": fn_file or "?",
+                                "calls": [],
+                            }
+            except Exception:
+                pass
 
         identical: list[dict] = []
         modified:  list[dict] = []
@@ -865,6 +893,160 @@ class ToolDispatcher:
         return {"rust": "rust", "c": "c"}.get(
             self.profile.get("primary_lang", ""), ""
         )
+
+    # T8: analyze_subtree — 子树范围内符号 + 调用图（按需）
+
+    def analyze_subtree(self, subtree_path: str = "",
+                        max_call_graph_funcs: int = 30) -> str:
+        """
+        枚举子树内（subtree_path 及其所有子目录）的所有符号，
+        构建子树内调用图，标注跨子树的外部依赖。
+
+        - 复用全局 SymbolDB（无需重新解析）
+        - 调用图边内部 = 子树文件之间；外部 = 调用了子树外的符号
+        - 跨层级查询应通过 find_symbol_definition / read_file 等全局工具
+        """
+        db = getattr(self.level2_index, "db", None) or self.level2_index
+        if db is None:
+            return "[错误] 符号索引未就绪，请先调用 initialize_analysis。"
+
+        all_files = db.all_files()
+        if subtree_path:
+            prefix = subtree_path.rstrip("/") + "/"
+            subtree_files = [
+                f for f in all_files
+                if f == subtree_path or f.startswith(prefix)
+            ]
+        else:
+            subtree_files = list(all_files)
+
+        if not subtree_files:
+            return (
+                f"[未找到] 子树 '{subtree_path or '<root>'}' 下无可索引文件。"
+                f"全仓库共 {len(all_files)} 个索引文件。"
+            )
+
+        # 收集子树内所有符号，按 kind 分组、按 name 索引
+        symbols_by_kind: dict[str, list[dict]] = {}
+        symbols_by_name: dict[str, dict] = {}
+        file_symbol_count: dict[str, int] = {}
+        for f in subtree_files:
+            syms = db.list_file_symbols(f)
+            file_symbol_count[f] = len(syms)
+            for s in syms:
+                kind = s.get("kind") or "other"
+                symbols_by_kind.setdefault(kind, []).append(s)
+                # 第一次出现的同名符号占位（用于内部/外部判断）
+                symbols_by_name.setdefault(s["name"], s)
+
+        total_syms = sum(len(v) for v in symbols_by_kind.values())
+
+        # 构建子树内调用图（限制函数数，避免 LSP 阻塞）
+        internal_calls: list[tuple[str, str, str]] = []
+        external_calls: dict[str, set[str]] = {}
+        graph_note = ""
+        engine_ready = (not hasattr(self.engine, "is_ready")
+                         or self.engine.is_ready())
+        if not engine_ready:
+            graph_note = "[注意] 语义引擎尚未就绪，调用图省略。"
+        else:
+            funcs = symbols_by_kind.get("function", [])
+            sample = funcs[:max_call_graph_funcs]
+            for fn in sample:
+                try:
+                    chain = self.engine.get_call_chain(fn["name"], 1)
+                except Exception:
+                    continue
+                callees = (chain or {}).get(fn["name"])
+                if not isinstance(callees, dict):
+                    continue
+                for callee_name in callees.keys():
+                    if callee_name.startswith("_") or callee_name == fn["name"]:
+                        continue
+                    info = symbols_by_name.get(callee_name)
+                    if info:
+                        internal_calls.append((
+                            fn["name"], callee_name,
+                            f"{info['file']}:{info['line']}",
+                        ))
+                    else:
+                        external_calls.setdefault(fn["name"], set()).add(callee_name)
+            if len(funcs) > max_call_graph_funcs:
+                graph_note = (
+                    f"[注意] 子树函数数 {len(funcs)} 个，仅对前 "
+                    f"{max_call_graph_funcs} 个构建调用图（按符号顺序）。"
+                    f"如需更多，对感兴趣的函数单独调用 expand_callees(name)。"
+                )
+
+        # 渲染
+        lines: list[str] = []
+        title = subtree_path or "<repo_root>"
+        lines.append(f"## 子树分析：{title}")
+        lines.append(
+            f"文件数：{len(subtree_files)} ／ 符号总数：{total_syms} ／ "
+            f"函数：{len(symbols_by_kind.get('function', []))}"
+        )
+        if graph_note:
+            lines.append(graph_note)
+        lines.append("")
+
+        # 文件列表
+        lines.append("### 子树文件列表")
+        for f in subtree_files[:50]:
+            n = file_symbol_count.get(f, 0)
+            lines.append(f"- {f}  ({n} 个符号)")
+        if len(subtree_files) > 50:
+            lines.append(f"  ... 还有 {len(subtree_files) - 50} 个文件")
+
+        # 符号清单（按 kind 分组）
+        lines.append("\n### 符号清单（按类型分组）")
+        kind_order = ["function", "struct", "typedef", "enum", "macro",
+                       "variable", "trait", "impl", "other"]
+        sorted_kinds = sorted(
+            symbols_by_kind.items(),
+            key=lambda kv: (kind_order.index(kv[0]) if kv[0] in kind_order
+                            else len(kind_order)),
+        )
+        for kind, items in sorted_kinds:
+            lines.append(f"\n**{kind}**（{len(items)} 个）：")
+            for s in items[:30]:
+                sig = s.get("signature") or ""
+                sig_short = f"  {sig}" if sig and len(sig) < 80 else ""
+                lines.append(f"- `{s['name']}`  ({s['file']}:{s['line']}){sig_short}")
+            if len(items) > 30:
+                lines.append(f"  ... 还有 {len(items) - 30} 个 {kind}")
+
+        # 内部调用图
+        if internal_calls:
+            lines.append("\n### 子树内调用关系（caller → callee）")
+            by_caller: dict[str, list[tuple[str, str]]] = {}
+            for caller, callee, loc in internal_calls:
+                by_caller.setdefault(caller, []).append((callee, loc))
+            for caller, callees in list(by_caller.items())[:25]:
+                lines.append(f"- **{caller}** →")
+                for callee, loc in callees[:8]:
+                    lines.append(f"    - {callee}  ({loc})")
+                if len(callees) > 8:
+                    lines.append(f"    - ... 还有 {len(callees) - 8} 个内部调用")
+        elif engine_ready:
+            lines.append("\n### 子树内调用关系")
+            lines.append("（未发现子树内的函数间调用）")
+
+        # 外部依赖（跨子树调用）
+        if external_calls:
+            lines.append("\n### 跨子树外部依赖（caller → 外部符号）")
+            for caller, callees in list(external_calls.items())[:20]:
+                shown = list(callees)[:10]
+                extra = "" if len(callees) <= 10 else f"  ... 还有 {len(callees) - 10} 个"
+                lines.append(f"- **{caller}** → {', '.join(shown)}{extra}")
+            lines.append(
+                "\n[提示] 如需查看外部符号定义，调用 "
+                "find_symbol_definition(name)；"
+                "如需读取外部文件内容，调用 read_file(path)。"
+            )
+
+        return "\n".join(lines)
+
 
     # T7: get_index_status — 暴露 SQLite/FTS 索引健康度
 

@@ -8,7 +8,7 @@ except ImportError:
 
 from pathlib import Path
 
-_path = Path(__file__).parent / "config.toml"
+_path = Path(__file__).resolve().parents[2] / "config.toml"
 with open(_path, "rb") as _f:
     _cfg = tomllib.load(_f)
 

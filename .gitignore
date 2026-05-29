@@ -3,6 +3,23 @@
 __pycache__/
 *.py[cod]
 *.pyo
+*.egg-info/
+build/
+dist/
+
+# 工具缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# 环境变量（可能含密钥）
+.env
+.env.*
+!.env.template
 
 # 配置（含 API Key，敏感）
 config.toml
@@ -11,12 +28,18 @@ config.toml
 data/
 *.db
 
+# 脚本生成物
+session_prompts/
+
+# 日志
+*.log
+
 # 编辑器
 .idea/
 .vscode/
 *.swp
 *~
-
+.DS_Store
 
 # OpenCode（动态生成，含系统提示词和绝对路径，不提交）
 .opencode.json

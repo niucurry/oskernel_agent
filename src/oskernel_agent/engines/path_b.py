@@ -6,8 +6,8 @@ import subprocess
 import threading
 from pathlib import Path
 
-from engines.lsp_base import LspEngine
-from parser.code_parser import find_function_calls
+from .lsp_base import LspEngine
+from ..parsers.code_parser import find_function_calls
 
 
 # compile_commands.json 生成策略

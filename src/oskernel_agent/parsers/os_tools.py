@@ -12,8 +12,8 @@ build_repo_map 会先按"仓库路径 + 源文件 mtime/size 指纹"查缓存数
 from collections import defaultdict
 from pathlib import Path
 
-from parser.code_parser import classify_symbol, run_ctags, generate_level1_map
-from parser.symbol_db import (
+from .code_parser import classify_symbol, run_ctags, generate_level1_map
+from .symbol_db import (
     SymbolDB,
     fingerprint_files,
     iter_source_files,

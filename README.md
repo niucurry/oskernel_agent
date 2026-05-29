@@ -4,6 +4,68 @@
 
 ---
 
+## 项目结构
+
+```
+agent/
+├── agent.py                       # 入口 shim → oskernel_agent.cli.agent
+├── setup_opencode.py              # 入口 shim → oskernel_agent.cli.setup_opencode
+├── config.toml                    # 用户配置（git-ignored）
+├── pyproject.toml                 # 包定义（src/ 布局 + console_scripts）
+├── setup.sh                       # 一键安装脚本
+├── requirements.txt
+│
+├── src/
+│   └── oskernel_agent/            # 主包
+│       ├── config.py              # config.toml 加载
+│       ├── cli/                   # 命令行入口
+│       │   ├── agent.py           # 主分析管道
+│       │   ├── mcp_server.py      # MCP stdio server
+│       │   ├── setup_opencode.py  # 注册到 OpenCode 全局配置
+│       │   ├── fetch_repo.py      # 克隆远程仓库
+│       │   └── tree_renderer.py   # 终端 rich.tree 渲染
+│       ├── analysis/              # 高阶分析
+│       │   └── repo_facts.py      # 仓库共享事实档案
+│       ├── parsers/               # 静态解析
+│       │   ├── code_parser.py     # tree-sitter + ctags + 启发式
+│       │   ├── symbol_db.py       # SQLite 符号索引 + FTS5
+│       │   └── os_tools.py        # Level2Index（SQLite 后端）
+│       ├── engines/               # 符号解析引擎（A/B/C 三档降级）
+│       │   ├── base.py
+│       │   ├── lsp_base.py        # LSP 通信复用基类
+│       │   ├── path_a.py          # rust-analyzer
+│       │   ├── path_b.py          # clangd
+│       │   ├── path_c.py          # tree-sitter 兜底
+│       │   └── llm_batch.py       # LLM 批处理调度
+│       ├── tools/                 # MCP 工具实现（T1–T6）
+│       │   ├── mcp_tools.py
+│       │   ├── tool_dispatcher.py
+│       │   ├── tool_handlers.py
+│       │   └── reference_db.py    # 参考 OS 指纹库
+│       ├── pipeline/              # 自底向上 tree 构建
+│       │   └── tree_builder.py
+│       ├── prompts/               # 提示词
+│       │   ├── builder.py         # 三层提示词组装
+│       │   └── templates/         # dir.md / verdict.md / json_repair.md
+│       └── reports/               # 报告渲染
+│           ├── html.py            # 表格式 HTML
+│           └── html_tree.py       # 多层折叠树 HTML
+│
+├── scripts/                       # 离线运维脚本
+│   ├── build_reference_db.py      # 构建参考 OS 指纹库
+│   ├── dump_session_prompts.py    # 导出 session prompt 到 md
+│   └── validate_tone.py           # 校验 tree.json 语气分隔
+│
+├── data/                          # 运行时数据（git-ignored）
+│   ├── historical_repos/          # 克隆下来的学生仓库
+│   ├── reference_repos/           # 参考 OS 源码
+│   ├── cache/                     # 符号索引缓存
+│   └── reports/                   # 输出报告
+└── reference_db/                  # 参考 OS 指纹 JSON
+```
+
+---
+
 ## 一、环境安装
 
 ### Linux
@@ -40,6 +102,8 @@ curl -fL https://github.com/rust-lang/rust-analyzer/releases/latest/download/rus
 sudo chmod +x /usr/local/bin/rust-analyzer
 
 pip install -r requirements.txt
+# 以可编辑模式安装本项目（启用 oskernel-agent / oskernel-setup 命令）
+pip install -e .
 
 # 注册 agent 到 OpenCode 全局配置
 python setup_opencode.py
@@ -186,10 +250,10 @@ python agent.py --repo-path /path/to/repo > report.txt 2>&1
 ### 只克隆仓库（不分析）
 
 ```bash
-python fetch_single_repo.py https://gitlab.eduxiji.net/.../repo.git
+python -m oskernel_agent.cli.fetch_repo https://gitlab.eduxiji.net/.../repo.git
 
 # 自定义存放目录
-python fetch_single_repo.py https://... --output-dir ./data/historical_repos
+python -m oskernel_agent.cli.fetch_repo https://... --output-dir ./data/historical_repos
 ```
 
 ### 构建参考指纹库（可选，用于原创性检测）
@@ -213,10 +277,19 @@ python scripts/build_reference_db.py --reference rcore-tutorial-v3 --repo-path /
 
 `--repo-id` / `--repo-path` / `--url` 三者互斥。
 
-### `fetch_single_repo.py`
+### `python -m oskernel_agent.cli.fetch_repo`
 
 | 参数                 | 说明                                             |
 | -------------------- | ------------------------------------------------ |
 | `url`（位置参数）  | 仓库 HTTPS 地址                                  |
 | `--output-dir DIR` | 本地存放目录（默认 `./data/historical_repos`） |
 | `--meta-dir DIR`   | 元数据目录（默认 `./data/metadata`）           |
+
+### 包安装后的等价命令
+
+`pip install -e .` 之后，`pyproject.toml` 暴露的 console scripts 等价于：
+
+| 短命令              | 等价调用                                          |
+| ------------------- | ------------------------------------------------- |
+| `oskernel-agent`    | `python -m oskernel_agent.cli.agent`              |
+| `oskernel-setup`    | `python -m oskernel_agent.cli.setup_opencode`     |

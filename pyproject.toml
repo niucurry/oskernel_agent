@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oskernel-agent"
+version = "0.1.0"
+description = "OS 内核代码分析智能体 — 完整性与原创性自动评估"
+requires-python = ">=3.11"
+readme = "README.md"
+dynamic = ["dependencies"]
+
+[project.scripts]
+oskernel-agent = "oskernel_agent.cli.agent:main"
+oskernel-setup = "oskernel_agent.cli.setup_opencode:setup"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"oskernel_agent.prompts" = ["templates/*.md"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }

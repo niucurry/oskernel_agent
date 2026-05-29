@@ -4,7 +4,7 @@ import tree_sitter_c as tsc
 import tree_sitter_rust as tsrust
 from tree_sitter import Language, Parser
 
-from engines.base import AnalysisEngine
+from .base import AnalysisEngine
 
 
 class TreeSitterEngine(AnalysisEngine):

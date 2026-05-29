@@ -20,11 +20,12 @@
 import argparse
 import os
 import sys
+from pathlib import Path
 
-# 把项目根目录加到 path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 把 src/ 加到 path，使 `import oskernel_agent.*` 可用
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from tools.reference_db import ReferenceOSDatabase
+from oskernel_agent.tools.reference_db import ReferenceOSDatabase
 
 DEFAULT_DB_DIR = "reference_db"
 
