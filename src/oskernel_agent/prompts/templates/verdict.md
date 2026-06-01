@@ -20,8 +20,8 @@
 
 1. 读 user message 中的 repo_path / facts / subsys_summaries / outputs
 
-2. 综合 subsys_summaries 中各子系统的 score / highlights / issues，
-   推断 5 维度评分：
+2. 综合 subsys_summaries 中各子系统的 summary / highlights / issues，
+   推断 5 维度评分（**评分只在本顶层会话产出**，子系统/模块本身不打分）：
    - **原创性** ← compare_with_reference_os 工具数据（若有）或 facts.meta.reference_os
    - **架构合理性** ← 子系统数量 / 模块边界清晰度 / 跨子系统依赖
    - **代码质量** ← 各子系统的 issues + search_code 标记数（若调）
@@ -35,7 +35,7 @@
 
 ━━ 写出顺序（两份文件各一次 write_report 调用）━━
 
-a. 详细评判 Markdown（含两张强制图表）→ 写到 `outputs.content_path`
+a. 详细评判 **HTML 片段**（含强制雷达图）→ 写到 `outputs.content_path`
 b. 结构化 JSON（短字段，无 content）→ 写到 `outputs.json_path`
 
 ━━ 硬性约束 ━━
@@ -57,24 +57,22 @@ dimensions 恰好 5 项，name 严格使用：
 
 〔约束5：one_line ≤ 40 字〕
 
-━━ 图表规范（必须出现在 .md 文件中）━━
+━━ HTML 输出规范（重要：直接写 HTML，不要写 Markdown）━━
 
-#### 强制图 1：子系统得分对比（基于 subsys_summaries 的 score）
+你产出的内容会**原样嵌入**最终页面（不经过任何 Markdown 转换），页面已加载
+Tailwind CSS + Mermaid + ECharts。请直接输出**语义化 HTML 片段**：
 
-```echarts
-{
-  "title": {"text": "OS 子系统得分对比", "left": "center"},
-  "xAxis": {"type": "category",
-            "data": ["进程管理","内存管理","文件系统","系统调用","设备驱动","硬件抽象"]},
-  "yAxis": {"type": "value", "max": 100},
-  "series": [{"type": "bar", "data": [s1, s2, s3, s4, s5, s6]}]
-}
-```
-（只列出 subsys_summaries 中实际存在的子系统）
+- 正文用 `<h2>` / `<h3>` / `<p>` / `<ul><li>` / `<strong>`，外层会套 `prose` 排版。
+- **文件引用**直接写纯文本 `path:line`（如 `kernel/trap.c:42`），系统会自动变成
+  可点击跳转链接——**不要**自己写 `<a>`。
+- **ECharts** 容器（option 必须是合法 JSON：双引号、无注释、无尾逗号）：
+  `<div class="echarts-chart" style="height:360px"><script type="application/json">{ ...option... }</script></div>`
+- **禁止**输出 ```echarts / ```mermaid 这类 Markdown 围栏。
 
-#### 强制图 2：5 维度雷达图
+#### 强制图：5 维度雷达图（基于本会话给出的 5 个 dimensions 评分）
 
-```echarts
+```html
+<div class="echarts-chart" style="height:380px"><script type="application/json">
 {
   "title": {"text": "综合评分", "left": "center"},
   "radar": {"indicator": [
@@ -86,77 +84,59 @@ dimensions 恰好 5 项，name 严格使用：
   ]},
   "series": [{"type":"radar","data":[{"value":[s1,s2,s3,s4,s5],"name":"综合"}]}]
 }
+</script></div>
 ```
+（s1..s5 用你给出的 5 个 dimensions[].score 实际数字替换。子系统不打分，
+故不再画"子系统得分对比"图。）
 
 <!-- format -->
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【输出格式契约】
 
-#### 1. 详细评判 Markdown（写入 outputs.content_path）
+#### 1. 详细评判 HTML 片段（写入 outputs.content_path）
 
-```
-## 综合评判
+```html
+<h2>综合评判</h2>
+<ul>
+  <li>reference OS：{name}</li>
+  <li>综合得分：{score_total}</li>
+  <li>子系统数：{N}</li>
+  <li>{一句话总评}</li>
+</ul>
 
-```summary
-- reference OS：{name}
-- 综合得分：{score_total}
-- 子系统数：{N}
-- {一句话总评}
-```
+<div class="echarts-chart" style="height:380px"><script type="application/json">
+{ ...5 维度雷达图 option，用真实 dimensions[].score... }
+</script></div>
 
-{5 维度雷达图 echarts}
+<h3>一、子系统横向对比</h3>
+<p>{2–3 段：哪个子系统最强 / 哪个偏弱，依据是 subsys_summaries 中各子系统的
+ summary 与 highlights / issues 分布（不依赖分数）}</p>
 
----
+<h3>二、原创性分析</h3>
+<p><strong>reference OS</strong>：{name}（基于 compare_with_reference_os 工具数据，如已调用）</p>
+<p>{2–3 段：哪些部分对齐参考实现 / 有显著改动 / 是创新}</p>
 
-## 一、子系统得分对比
+<h3>三、架构合理性</h3>
+<p>{基于 subsys_summaries 的模块拆分清晰度 + 跨子系统依赖评估，2–3 段}</p>
 
-{子系统得分柱状图 echarts}
+<h3>四、代码质量</h3>
+<p>{基于各子系统的 issues + search_code 工具数据，2–3 段}</p>
 
-{2–3 段：哪个子系统最强 / 哪个偏弱，依据是 subsys_summaries 中 score
- 与 highlights / issues 的分布}
+<h3>五、文档质量</h3>
+<p>{基于 facts.key_files 与必要的 read_file 检查，1–2 段}</p>
 
----
+<h3>六、完整性</h3>
+<p>{基于 facts.syscall + 各子系统的模块完备度，1–2 段}</p>
 
-## 二、原创性分析
+<h3>亮点</h3>
+<ul>
+  <li>{path:line} — {评判性描述}</li>
+</ul>
 
-**reference OS**：{name}
-（基于 compare_with_reference_os 工具数据，如已调用）
-
-{2–3 段：哪些部分对齐参考实现 / 有显著改动 / 是创新}
-
----
-
-## 三、架构合理性
-
-{基于 subsys_summaries 的模块拆分清晰度 + 跨子系统依赖评估，2–3 段}
-
----
-
-## 四、代码质量
-
-{基于各子系统的 issues + search_code 工具数据，2–3 段}
-
----
-
-## 五、文档质量
-
-{基于 facts.key_files 与必要的 read_file 检查，1–2 段}
-
----
-
-## 六、完整性
-
-{基于 facts.syscall + 各子系统的模块完备度，1–2 段}
-
----
-
-## 亮点与问题
-
-### 亮点
-{3–5 条，各附 path:line + 评判性描述}
-
-### 问题
-{3–5 条，各附 path:line + severity + 评判性描述}
+<h3>问题</h3>
+<ul>
+  <li>{path:line}（severity）— {评判性描述}</li>
+</ul>
 ```
 
 #### 2. 结构化 JSON（写入 outputs.json_path —— **不含 content 字段**）

@@ -115,8 +115,7 @@ def _env_disabled(name: str) -> bool:
 # 树状报告主入口
 
 def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
-                   cli_depth: int = 3,
-                   cli_filter: str | None = None) -> Path | None:
+                   cli_depth: int = 3) -> Path | None:
     """自底向上构建 tree.json，并产出终端打印 + HTML 报告。"""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -150,9 +149,8 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
 
     # 4. 终端打印
     try:
-        from .tree_renderer import print_tree, parse_score_filter
-        print_tree(tree, max_depth=cli_depth,
-                    score_filter=parse_score_filter(cli_filter))
+        from .tree_renderer import print_tree
+        print_tree(tree, max_depth=cli_depth)
     except Exception as e:
         print(f"[警告] CLI 渲染失败：{e}（继续）", file=sys.stderr)
 
@@ -190,8 +188,6 @@ def main() -> None:
     parser.add_argument("--output", "-o")
     parser.add_argument("--depth", type=int, default=3,
                         help="终端树打印的最大下钻层数（默认 3）")
-    parser.add_argument("--filter", default=None,
-                        help="终端过滤表达式，如 score<70")
 
     args = parser.parse_args()
 
@@ -207,7 +203,7 @@ def main() -> None:
 
     print(f"[agent] 报告将写入：{output_file}")
     _run_tree_mode(repo_path_a, repo_name_a, output_file,
-                    cli_depth=args.depth, cli_filter=args.filter)
+                    cli_depth=args.depth)
 
 
 if __name__ == "__main__":

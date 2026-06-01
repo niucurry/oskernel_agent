@@ -8,19 +8,31 @@ HTML 渲染：tree.json → 多层 Alpine.js 折叠树报告。
 from __future__ import annotations
 
 import html
-import json
 from pathlib import Path
 
 from .html import (
     _BROKEN_PREFIX,
+    _CDN_HEAD,
+    _INIT_SCRIPT,
+    linkify_html,
     make_file_link_resolver,
-    markdown_to_html_body,
 )
 
 
-_TREE_HEAD = """
-<script src="https://cdn.tailwindcss.com?plugins=typography"></script>
-<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+# 复用 html.py 的 CDN 头：已含 Tailwind + ECharts + Mermaid + Alpine 及其初始化。
+# 折叠节点展开时让其中的 ECharts 重新计算尺寸（初次在 display:none 下 init 会是 0 尺寸）。
+_TREE_HEAD = _CDN_HEAD
+
+_TREE_RESIZE_ON_OPEN = """
+<script>
+document.addEventListener('section:opened', function () {
+  setTimeout(function () {
+    document.querySelectorAll('.echarts-chart[data-rendered]').forEach(function (el) {
+      if (el.__chart) el.__chart.resize();
+    });
+  }, 60);
+});
+</script>
 """
 
 _TREE_CSS = """
@@ -52,47 +64,6 @@ a.file-jump:hover { background: rgba(9, 105, 218, 0.08); }
 """
 
 
-_TREE_INIT = """
-<script>
-function scoreClass(s) {
-  s = Number(s || 0);
-  if (s >= 85) return 'score-green';
-  if (s >= 70) return 'score-yellow';
-  return 'score-red';
-}
-
-function treeRoot() {
-  return {
-    data: null,
-    init() {
-      const el = document.getElementById('tree-data');
-      this.data = JSON.parse(el.textContent);
-    },
-  };
-}
-
-function treeNode(node, depth) {
-  return {
-    node: node,
-    depth: depth,
-    open: (function(){
-      const key = 'tree:' + (node.path || '__root__');
-      const saved = localStorage.getItem(key);
-      if (saved !== null) return saved === '1';
-      return depth <= 1;
-    })(),
-    toggle() {
-      this.open = !this.open;
-      localStorage.setItem('tree:' + (this.node.path || '__root__'),
-                           this.open ? '1' : '0');
-    },
-    scoreClass(s) { return scoreClass(s); },
-  };
-}
-</script>
-"""
-
-
 def _esc(s) -> str:
     if s is None:
         return ""
@@ -103,28 +74,6 @@ def _score_pill(score) -> str:
     s = int(score or 0)
     cls = "score-green" if s >= 85 else ("score-yellow" if s >= 70 else "score-red")
     return f'<span class="score-pill {cls}">{s}</span>'
-
-
-def _resolve_evidence(evidence: list, resolver) -> str:
-    """把 evidence 列表渲染成一组可点击链接。"""
-    if not evidence:
-        return ""
-    items: list[str] = []
-    for e in evidence:
-        f = e.get("file", "")
-        line = e.get("line")
-        if not f:
-            continue
-        url = resolver(f, str(line) if line is not None else None) if resolver else None
-        label = f"{_esc(f)}:{_esc(line)}" if line is not None else _esc(f)
-        if url:
-            broken = url.startswith(_BROKEN_PREFIX)
-            href = url[len(_BROKEN_PREFIX):] if broken else url
-            cls = "file-jump file-broken" if broken else "file-jump"
-            items.append(f'<a class="{cls}" href="{_esc(href)}">{label}</a>')
-        else:
-            items.append(f'<span class="file-jump">{label}</span>')
-    return " · ".join(items)
 
 
 def _resolve_path_anchor(path_with_line: str, resolver) -> str:
@@ -175,6 +124,15 @@ def _render_verdict(verdict: dict, resolver) -> str:
         for i in verdict.get("issues", [])
     )
 
+    # verdict 详细正文（agent 直出的 HTML，含强制图表）——原样嵌入并链接化 file:line
+    content = verdict.get("content") or ""
+    content_html = ""
+    if content.strip():
+        content_html = (
+            f'<div class="prose prose-sm dark:prose-invert max-w-none mt-2 mb-4">'
+            f'{linkify_html(content, resolver)}</div>'
+        )
+
     return f"""
 <section id="verdict" class="mb-8 p-6 rounded-lg border border-slate-300 dark:border-slate-700
                              bg-white dark:bg-slate-800 shadow-sm">
@@ -190,6 +148,7 @@ def _render_verdict(verdict: dict, resolver) -> str:
     </tr></thead>
     <tbody>{dims_html}</tbody>
   </table>
+  {content_html}
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
     <div>
       <div class="text-xs uppercase tracking-wider text-green-700 dark:text-green-400 mb-2">
@@ -208,34 +167,6 @@ def _render_verdict(verdict: dict, resolver) -> str:
 """
 
 
-def _render_key_apis(key_apis: list, resolver) -> str:
-    if not key_apis:
-        return ""
-    rows = ""
-    for api in key_apis:
-        name = _esc(api.get("name", ""))
-        line = api.get("line")
-        kind = _esc(api.get("kind", ""))
-        note = _esc(api.get("note", ""))
-        rows += (
-            f'<tr class="border-b border-slate-200 dark:border-slate-700">'
-            f'<td class="py-1 px-2 font-mono text-sm">{name}'
-            f'<span class="text-slate-500">:{_esc(line)}</span></td>'
-            f'<td class="py-1 px-2 text-xs text-slate-500">{kind}</td>'
-            f'<td class="py-1 px-2 text-sm text-slate-700 dark:text-slate-300">{note}</td>'
-            f'</tr>'
-        )
-    return (
-        f'<table class="w-full text-sm mt-2">'
-        f'<thead><tr class="text-xs text-slate-500 border-b">'
-        f'<th class="py-1 px-2 text-left">符号</th>'
-        f'<th class="py-1 px-2 text-left">类型</th>'
-        f'<th class="py-1 px-2 text-left">说明</th>'
-        f'</tr></thead>'
-        f'<tbody>{rows}</tbody></table>'
-    )
-
-
 # 渲染入口
 
 def render_tree_html(tree_json: dict, title: str = "代码树报告",
@@ -244,13 +175,8 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
     meta = tree_json.get("meta", {})
     verdict_html = _render_verdict(tree_json.get("verdict", {}) or {}, resolver)
 
-    # tree 数据作为 JSON 内嵌；Alpine 递归 component 通过 x-data 拿
-    tree_data_json = json.dumps(tree_json, ensure_ascii=False)
-
-    # 把 tree 节点改造成"路径锚点 HTML 预渲染"，使 evidence / highlights /
-    # issues / key_apis 的链接由服务端解析好，避免在前端再算 file 路径。
-    # 我们用 Alpine 递归渲染骨架（折叠状态），节点内部的 HTML 片段服务端预算好。
-    # 实现简化：直接生成静态 HTML（折叠用 Alpine 控制 open）。
+    # 直接生成静态 HTML 树（折叠状态由 Alpine 的 x-data open 控制），
+    # 节点内部 HTML 片段在服务端预渲染好，file:line 链接已解析。
     tree_static_html = _render_tree_node_static(
         tree_json.get("tree", {}) or {}, depth=0, resolver=resolver,
     )
@@ -264,7 +190,6 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
 <title>{title_safe}</title>
 {_TREE_HEAD}
 <style>{_TREE_CSS}</style>
-{_TREE_INIT}
 </head>
 <body class="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
 <main class="max-w-6xl mx-auto p-6 md:p-10">
@@ -284,7 +209,8 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
     </div>
   </section>
 </main>
-<script id="tree-data" type="application/json">{_esc(tree_data_json)}</script>
+{_INIT_SCRIPT}
+{_TREE_RESIZE_ON_OPEN}
 </body>
 </html>
 """
@@ -301,17 +227,17 @@ def _render_tree_node_static(node: dict, depth: int, resolver) -> str:
     is_container = typ in ("dir", "root", "subsystem")
     path = node.get("path", "")
     name = _esc(node.get("name") or path or "/")
-    score = int(node.get("score") or 0)
     role = _esc(node.get("role", ""))
     summary = _esc(node.get("summary", ""))
     open_default = "true" if depth <= 1 else "false"
     node_key = path or "__root__"
 
+    # 子系统/模块不打分，评分只在顶层 verdict 卡片展示
     head = (
         f'<div class="tree-toggle flex items-baseline gap-2 py-1" @click="open = !open; '
-        f'localStorage.setItem(\'tree:{_esc(node_key)}\', open ? \'1\' : \'0\')">'
+        f'localStorage.setItem(\'tree:{_esc(node_key)}\', open ? \'1\' : \'0\'); '
+        f'if (open) $dispatch(\'section:opened\')">'
         f'<span class="text-slate-400 w-4 text-center" x-text="open ? \'▾\' : \'▸\'"></span>'
-        f'{_score_pill(score)}'
         f'<span class="font-semibold {("text-cyan-700 dark:text-cyan-400" if is_container else "")}">'
         f'{name}{"/" if typ == "dir" else ""}</span>'
         f'{("<span class=\"text-xs text-slate-500\">("+role+")</span>") if role else ""}'
@@ -325,26 +251,15 @@ def _render_tree_node_static(node: dict, depth: int, resolver) -> str:
             f'{summary}</div>'
         )
 
-    # 详细叙述正文（subsystem / module 的 LLM markdown 输出）
+    # 详细叙述正文（subsystem / module 的 agent HTML 输出）——原样嵌入并链接化
     content = node.get("content") or ""
     if content.strip():
         body_parts.append(
             f'<div class="prose prose-sm dark:prose-invert max-w-none mt-1 mb-2">'
-            f'{markdown_to_html_body(content, resolver)}</div>'
+            f'{linkify_html(content, resolver)}</div>'
         )
 
-    # 文件特有：key_apis + evidence
-    key_apis = node.get("key_apis") or []
-    if key_apis:
-        body_parts.append(_render_key_apis(key_apis, resolver))
-    evidence = node.get("evidence") or []
-    if evidence:
-        body_parts.append(
-            f'<div class="text-xs text-slate-500 mt-2">证据：'
-            f'{_resolve_evidence(evidence, resolver)}</div>'
-        )
-
-    # 本节点的 highlights / issues（subsystem / dir 均可能携带）
+    # 本节点的 highlights / issues（subsystem 可能携带）
     hi = node.get("highlights") or []
     ii = node.get("issues") or []
     if hi:

@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -95,6 +96,9 @@ class BatchTask:
     cache_dir: Path
     cache_key: str
     fallback: dict = field(default_factory=dict)  # 失败兜底返回
+    # 写缓存前对 parsed 做增补（如把 agent 落盘的 HTML 正文读进 parsed），
+    # 使正文随 JSON 一起进缓存，缓存命中时也能拿到完整正文。
+    enrich: Callable[[dict], dict] | None = None
 
 
 _print_lock = threading.Lock()
@@ -204,6 +208,13 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
         _log(f"[llm_batch] {task.batch_id} 最终失败，使用 fallback")
         parsed = dict(task.fallback)
         parsed["_error"] = "llm_batch_failed"
+
+    # 增补正文后再入缓存：保证缓存命中时正文（含图表）不丢失
+    if task.enrich is not None:
+        try:
+            parsed = task.enrich(parsed)
+        except Exception as e:
+            _log(f"[llm_batch] {task.batch_id} enrich 失败：{e}")
 
     cache_write(task.cache_dir, task.cache_key, parsed)
     return parsed

@@ -36,9 +36,9 @@
 ━━ 写出顺序（关键！每份单独一次 write_report 调用）━━
 
 a. 对每个识别出来的模块 i（i 从 1 开始计数）：
-   写该模块的详细 Markdown 到 `outputs.module_paths[i-1]`
+   写该模块的详细 **HTML 片段** 到 `outputs.module_paths[i-1]`
 
-b. 写子系统总览 Markdown 到 `outputs.content_path`
+b. 写子系统总览 **HTML 片段** 到 `outputs.content_path`
 
 c. **最后**写结构化 JSON 到 `outputs.json_path`
    JSON 的 modules 数组中每个模块的 slot 字段就是上面 (a) 步用到的 i
@@ -49,9 +49,13 @@ c. **最后**写结构化 JSON 到 `outputs.json_path`
 2–5 个模块为佳，最多 8 个；不要硬凑、不要把"每个文件一个模块"。
 极小子系统（≤2 个文件）可以只有 1 个模块。
 
-〔约束2：JSON 不嵌长 Markdown〕
+〔约束2：JSON 不嵌长正文〕
 JSON 字段（summary / role / quote / reason）≤200 字符。长说明 / 代码块 /
-mermaid / echarts 一律写到 .md 文件。
+mermaid / echarts 一律写到 HTML 内容文件。
+
+〔约束2b：子系统/模块不打分〕
+**不要给子系统或模块打分**。评分只在顶层 VERDICT 会话产出。
+JSON 中不要出现 score 字段。
 
 〔约束3：技术结论必须精确到 file:line〕
 路径必须从工具返回值原样复制。禁止编造文件路径或行号。
@@ -63,68 +67,78 @@ mermaid / echarts 一律写到 .md 文件。
 所有传入的 files 应在 modules[*].file_paths 中至少出现一次（除非该文件
 经分析后判定与本子系统主线无关，可在 content .md 中说明）。
 
-━━ Markdown 图表规范 ━━
+━━ HTML 输出规范（重要：直接写 HTML，不要写 Markdown）━━
 
-报告渲染为 HTML，已加载 Mermaid + ECharts。
+你产出的内容会**原样嵌入**最终页面（不经过任何 Markdown 转换），页面已加载
+Tailwind CSS + Mermaid + ECharts。所以请直接输出**语义化 HTML 片段**：
 
-子系统总览 .md 中**建议**包含一张架构图（mermaid flowchart）。
-模块 .md 中按需使用：
-  ```mermaid   — 状态机 / 类图 / 调用流程 / 时序图
-  ```echarts   — 数据图（必须合法 JSON：双引号、无注释、无尾逗号）
-  ```summary   — 折叠摘要卡片（2–4 条关键数字）
+- 正文用 `<h3>` / `<h4>` / `<p>` / `<ul><li>` / `<table>` / `<strong>` / `<code>`。
+  外层会套 `prose` 排版样式，写干净的语义标签即可，无需自己加 class。
+- **文件引用**直接写纯文本 `path:line`（例如 `kernel/trap.c:42`），系统会自动
+  把它变成可点击的跳转链接——**不要**自己写 `<a>`。
+- **Mermaid 图**（架构 / 状态机 / 调用流程 / 时序图）：
+  `<pre class="mermaid">flowchart TD; A[入口]-->B[处理];</pre>`
+- **ECharts 数据图**（option 必须是合法 JSON：双引号、无注释、无尾逗号）：
+  `<div class="echarts-chart" style="height:360px"><script type="application/json">{ ...option... }</script></div>`
+
+子系统总览中**建议**至少放一张 Mermaid 架构图展示模块协作关系。
+**禁止**输出 ```mermaid / ```echarts / ``` 这类 Markdown 围栏——一律用上面的 HTML 容器。
 
 <!-- format -->
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【输出格式契约】
 
-#### 1. 模块详细 Markdown（写入 outputs.module_paths[slot-1]）
+#### 1. 模块详细 HTML 片段（写入 outputs.module_paths[slot-1]）
 
-```
-### {模块名}
+```html
+<h3>{模块名}</h3>
+<p><strong>职责</strong>：{1 句话定位}（如有主要入口附 file:line，如 kernel/proc.c:120）</p>
 
-**职责**：{1 句话定位}（如有主要入口附 file:line）
+<p><strong>包含文件</strong>：</p>
+<ul>
+  <li><code>file1.c</code> — 角色简述</li>
+  <li><code>file2.c</code> — 角色简述</li>
+</ul>
 
-**包含文件**：
-- file1.c — 角色简述
-- file2.c — 角色简述
+<p><strong>关键函数</strong>：</p>
+<ul>
+  <li><code>funcA</code>（file:line）：{1 句描述，基于 find_symbol_definition 实际返回}</li>
+  <li><code>funcB</code>（file:line）：{...}</li>
+</ul>
 
-**关键函数**：
-- `funcA`（file:line）：{1 句描述，基于 find_symbol_definition 实际返回}
-- `funcB`（file:line）：{...}
+<p><strong>实现要点</strong>：</p>
+<p>{2–4 段说明，每条技术声明附 file:line}</p>
 
-**实现要点**：
-{2–4 段说明，每条技术声明附 file:line}
+<pre class="mermaid">flowchart TD; A[入口]-->B[核心处理]-->C[返回];</pre>
 
-{合适时插入 mermaid 流程图}
-
-**置信度**：高 / 中 / 低
-```
-
-#### 2. 子系统总览 Markdown（写入 outputs.content_path）
-
-```
-## {子系统名} — {role}
-
-```summary
-- 源文件：N 个
-- 识别模块：M 个：{列举模块名}
-- reference OS：{name}（如有）
+<p><strong>置信度</strong>：高 / 中 / 低</p>
 ```
 
-### 总体架构
-{2–4 段：本子系统在仓库整体中的位置 / 主入口 / 跨子系统依赖}
+#### 2. 子系统总览 HTML 片段（写入 outputs.content_path）
 
-{建议在此放一张 mermaid flowchart 显示模块协作关系}
+```html
+<h2>{子系统名} — {role}</h2>
 
-### 模块拆分
-- **{模块 1}**：{1 句概述，附主要文件 path:line}
-- **{模块 2}**：{...}
-- ...
+<ul>
+  <li>源文件：N 个</li>
+  <li>识别模块：M 个：{列举模块名}</li>
+  <li>reference OS：{name}（如有）</li>
+</ul>
 
-### 与 reference OS 对比
-{2–4 句：哪些部分对齐参考实现、哪些有改动、哪些是创新（如有）}
+<h3>总体架构</h3>
+<p>{2–4 段：本子系统在仓库整体中的位置 / 主入口 / 跨子系统依赖}</p>
+<pre class="mermaid">flowchart LR; VFS-->inode; inode-->blockcache;</pre>
 
-**置信度**：高 / 中 / 低
+<h3>模块拆分</h3>
+<ul>
+  <li><strong>{模块 1}</strong>：{1 句概述，附主要文件 path:line}</li>
+  <li><strong>{模块 2}</strong>：{...}</li>
+</ul>
+
+<h3>与 reference OS 对比</h3>
+<p>{2–4 句：哪些部分对齐参考实现、哪些有改动、哪些是创新（如有）}</p>
+
+<p><strong>置信度</strong>：高 / 中 / 低</p>
 ```
 
 #### 3. 结构化 JSON（写入 outputs.json_path —— **不含 content 字段**）
@@ -134,7 +148,6 @@ mermaid / echarts 一律写到 .md 文件。
   "name":    "文件系统",
   "role":    "VFS + log-structured 实现",
   "summary": "本子系统由 VFS 抽象 / inode / 块缓存 / 日志层组成（≤200 字）",
-  "score":   78,
   "highlights": [
     {"path":"fs/log.c:42", "quote":"事务式日志结构保证 crash recovery（≤200 字）"}
   ],
@@ -147,14 +160,12 @@ mermaid / echarts 一律写到 .md 文件。
       "slot":       1,
       "name":       "VFS 抽象层",
       "summary":    "提供 file / inode trait（≤200 字）",
-      "score":      82,
       "file_paths": ["fs/vfs.c", "fs/file.c"]
     },
     {
       "slot":       2,
       "name":       "inode 层",
       "summary":    "...",
-      "score":      80,
       "file_paths": ["fs/inode.c"]
     }
   ]
@@ -162,7 +173,7 @@ mermaid / echarts 一律写到 .md 文件。
 ```
 
 字段类型：
-- `score`：integer 0–100
+- **不含 score 字段**（子系统/模块不打分）
 - `severity`：`low` / `medium` / `high`
 - `modules[].slot`：integer 1–8，对应 outputs.module_paths[slot-1]
 - **所有字符串字段 ≤200 字符**
