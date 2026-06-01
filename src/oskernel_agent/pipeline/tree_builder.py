@@ -36,8 +36,8 @@ from ..engines.llm_batch import (
 )
 
 SCHEMA_VERSION = "tree-v3"
-PROMPT_VERSION_SUBSYS  = "subsys-v1"
-PROMPT_VERSION_VERDICT = "verdict-v7"
+PROMPT_VERSION_SUBSYS  = "subsys-v3"
+PROMPT_VERSION_VERDICT = "verdict-v8"
 
 MAX_MODULES_PER_SUBSYS = 8   # 每个子系统至多 N 个模块槽位
 
@@ -200,25 +200,30 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
         "你负责分析仓库中的某一个 OS 子系统（如文件系统、内存管理）。"
         "请阅读这些代码，**自己决定该子系统内部的模块拆分**"
         "（典型 2–5 个模块，最多 8 个），然后产出：\n\n"
-        "  a. 子系统总览 .md（写到 outputs.content_path）—— 总评、模块列表、"
-        "整体架构图\n"
-        "  b. 每个模块的详细 .md（写到 outputs.module_paths[i] 中你选用的槽位）\n"
+        "  a. 子系统总览 **HTML 片段**（写到 outputs.content_path）—— 总评、"
+        "模块列表、整体架构图（Mermaid）\n"
+        "  b. 每个模块的详细 **HTML 片段**（写到 outputs.module_paths[i] 中你选用的槽位）\n"
         "  c. 结构化 JSON（写到 outputs.json_path）—— 含模块清单与各模块槽位号\n\n"
+        "内容直接写 HTML（不要 Markdown）：图表用 `<pre class=\"mermaid\">…</pre>` 或 "
+        "`<div class=\"echarts-chart\" style=\"height:360px\"><script type=\"application/json\">{…}"
+        "</script></div>`；文件引用写纯文本 path:line（自动变链接）。\n\n"
         "工作步骤：\n"
         "1. initialize_analysis(repo_path)\n"
         "2. analyze_subtree('') 或针对 files 中目录调 analyze_subtree(dir)\n"
         "3. 浏览 files 列表与符号清单，识别模块拆分\n"
         "4. read_file / find_symbol_definition 看关键模块的实现细节\n"
         "5. 工具调用总数 ≤12 次\n\n"
-        "**写出顺序**：先写各模块 .md → 再写子系统总览 .md → **最后**写 JSON。\n\n"
+        "**写出顺序**：先写各模块 HTML → 再写子系统总览 HTML → **最后**写 JSON。\n"
+        "**不要给子系统或模块打分**（JSON 无 score 字段）。\n\n"
+        "**不要对子系统或模块打分**——评分只在顶层 VERDICT 会话产出。\n\n"
         "JSON schema：\n"
         '{\n'
-        '  "name":"...","role":"...","summary":"...","score":int,\n'
+        '  "name":"...","role":"...","summary":"...",\n'
         '  "highlights":[{"path":"...","quote":"..."}],\n'
         '  "issues":[{"path":"...","severity":"low|medium|high","quote":"..."}],\n'
         '  "modules":[\n'
         '    {"slot":1,"name":"模块名","summary":"≤200字",'
-        '"score":int,"file_paths":["..."]}\n'
+        '"file_paths":["..."]}\n'
         '  ]\n'
         '}\n\n'
         "modules[].slot 是 1..8 之间的整数，对应你用 outputs.module_paths[slot-1] "
@@ -233,7 +238,6 @@ def _subsys_fallback(subsys_node: dict) -> dict:
         "name":       subsys_node["name"],
         "role":       subsys_node["name"],
         "summary":    f"本子系统包含 {n} 个文件（LLM 聚合失败，使用规则兜底）。",
-        "score":      60,
         "highlights": [],
         "issues":     [],
         "modules":    [],
@@ -254,6 +258,17 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
     file_keys = [f"{f['path']}:{f['mtime']}" for f in files]
     ck = cache_key(PROMPT_VERSION_SUBSYS, subsys_node["name"], *file_keys)
 
+    module_paths = outputs["module_paths"]
+
+    def _enrich(parsed: dict) -> dict:
+        """把 agent 落盘的 HTML 正文读进 parsed，使其随 JSON 一起进缓存。"""
+        parsed["content"] = _read_md_if_exists(Path(outputs["content_path"]))
+        for i, m in enumerate(parsed.get("modules") or [], start=1):
+            slot = int(m.get("slot") or i)
+            if 1 <= slot <= MAX_MODULES_PER_SUBSYS:
+                m["content"] = _read_md_if_exists(Path(module_paths[slot - 1]))
+        return parsed
+
     task = BatchTask(
         batch_id=f"subsys-{_safe_filename_part(subsys_node['name'])}",
         agent_name="os-kernel-subsys",
@@ -263,41 +278,38 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
         cache_dir=sub_cache,
         cache_key=ck,
         fallback=_subsys_fallback(subsys_node),
+        enrich=_enrich,
     )
     parsed = run_batch_task(
         task,
-        schema_hint='{"name":str,"role":str,"summary":str,"score":int,'
+        schema_hint='{"name":str,"role":str,"summary":str,'
                     '"highlights":[...],"issues":[...],'
-                    '"modules":[{slot:int,name:str,summary:str,score:int,'
+                    '"modules":[{slot:int,name:str,summary:str,'
                     'file_paths:[...]}]}',
         timeout=600,
     )
 
-    # 填子系统字段
+    # 填子系统字段（子系统/模块不打分，评分只在顶层 VERDICT）
+    # 正文已由 enrich 读入 parsed（含缓存命中场景）
     subsys_node["role"]       = parsed.get("role", subsys_node["name"])
     subsys_node["summary"]    = parsed.get("summary", "")
-    subsys_node["score"]      = int(parsed.get("score", 60))
-    subsys_node["content"]    = _read_md_if_exists(Path(outputs["content_path"]))
+    subsys_node["content"]    = parsed.get("content", "")
     subsys_node["highlights"] = parsed.get("highlights", [])
     subsys_node["issues"]     = parsed.get("issues", [])
 
     # 把 modules 转成 children
-    module_paths = outputs["module_paths"]
     subsys_node["children"] = []
     for i, m in enumerate(parsed.get("modules") or [], start=1):
         slot = int(m.get("slot") or i)
         if not (1 <= slot <= MAX_MODULES_PER_SUBSYS):
             continue
-        md_path = Path(module_paths[slot - 1])
-        mod_content = _read_md_if_exists(md_path)
         subsys_node["children"].append({
             "type":       "module",
             "name":       m.get("name", f"模块 {slot}"),
             "path":       f"{subsys_node['path']}/m{slot:03d}",
             "summary":    m.get("summary", ""),
-            "score":      int(m.get("score", 60)),
             "file_paths": m.get("file_paths", []),
-            "content":    mod_content,
+            "content":    m.get("content", ""),
         })
 
 
@@ -343,14 +355,17 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
     return (
         "你是仓库顶层评判会话，综合下面"
         "facts + 各 OS 子系统的总结，产出整体评判结论。\n"
-        "**长 Markdown 写入独立 .md，JSON 只放结构化字段**。\n\n"
+        "**详细正文写成独立 HTML 片段，JSON 只放结构化字段**。\n"
+        "正文直接写 HTML（不要 Markdown）：雷达图用 "
+        "`<div class=\"echarts-chart\" style=\"height:380px\"><script type=\"application/json\">{…}"
+        "</script></div>`；文件引用写纯文本 path:line（自动变链接）。\n\n"
         "工作步骤：\n"
         "1. initialize_analysis(repo_path)\n"
         "2. 必要时 compare_with_reference_os(facts.meta.reference_os) "
         "/ search_code 验证关键判断\n"
         "3. 工具调用 ≤5 次\n\n"
         "**写出顺序**：\n"
-        "  a. 详细评判 Markdown（含两张强制图表）→ 写到 outputs.content_path\n"
+        "  a. 详细评判 HTML 片段（含强制雷达图）→ 写到 outputs.content_path\n"
         "  b. 结构化 JSON → 写到 outputs.json_path\n\n"
         "JSON schema：\n"
         '{\n'
@@ -391,12 +406,10 @@ def _collect_subsys_summaries(tree_root: dict) -> list[dict]:
             "name":       c["name"],
             "role":       c.get("role", ""),
             "summary":    c.get("summary", ""),
-            "score":      c.get("score", 0),
             "highlights": c.get("highlights", []),
             "issues":     c.get("issues", []),
             "modules":    [
-                {"name": m["name"], "summary": m.get("summary", ""),
-                 "score": m.get("score", 0)}
+                {"name": m["name"], "summary": m.get("summary", "")}
                 for m in c.get("children", [])
             ],
         })
@@ -418,10 +431,15 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
     subsys_summaries = _collect_subsys_summaries(tree_root)
     facts_str = json.dumps(facts or {}, ensure_ascii=False, sort_keys=True)
     subsys_str = json.dumps(
-        [{"n": s["name"], "s": s["score"]} for s in subsys_summaries],
+        [s["name"] for s in subsys_summaries],
         ensure_ascii=False, sort_keys=True,
     )
     ck = cache_key(PROMPT_VERSION_VERDICT, facts_str[:2048], subsys_str)
+
+    def _enrich(parsed: dict) -> dict:
+        """把 verdict 详细正文（HTML，含强制图表）读进 parsed，随 JSON 一起进缓存。"""
+        parsed["content"] = _read_md_if_exists(Path(outputs["content_path"]))
+        return parsed
 
     task = BatchTask(
         batch_id="verdict",
@@ -432,6 +450,7 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
         cache_dir=verdict_cache,
         cache_key=ck,
         fallback=_verdict_fallback(),
+        enrich=_enrich,
     )
     parsed = run_batch_task(
         task,
@@ -439,7 +458,7 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                     '"highlights":[...],"issues":[...],"one_line":str}',
         timeout=600,
     )
-    parsed["content"] = _read_md_if_exists(Path(outputs["content_path"]))
+    # 正文已由 enrich 读入 parsed（含缓存命中场景）
     return parsed
 
 
@@ -477,7 +496,7 @@ def _empty_tree(repo_name: str, ts: str, facts: dict | None) -> dict:
         },
         "tree": {
             "type": "root", "path": "", "name": repo_name,
-            "summary": "", "score": 0, "children": [],
+            "summary": "", "children": [],
         },
     }
 

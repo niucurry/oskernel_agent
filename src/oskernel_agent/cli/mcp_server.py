@@ -20,7 +20,6 @@ from mcp import types
 from .. import config as _config
 from ..tools.mcp_tools import OSKernelMCPTools
 from ..tools.reference_db import ReferenceOSDatabase
-from ..reports.html import write_html
 
 # CLI 参数解析
 
@@ -366,14 +365,14 @@ def _make_tool_defs() -> list[types.Tool]:
         types.Tool(
             name="write_report",
             description=(
-                "将完整的最终评审报告写入文件并返回完成信号。"
+                "将内容原样写入指定文件并返回完成信号（不做任何格式转换）。"
                 "调用前必须先用 validate_refs 验证引用路径，确认无断链后再写入。"
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "content":     {"type": "string", "description": "完整的 Markdown 报告文本（工具自动渲染为 HTML）"},
-                    "output_path": {"type": "string", "description": "输出文件路径（.html 或 .md 均可，最终保存为 HTML）"},
+                    "content":     {"type": "string", "description": "要写入的内容（HTML 片段或结构化 JSON），原样落盘"},
+                    "output_path": {"type": "string", "description": "输出文件的精确路径，原样写入（不会改后缀）"},
                 },
                 "required": ["content"],
             },
@@ -693,7 +692,13 @@ def _handle_validate_refs(arguments: dict) -> list[types.TextContent]:
 
 
 def _handle_write_report(arguments: dict) -> list[types.TextContent]:
-    """把报告 Markdown 渲染为 HTML 写到磁盘。"""
+    """把 agent 产出的内容原样写到 output_path。
+
+    agent 现在直接产出 HTML 片段 / 结构化 JSON，写到调用方（树管道）指定的精确
+    路径（.json / .content.md / .module-NNN.md）。最终报告由树管道的 html_tree
+    统一渲染，本工具不再做任何 markdown→HTML 转换。引用路径的合法性由 validate_refs
+    在写入前负责校验。
+    """
     content     = arguments.get("content", "")
     output_path = arguments.get("output_path", "").strip()
 
@@ -701,36 +706,14 @@ def _handle_write_report(arguments: dict) -> list[types.TextContent]:
         return [types.TextContent(type="text", text="[完成] 报告生成完毕。")]
 
     p = Path(output_path)
-    if p.suffix.lower() != ".html":
-        p = p.with_suffix(".html")
     p.parent.mkdir(parents=True, exist_ok=True)
-
-    repo_roots: list[Path] = []
-    for ctx in _contexts.values():
-        rp = getattr(ctx, "repo_path", None)
-        if not rp:
-            continue
-        repo_root = Path(rp)
-        repo_roots.append(repo_root)
-        for src_rel in getattr(ctx, "structure", {}).get("source_roots_rel", []):
-            repo_roots.append(repo_root / src_rel)
     try:
-        md_path = p.with_suffix(".md")
-        md_path.write_text(content, encoding="utf-8")
-        html_path, broken = write_html(p, content, repo_roots=repo_roots)
-        _log(f"HTML 报告已写入：{html_path}（同名 .md 已保存，repo_roots={len(repo_roots)}，断链={len(broken)}）")
-        msg = f"[完成] 报告已保存到 {html_path}。"
-        if broken:
-            broken_list = "\n".join(f"  - {bp}" for bp in sorted(broken))
-            msg += (
-                f"\n\n[警告] HTML 中以下 {len(broken)} 个文件引用无法解析为磁盘路径，"
-                f"在报告里显示为红色断链，点击无法定位到正确源文件，"
-                f"请用 search_code 找到正确路径后重新调用 write_report 修正：\n"
-                f"{broken_list}"
-            )
+        p.write_text(content, encoding="utf-8")
+        _log(f"报告已写入：{p}（{len(content)} 字符）")
+        msg = f"[完成] 报告已保存到 {p}。"
     except Exception as exc:
-        _log(f"生成 HTML 报告失败：{exc}")
-        msg = f"[完成] 报告生成完毕，但 HTML 渲染失败：{exc}"
+        _log(f"写入报告失败：{exc}")
+        msg = f"[完成] 报告生成完毕，但写入失败：{exc}"
     return [types.TextContent(type="text", text=msg)]
 
 
