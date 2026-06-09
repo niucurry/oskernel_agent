@@ -4,17 +4,15 @@ HTML 报告的公共构件（供 html_tree.py 使用）。
 agent 现在**直接产出 HTML**（不再写 Markdown），所以本模块不再做 markdown→HTML
 转换。它只保留三类被最终渲染器复用的能力：
 
-  - CDN 头与初始化脚本：Tailwind CSS + Mermaid + ECharts + Alpine.js，
+  - CDN 头与初始化脚本：Tailwind CSS + ECharts + Alpine.js，
     全部通过 CDN 单标签引入，无构建流程。
   - 文件跳转链接解析：把仓库内的 `path:line` 解析成可点击的 vscode:// 等 URL，
     解析不到时标记断链。
   - linkify_html：在 agent 直出的 HTML 上，仅对“可见文本”里的 `path:line`
     做链接化，不触碰标签 / 脚本 / 代码块。
 
-图表容器约定（供 prompts 端指导 agent 直接写 HTML）：
-  <pre class="mermaid">...</pre>                                   → Mermaid 图
+数据图容器约定（仅 ECharts；架构图/流程图已弃用）：
   <div class="echarts-chart"><script type="application/json">{...}</script></div>
-                                                                   → ECharts 图
 """
 
 from __future__ import annotations
@@ -34,23 +32,6 @@ _CDN_HEAD = """
 <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
-<script type="module">
-  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-  const dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: dark ? 'dark' : 'default',
-    securityLevel: 'loose',
-    flowchart: { useMaxWidth: true },
-    sequence:  { useMaxWidth: true },
-  });
-  window.__renderMermaid = () => {
-    const nodes = document.querySelectorAll('.mermaid:not([data-processed])');
-    if (nodes.length) mermaid.run({ nodes });
-  };
-  document.addEventListener('DOMContentLoaded', () => window.__renderMermaid());
-  document.addEventListener('section:opened', () => setTimeout(window.__renderMermaid, 30));
-</script>
 """
 
 _INIT_SCRIPT = """
@@ -120,6 +101,8 @@ _FILEREF_RE = re.compile(
     rf"([A-Za-z0-9_./\-]+\.(?:{_FILEREF_EXTS}))"
     rf"(?:(?::|#L)(\d+)(?:-L?(\d+))?)?"
 )
+# 整段（允许前后空白）恰好是一个 file:line 引用 —— 用于判定 <code>path:line</code>
+_FILEREF_FULL = re.compile(rf"^\s*{_FILEREF_RE.pattern}\s*$")
 
 
 def _wrap_anchor(inner_html: str, url: str) -> str:
@@ -133,19 +116,23 @@ def _wrap_anchor(inner_html: str, url: str) -> str:
 
 # 原始 HTML 的文件引用链接化（agent 直出 HTML 时使用，不做 markdown 解析）
 
-# 受保护块：脚本 / 样式 / 代码 / 已有链接，内部文本不参与链接化
+# 受保护块：脚本 / 样式 / 预格式 / 已有链接，内部文本不参与链接化
+# 注意：不含 <code> —— <code> 由 _CODE_RE 单独处理（整段是 file:line 的会被链接化）
 _PROTECT_BLOCKS_RE = re.compile(
-    r"<(script|style|pre|code|a)\b[^>]*>.*?</\1>",
+    r"<(script|style|pre|a)\b[^>]*>.*?</\1>",
     re.DOTALL | re.IGNORECASE,
 )
+_CODE_RE = re.compile(r"<code\b[^>]*>(.*?)</code>", re.DOTALL | re.IGNORECASE)
 _ANY_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def linkify_html(fragment: str, resolver: LinkResolver | None = None) -> str:
-    """把一段**已经是 HTML** 的文本中裸露的 `path:line` 引用变成可点击跳转链接。
+    """把一段**已经是 HTML** 的文本里的 `path:line` 引用变成可点击跳转链接。
 
-    本函数不解析 markdown，只在“可见文本”节点上做 file:line → <a> 替换，
-    绝不触碰标签属性、<script>/<style>/<pre>/<code> 以及已有 <a> 内部的内容。
+    覆盖两类标注：
+      1. 可见正文里裸写的 file:line（如“见 kernel/proc.c:120”）；
+      2. 整段就是一个 file:line 的内联代码（如 <code>kernel/proc.c:120</code>）。
+    不触碰标签属性、<script>/<style>/<pre>/已有 <a>，以及非文件引用的普通代码片段。
     用于 agent 直接产出 HTML 的渲染路径。
     """
     if not resolver or not fragment:
@@ -153,11 +140,22 @@ def linkify_html(fragment: str, resolver: LinkResolver | None = None) -> str:
 
     blocks: list[str] = []
 
-    def _stash_block(m: re.Match) -> str:
-        blocks.append(m.group(0))
+    def _stash(s: str) -> str:
+        blocks.append(s)
         return f"\x00B{len(blocks) - 1}\x00"
 
-    text = _PROTECT_BLOCKS_RE.sub(_stash_block, fragment)
+    text = _PROTECT_BLOCKS_RE.sub(lambda m: _stash(m.group(0)), fragment)
+
+    # <code>：整段恰好是 file:line 的 → 整块包成跳转链接；否则原样保护
+    def _code_sub(m: re.Match) -> str:
+        fm = _FILEREF_FULL.match(m.group(1))
+        if fm:
+            url = resolver(fm.group(1), fm.group(2))
+            if url:
+                return _stash(_wrap_anchor(m.group(0), url))
+        return _stash(m.group(0))
+
+    text = _CODE_RE.sub(_code_sub, text)
 
     tags: list[str] = []
 
@@ -192,6 +190,29 @@ _JUMP_SCHEMES = {
 
 _BROKEN_PREFIX = "\x00broken\x00"
 
+# 建索引时跳过的目录（与 tool_handlers._SKIP_DIRS 同口径，外加 VCS/依赖目录）
+_INDEX_SKIP_DIRS = frozenset({
+    ".git", "vendor", "third_party", "target",
+    ".venv", "__pycache__", "node_modules",
+})
+
+
+def _build_repo_index(roots: list[Path]) -> dict[str, list[str]]:
+    """遍历仓库根，建 basename → [posix 相对路径, ...] 索引，供后缀匹配兜底。
+
+    相对路径前缀加根序号（root#i/...），多根时也能拼回正确的绝对路径。
+    """
+    import os
+    index: dict[str, list[str]] = {}
+    for ri, root in enumerate(roots):
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames
+                           if d not in _INDEX_SKIP_DIRS and not d.startswith(".")]
+            for name in filenames:
+                rel = (Path(dirpath) / name).relative_to(root).as_posix()
+                index.setdefault(name, []).append(f"{ri}\x00{rel}")
+    return index
+
 
 def make_file_link_resolver(
     repo_roots: list[Path] | None,
@@ -203,6 +224,26 @@ def make_file_link_resolver(
         return None
     template = _JUMP_SCHEMES.get(scheme, _JUMP_SCHEMES["vscode"])
     roots = [Path(r).resolve() for r in repo_roots]
+
+    # 后缀匹配索引按需懒建（仅在精确/剥前缀都失败时才付出遍历成本）
+    index_cache: dict[str, dict[str, list[str]]] = {}
+
+    def _suffix_unique_match(filepath: str) -> Path | None:
+        """在仓库里找路径以 filepath 结尾（按段对齐）的文件；仅唯一命中时返回。
+
+        修复「agent 少写前缀」的常见情形，如 `axhal/src/cpu.rs` →
+        `arceos/modules/axhal/src/cpu.rs`。重名歧义（多命中）保持不解析。
+        """
+        base = Path(filepath).name
+        if "index" not in index_cache:
+            index_cache["index"] = _build_repo_index(roots)
+        want = Path(filepath).as_posix()
+        matches: list[Path] = []
+        for tagged in index_cache["index"].get(base, []):
+            ri_str, rel = tagged.split("\x00", 1)
+            if rel == want or rel.endswith("/" + want):
+                matches.append(roots[int(ri_str)] / rel)
+        return matches[0] if len(matches) == 1 else None
 
     def _build_url(abs_path: str, line: str | None) -> str:
         anchor = f":{line}:1" if (line and scheme != "file") else ""
@@ -233,6 +274,9 @@ def make_file_link_resolver(
                             break
                     if candidate is not None:
                         break
+            # 仍未命中：尝试「后缀唯一匹配」补回缺失的中间前缀
+            if candidate is None:
+                candidate = _suffix_unique_match(filepath)
 
         if candidate is not None:
             try:
