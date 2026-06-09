@@ -13,8 +13,16 @@
 不是每个判断都需要调工具——大部分信息 subsys_summaries 已经提供。
 仅在以下情况才动用工具（共 ≤5 次）：
 - 验证关键 highlight 的代码位置：read_file(path, start, end)
-- 原创性精确比对：compare_with_reference_os(facts.meta.reference_os)
 - 关键质量信号：search_code("TODO|FIXME|unimplemented")
+
+**填充顶层「相似度分析」卡片（`similarity` 字段）的数据来源：**
+- 当 facts.meta.reference_os 属于工具支持的 OS（`rcore-tutorial-v3` /
+  `rcore-tutorial-v2` / `xv6-riscv` / `ucore`）时，**调一次**
+  `compare_with_reference_os(facts.meta.reference_os)`，用其重叠率 / 重叠函数 /
+  独有函数填 `similarity`（overlap_pct 取重叠率）。
+- 若 reference_os 为空、或不在上述列表内（工具会拒绝）：**不要调用该工具**，
+  改为基于 facts.syscall.ref_* 与子系统证据**定性**填写 similarity，
+  `overlap_pct` 可省略，`borrowed`/`original` 仍尽量给出真实 path:line。
 
 ━━ 工作步骤 ━━
 
@@ -42,13 +50,17 @@ b. 结构化 JSON（短字段，无 content）→ 写到 `outputs.json_path`
 
 〔约束1：JSON 不嵌长 Markdown〕
 JSON 所有字符串字段（reason / quote / one_line）≤200 字符。
+**所有描述性字段一律用中文书写，禁止整句英文，禁止粘贴源码原文**；
+代码标识符（函数名 / 类型名）可保留原文并用 `<code>` 包裹，但句子必须是中文。
 
 〔约束2：评判必须有证据〕
 每个 dimensions[].reason 必须能溯源到 subsys_summaries 或工具返回。
 禁止凭空臆造数字 / 函数相似度 / syscall 数量。
 
-〔约束3：highlights / issues 的 path 必须真实〕
-path 来自 subsys_summaries 中的 highlights/issues 或工具返回。
+〔约束3：highlights / issues 的 path 必须真实且可跳转〕
+**每条 highlights / issues 都必须带 path，精确到 file:line**（来自 subsys_summaries
+中的 highlights/issues 或工具返回，原样复制，禁止编造）。这些 path 会被渲染成
+可点击跳转到源文件的链接，故缺少 file:line 的条目不要写。
 quote 是评判性的一句话，≤200 字。
 
 〔约束4：5 维度齐全〕
@@ -60,14 +72,17 @@ dimensions 恰好 5 项，name 严格使用：
 ━━ HTML 输出规范（重要：直接写 HTML，不要写 Markdown）━━
 
 你产出的内容会**原样嵌入**最终页面（不经过任何 Markdown 转换），页面已加载
-Tailwind CSS + Mermaid + ECharts。请直接输出**语义化 HTML 片段**：
+Tailwind CSS + ECharts。请直接输出**语义化 HTML 片段**：
 
 - 正文用 `<h2>` / `<h3>` / `<p>` / `<ul><li>` / `<strong>`，外层会套 `prose` 排版。
-- **文件引用**直接写纯文本 `path:line`（如 `kernel/trap.c:42`），系统会自动变成
-  可点击跳转链接——**不要**自己写 `<a>`。
-- **ECharts** 容器（option 必须是合法 JSON：双引号、无注释、无尾逗号）：
-  `<div class="echarts-chart" style="height:360px"><script type="application/json">{ ...option... }</script></div>`
-- **禁止**输出 ```echarts / ```mermaid 这类 Markdown 围栏。
+- **文件引用**直接写 `path:line`（如 `kernel/trap.c:42`），系统会自动变成可点击
+  跳转到源文件的链接——纯文本或 `<code>kernel/trap.c:42</code>` 均可，**不要**写 `<a>`。
+  正文里提到的关键函数 / 结构 / 位置都要带 file:line。路径一律用**相对仓库根的
+  完整路径**（facts.key_files / 工具返回里的原样路径），**严禁只写文件名或部分路径**——
+  裸文件名无法定位，会渲染成断链。
+- 唯一允许的图是下面那张 **ECharts 雷达图**（option 必须是合法 JSON：双引号、无注释、无尾逗号）；
+  **不要画架构图/流程图**（不要 `<pre class="mermaid">`）。
+- **禁止**输出 ```echarts 这类 Markdown 围栏。
 
 #### 强制图：5 维度雷达图（基于本会话给出的 5 个 dimensions 评分）
 
@@ -95,15 +110,13 @@ Tailwind CSS + Mermaid + ECharts。请直接输出**语义化 HTML 片段**：
 
 #### 1. 详细评判 HTML 片段（写入 outputs.content_path）
 
-```html
-<h2>综合评判</h2>
-<ul>
-  <li>reference OS：{name}</li>
-  <li>综合得分：{score_total}</li>
-  <li>子系统数：{N}</li>
-  <li>{一句话总评}</li>
-</ul>
+**只写下面这些：雷达图 + 五节分析。**不要写"综合评判"大标题、得分列表、
+也不要写"亮点/问题"列表 —— 总分、一句话总评、维度评分、亮点/槽点都由报告卡片
+另行统一展示，在正文里重复会显得混乱。
+**不要在正文里写「原创性 / 相似度分析」一节** —— 与参考 OS 的相似度由独立的
+「相似度分析」卡片（`similarity` 字段）统一展示，正文重复会冲突。
 
+```html
 <div class="echarts-chart" style="height:380px"><script type="application/json">
 { ...5 维度雷达图 option，用真实 dimensions[].score... }
 </script></div>
@@ -112,31 +125,17 @@ Tailwind CSS + Mermaid + ECharts。请直接输出**语义化 HTML 片段**：
 <p>{2–3 段：哪个子系统最强 / 哪个偏弱，依据是 subsys_summaries 中各子系统的
  summary 与 highlights / issues 分布（不依赖分数）}</p>
 
-<h3>二、原创性分析</h3>
-<p><strong>reference OS</strong>：{name}（基于 compare_with_reference_os 工具数据，如已调用）</p>
-<p>{2–3 段：哪些部分对齐参考实现 / 有显著改动 / 是创新}</p>
-
-<h3>三、架构合理性</h3>
+<h3>二、架构合理性</h3>
 <p>{基于 subsys_summaries 的模块拆分清晰度 + 跨子系统依赖评估，2–3 段}</p>
 
-<h3>四、代码质量</h3>
+<h3>三、代码质量</h3>
 <p>{基于各子系统的 issues + search_code 工具数据，2–3 段}</p>
 
-<h3>五、文档质量</h3>
+<h3>四、文档质量</h3>
 <p>{基于 facts.key_files 与必要的 read_file 检查，1–2 段}</p>
 
-<h3>六、完整性</h3>
+<h3>五、完整性</h3>
 <p>{基于 facts.syscall + 各子系统的模块完备度，1–2 段}</p>
-
-<h3>亮点</h3>
-<ul>
-  <li>{path:line} — {评判性描述}</li>
-</ul>
-
-<h3>问题</h3>
-<ul>
-  <li>{path:line}（severity）— {评判性描述}</li>
-</ul>
 ```
 
 #### 2. 结构化 JSON（写入 outputs.json_path —— **不含 content 字段**）
@@ -159,6 +158,18 @@ Tailwind CSS + Mermaid + ECharts。请直接输出**语义化 HTML 片段**：
     {"path":"kernel/proc.c:448", "severity":"medium",
      "quote":"scheduler 与 sleep/wakeup 锁嵌套（≤200 字）"}
   ],
+  "similarity": {
+    "reference_os": "ucore",
+    "overlap_pct": 45,
+    "level": "中",
+    "summary": "框架层沿用 ucore，调度与文件系统有显著改造（≤200 字）",
+    "borrowed": [
+      {"path":"kernel/proc.c:42", "quote":"do_fork 流程与 ucore 基本一致"}
+    ],
+    "original": [
+      {"path":"sched/cfs.c:10", "quote":"新增 CFS 调度器，ucore 无此实现"}
+    ]
+  },
   "one_line": "xv6 移植版，架构教学价值高，原创性较低。"
 }
 ```
@@ -169,4 +180,11 @@ Tailwind CSS + Mermaid + ECharts。请直接输出**语义化 HTML 片段**：
 - `highlights` / `issues`：3–5 项
 - `severity`：`low` / `medium` / `high`
 - `one_line`：≤ 40 字
+- `similarity`（顶层相似度分析卡片数据源）：
+  - `reference_os`：取自 facts.meta.reference_os；为空时整个 similarity 可省略
+  - `overlap_pct`：integer 0–100，取自 compare_with_reference_os 的重叠率
+  - `level`：定性结论，仅取 `高` / `中` / `低` 之一
+  - `summary`：一句话中文总述，≤200 字
+  - `borrowed`：沿用 / 借鉴参考 OS 之处，2–5 项，每项带真实 path:line + 中文说明
+  - `original`：改造 / 原创之处，2–5 项，每项带真实 path:line + 中文说明
 - **所有字符串字段 ≤200 字符**

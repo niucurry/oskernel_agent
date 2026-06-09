@@ -36,8 +36,8 @@ from ..engines.llm_batch import (
 )
 
 SCHEMA_VERSION = "tree-v3"
-PROMPT_VERSION_SUBSYS  = "subsys-v3"
-PROMPT_VERSION_VERDICT = "verdict-v8"
+PROMPT_VERSION_SUBSYS  = "subsys-v5"
+PROMPT_VERSION_VERDICT = "verdict-v11"
 
 MAX_MODULES_PER_SUBSYS = 8   # 每个子系统至多 N 个模块槽位
 
@@ -200,13 +200,12 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
         "你负责分析仓库中的某一个 OS 子系统（如文件系统、内存管理）。"
         "请阅读这些代码，**自己决定该子系统内部的模块拆分**"
         "（典型 2–5 个模块，最多 8 个），然后产出：\n\n"
-        "  a. 子系统总览 **HTML 片段**（写到 outputs.content_path）—— 总评、"
-        "模块列表、整体架构图（Mermaid）\n"
+        "  a. 子系统总览 **HTML 片段**（写到 outputs.content_path）—— 总评、模块列表\n"
         "  b. 每个模块的详细 **HTML 片段**（写到 outputs.module_paths[i] 中你选用的槽位）\n"
         "  c. 结构化 JSON（写到 outputs.json_path）—— 含模块清单与各模块槽位号\n\n"
-        "内容直接写 HTML（不要 Markdown）：图表用 `<pre class=\"mermaid\">…</pre>` 或 "
-        "`<div class=\"echarts-chart\" style=\"height:360px\"><script type=\"application/json\">{…}"
-        "</script></div>`；文件引用写纯文本 path:line（自动变链接）。\n\n"
+        "内容直接写 HTML（不要 Markdown）：用 `<h3>/<p>/<ul>/<table>` 等语义标签；"
+        "**不要画架构图/流程图**（不要 `<pre class=\"mermaid\">`），用文字说明模块关系；"
+        "文件引用写纯文本 path:line（自动变链接）。\n\n"
         "工作步骤：\n"
         "1. initialize_analysis(repo_path)\n"
         "2. analyze_subtree('') 或针对 files 中目录调 analyze_subtree(dir)\n"
@@ -392,6 +391,7 @@ def _verdict_fallback() -> dict:
         ],
         "highlights": [],
         "issues":     [],
+        "similarity": {},
         "one_line":   "LLM 顶层评判失败，使用规则兜底。",
         "_error":     "verdict_fallback",
     }
@@ -455,7 +455,10 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
     parsed = run_batch_task(
         task,
         schema_hint='{"score_total":int,"dimensions":[...5 items...],'
-                    '"highlights":[...],"issues":[...],"one_line":str}',
+                    '"highlights":[...],"issues":[...],'
+                    '"similarity":{reference_os:str,overlap_pct:int,level:str,'
+                    'summary:str,borrowed:[...],original:[...]},'
+                    '"one_line":str}',
         timeout=600,
     )
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
