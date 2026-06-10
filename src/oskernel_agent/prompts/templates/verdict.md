@@ -15,14 +15,9 @@
 - 验证关键 highlight 的代码位置：read_file(path, start, end)
 - 关键质量信号：search_code("TODO|FIXME|unimplemented")
 
-**填充顶层「相似度分析」卡片（`similarity` 字段）的数据来源：**
-- 当 facts.meta.reference_os 属于工具支持的 OS（`rcore-tutorial-v3` /
-  `rcore-tutorial-v2` / `xv6-riscv` / `ucore`）时，**调一次**
-  `compare_with_reference_os(facts.meta.reference_os)`，用其重叠率 / 重叠函数 /
-  独有函数填 `similarity`（overlap_pct 取重叠率）。
-- 若 reference_os 为空、或不在上述列表内（工具会拒绝）：**不要调用该工具**，
-  改为基于 facts.syscall.ref_* 与子系统证据**定性**填写 similarity，
-  `overlap_pct` 可省略，`borrowed`/`original` 仍尽量给出真实 path:line。
+**相似度分析（`similarity` 字段）：** 当 `facts.meta.reference_os` 非空时，先调用
+`load_skill('reference-os-comparison')` 取回详细指引（含 compare_with_reference_os
+用法与 `similarity` 字段契约）再执行；为空则跳过、不填 similarity。
 
 ━━ 工作步骤 ━━
 
@@ -34,7 +29,8 @@
    - **架构合理性** ← 子系统数量 / 模块边界清晰度 / 跨子系统依赖
    - **代码质量** ← 各子系统的 issues + search_code 标记数（若调）
    - **文档质量** ← facts.key_files 中的 README/docs + read_file（若调）
-   - **完整性** ← facts.syscall + 各子系统的覆盖深度
+   - **完整性** ← facts.syscall + 各子系统的覆盖深度（需深入核实 syscall 覆盖时，
+     先 `load_skill('syscall-coverage')`）
 
 3. 选 3–5 个最有代表性的 highlights / issues（必须从 subsys_summaries
    或工具返回中真实存在）
@@ -158,33 +154,22 @@ Tailwind CSS + ECharts。请直接输出**语义化 HTML 片段**：
     {"path":"kernel/proc.c:448", "severity":"medium",
      "quote":"scheduler 与 sleep/wakeup 锁嵌套（≤200 字）"}
   ],
-  "similarity": {
-    "reference_os": "ucore",
-    "overlap_pct": 45,
-    "level": "中",
-    "summary": "框架层沿用 ucore，调度与文件系统有显著改造（≤200 字）",
-    "borrowed": [
-      {"path":"kernel/proc.c:42", "quote":"do_fork 流程与 ucore 基本一致"}
-    ],
-    "original": [
-      {"path":"sched/cfs.c:10", "quote":"新增 CFS 调度器，ucore 无此实现"}
-    ]
-  },
   "one_line": "xv6 移植版，架构教学价值高，原创性较低。"
 }
 ```
 
+（当 facts.meta.reference_os 非空时，JSON 中还需并列一个 `similarity` 字段；其完整
+契约见技能 `reference-os-comparison`，先 `load_skill('reference-os-comparison')` 再填。
+reference_os 为空时省略 similarity。）
+
 字段约束：
-- `score_total` / `dimensions[].score`：integer 0–100
+- `dimensions[].score`：integer **0–100**（满分 100，不是 0–10！）。尺度锚点：
+  90+ 优秀 / 75–89 良好 / 60–74 合格 / 40–59 偏弱 / <40 差。
+- `score_total`：integer 0–100，**必须等于 5 个维度分的（等权）平均后四舍五入取整**，
+  不要另给一个与维度脱节的总分。例：维度 70/60/50/50/80 → score_total = 62。
+  （系统最终会按维度加权平均重算总分校正，所以请保持一致。）
 - `dimensions`：恰好 5 项，name 使用固定 5 个名称
 - `highlights` / `issues`：3–5 项
 - `severity`：`low` / `medium` / `high`
 - `one_line`：≤ 40 字
-- `similarity`（顶层相似度分析卡片数据源）：
-  - `reference_os`：取自 facts.meta.reference_os；为空时整个 similarity 可省略
-  - `overlap_pct`：integer 0–100，取自 compare_with_reference_os 的重叠率
-  - `level`：定性结论，仅取 `高` / `中` / `低` 之一
-  - `summary`：一句话中文总述，≤200 字
-  - `borrowed`：沿用 / 借鉴参考 OS 之处，2–5 项，每项带真实 path:line + 中文说明
-  - `original`：改造 / 原创之处，2–5 项，每项带真实 path:line + 中文说明
 - **所有字符串字段 ≤200 字符**

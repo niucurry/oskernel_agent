@@ -36,10 +36,21 @@ from ..engines.llm_batch import (
 )
 
 SCHEMA_VERSION = "tree-v3"
-PROMPT_VERSION_SUBSYS  = "subsys-v5"
-PROMPT_VERSION_VERDICT = "verdict-v11"
+PROMPT_VERSION_SUBSYS  = "subsys-v7"
+PROMPT_VERSION_VERDICT = "verdict-v14"
 
 MAX_MODULES_PER_SUBSYS = 8   # 每个子系统至多 N 个模块槽位
+
+# 顶层评判 5 维度及其在总分中的权重（默认等权；如需侧重可调）。
+# score_total 由这些维度加权平均确定性算出，不再采信 LLM 自填的总分。
+VERDICT_DIMENSIONS = ["原创性", "架构合理性", "代码质量", "文档质量", "完整性"]
+VERDICT_WEIGHTS = {
+    "原创性":     1.0,
+    "架构合理性": 1.0,
+    "代码质量":   1.0,
+    "文档质量":   1.0,
+    "完整性":     1.0,
+}
 
 _LANG_BY_EXT = {
     ".c": "c", ".h": "c", ".cc": "cpp", ".cpp": "cpp", ".hpp": "cpp",
@@ -397,6 +408,43 @@ def _verdict_fallback() -> dict:
     }
 
 
+def _normalize_verdict(parsed: dict) -> dict:
+    """统一评分尺度：维度分 clamp 到 0–100，总分=维度加权平均（确定性）。
+
+    LLM 偶尔把维度分按 0–10 制给（如 7/6/5），且自填的 score_total 与维度分
+    脱节。这里做两件事，保证落盘结果在固定 0–100 尺度上自洽：
+      1. 尺度纠偏：若所有维度分 ≤10，判定为误用 0–10 制，统一 ×10。
+      2. 重算总分：score_total = round(Σ w·score / Σ w)，覆盖 LLM 自填值。
+    幂等：对已归一化的结果再跑一次不变。
+    """
+    dims = parsed.get("dimensions") or []
+    raw_scores: list[float | None] = []
+    for d in dims:
+        try:
+            raw_scores.append(float(d.get("score")))
+        except (TypeError, ValueError):
+            raw_scores.append(None)
+
+    present = [s for s in raw_scores if s is not None]
+    if not present:
+        return parsed
+
+    scale = 10 if max(present) <= 10 else 1
+    num = den = 0.0
+    for d, raw in zip(dims, raw_scores):
+        if raw is None:
+            continue
+        score = max(0, min(100, int(round(raw * scale))))
+        d["score"] = score
+        w = VERDICT_WEIGHTS.get(d.get("name"), 1.0)
+        num += w * score
+        den += w
+
+    if den > 0:
+        parsed["score_total"] = int(round(num / den))
+    return parsed
+
+
 def _collect_subsys_summaries(tree_root: dict) -> list[dict]:
     out = []
     for c in tree_root.get("children", []):
@@ -462,7 +510,8 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
         timeout=600,
     )
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
-    return parsed
+    # 归一化评分：维度统一到 0–100，总分=维度加权平均（覆盖 LLM 自填值）
+    return _normalize_verdict(parsed)
 
 
 # 工具函数

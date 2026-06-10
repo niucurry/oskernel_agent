@@ -21,6 +21,7 @@ def _build_session_prompt(session_type) -> str:
         LAYER_2_CONSTRAINTS,
         get_task_desc,
     )
+    from ..prompts import skills
 
     _BAR = "━" * 30
 
@@ -33,6 +34,9 @@ def _build_session_prompt(session_type) -> str:
         parts.append(f"{_BAR}\n【工作流】\n\n" + workflow_text)
     if format_text:
         parts.append(format_text)
+    catalog = skills.build_catalog(session_type)
+    if catalog:
+        parts.append(catalog)
     return "\n\n".join(parts)
 
 

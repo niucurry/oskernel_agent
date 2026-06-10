@@ -30,6 +30,8 @@
    每个模块对应若干 file_paths（通常 1–4 个文件）
 
 5. 对每个模块用 read_file / find_symbol_definition 看具体实现细节
+   - 若某模块控制流跨多函数、难以说清执行路径：先 `load_skill('call-chain-tracing')`
+   - 若本子系统是「系统调用」：先 `load_skill('syscall-coverage')`
 
 工具调用总数 ≤12 次。
 
@@ -150,11 +152,12 @@ Tailwind CSS 排版。所以请直接输出**语义化 HTML 片段**：
   <li><strong>{模块 2}</strong>：{...}</li>
 </ul>
 
-<h3>与 reference OS 对比</h3>
-<p>{2–4 句：哪些部分对齐参考实现、哪些有改动、哪些是创新（如有）}</p>
-
 <p><strong>置信度</strong>：高 / 中 / 低</p>
 ```
+
+（当 user message 的 reference_os 非空时，在「模块拆分」之后追加一节「与 reference OS
+对比」；写法见技能 `reference-os-comparison`，先 `load_skill('reference-os-comparison')`
+再写。reference_os 为空则不写该节。）
 
 #### 3. 结构化 JSON（写入 outputs.json_path —— **不含 content 字段**）
 
