@@ -19,11 +19,47 @@ from __future__ import annotations
 
 import html
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Callable, Optional
 
 # 解析器签名：(file_path_str, line_str_or_None) -> URL（可点击跳转）或 None
 LinkResolver = Callable[[str, Optional[str]], Optional[str]]
+
+
+class TocIntegrityError(ValueError):
+    """目录定位校验失败：存在点击后无法准确定位的目录项。"""
+
+
+_TOC_HREF_RE = re.compile(r'class="toc-link[^"]*"[^>]*?href="#([^"]+)"')
+_ID_ATTR_RE = re.compile(r'\sid="([^"]+)"')
+
+
+def find_toc_locate_problems(html_text: str) -> list[str]:
+    """检查每个目录项(.toc-link)是否都能**精确定位到唯一目标**。
+
+    定位准确 ⇔ 目录项的 href="#X" 在文档里对应**恰好一个** id="X"：
+      - 0 个 → 点击无处可跳；
+      - ≥2 个 → 浏览器跳到第一个，可能不是目标，定位错乱。
+    返回问题描述列表，空列表表示全部目录项定位准确。供渲染器产出前自检调用。
+    """
+    hrefs = _TOC_HREF_RE.findall(html_text)
+    id_counts = Counter(_ID_ATTR_RE.findall(html_text))
+    problems: list[str] = []
+    for h in hrefs:
+        n = id_counts.get(h, 0)
+        if n == 0:
+            problems.append(f'目录项 #{h} 找不到对应锚点 —— 点击无法定位')
+        elif n > 1:
+            problems.append(f'锚点 id="{h}" 重复 {n} 次 —— 会定位到错误位置')
+    return problems
+
+
+def assert_toc_resolves(html_text: str) -> None:
+    """目录项若不能精确定位则抛 TocIntegrityError（渲染器产出前的硬校验）。"""
+    problems = find_toc_locate_problems(html_text)
+    if problems:
+        raise TocIntegrityError("；".join(problems))
 
 
 # CDN 资源
@@ -58,7 +94,7 @@ _INIT_SCRIPT = """
 
   function initScrollSpy() {
     var links = document.querySelectorAll('.toc-link');
-    var sections = document.querySelectorAll('section[data-section-id]');
+    var sections = document.querySelectorAll('[data-section-id]');
     if (!('IntersectionObserver' in window) || !links.length || !sections.length) return;
     var byId = {};
     links.forEach(function(a) {
@@ -73,13 +109,42 @@ _INIT_SCRIPT = """
           if (byId[id]) byId[id].classList.add('toc-active');
         }
       });
-    }, { rootMargin: '-30% 0px -60% 0px', threshold: 0 });
+    }, { rootMargin: '-20% 0px -70% 0px', threshold: 0 });
     sections.forEach(function(s) { observer.observe(s); });
+  }
+
+  // 点击目录项：若目标在折叠的树节点内，先展开沿途节点再平滑滚动
+  function initTocClick() {
+    document.querySelectorAll('.toc-link').forEach(function(a) {
+      a.addEventListener('click', function(ev) {
+        var id = (a.getAttribute('href') || '').replace(/^#/, '');
+        if (!id) return;
+        var target = document.getElementById(id);
+        if (!target) return;
+        ev.preventDefault();
+        var node = target;
+        while (node) {
+          if (node.classList && node.classList.contains('tree-node') &&
+              window.Alpine && typeof Alpine.$data === 'function') {
+            try {
+              var data = Alpine.$data(node);
+              if (data && data.open === false) data.open = true;
+            } catch (e) {}
+          }
+          node = node.parentElement;
+        }
+        setTimeout(function() {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 20);
+        if (history.replaceState) history.replaceState(null, '', '#' + id);
+      });
+    });
   }
 
   document.addEventListener('DOMContentLoaded', function() {
     initECharts();
     initScrollSpy();
+    initTocClick();
   });
 
   document.addEventListener('section:opened', function() {

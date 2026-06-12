@@ -216,7 +216,12 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
         except Exception as e:
             _log(f"[llm_batch] {task.batch_id} enrich 失败：{e}")
 
-    cache_write(task.cache_dir, task.cache_key, parsed)
+    # 只缓存成功结果：带 _error 的兜底**不写缓存**，否则一次瞬时失败（超时/限流/
+    # 子进程异常）会被永久冻住，后续每次跑都命中空结果而不再重试。不缓存则下次自愈。
+    if parsed.get("_error"):
+        _log(f"[llm_batch] {task.batch_id} 失败结果不入缓存，下次将重试")
+    else:
+        cache_write(task.cache_dir, task.cache_key, parsed)
     return parsed
 
 
