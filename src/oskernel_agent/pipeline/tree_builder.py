@@ -306,6 +306,9 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
     subsys_node["content"]    = parsed.get("content", "")
     subsys_node["highlights"] = parsed.get("highlights", [])
     subsys_node["issues"]     = parsed.get("issues", [])
+    # 聚合失败留痕：渲染端据此显著标注「内容缺失」，不再静默发空白
+    if parsed.get("_error"):
+        subsys_node["_error"] = parsed["_error"]
 
     # 把 modules 转成 children
     subsys_node["children"] = []

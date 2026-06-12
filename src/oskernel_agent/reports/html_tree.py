@@ -15,6 +15,7 @@ from .html import (
     _BROKEN_PREFIX,
     _CDN_HEAD,
     _INIT_SCRIPT,
+    assert_toc_resolves,
     linkify_html,
     make_file_link_resolver,
 )
@@ -48,9 +49,34 @@ document.addEventListener('section:opened', function () {
 
 _TREE_CSS = """
 :root { color-scheme: light dark; }
+html { scroll-behavior: smooth; }
 html, body {
   font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
                Helvetica, Arial, sans-serif;
+}
+/* 锚点跳转时与视口顶部留出间距，避免标题贴边 */
+[id] { scroll-margin-top: 1rem; }
+/* 左侧目录 */
+.toc-nav { scrollbar-width: thin; }
+.toc-nav a.toc-link {
+  display: block; padding: 0.2rem 0.6rem; border-radius: 0.375rem;
+  font-size: 0.8rem; line-height: 1.4; color: rgb(100 116 139);
+  border-left: 2px solid transparent; text-decoration: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.toc-nav a.toc-link:hover { color: rgb(15 23 42); background: rgb(148 163 184 / 0.12); }
+.toc-nav a.toc-link.toc-sub { padding-left: 1.4rem; font-size: 0.75rem; }
+.toc-nav a.toc-link.toc-sub2 {
+  padding-left: 2.2rem; font-size: 0.72rem; color: rgb(148 163 184);
+}
+.toc-nav a.toc-active {
+  color: rgb(37 99 235); font-weight: 600;
+  border-left-color: rgb(37 99 235); background: rgb(37 99 235 / 0.08);
+}
+@media (prefers-color-scheme: dark) {
+  .toc-nav a.toc-link { color: rgb(148 163 184); }
+  .toc-nav a.toc-link:hover { color: rgb(241 245 249); }
+  .toc-nav a.toc-active { color: rgb(96 165 250); border-left-color: rgb(96 165 250); }
 }
 a.file-jump { border-bottom: 1px dashed currentColor; text-decoration: none; }
 a.file-jump:hover { background: rgba(9, 105, 218, 0.08); }
@@ -182,7 +208,7 @@ def _render_similarity(sim: dict, resolver) -> str:
         if summary else ""
     )
     return f"""
-<section id="similarity" class="mb-8 p-6 rounded-lg border border-slate-300 dark:border-slate-700
+<section id="similarity" data-section-id="similarity" class="mb-8 p-6 rounded-lg border border-slate-300 dark:border-slate-700
                              bg-white dark:bg-slate-800 shadow-sm">
   <h2 class="text-xl font-semibold mb-3">与借鉴 OS 的相似度分析</h2>
   <div class="flex items-baseline gap-3 mb-3 text-sm">
@@ -238,7 +264,7 @@ def _render_verdict(verdict: dict, resolver) -> str:
         )
 
     return f"""
-<section id="verdict" class="mb-8 p-6 rounded-lg border border-slate-300 dark:border-slate-700
+<section id="verdict" data-section-id="verdict" class="mb-8 p-6 rounded-lg border border-slate-300 dark:border-slate-700
                              bg-white dark:bg-slate-800 shadow-sm">
   <div class="flex items-baseline gap-3 mb-3">
     <span class="text-3xl font-bold {cls}">{score_total}</span>
@@ -281,14 +307,38 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
     verdict_html = _render_verdict(verdict, resolver)
     similarity_html = _render_similarity(verdict.get("similarity") or {}, resolver)
 
+    # 为顶层子系统及其直接子节点（模块）分配稳定锚点 id（供目录跳转 + 滚动高亮）。
+    # 目录做两层：子系统（level 1）+ 模块（level 2），更深的节点不进目录以免过长。
+    tree_root = tree_json.get("tree", {}) or {}
+    subsystems = (tree_root.get("children") or []) \
+        if tree_root.get("type") == "root" else [tree_root]
+    anchor_ids: dict[int, str] = {}
+    toc_subs: list[tuple[str, str, int]] = []  # (anchor_id, label, level)
+    for i, node in enumerate(subsystems):
+        if not isinstance(node, dict):
+            continue
+        sid = f"subsys-{i}"
+        anchor_ids[id(node)] = sid
+        label = node.get("name") or node.get("path") or f"模块 {i + 1}"
+        toc_subs.append((sid, str(label), 1))
+        for j, child in enumerate(node.get("children") or []):
+            if not isinstance(child, dict):
+                continue
+            cid = f"subsys-{i}-{j}"
+            anchor_ids[id(child)] = cid
+            clabel = child.get("name") or child.get("path") or f"模块 {j + 1}"
+            toc_subs.append((cid, str(clabel), 2))
+
     # 直接生成静态 HTML 树（折叠状态由 Alpine 的 x-data open 控制），
     # 节点内部 HTML 片段在服务端预渲染好，file:line 链接已解析。
     tree_static_html = _render_tree_node_static(
-        tree_json.get("tree", {}) or {}, depth=0, resolver=resolver,
+        tree_root, depth=0, resolver=resolver, anchor_ids=anchor_ids,
     )
 
+    toc_html = _render_toc(verdict_html, similarity_html, toc_subs)
+
     title_safe = _esc(title)
-    return f"""<!DOCTYPE html>
+    doc = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
@@ -298,42 +348,80 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
 <style>{_TREE_CSS}</style>
 </head>
 <body class="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
-<main class="max-w-6xl mx-auto p-6 md:p-10">
-  <header class="mb-6">
-    <h1 class="text-2xl font-bold">{_esc(meta.get('repo','?'))}</h1>
-    <div class="text-sm text-slate-500">
-      评估时间：{_esc(meta.get('ts',''))} · 源文件：{_esc(meta.get('indexed_files',0))} 个
-    </div>
-  </header>
-  {verdict_html}
-  {similarity_html}
-  <section>
-    <h2 class="text-xl font-semibold mb-3">代码树（下层 = 中性描述）</h2>
-    <div class="tree-root rounded-lg border border-slate-200 dark:border-slate-700
-                bg-white dark:bg-slate-800 p-4">
-      {tree_static_html}
-    </div>
-  </section>
-</main>
+<div class="max-w-7xl mx-auto flex gap-6 px-4 md:px-6">
+  {toc_html}
+  <main class="flex-1 min-w-0 py-6 md:py-10">
+    <header class="mb-6">
+      <h1 class="text-2xl font-bold">{_esc(meta.get('repo','?'))}</h1>
+      <div class="text-sm text-slate-500">
+        评估时间：{_esc(meta.get('ts',''))} · 源文件：{_esc(meta.get('indexed_files',0))} 个
+      </div>
+    </header>
+    {verdict_html}
+    {similarity_html}
+    <section id="tree" data-section-id="tree">
+      <h2 class="text-xl font-semibold mb-3">代码树（下层 = 中性描述）</h2>
+      <div class="tree-root rounded-lg border border-slate-200 dark:border-slate-700
+                  bg-white dark:bg-slate-800 p-4">
+        {tree_static_html}
+      </div>
+    </section>
+  </main>
+</div>
 {_INIT_SCRIPT}
 {_TREE_RESIZE_ON_OPEN}
 </body>
 </html>
 """
+    # 产出前硬校验：每个目录项都必须精确定位到唯一锚点，否则抛错而非静默产出
+    assert_toc_resolves(doc)
+    return doc
 
 
-def _render_tree_node_static(node: dict, depth: int, resolver) -> str:
+def _render_toc(verdict_html: str, similarity_html: str,
+                toc_subs: list[tuple[str, str, int]]) -> str:
+    """左侧粘性目录：评判 / 相似度 / 代码树 + 子系统（含模块），点击平滑定位。
+
+    toc_subs 每项为 (anchor_id, label, level)：level 1 = 子系统，2 = 模块（缩进更深）。
+    """
+    items: list[str] = []
+    if verdict_html.strip():
+        items.append('<a class="toc-link" href="#verdict">综合评判</a>')
+    if similarity_html.strip():
+        items.append('<a class="toc-link" href="#similarity">相似度分析</a>')
+    items.append('<a class="toc-link" href="#tree">代码树</a>')
+    for sid, label, level in toc_subs:
+        sub_cls = "toc-sub2" if level >= 2 else "toc-sub"
+        items.append(
+            f'<a class="toc-link {sub_cls}" href="#{_esc(sid)}" '
+            f'title="{_esc(label)}">{_esc(label)}</a>'
+        )
+    links = "\n      ".join(items)
+    return f"""<nav class="toc-nav hidden lg:block w-56 shrink-0 self-start sticky top-0
+              max-h-screen overflow-y-auto py-6 md:py-10">
+    <div class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2 px-2">目录</div>
+    <div class="space-y-0.5">
+      {links}
+    </div>
+  </nav>"""
+
+
+def _render_tree_node_static(node: dict, depth: int, resolver,
+                             anchor_ids: dict[int, str] | None = None) -> str:
     """静态渲染单个节点，Alpine 控制折叠状态。
 
     节点类型由 pipeline 产出：root / subsystem / module（历史上还有 dir / file）。
     渲染策略与 type 解耦——按节点实际携带的字段渲染，任何带 children 的节点都递归，
     避免 type 取值与渲染分支不一致导致整棵子树被丢弃。
+
+    anchor_ids：{id(node): 锚点 id}，给左侧目录指向的顶层子系统挂上 HTML id。
     """
+    anchor_ids = anchor_ids or {}
     typ = node.get("type", "")
     # root 只是仓库名占位（与页眉 h1 重复），直接渲染子树，少一层冗余缩进
     if typ == "root":
         return "".join(
-            _render_tree_node_static(c, 1, resolver)
+            _render_tree_node_static(c, 1, resolver, anchor_ids)
             for c in (node.get("children") or [])
         )
     is_container = typ in ("dir", "root", "subsystem")
@@ -347,6 +435,15 @@ def _render_tree_node_static(node: dict, depth: int, resolver) -> str:
     # 节点标题字号随树深度递减：root > 子系统 > 模块 > 更深
     title_size = {0: "text-xl", 1: "text-lg", 2: "text-base"}.get(depth, "text-sm")
 
+    # 聚合失败留痕：标题旁红色徽章 + 展开后醒目提示，避免空白被当成「正常但没内容」
+    has_error = bool(node.get("_error"))
+    err_badge = (
+        '<span class="ml-1 px-1.5 py-0.5 rounded text-xs font-semibold '
+        'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" '
+        'title="该子系统 LLM 聚合失败，内容缺失——重跑可恢复">⚠ 聚合失败</span>'
+        if has_error else ""
+    )
+
     # 子系统/模块不打分，评分只在顶层 verdict 卡片展示
     head = (
         f'<div class="tree-toggle flex items-baseline gap-2 py-1" @click="open = !open; '
@@ -356,10 +453,18 @@ def _render_tree_node_static(node: dict, depth: int, resolver) -> str:
         f'<span class="font-semibold {title_size} {("text-cyan-700 dark:text-cyan-400" if is_container else "")}">'
         f'{name}{"/" if typ == "dir" else ""}</span>'
         f'{("<span class=\"text-xs text-slate-500\">("+role+")</span>") if role else ""}'
+        f'{err_badge}'
         f'</div>'
     )
 
     body_parts: list[str] = []
+    if has_error:
+        body_parts.append(
+            '<div class="mt-1 mb-2 p-2 rounded border border-red-300 dark:border-red-800 '
+            'bg-red-50 dark:bg-red-900/20 text-sm text-red-700 dark:text-red-300">'
+            '本子系统 LLM 聚合失败，正文与模块缺失（当前为规则兜底）。'
+            '重跑即可恢复；失败结果不再写入缓存。</div>'
+        )
     if summary:
         body_parts.append(
             f'<div class="text-sm text-slate-700 dark:text-slate-300 mt-1 mb-2">'
@@ -388,7 +493,7 @@ def _render_tree_node_static(node: dict, depth: int, resolver) -> str:
     children = node.get("children") or []
     if children:
         child_html = "".join(
-            _render_tree_node_static(c, depth + 1, resolver)
+            _render_tree_node_static(c, depth + 1, resolver, anchor_ids)
             for c in children
         )
         body_parts.append(f'<div class="ml-4 mt-2">{child_html}</div>')
@@ -398,8 +503,11 @@ def _render_tree_node_static(node: dict, depth: int, resolver) -> str:
         f'<div class="tree-body" x-show="open" x-cloak>{body}</div>'
         if body else ""
     )
+    # 顶层子系统挂锚点 id + data-section-id，供目录跳转与滚动高亮
+    sid = anchor_ids.get(id(node))
+    anchor_attr = f' id="{_esc(sid)}" data-section-id="{_esc(sid)}"' if sid else ""
     return (
-        f'<div class="tree-node mb-1" x-data="{{ open: {open_default} }}" '
+        f'<div class="tree-node mb-1"{anchor_attr} x-data="{{ open: {open_default} }}" '
         f'x-init="(function(){{ const s = localStorage.getItem(\'tree:{_esc(node_key)}\'); '
         f'if (s !== null) open = (s === \'1\'); }})()">'
         f'{head}{body_div}</div>'
