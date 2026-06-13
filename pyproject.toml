@@ -16,9 +16,18 @@ oskernel-setup = "oskernel_agent.cli.setup_opencode:setup"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+# 仅打包既有的 oskernel_agent；查重引擎模块通过 `python -m src.<module>` 源码运行，
+# 不作为已安装包，避免与 src.* 导入路径冲突。
+include = ["oskernel_agent*"]
 
 [tool.setuptools.package-data]
 "oskernel_agent.prompts" = ["templates/*.md"]
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
+
+[tool.pytest.ini_options]
+# pythonpath=["."] 让 `import src.xxx`（查重引擎）可用；
+# 现有 tests/test_toc.py 自行把 src/ 加入 path 导入 oskernel_agent，二者互不影响。
+pythonpath = ["."]
+testpaths = ["tests"]
