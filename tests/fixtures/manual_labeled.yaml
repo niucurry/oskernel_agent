@@ -1,0 +1,14 @@
+# 人工标注评测集（可选）。评测脚本 `python -m tests.evaluation.run` 会与合成集一起跑。
+# 每条 pair：A / B 两个函数的定位（repo_id + file_path + start_line，需已在 functions.db 中），
+# label（1=互为克隆/抄袭，0=不相关），note（人工说明）。
+# 评测时把 B 视为"待查函数"、A 视为"应命中的历史来源"。
+pairs: []
+# 示例（取消注释并改成真实定位后启用）：
+#  - a: {repo_id: "2023/team_alpha", file_path: "os/src/mm/frame.rs", start_line: 40}
+#    b: {repo_id: "2022/team_beta",  file_path: "kernel/mm/frame_alloc.rs", start_line: 88}
+#    label: 1
+#    note: "buddy 帧分配器，疑似系统性改名抄袭"
+#  - a: {repo_id: "2023/team_alpha", file_path: "os/src/fs/inode.rs", start_line: 12}
+#    b: {repo_id: "2021/team_gamma", file_path: "fs/vfs.rs", start_line: 5}
+#    label: 0
+#    note: "都是 VFS 接口但实现不同"

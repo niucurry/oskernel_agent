@@ -501,3 +501,85 @@ python -m src.review --suspects data/output/{repo}_suspects.json
 > LLM 客户端封装为可注入接口（[src/review/llm.py](src/review/llm.py)），单元测试用 mock LLM 覆盖正常 JSON、格式重试、行号越界过滤、三次投票分歧等路径，无需联网。`--limit N` 可只复核前 N 个 review 档（控制成本）。
 
 **验收实测**：用真实 DeepSeek 复核 5 个嫌疑对（RR 调度 / buddy 分配 / RISC-V trap 上下文 / 链表头插 / `sys_getpid` vs `sys_getppid`），reasoning 言之有物且逐条引用行号——前四者正确判为 `common_pattern`（教科书通用模式），后者正确判为 `false_positive`；evidence 行号全部通过回源校验。
+
+### 辅助信号通道（`src.metadata`）
+
+在主漏斗之外叠加三个辅助信号，输出 `{repo}_suspects_final.json`：
+
+```bash
+python -m src.metadata --suspects data/output/{repo}_suspects_v2.json \
+    [--query-repo <新作品路径>] [--baselines --qdrant-path data/db/qdrant_local]
+```
+
+1. **独特字符串**（独立召回路径）：基于 `unique_strings` 表建反向索引 `string_value → [(repo_id, func_id)]`，**出现在 > 5 个不同仓库的通用字符串剔除**。新作品函数的字符串命中历史函数时，bump 既有对的 `evidence.unique_string_matches`，或**新建 `SuspectPair`（tier=review，`source=string_channel`）**。
+2. **基线白底库**：基线仓库（[config/baselines.yaml](config/baselines.yaml)：rCore-Tutorial / xv6-riscv / 组委会模板）经 ingest+normalize+embed 入库，Qdrant payload 标 `is_baseline=true`。对每个嫌疑对，双方函数分别查与基线库的最高相似度；**双方都与同一基线函数相似度 > 0.85 才** 标 `evidence.baseline_flag=true` 并降级 `baseline_derived`（不再进 LLM 复核，报告单独列出）。
+3. **commit 异常信号**：`git blame` 定位引入嫌疑函数的 commit，结合 `_meta.json` 检查：单次新增 > 2000 行 / message 属模糊模板（init/add files/update，规则可配）/ 引入时间距比赛开始 < 3 天却已是完整实现。结果写 `evidence.commit_signals`，仅作报告附注、不改 tier。
+
+规则参数见 [config/settings.yaml](config/settings.yaml) 的 `metadata` 段。通道 1 仅需 `functions.db`；通道 2 需 Qdrant 中已有基线数据；通道 3 需 `--query-repo`（含 `_meta.json`）。
+
+**验收实测**：通用字符串（6 仓库）被正确过滤、独特字符串命中新建嫌疑对；基线扣除仅在双侧命中同一函数时触发（单侧不扣）；`git blame` 正确定位函数引入 commit。端到端：两支 rCore 衍生的 RISC-V trap 上下文函数都命中同一基线 trap 函数（sim 1.0），被吸收为 `baseline_derived`，不再进 review。
+
+### 报告生成（`src.report`）
+
+报告采用「模板 + 填空」控制幻觉：固定五章节，每章节只把**该章节相关的结构化数据**喂给 LLM；表格与统计由代码直接生成（不过 LLM）。
+
+1. **溯源结论**：按 tier 加权命中排名的 Top-3 历史作品 + 嫌疑对/confirmed/review 分布 + 涉及模块（LLM 据此写结论）。
+2. **模块级对照表**：sched/mm/fs/trap/driver 各模块最相似历史来源（纯代码生成 Markdown 表）。
+3. **高相似清单**：所有 `confirmed` 与 `verdict=likely_clone` 对，双方 文件:行号 / 相似度 / clone_type（表格代码生成），reasoning 由 LLM 压到 50 字内。
+4. **创新点**：新作品中与全历史库最高相似度 < 0.5 且行数 > 30 的函数 Top-10，LLM 据代码描述「独立实现部分」，**每条带 文件:行号 引用**。
+5. **附注信号**：`baseline_derived` 统计、commit 异常信号、`disputed` 待人工复核清单。
+
+**后置校验**：抽取报告所有 `文件:行号` 引用回源验证（落在真实函数区间内），**无法验证的整句删除**并在末尾附「已删除 n 条」。
+
+历史作品档案（独立命令）：
+
+```bash
+python -m src.report profile --all     # 每个历史仓库一份 data/db/profiles/{repo_id}.md
+```
+
+档案输入为该仓库模块分布 + 各模块代表函数代码 + README，同样强制行号引用 + 后置校验；review 复核时会把候选方档案摘要（前 300 字）附进嫌疑卡片。
+
+### 全流水线总入口（`src.pipeline`）
+
+```bash
+python -m src.pipeline --repo <新作品路径或 git url> [--top-k 20] [--skip-llm] \
+    [--resume-from <step>] [--no-simhash] [--baselines] [--review-limit N]
+```
+
+按序执行 **ingest → recall(含 normalize) → exact → segment → metadata → review → report**，每步落盘中间 JSON，任一步失败可 `--resume-from <step>` 续跑；终端打印每步耗时与**漏斗数字**（候选逐层递减）。前提：历史库已离线建好（`src.normalize` → `src.embed build` → `src.simhash build`）。
+
+**验收实测**：对 rCore-Tutorial-v3 全库（448 函数）建库后，把其中 easy-fs 作为伪新作品**一条命令**跑通全流水线，输出 `data/output/{repo}_report.md`。漏斗：recall 39 函数/118 候选 → exact 比对 77 → confirmed 40 / review 7 / weak 14 → review 复核（likely_clone 1 / common_pattern 4）。报告五章节数字与中间 JSON 完全一致；**报告中无法回源的 文件:行号 引用 = 0**。
+
+---
+
+## 六、评测体系（`tests/evaluation`）
+
+合成「已知克隆」评测集 + 多维指标统计 + CI 回归基线。
+
+```bash
+python -m tests.evaluation.synthesize --per-class 50   # 生成 tests/fixtures/eval_set.json
+python -m tests.evaluation.run [--with-llm] [--check]  # 评测并存历史结果
+```
+
+- **合成**（`synthesize`）：从 `functions.db` 随机抽函数，用 tree-sitter 生成四类已知克隆——
+  **T1** 原样复制 / **T2** 系统性改名（一致重写标识符）/ **T3** 增删语句（随机删 ~20% + 插入日志语句）/
+  **T4** 结构重写（if-else→match、for→while-let）。每类 50 对 + 等量随机负样本，每个变体都经 tree-sitter
+  重解析校验合法（含语法错误则丢弃重采）。带 ground truth 标签存 `tests/fixtures/eval_set.json`。
+- **评测**（`run`）：把样本注入各层，统计每类的 Layer1 SimHash / Layer2 向量 / 级联 / 最终召回，
+  总体 precision/recall，可选 LLM verdict 准确率，及耗时；输出 Markdown 表并存
+  `tests/evaluation/history/{date}.json` 便于跟踪劣化。
+- **人工标注集**：`tests/fixtures/manual_labeled.yaml`（pair: A/B 函数定位 + label + note），评测时与合成集一并跑。
+- **回归基线**：`--check` 时 T1/T2 最终召回 < 0.95 或 T3 < 0.80 即非零退出；CI（[.github/workflows/eval.yml](.github/workflows/eval.yml) / [.gitlab-ci.yml](.gitlab-ci.yml)）跑小型评测集做回归门禁。
+
+**第一版基线**（rCore-Tutorial-v3 全库 448 函数，每类 50 + 200 负样本）：
+
+| 类别 | L1 SimHash | L2 向量 | 级联 | 最终召回 |
+| --- | --- | --- | --- | --- |
+| T1 原样 | 1.00 | 1.00 | 1.00 | 1.00 |
+| T2 改名 | 0.40 | 1.00 | 0.40 | 1.00 |
+| T3 增删 | 0.64 | 0.98 | 0.64 | 0.88 |
+| T4 重写 | 0.46 | 0.98 | 0.46 | 1.00 |
+
+总体 **precision = 0.995**（200 负样本仅 1 误报）、**recall = 0.97**。
+
+**关键结论**：Layer 2 向量召回对四类变换都很强（0.98–1.00）；但 **Layer 1 SimHash 对 T2 改名 / T4 结构重写召回偏低（0.40–0.46）**——特征 token 随重命名/重构而改变。因级联召回受 SimHash 上限制约（cascade≈L1），**SimHash 宜作为向量召回的补充通道（取并集）或仅用于大规模初筛，不应作为硬性前置过滤**，否则会漏掉改名/重构型克隆。这是评测体系给出的第一条系统性改进依据。
