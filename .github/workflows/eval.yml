@@ -1,0 +1,57 @@
+name: clone-detection-ci
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: |
+          python -m pip install -U pip
+          pip install -r requirements.txt
+      - name: Run unit tests
+        # 依赖 codet5p 模型的用例在离线环境会自动 skip
+        run: python -m pytest tests/ -q -p no:cacheprovider
+
+  eval-regression:
+    runs-on: ubuntu-latest
+    # 评测需要嵌入模型与向量库，较重；仅在主干/特性分支跑小型集
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: |
+          python -m pip install -U pip
+          pip install -r requirements.txt
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-codet5p-110m
+      - name: Build small historical index
+        run: |
+          git clone --depth 1 https://github.com/rcore-os/rCore-Tutorial-v3 data/repos/rcore/v3
+          python -m src.normalize --repo data/repos/rcore/v3 --repo-id rcore/v3 --db data/db/functions.db
+          python -m src.embed --qdrant-path data/db/qdrant_local build --all --db data/db/functions.db
+          python -m src.simhash --idf data/db/idf.json --index data/db/simhash_index.pkl build --db data/db/functions.db
+      - name: Synthesize small eval set
+        run: python -m tests.evaluation.synthesize --per-class 15 --out tests/fixtures/eval_set.json
+      - name: Run evaluation with regression gate
+        # T1/T2 最终召回 < 0.95 或 T3 < 0.80 → 失败
+        run: python -m tests.evaluation.run --check
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: tests/evaluation/history/

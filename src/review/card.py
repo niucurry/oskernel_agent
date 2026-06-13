@@ -70,6 +70,17 @@ def _func_header(side: str, f: dict) -> str:
     )
 
 
+def _candidate_profile(repo_id: str) -> str:
+    """候选方历史作品档案摘要（前 300 字），无则空。"""
+    try:
+        from src.report.profile import load_profile_summary
+
+        summary = load_profile_summary(repo_id)
+    except Exception:  # noqa: BLE001 — 档案缺失不应阻断复核
+        summary = ""
+    return f"\n【历史作品档案摘要】\n{summary}\n" if summary else ""
+
+
 def _segment_block(ev: dict) -> str:
     """段级匹配信息（来自 Layer 3 分段验证）。"""
     sh = ev.get("segment_hits")
@@ -116,7 +127,8 @@ def build_card(suspect: dict, *, max_tokens: int = 6000, context_lines: int = 10
     header = (
         "# 嫌疑对复核卡片\n"
         f"{_func_header('新作品', q)}\n"
-        f"{_func_header('历史作品', c)}\n\n"
+        f"{_func_header('历史作品', c)}\n"
+        f"{_candidate_profile(c.get('repo_id', ''))}\n"
         f"{_evidence_block(suspect)}\n"
     )
 

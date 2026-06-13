@@ -78,8 +78,10 @@ class VectorStore:
         exclude_repo_id: str | None = None,
         module_tag: str | None = None,
         candidate_ids: list[int] | None = None,
+        baseline_only: bool = False,
     ) -> list[dict]:
-        """检索 top_k；可排除某 repo_id、限定 module_tag、限定候选 id 集合（SimHash 粗筛）。
+        """检索 top_k；可排除某 repo_id、限定 module_tag、限定候选 id 集合（SimHash 粗筛）、
+        或仅检索基线库（is_baseline=true，供 metadata 扣除）。
 
         返回含 score+payload 的 dict 列表。candidate_ids 为空列表时不会命中任何点。
         """
@@ -93,6 +95,8 @@ class VectorStore:
             must.append(
                 models.FieldCondition(key="module_tag", match=models.MatchValue(value=module_tag))
             )
+        if baseline_only:
+            must.append(models.FieldCondition(key="is_baseline", match=models.MatchValue(value=True)))
         if candidate_ids is not None:
             must.append(models.HasIdCondition(has_id=list(candidate_ids)))
         flt = models.Filter(must=must or None, must_not=must_not or None) if (must or must_not) else None

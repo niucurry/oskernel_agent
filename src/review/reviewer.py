@@ -80,8 +80,8 @@ def run_review(
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_name = suspects_path.name.replace("_suspects.json", "") + "_reviewed.json"
-    out_path = out_dir / out_name
+    base = suspects_path.stem.split("_suspects")[0] or suspects_path.stem
+    out_path = out_dir / f"{base}_reviewed.json"
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("复核完成：{} 个 → {}（verdict 分布 {}）", result["n_reviewed"], out_path, result["verdict_counts"])
     result["_output_path"] = str(out_path)
