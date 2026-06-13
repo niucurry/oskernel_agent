@@ -6,3 +6,22 @@ tree-sitter-c==0.24.1
 tree-sitter-rust==0.24.2
 mcp[cli]>=1.0.0
 rich>=13.0
+
+# --- 查重引擎（feature/clone-detection-engine） ---
+pydantic>=2.6
+python-gitlab>=4.4
+pyyaml>=6.0
+loguru>=0.7
+python-dotenv>=1.0
+pytest>=8.0
+# Layer 2 向量召回（src.embed）
+# 注意：codet5p 的 trust_remote_code 模型仅兼容 transformers 4.x，勿升级到 5.x
+transformers>=4.40,<5
+torch>=2.0
+numpy>=1.24
+qdrant-client>=1.7
+tqdm>=4.66
+# Layer 1 SimHash 粗筛（src.simhash）
+xxhash>=3.4
+# Layer 3 分段向量验证（src.segment）
+scipy>=1.10

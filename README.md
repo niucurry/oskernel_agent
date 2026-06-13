@@ -293,3 +293,211 @@ python scripts/build_reference_db.py --reference rcore-tutorial-v3 --repo-path /
 | ------------------- | ------------------------------------------------- |
 | `oskernel-agent`    | `python -m oskernel_agent.cli.agent`              |
 | `oskernel-setup`    | `python -m oskernel_agent.cli.setup_opencode`     |
+
+---
+
+## 五、作品查重引擎（feature/clone-detection-engine）
+
+在「描述报告」之外，本项目正在构建一套**历史作品查重引擎**：对新提交作品，从约 200 个历史决赛仓库中找出相似代码并生成评审报告。查重链路（`src/` 下 `ingest/normalize/simhash/embed/segment/exact/metadata/review/report` 各子模块）与现有报告生成（`oskernel_agent.reports`）**完全独立、互不影响**。
+
+四层漏斗：SimHash 粗筛 → 向量 ANN 召回（CodeT5+ + Qdrant）→ 分段向量验证 → 精确比对 + 元数据信号 → LLM 复核 + 评审报告。每个子模块都有独立 CLI 入口（`python -m src.<module>`），中间产物落盘 JSON/SQLite 解耦。
+
+依赖服务（Qdrant 向量库）：
+
+```bash
+docker compose up -d        # 启动 Qdrant（http://localhost:6333/dashboard）
+```
+
+### 数据获取（`src.ingest`）
+
+从 GitLab 批量克隆历史作品并抓取元数据。
+
+**1. 准备环境变量**
+
+```bash
+cp .env.example .env
+# 编辑 .env，填入 GITLAB_TOKEN（read_api / read_repository 权限即可）
+# 自建 GitLab 实例还需设置 GITLAB_URL
+```
+
+`GITLAB_TOKEN` 从环境变量读取（也会自动加载 `.env`）。不设置时以匿名方式访问，仅能拉取公开仓库且受速率限制。
+
+**2. 准备仓库清单**
+
+```bash
+# 生成含 3 条示例数据的模板（已存在则不覆盖）
+python -m src.ingest --init-template --config config/repos.yaml
+```
+
+模板 `config/repos.yaml` 每条记录字段：`repo_url` / `year` / `team_name` / `award_level`。把示例替换为真实仓库即可。
+
+**3. 批量拉取**
+
+```bash
+python -m src.ingest --config config/repos.yaml          # 断点续传：已克隆的仓库自动跳过
+python -m src.ingest --config config/repos.yaml --force  # 强制重新克隆
+```
+
+仓库克隆到 `data/repos/{year}/{team_name}/`；每个仓库目录下额外生成 `_meta.json`，包含：
+
+- **commit 历史**：每条含 `sha` / `author` / `date` / `message` / 变更文件数 / 增删行数；
+- **fork 关系**：`forked_from_project` 字段；
+- **项目元数据**：创建时间 `created_at`、贡献者列表 `contributors`。
+
+| 参数                  | 说明                                                  |
+| --------------------- | ----------------------------------------------------- |
+| `--config PATH`       | repos.yaml 路径（默认 `config/repos.yaml`）           |
+| `--repos-root DIR`    | 克隆输出根目录（默认 `data/repos`）                   |
+| `--force`             | 强制重新克隆已存在的仓库                              |
+| `--gitlab-url URL`    | GitLab 实例地址（覆盖 `GITLAB_URL`）                  |
+| `--no-commit-stats`   | 跳过逐 commit 的增删行/变更文件数抓取（更快）         |
+| `--init-template`     | 生成示例 `repos.yaml` 模板后退出                      |
+
+**测试**
+
+```bash
+uv pip install -r requirements.txt   # 或 pip install -r requirements.txt
+python -m pytest tests/              # ingest 用 mock 的 GitLab API 验证 _meta.json 字段完整性
+```
+
+### 代码归一化（`src.normalize`）
+
+基于 tree-sitter 把仓库切分为函数，做 AST 级归一化，结果写入 SQLite（`data/db/functions.db`）。
+
+```bash
+python -m src.normalize --repo data/repos/2024/team-x   # 单个仓库
+python -m src.normalize --all                            # 遍历 data/repos 下全部仓库
+```
+
+处理流程：
+
+1. **文件发现**：处理 `.rs` / `.c` / `.h` / `.S` / `.asm`；排除 `target/`、`build/`、`.git/`、`vendor/`、`third_party/` 以及任何含 `LICENSE`/`COPYING` 的第三方子目录；超过 `--max-lines`（默认 10000）行的文件跳过。
+2. **函数切分**：Rust 取 `function_item`（含 impl 方法），`macro_definition` 单独标 `macro`；C 取 `function_definition`；汇编按标号切段；小于 `--min-lines`（默认 5）行的函数跳过。
+3. **模块归类**：按路径关键词归类（规则见 [config/module_rules.yaml](config/module_rules.yaml)），标签 `sched/mm/fs/trap/driver/arch/macro/other`。
+4. **归一化**（生成 `normalized_code`）：用户标识符脱敏为 `VAR_n`/`FUNC_n`（同名同号、首现排序），保留类型名与白名单符号（[config/keep_symbols.txt](config/keep_symbols.txt)）；删注释；字符串→`STR`（长度 ≥ 8 的原文存入 `unique_strings` 表）；数字按量级→`INT_S`/`INT_M`/`INT_HEX`；按语句压缩空白。**改变量名后 `normalized_code` 完全一致。**
+
+| 参数            | 说明                                            |
+| --------------- | ----------------------------------------------- |
+| `--repo PATH`   | 单个仓库目录（与 `--all` 互斥）                 |
+| `--all`         | 遍历 `--repos-root` 下全部仓库                  |
+| `--repo-id ID`  | 覆盖自动推断的 `repo_id`                        |
+| `--db PATH`     | SQLite 输出（默认 `data/db/functions.db`）      |
+| `--min-lines N` | 小于该行数的函数跳过（默认 5）                  |
+| `--max-lines N` | 超过该行数的文件跳过（默认 10000）             |
+
+输出库表：`functions(id, repo_id, file_path, start_line, end_line, func_name, module_tag, lang, raw_code, normalized_code, feature_tokens)` 与 `unique_strings(repo_id, func_id, string_value)`。按 `repo_id` 幂等写入（重跑同一仓库先删旧记录）。`feature_tokens` 是 `extract_feature_tokens` 抽取的特征集合（`cf:` 控制流 / `ty:` 类型 / `lib:` 保留库符号调用 / `call:` 其它调用 / asm 的 `op:` 助记符），供 Layer 1 SimHash 使用。
+
+### Layer 1 SimHash 粗筛（`src.simhash`）
+
+在向量检索之前用 SimHash 做廉价粗筛，快速排除明显不相似的函数对。
+
+```bash
+python -m src.simhash build                    # 从 functions.db 建 IDF + SimHash 索引
+python -m src.simhash query --repo <仓库>      # 报告每函数的 SimHash 候选规模
+```
+
+- **特征**：用 `functions.feature_tokens`。
+- **权重**：全库 IDF，`weight(t)=log(N/df(t))`，写 `data/db/idf.json`。
+- **指纹**：每个 token 用 xxhash 算 64 位、按 IDF 加权累加再符号化得 64 位 SimHash；同时保存每位累加绝对值（量化为 uint8）用于比特松弛。
+- **分段索引**：64 位切 4 段 × 16 位，每段一个 `dict[seg, [func_id]]`，pickle 存 `data/db/simhash_index.pkl`；`query` 4 段分别查表取并集。**比特松弛**（默认开）：每段额外翻转累加绝对值最低的 1 位再查一次（每段 2 次、共 8 次查表），召回少量比特差异的近似指纹。
+
+集成：`src.embed query --with-simhash` 先 SimHash 召回候选 `func_id` 集合，作为 Qdrant id 过滤传入向量检索（Layer 1 → Layer 2 漏斗），召回 JSON 的 `simhash` 字段记录耗时与候选池规模。
+
+**验收实测**：
+- 改名版函数对（变量重命名不改变特征 token）SimHash 汉明距离 = 0（≤ 8）；随机无关函数对平均距离 ≈ 31（28–36 理论区间）。
+- 开/关 SimHash 端到端对比（rCore-Tutorial-v3 全库 448 函数建索引，用其中 easy-fs 的改名副本作伪新作品）：**confirmed + review 档（真嫌疑）保留率 100%（17/17），SimHash 未漏任何真嫌疑**；被滤掉的 3 个全是 weak 档（score 0.5–0.62）的松散跨函数匹配。开关后 SimHash 反而把固定 top-20 向量召回挤出的结构克隆捞回（confirmed 40 vs 15），即粗筛同时**提升**了真克隆召回。
+- 注：耗时优势是**大规模**（≈200 仓库）属性——本实验语料仅 448 函数、向量检索本就亚毫秒级，故此处看不出提速（OFF 0.12s / ON 0.18s）。
+
+### Layer 2 向量召回（`src.embed`）
+
+用 `Salesforce/codet5p-110m-embedding`（256 维）嵌入 `normalized_code`，写入 Qdrant，对新作品做 ANN 召回。模型名/滑窗/batch 等见 [config/settings.yaml](config/settings.yaml)。
+
+> ⚠️ codet5p 的 `trust_remote_code` 模型**仅兼容 transformers 4.x**（5.x 会报 `is_decoder` 缺失），`requirements.txt` 已固定 `transformers>=4.40,<5`。
+
+**建库**（遍历 `functions.db` 全部函数，增量入库）：
+
+```bash
+docker compose up -d                       # 启动 Qdrant（有 docker 时）
+python -m src.embed build --all            # 默认连 http://localhost:6333
+
+# 无 docker：用本地磁盘向量库 或 内存库
+python -m src.embed --qdrant-path data/db/qdrant_local build --all
+python -m src.embed --in-memory build --all
+```
+
+**检索**（对新作品：归一化 → 嵌入 → top-k 召回）：
+
+```bash
+python -m src.embed --qdrant-path data/db/qdrant_local query --repo path/to/new-submission
+```
+
+检索流程：调用 `src.normalize` 切分归一化新作品 → 嵌入每个函数 → Qdrant top-k（默认 20）；**排除同 `repo_id`，优先同 `module_tag` 内检索，不足再放开模块限制补足**。结果写 `data/output/{repo_name}_recall.json`（每条 = query 函数 + 候选列表，含分数与全部 payload）。
+
+完成后终端打印快速统计：相似度 `>0.9 / 0.8-0.9 / 0.7-0.8` 的候选对数量，以及按历史仓库聚合的**命中 Top-5 排行**（最初步的「新作品最像哪几个历史作品」）。
+
+Qdrant payload：`repo_id, year, file_path, start_line, end_line, func_name, module_tag, is_baseline`；点 id 复用 `functions.id`（保证增量去重）。
+
+**验收实测**：改名对（归一化等价）cosine ≈ 1.0、无关对 ≈ 0.31；对 rCore-Tutorial-v3 建库 448 函数，用其轻微改名版查询，**Top-1 自命中 94.6%**（其余均为库内归一化完全相同的函数碰撞，无真实漏检）。
+
+### Layer 4 精确比对与嫌疑对生成（`src.exact`）
+
+对召回结果逐对做**行级精确比对**，分流成不同可信度的嫌疑对。
+
+```bash
+python -m src.exact verify --recall data/output/{repo}_recall.json --db data/db/functions.db
+```
+
+`ExactMatcher`（`difflib` 自建，无外部依赖）对每对函数跑两遍：
+- **exact 通道**：原文逐行比对，原文相同的行标 `exact`；
+- **renamed 通道**：对原文做**逐行保序的轻量掩码**（标识符→`ID`、数字→`NUM`、字符串→`STR`、去注释，**不重排行**）后比对，仅掩码后才相同的行标 `renamed`。
+
+> 注：renamed 通道刻意用「逐行掩码」而非 `src.normalize` 的 `normalized_code`——后者按 AST 语句重排了行，行号无法回溯；逐行掩码保持行数不变，使匹配行区间能精确换算回**绝对文件行号**（`remap_spans`，函数内第 1 行 == 文件第 `start_line` 行）。
+
+流水线：读 `*_recall.json` → 对 `vector_similarity > 0.7` 的候选从 `functions.db` 取出原文比对 → 组装 `SuspectPair`（填 `evidence.vector_similarity` / `exact_match_lines`，`matched_spans` 换算为绝对行号）→ 按 `similar_line_ratio` 分流：
+
+| 档位 | `similar_line_ratio` | 含义 |
+| --- | --- | --- |
+| `confirmed` | > 0.95 | 铁证，后续 LLM 只写解释 |
+| `review` | 0.7 – 0.95 | 核心复核区间 |
+| `weak` | 0.5 – 0.7 | 弱信号 |
+| （丢弃） | < 0.5 | 不输出 |
+
+输出 `data/output/{repo}_suspects.json`。**验收实测**：延续上面的伪新作品实验，比对 6876 对 → 977 个嫌疑对（confirmed 564 / review 119 / weak 294），confirmed 级把改名版函数与原函数精确对上（行区间正确换算为绝对行号）。
+
+### Layer 3 分段向量验证（`src.segment`）
+
+对 `tier=review` / `weak` 的嫌疑对做**函数内分段**的细粒度比对，把"整体相似但实现不同"的对甄别出来。
+
+```bash
+python -m src.segment --suspects data/output/{repo}_suspects.json
+# 输出 {repo}_suspects_v2.json，原文件保留
+```
+
+- **分段**（`normalize.segment_function`）：函数 < 15 行整体作一段；否则按顶层控制流切——每个 if/else 分支体、loop/while/for 体、match 臂各一段，其余连续语句每 10 行聚一段，< 4 行的段并入相邻段。每段带绝对行号与逐段 `normalized_text`。
+- **匹配**：双方各段用 Embedder 嵌入（跨所有对一次性 batch），两两算 cosine，用匈牙利算法（`scipy.optimize.linear_sum_assignment`）做最优一对一匹配，cosine > 0.85 记一次命中，避免一段重复命中多段。
+- **覆盖率**：`q_coverage`/`c_coverage`=命中段数/各自总段数，连同命中段对写入 `evidence.segment_hits`。
+- **重打分**：`final_score = 0.4·min(q_cov,c_cov) + 0.3·exact_match_ratio + 0.3·vector_similarity`。
+- **升降级**：`weak` 且重打分 > 0.75 → 升 `review`；`review` 且双向覆盖 < 0.3 且 `exact_match_ratio` < 0.2 → 降 `dismissed`（写明原因）。命中段对会传入 Layer 5 嫌疑卡片。
+
+**验收实测**：优先级扫描调度器 vs 其改名版（真克隆）双向覆盖 = 1.0；vs 轮转调度器（同主题不同算法）覆盖 = 0.0，被正确降级 `dismissed`；一个被误判 `weak` 的克隆经分段重打分（0.76）升级 `review`——降级/升级均合理。
+
+### Layer 5 LLM 复核（`src.review`）
+
+对 `tier=review` 的嫌疑对调用 LLM（OpenAI 兼容 API，默认 `deepseek-chat`）复核，给出结构化判定。模型名在 [config/settings.yaml](config/settings.yaml) 的 `llm` 段，`base_url`/`api_key` 从环境变量 `LLM_BASE_URL`/`LLM_API_KEY` 读（写入 `.env` 即可）。
+
+```bash
+python -m src.review --suspects data/output/{repo}_suspects.json
+```
+
+流程：
+1. **嫌疑卡片**：每对生成文本卡片——双方 `raw_code`（标注绝对行号）、仓库/文件/模块信息、下层全部证据（向量相似度、精确匹配行数、`matched_spans`）；代码超长时只保留匹配区 ±10 行，其余用「... [省略 n 行] ...」，总长压在 6000 token 内。
+2. **复核 prompt**（[src/review/prompts.py](src/review/prompts.py)）：硬性规则要求只依据卡片内容、必须考虑 OS 内核教科书式通用模式（RR 调度/buddy 分配/RISC-V trap 等）、每条证据引用双方行号、不确定时倾向 `false_positive`/低置信度，严格输出固定 JSON schema。
+3. **投票**：`temperature=0.3` 调 3 次，verdict 取多数；平票/三次全不同 → `disputed` 并保留三次原始输出；confidence 取均值；JSON 解析失败追加纠正指令重试一次，仍失败标 `parse_error`。
+4. **后置校验**：正则抽取 LLM evidence 行号回源验证是否落在对应函数行号范围内，越界条目删除并记警告；`likely_clone` 但证据清空则降级为 `disputed`。
+5. **并发**：`asyncio` 并发（默认 5），带网络重试与限速。
+
+输出 `data/output/{repo}_reviewed.json`。verdict 取值：`high_similarity` / `likely_clone` / `common_pattern` / `false_positive`（聚合态另有 `disputed` / `parse_error`）。
+
+> LLM 客户端封装为可注入接口（[src/review/llm.py](src/review/llm.py)），单元测试用 mock LLM 覆盖正常 JSON、格式重试、行号越界过滤、三次投票分歧等路径，无需联网。`--limit N` 可只复核前 N 个 review 档（控制成本）。
+
+**验收实测**：用真实 DeepSeek 复核 5 个嫌疑对（RR 调度 / buddy 分配 / RISC-V trap 上下文 / 链表头插 / `sys_getpid` vs `sys_getppid`），reasoning 言之有物且逐条引用行号——前四者正确判为 `common_pattern`（教科书通用模式），后者正确判为 `false_positive`；evidence 行号全部通过回源校验。
