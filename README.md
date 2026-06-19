@@ -302,6 +302,27 @@ python scripts/build_reference_db.py --reference rcore-tutorial-v3 --repo-path /
 
 四层漏斗：SimHash 粗筛 → 向量 ANN 召回（CodeT5+ + Qdrant）→ 分段向量验证 → 精确比对 + 元数据信号 → LLM 复核 + 评审报告。每个子模块都有独立 CLI 入口（`python -m src.<module>`），中间产物落盘 JSON/SQLite 解耦。
 
+#### 最简用法：两条命令
+
+整个引擎对日常使用只暴露两条命令——**建库**一次、**对比**多次。
+
+```bash
+# ① 建历史库：把真实仓库地址填进 config/repos.yaml，然后一条命令搞定
+#    （拉取 → 归一化 → 向量化 → SimHash 索引，产物全部写入 data/db/）
+export GITLAB_TOKEN=<你的 GitLab token>     # 私有仓库需要；公开仓库可省略
+python -m src.buildlib
+
+# ② 对比新作品：给一个本地路径或 git URL，一条命令出评审报告
+export LLM_API_KEY=$(python -c "import tomllib;print(tomllib.load(open('config.toml','rb'))['api']['key'])")
+export LLM_BASE_URL=$(python -c "import tomllib;print(tomllib.load(open('config.toml','rb'))['api']['base_url'])")
+python -m src.pipeline --repo <新作品路径或 git url>
+# → data/output/<作品名>_report.md
+```
+
+后续**新增历史仓库**：把新地址追加进 `config/repos.yaml`，重跑 `python -m src.buildlib` 即可（默认全量重建，避免向量库残留孤儿点）。仓库已在本地、只想重建索引时加 `--skip-ingest`。
+
+> `src.buildlib` 只是把下面 `src.ingest → src.normalize → src.embed build --recreate → src.simhash build` 四步串成一条命令；需要单独调试某一步时仍可分开运行（见下文各模块）。
+
 依赖服务（Qdrant 向量库）：
 
 ```bash
