@@ -1,0 +1,17 @@
+# 历史决赛作品清单（src.ingest 数据获取输入）
+# 每条记录字段：repo_url / year / team_name / award_level
+# 仓库会被克隆到 data/repos/{year}/{team_name}/
+# 下面 3 条为示例，请替换为真实仓库后运行：python -m src.ingest --config config/repos.yaml
+repos:
+- repo_url: https://gitlab.com/group-2023/team-alpha-os
+  year: 2023
+  team_name: team_alpha
+  award_level: 一等奖
+- repo_url: https://gitlab.com/group-2023/team-beta-os
+  year: 2023
+  team_name: team_beta
+  award_level: 二等奖
+- repo_url: https://gitlab.com/group-2024/team-gamma-os
+  year: 2024
+  team_name: team_gamma
+  award_level: 三等奖

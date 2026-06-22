@@ -20,6 +20,7 @@ htmlcov/
 .env
 .env.*
 !.env.template
+!.env.example
 
 # 配置（含 API Key，敏感）
 config.toml
@@ -43,3 +44,5 @@ session_prompts/
 
 # OpenCode（动态生成，含系统提示词和绝对路径，不提交）
 .opencode.json
+
+test/
