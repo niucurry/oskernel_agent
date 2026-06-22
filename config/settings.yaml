@@ -1,0 +1,46 @@
+# 查重引擎运行配置（src.embed 等模块读取）。
+
+embedding:
+  # HuggingFace 模型名；后续可换 UniXcoder 等同类嵌入模型
+  model_name: Salesforce/codet5p-110m-embedding
+  max_length: 512        # 模型单次最大 token 数
+  window_size: 512       # 滑窗大小（超长函数）
+  window_stride: 384     # 滑窗步长
+  batch_size: 16         # 每批窗口数
+  device: auto           # auto / cpu / cuda
+
+qdrant:
+  # 生产用 docker 起的服务地址；无 docker 时可用本地路径（见 --qdrant-path）
+  url: http://localhost:6333
+  collection: os_functions
+
+retrieval:
+  top_k: 20              # 每个 query 函数召回候选数
+
+metadata:
+  string_generic_repo_threshold: 5   # 出现在 > 该数量个不同仓库的字符串视为通用，不索引
+  baseline_sim_threshold: 0.85       # 双侧与同一基线函数相似度均 > 此值才扣除
+  contest_start: "2024-05-01"        # 比赛开始日期（用于 commit 早期完整实现信号）
+  early_impl_days: 3                 # 引入时间距比赛开始 < 此天数视为可疑
+  early_impl_min_lines: 30           # 且函数规模 >= 此行数才算"已是完整实现"
+  large_commit_lines: 2000           # 单次新增 > 此行数视为异常大提交
+  vague_message_patterns:            # 模糊模板 commit message（正则，大小写不敏感）
+    - '^\s*init'
+    - '^\s*add\s+files?'
+    - '^\s*update'
+    - '^\s*first\s+commit'
+    - '^\s*commit'
+    - '^\s*wip'
+    - '^\s*\.+\s*$'
+
+llm:
+  # 模型名在此配置；base_url / api_key 从环境变量读（LLM_BASE_URL / LLM_API_KEY）
+  model: deepseek-chat
+  temperature: 0.3       # 复核投票温度
+  votes: 3               # 每个嫌疑对调用次数（多数表决）
+  concurrency: 5         # asyncio 并发度
+  max_card_tokens: 6000  # 嫌疑卡片 token 上限
+  context_lines: 10      # 超长代码保留 matched_spans ± 行数
+  request_timeout: 60    # 单次请求超时（秒）
+  max_retries: 3         # 网络层重试次数
+  min_interval: 0.0      # 相邻请求最小间隔（秒），限速用

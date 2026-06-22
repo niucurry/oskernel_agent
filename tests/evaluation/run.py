@@ -1,0 +1,276 @@
+"""评测脚本：把样本注入流水线各层，统计召回/精确率/LLM 准确率/耗时。
+
+  python -m tests.evaluation.run [--eval-set ...] [--manual ...] [--top-k 20]
+                                 [--with-llm --llm-sample 20] [--check]
+输出 Markdown 报告并保存历史结果到 tests/evaluation/history/{date}.json。
+--check：T1/T2 最终召回 < 0.95 或 T3 < 0.80 时以非零退出（供 CI 回归基线）。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sqlite3
+import sys
+import time
+from collections import defaultdict
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+import numpy as np
+import yaml
+from loguru import logger
+
+from src.exact.matcher import ExactMatcher
+from src.normalize.store import DEFAULT_DB
+
+HISTORY_DIR = "tests/evaluation/history"
+DEFAULT_EVAL_SET = "tests/fixtures/eval_set.json"
+DEFAULT_MANUAL = "tests/fixtures/manual_labeled.yaml"
+DETECT_RATIO = 0.5            # exact 相似行占比 >= 此值 视为命中嫌疑
+CI_THRESHOLDS = {"T1": 0.95, "T2": 0.95, "T3": 0.80}
+
+
+def _raw_by_id(db_path: str | Path) -> dict[int, str]:
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT id, raw_code FROM functions").fetchall()
+    conn.close()
+    return {i: r for i, r in rows}
+
+
+def _resolve_manual(db_path: str | Path, pairs: list[dict]) -> list[dict]:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    out = []
+    for p in pairs:
+        def find(loc):
+            return conn.execute(
+                "SELECT id, raw_code, lang, normalized_code, feature_tokens FROM functions "
+                "WHERE repo_id=? AND file_path=? AND start_line=?",
+                (loc["repo_id"], loc["file_path"], loc["start_line"]),
+            ).fetchone()
+        a, b = find(p["a"]), find(p["b"])
+        if a and b:
+            out.append({"cls": "MANUAL", "label": int(p["label"]),
+                        "target": {"id": a["id"], "raw_code": a["raw_code"]},
+                        "variant": {"raw_code": b["raw_code"], "lang": b["lang"],
+                                    "normalized_code": b["normalized_code"],
+                                    "feature_tokens": json.loads(b["feature_tokens"] or "[]")},
+                        "manual": True})
+        else:
+            logger.warning("人工样本定位失败：{}", p)
+    conn.close()
+    return out
+
+
+def evaluate(
+    eval_set: dict,
+    *,
+    db_path: str | Path = DEFAULT_DB,
+    qdrant_path: str = "data/db/qdrant_local",
+    idf_path: str = "data/db/idf.json",
+    index_path: str = "data/db/simhash_index.pkl",
+    top_k: int = 20,
+    manual: list[dict] | None = None,
+    with_llm: bool = False,
+    llm_sample: int = 20,
+) -> dict:
+    from src.embed.embedder import get_embedder
+    from src.embed.settings import load_settings
+    from src.embed.vector_store import VectorStore
+    from src.simhash.build import SimHashQuery
+
+    samples = list(eval_set["samples"]) + (manual or [])
+    raw_by_id = _raw_by_id(db_path)
+    matcher = ExactMatcher()
+    sq = SimHashQuery(idf_path, index_path)
+    store = VectorStore(load_settings().qdrant.collection, path=qdrant_path)
+    embedder = get_embedder(show_progress=False)
+
+    timings: dict[str, float] = {}
+    t0 = time.perf_counter()
+    vecs = embedder.encode_batch([s["variant"]["normalized_code"] or " " for s in samples])
+    timings["embed_all"] = round(time.perf_counter() - t0, 2)
+
+    # 逐样本判定
+    per = defaultdict(lambda: {"n": 0, "l1": 0, "l2": 0, "casc": 0, "final": 0})
+    fp = 0
+    neg_total = 0
+    t1 = time.perf_counter()
+    for s, vec in zip(samples, vecs):
+        cls, label = s["cls"], s["label"]
+        tgt_id = s["target"]["id"]
+        tgt_raw = s["target"].get("raw_code") or raw_by_id.get(tgt_id, "")
+        var = s["variant"]
+
+        if label == 1:
+            cand_sh = sq.query(var.get("feature_tokens", []))
+            l1 = tgt_id in cand_sh
+            v_ids = {h["id"] for h in store.search(vec, top_k)}
+            l2 = tgt_id in v_ids
+            casc_ids = {h["id"] for h in store.search(vec, top_k, candidate_ids=sorted(cand_sh) or [-1])}
+            casc = tgt_id in casc_ids
+            ratio = matcher.match(var["raw_code"], tgt_raw, var.get("lang", "rust")).similar_line_ratio
+            final = ratio >= DETECT_RATIO
+            p = per[cls]
+            p["n"] += 1
+            p["l1"] += l1; p["l2"] += l2; p["casc"] += casc; p["final"] += final
+        else:
+            neg_total += 1
+            ratio = matcher.match(var["raw_code"], tgt_raw, var.get("lang", "rust")).similar_line_ratio
+            if ratio >= DETECT_RATIO:
+                fp += 1
+    timings["pipeline"] = round(time.perf_counter() - t1, 2)
+
+    # 汇总
+    classes = {}
+    tp_total = 0
+    pos_total = 0
+    for cls, p in per.items():
+        n = p["n"] or 1
+        classes[cls] = {
+            "n": p["n"],
+            "recall_layer1": round(p["l1"] / n, 3),
+            "recall_layer2": round(p["l2"] / n, 3),
+            "recall_cascade": round(p["casc"] / n, 3),
+            "recall_final": round(p["final"] / n, 3),
+        }
+        tp_total += p["final"]
+        pos_total += p["n"]
+    precision = round(tp_total / (tp_total + fp), 3) if (tp_total + fp) else 0.0
+    recall_overall = round(tp_total / pos_total, 3) if pos_total else 0.0
+
+    result = {
+        "date": date.today().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "counts": eval_set.get("counts", {}),
+        "by_class": classes,
+        "overall": {"precision": precision, "recall": recall_overall,
+                    "tp": tp_total, "fp": fp, "neg_total": neg_total, "pos_total": pos_total},
+        "timings_sec": timings,
+    }
+
+    if with_llm:
+        result["llm"] = _eval_llm(samples, raw_by_id, n=llm_sample)
+    return result
+
+
+def _eval_llm(samples, raw_by_id, n: int) -> dict:
+    """对子集跑真实 LLM 复核，统计 verdict 极性准确率。"""
+    try:
+        from src.review.config import load_llm_settings
+        from src.review.llm import OpenAICompatClient
+        from src.review.voting import review_one
+        import asyncio
+        s = load_llm_settings()
+        if not s.api_key:
+            return {"skipped": "no LLM_API_KEY"}
+        client = OpenAICompatClient(s)
+    except Exception as exc:  # noqa: BLE001
+        return {"skipped": str(exc)}
+
+    import asyncio
+    pos = [x for x in samples if x["label"] == 1][: n // 2]
+    neg = [x for x in samples if x["label"] == 0][: n // 2]
+    correct = 0
+    total = 0
+    for x in pos + neg:
+        tgt_raw = x["target"].get("raw_code") or raw_by_id.get(x["target"]["id"], "")
+        susp = _mk_suspect(x["variant"], tgt_raw)
+        out = asyncio.run(review_one(susp, client, s))
+        verdict = out["review"]["verdict"]
+        is_clone_verdict = verdict in ("likely_clone", "high_similarity")
+        if (x["label"] == 1) == is_clone_verdict:
+            correct += 1
+        total += 1
+    return {"accuracy": round(correct / total, 3) if total else 0.0, "n": total}
+
+
+def _mk_suspect(var, tgt_raw):
+    return {
+        "tier": "review", "final_score": 0.8,
+        "query_func": {"repo_id": "eval/new", "file_path": var.get("file_path", "v.rs"),
+                       "start_line": 1, "end_line": var["raw_code"].count("\n") + 1, "func_name": "f",
+                       "module_tag": "other", "lang": var.get("lang", "rust"),
+                       "raw_code": var["raw_code"], "normalized_code": var.get("normalized_code", "")},
+        "candidate_func": {"repo_id": "hist/old", "file_path": "o.rs", "start_line": 1,
+                           "end_line": tgt_raw.count("\n") + 1, "func_name": "g", "module_tag": "other",
+                           "lang": "rust", "raw_code": tgt_raw, "normalized_code": ""},
+        "evidence": {"vector_similarity": 0.8}, "matched_spans": [], "match_type_per_span": [],
+    }
+
+
+def render_report(result: dict) -> str:
+    lines = [f"# 查重系统评测报告（{result['date']}）", "",
+             f"样本：{result['counts']}", "",
+             "## 各类召回率（Layer1 SimHash / Layer2 向量 / 级联 / 最终）", "",
+             "| 类别 | 样本数 | L1 召回 | L2 召回 | 级联召回 | 最终召回 |",
+             "| --- | --- | --- | --- | --- | --- |"]
+    for cls in ("T1", "T2", "T3", "T4", "MANUAL"):
+        c = result["by_class"].get(cls)
+        if c:
+            lines.append(f"| {cls} | {c['n']} | {c['recall_layer1']} | {c['recall_layer2']} "
+                         f"| {c['recall_cascade']} | {c['recall_final']} |")
+    o = result["overall"]
+    lines += ["", "## 总体", "",
+              f"- precision = {o['precision']}（TP={o['tp']} / FP={o['fp']}）",
+              f"- recall = {o['recall']}（TP={o['tp']} / 正样本={o['pos_total']}）",
+              f"- 负样本 {o['neg_total']}", "",
+              f"## 耗时(s)：{result['timings_sec']}"]
+    if "llm" in result:
+        lines += ["", f"## LLM 复核 verdict 准确率：{result['llm']}"]
+    return "\n".join(lines)
+
+
+def check_thresholds(result: dict) -> list[str]:
+    fails = []
+    for cls, thr in CI_THRESHOLDS.items():
+        c = result["by_class"].get(cls)
+        if c and c["recall_final"] < thr:
+            fails.append(f"{cls} 最终召回 {c['recall_final']} < {thr}")
+    return fails
+
+
+def main(argv: list[str] | None = None) -> int:
+    from dotenv import load_dotenv
+    load_dotenv()
+    p = argparse.ArgumentParser(prog="python -m tests.evaluation.run")
+    p.add_argument("--eval-set", default=DEFAULT_EVAL_SET)
+    p.add_argument("--manual", default=DEFAULT_MANUAL)
+    p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--qdrant-path", default="data/db/qdrant_local")
+    p.add_argument("--top-k", type=int, default=20)
+    p.add_argument("--with-llm", action="store_true")
+    p.add_argument("--llm-sample", type=int, default=20)
+    p.add_argument("--check", action="store_true", help="召回低于回归阈值则非零退出")
+    args = p.parse_args(argv)
+
+    eval_set = json.loads(Path(args.eval_set).read_text(encoding="utf-8"))
+    manual = []
+    mp = Path(args.manual)
+    if mp.is_file():
+        pairs = (yaml.safe_load(mp.read_text(encoding="utf-8")) or {}).get("pairs") or []
+        if pairs:
+            manual = _resolve_manual(args.db, pairs)
+
+    result = evaluate(eval_set, db_path=args.db, qdrant_path=args.qdrant_path, top_k=args.top_k,
+                      manual=manual, with_llm=args.with_llm, llm_sample=args.llm_sample)
+
+    report = render_report(result)
+    print(report)
+    hist = Path(HISTORY_DIR)
+    hist.mkdir(parents=True, exist_ok=True)
+    (hist / f"{result['date']}.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    (hist / f"{result['date']}_report.md").write_text(report, encoding="utf-8")
+    logger.info("评测结果保存到 {}/{}.json", HISTORY_DIR, result["date"])
+
+    if args.check:
+        fails = check_thresholds(result)
+        if fails:
+            logger.error("回归基线未达标：{}", "; ".join(fails))
+            return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

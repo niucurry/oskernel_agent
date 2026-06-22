@@ -1,0 +1,16 @@
+# 基线白底库（公共/模板代码：教学 OS、组委会模板）。
+# 与 repos.yaml 同结构，可被 src.ingest 拉取；入库后 Qdrant payload 标 is_baseline=true，
+# 命中基线只作扣除依据、不计抄袭。
+repos:
+  - repo_url: https://github.com/rcore-os/rCore-Tutorial-v3
+    year: 0
+    team_name: baseline_rcore_v3
+    award_level: baseline
+  - repo_url: https://github.com/mit-pdos/xv6-riscv
+    year: 0
+    team_name: baseline_xv6_riscv
+    award_level: baseline
+  - repo_url: https://gitlab.eduxiji.net/template/os-contest-template
+    year: 0
+    team_name: baseline_contest_template
+    award_level: baseline

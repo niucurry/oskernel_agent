@@ -1,0 +1,21 @@
+# 函数所属内核子系统的归类规则（src.normalize 使用）。
+# 按文件路径关键词启发式归类：自上而下逐条匹配，命中任一关键词即归该 tag；
+# 全不命中则归 default。
+#
+# 特殊规则（在代码中处理，优先级最高）：
+#   - 汇编文件（.S/.asm）一律归 arch
+#   - Rust 宏定义（macro_definition）一律归 macro
+rules:
+  - tag: sched
+    keywords: [sched, task, process, thread]
+  - tag: mm
+    keywords: [mm, memory, heap, frame, page, alloc]
+  - tag: fs
+    keywords: [fs, file, inode, vfs, ext, fat]
+  - tag: trap
+    keywords: [trap, interrupt, exception, irq, syscall]
+  - tag: driver
+    keywords: [driver, dev, uart, virtio, block]
+  - tag: arch
+    keywords: [arch, riscv, boot, entry]
+default: other
