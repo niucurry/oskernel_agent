@@ -20,6 +20,8 @@ retrieval:
 metadata:
   string_generic_repo_threshold: 5   # 出现在 > 该数量个不同仓库的字符串视为通用，不索引
   baseline_sim_threshold: 0.85       # 双侧与同一基线函数相似度均 > 此值才扣除
+  common_code_repo_threshold: 5      # query 函数高相似命中 >= 此数量个不同历史仓库 → 判公共/框架代码
+  common_code_sim_threshold: 0.9     # 计入“高相似命中”的向量相似度下限
   contest_start: "2024-05-01"        # 比赛开始日期（用于 commit 早期完整实现信号）
   early_impl_days: 3                 # 引入时间距比赛开始 < 此天数视为可疑
   early_impl_min_lines: 30           # 且函数规模 >= 此行数才算"已是完整实现"
