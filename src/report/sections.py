@@ -7,8 +7,11 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-# tier 加权（用于溯源排名）
-_TIER_WEIGHT = {"confirmed": 3, "review": 2, "weak": 1, "baseline_derived": 0, "dismissed": 0}
+# tier 加权（用于溯源排名）；公共/模板代码权重 0，不计入溯源
+_TIER_WEIGHT = {"confirmed": 3, "review": 2, "weak": 1,
+                "baseline_derived": 0, "dismissed": 0, "common_code": 0}
+# 不计抄袭、从溯源/模块对照中排除的档位
+_NON_PLAGIARISM = ("dismissed", "baseline_derived", "common_code")
 MODULES = ["sched", "mm", "fs", "trap", "driver"]
 INNOVATION_SIM_MAX = 0.5
 INNOVATION_MIN_LINES = 30
@@ -39,7 +42,7 @@ def trace_top_repos(suspects: list[dict], top_n: int = 3) -> list[dict]:
         a["weight"] += _TIER_WEIGHT.get(tier, 0)
         a["tiers"][tier] += 1
         a["modules"].add(_q(s).get("module_tag", "other"))
-        if tier not in ("dismissed", "baseline_derived"):
+        if tier not in _NON_PLAGIARISM:
             a["pairs"] += 1
     ranked = sorted(agg.items(), key=lambda kv: kv[1]["weight"], reverse=True)
     out = []
@@ -65,7 +68,7 @@ def module_table_rows(suspects: list[dict]) -> list[dict]:
     for mod in MODULES:
         best = None
         for s in suspects:
-            if _q(s).get("module_tag") != mod:
+            if _q(s).get("module_tag") != mod or s.get("tier") in _NON_PLAGIARISM:
                 continue
             score = float(s.get("final_score") or 0.0)
             if best is None or score > best["sim"]:
@@ -138,7 +141,15 @@ def annotations(suspects: list[dict]) -> dict:
     baseline = [s for s in suspects if s.get("tier") == "baseline_derived"]
     commit_hits = [s for s in suspects if (s.get("evidence") or {}).get("commit_signals")]
     disputed = [s for s in suspects if _verdict(s) == "disputed"]
+    # 公共/框架代码：按 query 函数去重（一个函数会有多条对）
+    common_q: dict[str, int] = {}
+    for s in suspects:
+        if s.get("tier") == "common_code":
+            ref = f"{_q(s)['file_path']}:{_q(s)['start_line']}"
+            common_q[ref] = max(common_q.get(ref, 0), (s.get("evidence") or {}).get("common_code_repos", 0))
     return {
+        "common_code_count": len(common_q),
+        "common_code": [{"new": ref, "repos": n} for ref, n in sorted(common_q.items())],
         "baseline_count": len(baseline),
         "baseline": [
             {"new": f"{_q(s)['file_path']}:{_q(s)['start_line']}", "note": s.get("baseline_note", "")}
@@ -158,7 +169,10 @@ def annotations(suspects: list[dict]) -> dict:
 
 
 def render_annotations(ann: dict) -> str:
-    parts = [f"- **基线衍生(baseline_derived)**：{ann['baseline_count']} 对（公共/模板代码，不计抄袭）"]
+    parts = [f"- **公共/框架代码(common_code)**：{ann.get('common_code_count', 0)} 个函数（高相似命中多个历史仓库，判为教学OS/框架公共代码，不计抄袭）"]
+    for c in ann.get("common_code", []):
+        parts.append(f"  - {c['new']} — 命中 {c['repos']} 个不同历史仓库")
+    parts.append(f"- **基线衍生(baseline_derived)**：{ann['baseline_count']} 对（公共/模板代码，不计抄袭）")
     for b in ann["baseline"]:
         parts.append(f"  - {b['new']} — {b['note']}")
     parts.append(f"- **commit 异常信号**：{len(ann['commit_signals'])} 处")

@@ -12,7 +12,7 @@ from src.metadata.commits import (
     parse_blame,
 )
 from src.metadata.config import MetadataSettings
-from src.metadata.runner import channel_baseline, channel_unique_strings
+from src.metadata.runner import channel_baseline, channel_common_code, channel_unique_strings
 from src.metadata.strings import build_reverse_index, string_hits_for_func
 from src.models import FunctionRecord
 from src.normalize.store import FunctionStore
@@ -113,6 +113,36 @@ def test_channel_baseline_downgrades_only_both_sides():
     assert n == 1
     assert s_both["tier"] == "baseline_derived" and s_both["evidence"]["baseline_flag"] is True
     assert s_one["tier"] == "review"  # 仅一侧命中基线，不扣除
+
+
+# ---------- 通道 4：公共/框架代码广度过滤 ----------
+
+def _sp(qfp, qsl, crepo, tier, vec):
+    return {"tier": tier, "query_func": {"file_path": qfp, "start_line": qsl},
+            "candidate_func": {"repo_id": crepo}, "evidence": {"vector_similarity": vec}}
+
+
+def test_common_code_downgrades_broad_match():
+    # 公共函数 A：高相似命中 6 个不同仓库 → common_code
+    common = [_sp("a.rs", 1, f"2025/team{i}", "confirmed", 0.99) for i in range(6)]
+    # 独有函数 B：只命中 1 个仓库 → 保持 confirmed
+    uniq = [_sp("b.rs", 1, "2025/teamX", "confirmed", 1.0)]
+    # 函数 C：命中 6 个仓库但相似度都低于阈值 → 不算公共
+    weakmany = [_sp("c.rs", 1, f"2025/w{i}", "weak", 0.6) for i in range(6)]
+    data = {"suspects": common + uniq + weakmany}
+    n = channel_common_code(data, SETTINGS)
+    assert n == 6
+    assert all(s["tier"] == "common_code" for s in common)
+    assert common[0]["evidence"]["common_code_repos"] == 6
+    assert uniq[0]["tier"] == "confirmed"
+    assert all(s["tier"] == "weak" for s in weakmany)  # 低相似不计入广度
+
+
+def test_common_code_keeps_baseline_derived():
+    s = _sp("d.rs", 1, "2025/t0", "baseline_derived", 0.99)
+    others = [_sp("d.rs", 1, f"2025/t{i}", "confirmed", 0.99) for i in range(1, 6)]
+    channel_common_code({"suspects": [s] + others}, SETTINGS)
+    assert s["tier"] == "baseline_derived"  # 更具体的基线信号不被覆盖
 
 
 # ---------- 通道 3：git blame 定位 + 信号 ----------
