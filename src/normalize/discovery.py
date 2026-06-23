@@ -8,11 +8,11 @@ from pathlib import Path
 
 from .ts import lang_of
 
-# 始终排除的目录名
-EXCLUDE_DIRS = {"target", "build", ".git", "vendor", "third_party", "node_modules"}
-
-# 判定为「第三方库目录」的许可证文件名（去扩展名后的 stem，大写比较）
-_LICENSE_STEMS = {"LICENSE", "LICENCE", "COPYING"}
+# 始终排除的目录名（构建产物、明确的 vendored 依赖目录）
+EXCLUDE_DIRS = {
+    "target", "build", ".git", "vendor", "third_party", "third-party",
+    "node_modules", ".cargo", "deps", "dependencies",
+}
 
 
 @dataclass(frozen=True)
@@ -22,28 +22,21 @@ class DiscoveredFile:
     lang: str           # rust / c / asm
 
 
-def _has_license(dirpath: str, filenames: list[str]) -> bool:
-    for fn in filenames:
-        stem = Path(fn).stem.upper()
-        if stem in _LICENSE_STEMS or Path(fn).name.upper() in _LICENSE_STEMS:
-            return True
-    return False
-
-
 def discover_files(repo: str | Path) -> list[DiscoveredFile]:
     """遍历仓库，返回待处理的源码文件。
 
-    排除：EXCLUDE_DIRS 中的目录；以及任何（非仓库根）含 LICENSE/COPYING 的子目录
-    （视为第三方库，整棵子树跳过）。行数过大的文件由调用方在读取时跳过。
+    排除：EXCLUDE_DIRS 中的目录名所对应的子树。
+
+    注意：早期版本曾把「含 LICENSE/COPYING 的子目录」整棵当第三方库跳过，但 Rust 工程惯例是
+    每个 crate（包括参赛队自己写的）都带 LICENSE，该规则会误杀整个作品源码（实测某作品 480 个
+    rust 文件只剩 9 个函数）。故移除该启发式，仅按目录名排除；少量随仓库签入的 vendored crate
+    会被纳入，但 SimHash 的 IDF 降权、>5 仓库通用串过滤、基线通道与 LLM common_pattern 判定
+    已专门用于消化「广泛共享代码」，宁可多收也不漏检。
     """
     repo = Path(repo).resolve()
     out: list[DiscoveredFile] = []
 
     for dirpath, dirnames, filenames in os.walk(repo):
-        # 第三方库子目录：含 LICENSE 且不是仓库根 → 整棵子树跳过
-        if Path(dirpath) != repo and _has_license(dirpath, filenames):
-            dirnames[:] = []
-            continue
         # 排除指定目录（原地修改 dirnames 以阻止 os.walk 下降）
         dirnames[:] = sorted(d for d in dirnames if d not in EXCLUDE_DIRS)
 
