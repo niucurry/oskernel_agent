@@ -34,23 +34,19 @@ def _normalize_query_repo(repo_path: Path, repos_root: Path) -> tuple[str, list]
 
 
 def _search_with_fallback(
-    store: VectorStore, vec, top_k: int, *, exclude_repo_id: str, module_tag: str,
+    store: VectorStore, vec, top_k: int, *, exclude_repo_id: str, module_tag: str | None = None,
     candidate_ids: list[int] | None = None,
 ) -> list[dict]:
-    """优先在同 module_tag 内检索；不足 top_k 时放开模块限制补足。
+    """全模块向量检索（取全局 top_k）。
 
-    candidate_ids（SimHash 粗筛结果）非 None 时作为 id 过滤贯穿两次检索。
+    向量相似度是召回主信号，**不按 module_tag 硬过滤**：抄袭者常改动文件路径/目录结构，
+    导致新作品函数的 module_tag 与历史源不一致；若先按模块过滤再检索，模块子集足以凑满
+    top_k 时「不足才放开」的兜底永不触发，跨模块克隆会被整体漏召回（实测漏 ~80%）。
+    module_tag 仅作为下游证据/展示信号，不参与召回过滤。
+
+    candidate_ids（SimHash 粗筛结果）非 None 时作为 id 过滤。
     """
-    cands = store.search(vec, top_k, exclude_repo_id=exclude_repo_id, module_tag=module_tag, candidate_ids=candidate_ids)
-    if len(cands) < top_k:
-        seen = {c["id"] for c in cands}
-        for m in store.search(vec, top_k, exclude_repo_id=exclude_repo_id, module_tag=None, candidate_ids=candidate_ids):
-            if m["id"] not in seen:
-                cands.append(m)
-                seen.add(m["id"])
-                if len(cands) >= top_k:
-                    break
-    return cands
+    return store.search(vec, top_k, exclude_repo_id=exclude_repo_id, module_tag=None, candidate_ids=candidate_ids)
 
 
 def query_repo(
