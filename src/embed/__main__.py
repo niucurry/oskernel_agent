@@ -43,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     pb.add_argument("--all", action="store_true", help="遍历全部函数（占位开关，当前即全量）")
     pb.add_argument("--db", default=FUNCTIONS_DB, help=f"functions.db 路径（默认 {FUNCTIONS_DB}）")
     pb.add_argument("--recreate", action="store_true", help="重建 collection（清空已有向量）")
+    pb.add_argument("--min-lines", type=int, default=0, help="只向量化行数 >= 此值的函数（functions.db 仍保留全部；0=全部）")
 
     pq = sub.add_parser("query", help="对新作品检索召回")
     pq.add_argument("--repo", required=True, help="新作品仓库目录")
@@ -62,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "build":
         embedder = get_embedder(settings.embedding)
-        res = build_index(args.db, store, embedder, recreate=args.recreate)
+        res = build_index(args.db, store, embedder, recreate=args.recreate, min_lines=args.min_lines)
         logger.info("建库完成：{}", res)
         return 0
 

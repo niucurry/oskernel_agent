@@ -19,16 +19,19 @@ REPO = Path(__file__).parent / "fixtures" / "sample_repo"
 
 # ---------- 文件发现 ----------
 
-def test_discovery_excludes_vendor_thirdparty_target_and_license_dirs():
+def test_discovery_excludes_build_and_vendor_dirs_by_name():
     rels = {f.rel_path.replace("\\", "/") for f in discover_files(REPO)}
     assert rels == {
         "os/src/sched/task.rs",
         "os/src/mm/heap.c",
         "os/src/arch/boot.S",
+        "os/external/foobar/thirdlib.rs",
     }
-    # 根目录的 LICENSE 不应导致整库被排除（上面已发现文件即证明）
+    # 构建产物 / 明确的 vendored 目录按目录名排除
     assert not any("vendor" in r or "third_party" in r or "target" in r for r in rels)
-    assert not any("external" in r for r in rels)  # 含 LICENSE 的第三方子目录被排除
+    # 含 LICENSE 的子目录不再被整棵排除：Rust 工程每个 crate 都带 LICENSE，
+    # 旧启发式会误杀参赛队自己的源码（见 discovery.discover_files 注释）。
+    assert "os/external/foobar/thirdlib.rs" in rels
 
 
 def test_discovery_language_detection():

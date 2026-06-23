@@ -17,6 +17,9 @@ from qdrant_client import QdrantClient, models
 class VectorStore:
     def __init__(self, collection: str, *, url: str | None = None, path: str | None = None, in_memory: bool = False):
         self.collection = collection
+        self._path = path
+        self._in_memory = in_memory
+        self._url = url
         if in_memory:
             self.client = QdrantClient(location=":memory:")
         elif path:
@@ -24,6 +27,17 @@ class VectorStore:
             self.client = QdrantClient(path=path)
         else:
             self.client = QdrantClient(url=url or "http://localhost:6333")
+
+    def flush(self) -> None:
+        """本地路径模式下，close+重开以强制落盘（qdrant 本地模式默认内存缓冲，仅 close 时写盘）。
+
+        建库长任务的崩溃安全检查点：意外中断只丢上次 flush 之后的增量，重跑（recreate=False）
+        会跳过已落盘的点继续。http/内存模式无需此操作。
+        """
+        if not self._path:
+            return
+        self.client.close()
+        self.client = QdrantClient(path=self._path)
 
     # ---- collection 生命周期 ----
     def ensure_collection(self, dim: int, *, recreate: bool = False) -> None:
