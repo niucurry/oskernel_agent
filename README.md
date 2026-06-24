@@ -300,7 +300,7 @@ python scripts/build_reference_db.py --reference rcore-tutorial-v3 --repo-path /
 
 在「描述报告」之外，本项目正在构建一套**历史作品查重引擎**：对新提交作品，从约 200 个历史决赛仓库中找出相似代码并生成评审报告。查重链路（`src/` 下 `ingest/normalize/simhash/embed/segment/exact/metadata/review/report` 各子模块）与现有报告生成（`oskernel_agent.reports`）**完全独立、互不影响**。
 
-四层漏斗：SimHash 粗筛 → 向量 ANN 召回（CodeT5+ + Qdrant）→ 分段向量验证 → 精确比对 + 元数据信号 → LLM 复核 + 评审报告。每个子模块都有独立 CLI 入口（`python -m src.<module>`），中间产物落盘 JSON/SQLite 解耦。
+四层漏斗：SimHash 召回（并集补充 / 大规模初筛）+ 向量 ANN 召回（CodeT5+ + Qdrant）→ 分段向量验证 → 精确比对 + 元数据信号 → LLM 复核 + 评审报告。每个子模块都有独立 CLI 入口（`python -m src.<module>`），中间产物落盘 JSON/SQLite 解耦。
 
 #### 最简用法：两条命令
 
@@ -422,7 +422,7 @@ python -m src.simhash query --repo <仓库>      # 报告每函数的 SimHash �
 - **指纹**：每个 token 用 xxhash 算 64 位、按 IDF 加权累加再符号化得 64 位 SimHash；同时保存每位累加绝对值（量化为 uint8）用于比特松弛。
 - **分段索引**：64 位切 4 段 × 16 位，每段一个 `dict[seg, [func_id]]`，pickle 存 `data/db/simhash_index.pkl`；`query` 4 段分别查表取并集。**比特松弛**（默认开）：每段额外翻转累加绝对值最低的 1 位再查一次（每段 2 次、共 8 次查表），召回少量比特差异的近似指纹。
 
-集成：`src.embed query --with-simhash` 先 SimHash 召回候选 `func_id` 集合，作为 Qdrant id 过滤传入向量检索（Layer 1 → Layer 2 漏斗），召回 JSON 的 `simhash` 字段记录耗时与候选池规模。
+集成（并集补充通道）：`src.embed query --with-simhash` 时，主通道走全局向量 top_k（不受 SimHash 候选池限制）；SimHash 给定时额外在其候选池内取向量 top_k，按 `func_id` 去重后并入主通道结果（**不再做交集过滤**），每个候选标注 `recall_source`（vector / simhash）。召回 JSON 的 `simhash` 字段记录耗时与候选池规模，`recall_sources` 记录各通道贡献数。SimHash 由此定位为**补召回 + 大规模初筛加速**，而非硬性前置过滤。
 
 **验收实测**：
 - 改名版函数对（变量重命名不改变特征 token）SimHash 汉明距离 = 0（≤ 8）；随机无关函数对平均距离 ≈ 31（28–36 理论区间）。
@@ -603,4 +603,6 @@ python -m tests.evaluation.run [--with-llm] [--check]  # 评测并存历史结�
 
 总体 **precision = 0.995**（200 负样本仅 1 误报）、**recall = 0.97**。
 
-**关键结论**：Layer 2 向量召回对四类变换都很强（0.98–1.00）；但 **Layer 1 SimHash 对 T2 改名 / T4 结构重写召回偏低（0.40–0.46）**——特征 token 随重命名/重构而改变。因级联召回受 SimHash 上限制约（cascade≈L1），**SimHash 宜作为向量召回的补充通道（取并集）或仅用于大规模初筛，不应作为硬性前置过滤**，否则会漏掉改名/重构型克隆。这是评测体系给出的第一条系统性改进依据。
+**关键结论**：Layer 2 向量召回对四类变换都很强（0.98–1.00）；但 **Layer 1 SimHash 对 T2 改名 / T4 结构重写召回偏低（0.40–0.46）**——特征 token 随重命名/重构而改变。上表为**第一版基线**：彼时级联召回受 SimHash 上限制约（cascade≈L1），会漏掉改名/重构型克隆。
+
+**已据此改进**：召回改为并集——主通道走全局向量 top_k，SimHash 仅作补召回 + 大规模初筛，不再做交集过滤。改进后级联召回 **T2 0.40→1.00、T3 0.64→1.00、T4 0.46→1.00**（T1 保持 1.00），总体 **precision 0.995→1.00、recall 0.97→0.975**（见 [tests/evaluation/history/2026-06-24_report.md](tests/evaluation/history/2026-06-24_report.md)）。这是评测体系驱动的第一条系统性改进，已闭环落地。
