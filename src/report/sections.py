@@ -168,6 +168,103 @@ def annotations(suspects: list[dict]) -> dict:
     }
 
 
+def ai_detection_data(ai_report: dict | None, *, top_files: int = 8, top_funcs: int = 10) -> dict:
+    """从 {repo}_ai_detect.json 提取「AI 生成代码检测」章节所需结构化数据。
+
+    返回 {"status": ok|skipped|missing, ...}。ok 时含 overall/by_language/high_risk_files/
+    suspicious（各取 Top-N，source 截断），供 LLM 撰写与代码生成表格共用。
+    """
+    if not ai_report:
+        return {"status": "missing"}
+    status = ai_report.get("status")
+    if status != "ok":
+        return {"status": status or "missing", "reason": ai_report.get("reason", ""),
+                "model_id": ai_report.get("model_id", "")}
+
+    agg = ai_report.get("aggregated", {})
+    overall = agg.get("overall", {})
+    suspicious = []
+    for s in agg.get("suspicious_functions", [])[:top_funcs]:
+        src = (s.get("source") or "").strip()
+        if len(src) > 800:
+            src = src[:800] + "\n…(截断)"
+        suspicious.append({
+            "name": s.get("qualified_name") or s.get("function_name", ""),
+            "ref": f"{s['file_path']}:{s['start_line']}-{s['end_line']}",
+            "language": s.get("language", ""),
+            "confidence": round(float(s.get("confidence") or 0.0), 3),
+            "detect_score": s.get("detect_score"),
+            "log_rank": s.get("log_rank"),
+            "stage": s.get("stage", ""),
+            "source": src,
+        })
+    return {
+        "status": "ok",
+        "model_id": ai_report.get("model_id", ""),
+        "overall": overall,
+        "by_language": agg.get("by_language", []),
+        "high_risk_files": [f for f in agg.get("high_risk_files", []) if f.get("llm_count")][:top_files],
+        "suspicious": suspicious,
+        "git_blame_available": agg.get("git_blame_available", False),
+        "by_author": agg.get("by_author", [])[:8],
+    }
+
+
+def _pct(x: float | None) -> str:
+    return f"{(x or 0.0) * 100:.1f}%"
+
+
+def render_ai_overview_table(overall: dict) -> str:
+    decided = (overall.get("llm_count", 0) or 0) + (overall.get("human_count", 0) or 0)
+    llm_pct = _pct(overall.get("llm_ratio_by_count")) if decided else "—"
+    loc_pct = _pct(overall.get("llm_ratio_by_loc")) if overall.get("total_loc") else "—"
+    lines = ["| 指标 | 数值 |", "| --- | --- |",
+             f"| 函数总数 | {overall.get('total_functions', 0)} |",
+             f"| AI 疑似（LLM） | {overall.get('llm_count', 0)}（按函数数 {llm_pct} / 按行数 {loc_pct}） |",
+             f"| 人类编写（Human） | {overall.get('human_count', 0)} |",
+             f"| 不确定/跳过（Uncertain） | {overall.get('uncertain_count', 0)} |",
+             f"| 平均置信度 | {float(overall.get('average_confidence') or 0.0):.2f} |"]
+    return "\n".join(lines)
+
+
+def render_ai_language_table(by_language: list[dict]) -> str:
+    lines = ["| 语言 | 函数数 | AI 疑似 | AI 疑似率 |", "| --- | --- | --- | --- |"]
+    for ls in sorted(by_language, key=lambda x: -(x.get("llm_count") or 0)):
+        lines.append(f"| {ls.get('language', '')} | {ls.get('total_functions', 0)} | "
+                     f"{ls.get('llm_count', 0)} | {_pct(ls.get('llm_ratio'))} |")
+    return "\n".join(lines)
+
+
+def render_ai_highrisk_table(files: list[dict]) -> str:
+    if not files:
+        return "（无 AI 疑似函数聚集的文件）"
+    lines = ["| 文件 | AI 疑似 | 函数数 | 疑似率 | 最可疑函数 |", "| --- | --- | --- | --- | --- |"]
+    for f in files:
+        lines.append(f"| {f.get('path', '')} | {f.get('llm_count', 0)} | {f.get('total_functions', 0)} | "
+                     f"{_pct(f.get('llm_ratio'))} | {f.get('most_suspicious_fn', '') or '—'} |")
+    return "\n".join(lines)
+
+
+def render_ai_suspicious_table(funcs: list[dict]) -> str:
+    if not funcs:
+        return "（无高置信 AI 疑似函数）"
+    lines = ["| 函数 | 文件:行 | 语言 | 置信度 | detect_score | 阶段 |", "| --- | --- | --- | --- | --- |"]
+    for s in funcs:
+        ds = f"{s['detect_score']:.4f}" if s.get("detect_score") is not None else "—"
+        lines.append(f"| {s['name']} | {s['ref']} | {s['language']} | {s['confidence']} | {ds} | {s['stage']} |")
+    return "\n".join(lines)
+
+
+def render_ai_author_table(authors: list[dict]) -> str:
+    if not authors:
+        return ""
+    lines = ["", "**按作者（git blame）：**", "", "| 作者 | AI 疑似函数 | 函数数 | AI 疑似率 |", "| --- | --- | --- | --- |"]
+    for a in authors:
+        lines.append(f"| {a.get('author', '')} | {a.get('llm_count', 0)} | "
+                     f"{a.get('total_functions', 0)} | {_pct(a.get('llm_ratio'))} |")
+    return "\n".join(lines)
+
+
 def render_annotations(ann: dict) -> str:
     parts = [f"- **公共/框架代码(common_code)**：{ann.get('common_code_count', 0)} 个函数（高相似命中多个历史仓库，判为教学OS/框架公共代码，不计抄袭）"]
     for c in ann.get("common_code", []):
