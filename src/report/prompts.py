@@ -21,6 +21,34 @@ PROFILE_SYSTEM = """你是 OS 内核作品分析助手。依据给定的「模�
 不要编造。输出 Markdown 要点。"""
 
 
+SECTION6_SYSTEM = """你是 AI 生成代码检测报告撰写助手。检测方法是 DetectCodeGPT（基于参考模型的
+困惑度/log-rank，免训练），结论是**概率性信号而非定论**。给你这份新作品的检测统计 JSON（总体
+比例、分语言、高风险文件、若干高置信「AI 疑似」函数及其代码与 文件:行号）。请用简洁中文写一段
+「AI 生成代码检测」结论，包含：①整体 AI 疑似程度（点名数字与比例）；②最可疑的文件/函数（**每条
+具体结论都要带给定的 文件:行号 引用，直接用 ref，不要改数字**）；③必要的局限性说明（Python/JS
+精度偏低、短函数与样板代码易误报，仅供人工复核参考）。禁止编造数据中没有的文件、函数或数字。
+只输出正文段落，不要标题。若统计显示几乎没有 AI 疑似函数，请直接说明该作品整体未见明显 AI 生成特征。"""
+
+
+def section6_user(data: dict) -> str:
+    import json
+    overall = data.get("overall", {})
+    parts = [
+        "检测模型：" + str(data.get("model_id", "")),
+        "总体统计（JSON）：\n" + json.dumps(overall, ensure_ascii=False),
+        "分语言（JSON）：\n" + json.dumps(data.get("by_language", []), ensure_ascii=False),
+        "高风险文件（JSON）：\n" + json.dumps(data.get("high_risk_files", []), ensure_ascii=False),
+    ]
+    if data.get("suspicious"):
+        parts.append("高置信 AI 疑似函数（含代码）：")
+        for s in data["suspicious"]:
+            parts.append(
+                f"### {s['name']}  (ref: {s['ref']}, 置信度 {s['confidence']}, 语言 {s['language']})\n"
+                f"```\n{s['source']}\n```"
+            )
+    return "\n\n".join(parts)
+
+
 def section1_user(top_repos: list[dict]) -> str:
     import json
     return "历史来源统计（JSON）：\n" + json.dumps(top_repos, ensure_ascii=False, indent=2)

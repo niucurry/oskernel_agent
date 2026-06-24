@@ -41,13 +41,19 @@ def _sanitize_cell(text: str, limit: int = 50) -> str:
     return text[:limit]
 
 
-async def _generate_async(suspects, recall, client) -> tuple[str, int]:
+async def _generate_async(suspects, recall, client, ai_report=None) -> tuple[str, int]:
     top_repos = S.trace_top_repos(suspects)
     mod_rows = S.module_table_rows(suspects)
     hi_pairs = S.high_similarity_pairs(suspects)
     innov = S.innovation_functions(recall)
     ann = S.annotations(suspects)
     allowed = _collect_allowed(suspects, innov)
+
+    # 章六：AI 生成代码检测（与其他模块一样唤起独立会话生成结论）
+    ai_data = S.ai_detection_data(ai_report)
+    if ai_data.get("status") == "ok":
+        for s in ai_data.get("suspicious", []):
+            add_allowed(allowed, s["ref"])  # 登记可疑函数 文件:行 供后置回源校验
 
     # 并发取 LLM 文本
     s1_task = _complete(client, P.SECTION1_SYSTEM, P.section1_user(top_repos)) if top_repos else _noop()
@@ -56,7 +62,11 @@ async def _generate_async(suspects, recall, client) -> tuple[str, int]:
         if (hi_pairs and client) else _noop()
     )
     s4_task = _complete(client, P.SECTION4_SYSTEM, P.section4_user(innov)) if (innov and client) else _noop()
-    s1_text, s3_raw, s4_text = await asyncio.gather(s1_task, s3_task, s4_task)
+    s6_task = (
+        _complete(client, P.SECTION6_SYSTEM, P.section6_user(ai_data))
+        if (ai_data.get("status") == "ok" and client) else _noop()
+    )
+    s1_text, s3_raw, s4_text, s6_text = await asyncio.gather(s1_task, s3_task, s4_task, s6_task)
 
     deleted = 0
     # 章一：溯源结论（LLM 散文 → 后置校验）
@@ -91,6 +101,10 @@ async def _generate_async(suspects, recall, client) -> tuple[str, int]:
     else:
         s4_text, d = scrub(s4_text, allowed); deleted += d
 
+    # 章六：AI 生成代码检测正文（散文走 LLM → 后置校验；表格纯代码生成）
+    s6_body, s6_extra = _ai_section_body(ai_data, s6_text, allowed)
+    deleted += s6_extra
+
     # 组装
     md = [
         "# 作品查重评审报告", "",
@@ -100,6 +114,7 @@ async def _generate_async(suspects, recall, client) -> tuple[str, int]:
         (S.render_high_sim_table(hi_pairs, summaries) if hi_pairs else "（无 confirmed / likely_clone 对）"), "",
         "## 四、创新点分析", "", s4_text, "",
         "## 五、附注信号", "", S.render_annotations(ann), "",
+        "## 六、AI 生成代码检测", "", s6_body, "",
     ]
     if deleted:
         md.append(f"\n---\n> 后置校验：已删除 {deleted} 条无法回源（文件:行号 越界）的陈述。")
@@ -110,10 +125,48 @@ async def _noop():
     return ""
 
 
-def generate_report(reviewed_data: dict, recall_data: dict, client=None) -> tuple[str, int]:
-    """返回 (report_markdown, deleted_count)。client 为 None 时不调用 LLM（模板兜底）。"""
+def _ai_section_body(ai_data: dict, s6_text: str, allowed: dict) -> tuple[str, int]:
+    """拼装章六正文：状态分支 + LLM 散文（回源校验）+ 代码生成表格。返回 (markdown, 删除句数)。"""
+    status = ai_data.get("status")
+    if status == "missing":
+        return ("未运行 AI 生成代码检测。可在带 GPU 的环境单独执行 "
+                "`python -m src.ai_detect --repo <作品路径>` 生成 `{repo}_ai_detect.json` 后并入本报告。"), 0
+    if status != "ok":
+        reason = ai_data.get("reason", "")
+        return f"AI 生成代码检测未完成（status={status}）：{reason}", 0
+
+    deleted = 0
+    overall = ai_data.get("overall", {})
+    if not s6_text:
+        llm = overall.get("llm_count", 0)
+        total = overall.get("total_functions", 0)
+        s6_text = (f"（未启用 LLM）检测模型 {ai_data.get('model_id', '')}：共分析 {total} 个函数，"
+                   f"其中 AI 疑似 {llm} 个。详见下表。结论为概率性信号，仅供人工复核参考。")
+    else:
+        s6_text, deleted = scrub(s6_text, allowed)
+
+    parts = [
+        s6_text, "",
+        S.render_ai_overview_table(overall), "",
+        "**分语言：**", "", S.render_ai_language_table(ai_data.get("by_language", [])), "",
+        "**高风险文件：**", "", S.render_ai_highrisk_table(ai_data.get("high_risk_files", [])), "",
+        "**高置信 AI 疑似函数：**", "", S.render_ai_suspicious_table(ai_data.get("suspicious", [])),
+    ]
+    author_tbl = S.render_ai_author_table(ai_data.get("by_author", []))
+    if author_tbl:
+        parts.append(author_tbl)
+    parts += ["", "> 检测方法：DetectCodeGPT（困惑度/log-rank，免训练）。结果为概率性信号，非定论；"
+              "短函数与样板代码、Python/JS 等语言易误报，请结合人工复核。"]
+    return "\n".join(parts), deleted
+
+
+def generate_report(reviewed_data: dict, recall_data: dict, client=None, ai_report: dict | None = None) -> tuple[str, int]:
+    """返回 (report_markdown, deleted_count)。client 为 None 时不调用 LLM（模板兜底）。
+
+    ai_report：{repo}_ai_detect.json 内容（AI 生成代码检测结果），为 None 时章六给出未运行说明。
+    """
     suspects = reviewed_data.get("suspects", [])
-    return asyncio.run(_generate_async(suspects, recall_data, client))
+    return asyncio.run(_generate_async(suspects, recall_data, client, ai_report))
 
 
 def run_report(
@@ -123,10 +176,14 @@ def run_report(
     client=None,
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     repo_name: str | None = None,
+    ai_detect_path: str | Path | None = None,
 ) -> dict:
     reviewed = json.loads(Path(reviewed_path).read_text(encoding="utf-8"))
     recall = json.loads(Path(recall_path).read_text(encoding="utf-8"))
-    md, deleted = generate_report(reviewed, recall, client)
+    ai_report = None
+    if ai_detect_path and Path(ai_detect_path).exists():
+        ai_report = json.loads(Path(ai_detect_path).read_text(encoding="utf-8"))
+    md, deleted = generate_report(reviewed, recall, client, ai_report)
 
     name = repo_name or (recall.get("query_repo_id") or "report").replace("/", "_")
     out_dir = Path(output_dir)
