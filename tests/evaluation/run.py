@@ -108,8 +108,10 @@ def evaluate(
             l1 = tgt_id in cand_sh
             v_ids = {h["id"] for h in store.search(vec, top_k)}
             l2 = tgt_id in v_ids
-            casc_ids = {h["id"] for h in store.search(vec, top_k, candidate_ids=sorted(cand_sh) or [-1])}
-            casc = tgt_id in casc_ids
+            # 级联 = 全局向量 top_k ∪ SimHash 候选池内向量 top_k（并集口径，与 src.embed.query 一致）；
+            # SimHash 不再硬过滤全局召回，故 casc 恒 ≥ l2，改名/重写克隆不再被候选池钳制。
+            sh_ids = {h["id"] for h in store.search(vec, top_k, candidate_ids=sorted(cand_sh) or [-1])}
+            casc = l2 or (tgt_id in sh_ids)
             ratio = matcher.match(var["raw_code"], tgt_raw, var.get("lang", "rust")).similar_line_ratio
             final = ratio >= DETECT_RATIO
             p = per[cls]
