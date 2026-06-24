@@ -25,3 +25,7 @@ tqdm>=4.66
 xxhash>=3.4
 # Layer 3 分段向量验证（src.segment）
 scipy>=1.10
+# AI 生成代码检测（src.ai_detect / DetectCodeGPT）：复用 torch/transformers/numpy/scipy/pydantic，无新增硬依赖。
+# 真正加载参考模型（CodeLlama 等，建议宿主机 GPU）时另需手动装：pip install "accelerate>=0.27"
+# （VM 无模型时该步骤优雅跳过，不阻塞流水线）。
+# 注意：不安装 tree-sitter-languages —— 与本仓库 tree-sitter==0.25.2 冲突，桥接层改用 src.normalize 解析。
