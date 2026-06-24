@@ -35,6 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--resume-from", choices=STEPS, default=None, help="从指定步骤续跑（需前序产物存在）")
     p.add_argument("--no-simhash", action="store_true", help="召回不启用 SimHash 粗筛")
     p.add_argument("--baselines", action="store_true", help="启用基线扣除（需 Qdrant 已有基线数据）")
+    p.add_argument("--skip-ai-detect", action="store_true",
+                   help="跳过 AI 生成代码检测（无参考模型/GPU 时；report 章六给出未运行说明）")
     p.add_argument("--db", default=DEFAULT_DB)
     p.add_argument("--qdrant-path", default=DEFAULT_QDRANT)
     p.add_argument("--idf", default=DEFAULT_IDF)
@@ -76,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     v2_path = out / f"{repo_name}_suspects_v2.json"
     final_path = out / f"{repo_name}_suspects_final.json"
     reviewed_path = out / f"{repo_name}_reviewed.json"
+    ai_detect_path = out / f"{repo_name}_ai_detect.json"
 
     meta_commits = []
     if _should_run("ingest", args.resume_from):
@@ -161,6 +164,17 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     elif reviewed_path.exists():
         report_input = reviewed_path
 
+    # ---- ai_detect（AI 生成代码检测，独立于查重漏斗；缺模型则优雅跳过）----
+    if not args.skip_ai_detect and _should_run("ai_detect", args.resume_from):
+        from src.ai_detect.runner import run_ai_detect
+        res = timed("ai_detect", lambda: run_ai_detect(
+            repo_path, output_dir=out, repo_name=repo_name, show_progress=False))
+        funnel["ai_detect_status"] = res.get("status")
+        if res.get("status") == "ok":
+            funnel["ai_detect"] = res["aggregated"]["overall"]
+        else:
+            funnel["ai_detect_reason"] = res.get("reason")
+
     # ---- report ----
     if _should_run("report", args.resume_from):
         from src.report.generate import run_report
@@ -171,7 +185,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             s = load_llm_settings()
             client = OpenAICompatClient(s) if s.api_key else None
         res = timed("report", lambda: run_report(
-            report_input, recall_path, client=client, output_dir=out, repo_name=repo_name))
+            report_input, recall_path, client=client, output_dir=out, repo_name=repo_name,
+            ai_detect_path=ai_detect_path if ai_detect_path.exists() else None))
         funnel["report"] = res["output_path"]
         funnel["report_deleted_refs"] = res["deleted"]
 
