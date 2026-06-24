@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AICD Calibration Report</title>
+<!-- Plotly CDN (calibration is a dev tool; CDN is acceptable here) -->
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+:root{--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;
+  --red:#ef4444;--green:#22c55e;--blue:#3b82f6;--font:system-ui,-apple-system,sans-serif}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;line-height:1.6}
+.container{max-width:1200px;margin:0 auto;padding:1.5rem 1rem}
+header{background:#1e293b;color:#f1f5f9;padding:1rem 0;margin-bottom:2rem}
+header .inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem}
+header h1{font-size:1.3rem;font-weight:700}
+header .meta{font-size:.8rem;color:#94a3b8}
+section{margin-bottom:2.5rem}
+h2{font-size:1.05rem;font-weight:700;margin-bottom:1rem;padding-bottom:.4rem;border-bottom:2px solid var(--border)}
+h3{font-size:.95rem;font-weight:600;margin-bottom:.75rem;color:var(--text)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.25rem;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;margin-bottom:1.5rem}
+.stat-card .val{font-size:1.8rem;font-weight:800}
+.stat-card .lbl{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:.2rem}
+.lang-section{margin-bottom:2.5rem;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.lang-header{background:#1e293b;color:#f1f5f9;padding:.75rem 1.25rem;display:flex;justify-content:space-between;align-items:center}
+.lang-header h2{color:#f1f5f9;border:none;margin:0;padding:0;font-size:1rem}
+.lang-body{padding:1.25rem}
+.plot-container{width:100%;overflow:hidden;border-radius:8px;margin-bottom:1.25rem}
+/* Threshold cards */
+.thresh-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem;margin-bottom:1.25rem}
+.thresh-card{background:#f1f5f9;border-radius:8px;padding:.85rem;text-align:center}
+.thresh-card .tval{font-size:1.5rem;font-weight:700;color:var(--blue)}
+.thresh-card .tlbl{font-size:.72rem;color:var(--muted);margin-top:.2rem}
+/* Confusion matrix */
+.cm-section{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem}
+.cm-card{border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.cm-title{background:#475569;color:#f1f5f9;padding:.4rem .75rem;font-size:.8rem;font-weight:600}
+.cm-grid{display:grid;grid-template-columns:1fr 1fr;text-align:center;font-size:1rem}
+.cm-grid .cell{padding:.6rem .4rem;border:1px solid var(--border)}
+.cm-grid .tp{background:#dcfce7;color:#166534;font-weight:700}
+.cm-grid .fp{background:#fee2e2;color:#991b1b}
+.cm-grid .fn{background:#ffedd5;color:#92400e}
+.cm-grid .tn{background:#f0fdf4;color:#166534;font-weight:700}
+.cm-grid .lbl{background:#f8fafc;font-size:.7rem;color:var(--muted);font-weight:600}
+.cm-stats{padding:.5rem .75rem;font-size:.8rem;color:var(--muted)}
+/* Usage box */
+.usage-box{background:#0f172a;color:#e2e8f0;padding:1rem;border-radius:8px;font-family:'JetBrains Mono','Fira Code',monospace;font-size:.8rem;white-space:pre;overflow-x:auto}
+table{width:100%;border-collapse:collapse;background:var(--card);border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);font-size:13px}
+thead th{background:#1e293b;color:#f1f5f9;padding:.6rem 1rem;text-align:left;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em}
+tbody td{padding:.55rem 1rem;border-bottom:1px solid var(--border)}
+tbody tr:last-child td{border-bottom:none}
+</style>
+</head>
+<body>
+<header>
+<div class="container inner">
+  <div>
+    <h1>AICD Calibration Report</h1>
+    <div class="meta">Model: {{ report.model_id }} &nbsp;|&nbsp; {{ report.generated_at }} &nbsp;|&nbsp; {{ report.samples_dir }}</div>
+  </div>
+</div>
+</header>
+
+<div class="container">
+
+<!-- ===== Summary ===== -->
+<section>
+<h2>Summary</h2>
+<div class="card-grid">
+  <div class="card stat-card">
+    <div class="val">{{ report.results | length }}</div>
+    <div class="lbl">Languages calibrated</div>
+  </div>
+  <div class="card stat-card">
+    <div class="val">{{ report.results | sum(attribute='n_llm') }}</div>
+    <div class="lbl">LLM functions</div>
+  </div>
+  <div class="card stat-card">
+    <div class="val">{{ report.results | sum(attribute='n_human') }}</div>
+    <div class="lbl">Human functions</div>
+  </div>
+</div>
+
+<!-- Overall thresholds table -->
+<table>
+  <thead>
+    <tr>
+      <th>Language</th>
+      <th>LLM functions</th>
+      <th>Human functions</th>
+      <th>LR AUC</th>
+      <th>DS AUC</th>
+      <th>LR Low Thresh</th>
+      <th>LR High Thresh</th>
+      <th>DS Thresh</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for p in plots %}
+  <tr>
+    <td><strong>{{ p.language }}</strong></td>
+    <td>{{ p.n_llm }}</td>
+    <td>{{ p.n_human }}</td>
+    <td>{{ p.auc_lr }}</td>
+    <td>{{ p.auc_ds }}</td>
+    <td style="color:var(--red);font-weight:700">{{ p.lr_low }}</td>
+    <td style="color:var(--green);font-weight:700">{{ p.lr_high }}</td>
+    <td style="color:var(--blue)">{{ p.ds_thresh }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</section>
+
+<!-- ===== Per-language sections ===== -->
+{% for p in plots %}
+<div class="lang-section">
+  <div class="lang-header">
+    <h2>{{ p.language | upper }}</h2>
+    <span style="font-size:.8rem;color:#94a3b8">
+      {{ p.n_llm }} LLM &nbsp;|&nbsp; {{ p.n_human }} Human &nbsp;|&nbsp;
+      LR-AUC: {{ p.auc_lr }}{% if p.auc_ds != "N/A" %} &nbsp;|&nbsp; DS-AUC: {{ p.auc_ds }}{% endif %}
+    </span>
+  </div>
+  <div class="lang-body">
+
+    <!-- Threshold summary -->
+    <div class="thresh-row">
+      <div class="thresh-card">
+        <div class="tval" style="color:var(--red)">{{ p.lr_low }}</div>
+        <div class="tlbl">LR low threshold<br>(below = LLM)</div>
+      </div>
+      <div class="thresh-card">
+        <div class="tval" style="color:var(--green)">{{ p.lr_high }}</div>
+        <div class="tlbl">LR high threshold<br>(above = Human)</div>
+      </div>
+      <div class="thresh-card">
+        <div class="tval" style="color:var(--blue)">{{ p.ds_thresh }}</div>
+        <div class="tlbl">NPR detect score<br>threshold</div>
+      </div>
+      <div class="thresh-card">
+        <div class="tval">{{ p.auc_lr }}</div>
+        <div class="tlbl">Log-rank AUC</div>
+      </div>
+    </div>
+
+    <!-- Plotly chart -->
+    <div class="plot-container">{{ p.div | safe }}</div>
+
+    <!-- Confusion matrices -->
+    {% if p.cm_youden or p.cm_f1 %}
+    <h3>Confusion Matrices at Selected Thresholds</h3>
+    <div class="cm-section">
+      {% for cm, title, thresh in [
+          (p.cm_youden, "Youden's J", p.lr_low),
+          (p.cm_f1,     "F1-max",    p.lr_roc.f1_max_threshold | round(3) if p.lr_roc else "--"),
+      ] %}
+      {% if cm %}
+      <div class="cm-card">
+        <div class="cm-title">{{ title }} — threshold {{ thresh }}</div>
+        <div class="cm-grid">
+          <div class="cell lbl"></div>
+          <div class="cell lbl">Pred LLM</div>
+          <div class="cell lbl">Pred Human</div>
+          <div class="cell lbl">Actual LLM</div>
+          <div class="cell tp">TP: {{ cm.tp }}</div>
+          <div class="cell fn">FN: {{ cm.fn }}</div>
+          <div class="cell lbl">Actual Human</div>
+          <div class="cell fp">FP: {{ cm.fp }}</div>
+          <div class="cell tn">TN: {{ cm.tn }}</div>
+        </div>
+        <div class="cm-stats">
+          Precision: {{ "%.3f"|format(cm.precision) }}
+          &nbsp;|&nbsp; Recall: {{ "%.3f"|format(cm.recall) }}
+          &nbsp;|&nbsp; F1: {{ "%.3f"|format(cm.f1) }}
+          &nbsp;|&nbsp; Accuracy: {{ "%.3f"|format(cm.accuracy) }}
+        </div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+
+<!-- ===== Usage ===== -->
+<section>
+<h2>Apply Calibrated Thresholds</h2>
+{% if plots %}
+<p style="margin-bottom:.75rem;color:var(--muted)">Add to <code>~/.config/aicd/config.yaml</code> or pass as CLI flags:</p>
+<div class="usage-box">
+# ~/.config/aicd/config.yaml
+threshold_log_rank_low:  {{ plots[0].lr_low }}
+threshold_log_rank_high: {{ plots[0].lr_high }}
+threshold_detect_score:  {{ plots[0].ds_thresh }}
+
+# Or via CLI:
+aicd scan &lt;repo&gt; \
+  --threshold-log-rank-low  {{ plots[0].lr_low }} \
+  --threshold-log-rank-high {{ plots[0].lr_high }} \
+  --threshold-detect-score  {{ plots[0].ds_thresh }}
+</div>
+{% endif %}
+</section>
+
+</div>
+<script>
+// Plotly charts are already embedded via the 'div | safe' filter above.
+// This script resizes charts on window resize for responsiveness.
+window.addEventListener('resize', function() {
+  document.querySelectorAll('.js-plotly-plot').forEach(function(el) {
+    Plotly.Plots.resize(el);
+  });
+});
+</script>
+</body>
+</html>

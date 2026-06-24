@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AI Code Detection -- {{ report.repo_path }}</title>
+<style>
+:root{--red:#ef4444;--orange:#f97316;--green:#22c55e;--blue:#3b82f6;--purple:#8b5cf6;--bg:#f8fafc;--card:#fff;--border:#e2e8f0;--text:#1e293b;--muted:#64748b;--font:system-ui,-apple-system,sans-serif;--mono:'JetBrains Mono','Fira Code','Cascadia Code',monospace}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.6;font-size:14px}
+a{color:var(--blue);text-decoration:none}
+/* layout */
+.container{max-width:1200px;margin:0 auto;padding:1.5rem 1rem}
+section{margin-bottom:2.5rem}
+h2{font-size:1.1rem;font-weight:700;color:var(--text);margin-bottom:1rem;padding-bottom:.4rem;border-bottom:2px solid var(--border)}
+/* header */
+.site-header{background:#1e293b;color:#f1f5f9;padding:1rem 0;margin-bottom:2rem}
+.site-header .inner{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem}
+.site-header h1{font-size:1.3rem;font-weight:700}
+.site-header .meta{font-size:.8rem;color:#94a3b8}
+/* cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1.5rem}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.25rem;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.card .val{font-size:2rem;font-weight:800;line-height:1}
+.card .lbl{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:.3rem}
+.card.danger .val{color:var(--red)} .card.warning .val{color:var(--orange)} .card.safe .val{color:var(--green)} .card.info .val{color:var(--blue)}
+/* summary row */
+.summary-row{display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center}
+.summary-row .chart-wrap{flex:0 0 200px}
+/* charts */
+.chart-box{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1rem;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem;margin-bottom:1rem}
+/* treemap */
+.treemap-wrap{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1rem;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.treemap{display:flex;flex-wrap:wrap;gap:3px;border-radius:6px;overflow:hidden;background:var(--bg)}
+.tm-cell{display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:default;border-radius:3px;font-size:10px;font-weight:600;color:rgba(255,255,255,.9);min-height:36px;transition:filter .15s;text-shadow:0 1px 2px rgba(0,0,0,.3);padding:2px 4px;text-align:center;line-height:1.2}
+.tm-cell:hover{filter:brightness(1.15)}
+/* table */
+.tbl-controls{display:flex;gap:.75rem;align-items:center;margin-bottom:.75rem;flex-wrap:wrap}
+.tbl-controls input{flex:1;min-width:180px;padding:.4rem .75rem;border:1px solid var(--border);border-radius:6px;font-size:13px;outline:none}
+.tbl-controls input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+table{width:100%;border-collapse:collapse;background:var(--card);border-radius:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06);font-size:13px}
+thead th{background:#1e293b;color:#f1f5f9;padding:.65rem 1rem;text-align:left;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;cursor:pointer;user-select:none;white-space:nowrap}
+thead th:hover{background:#334155}
+thead th.asc::after{content:" ^"} thead th.desc::after{content:" v"}
+tbody td{padding:.6rem 1rem;border-bottom:1px solid var(--border);vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr.fn-row:hover td{background:#f1f5f9;cursor:pointer}
+.badge{display:inline-flex;align-items:center;padding:.15em .5em;border-radius:4px;font-size:.72rem;font-weight:600}
+.badge-ai{background:#fee2e2;color:#b91c1c} .badge-human{background:#dcfce7;color:#166534}
+.badge-stage{background:#e0f2fe;color:#075985}
+/* confidence bar */
+.conf-bar{display:flex;align-items:center;gap:.4rem}
+.conf-track{height:6px;width:60px;background:var(--border);border-radius:3px;overflow:hidden}
+.conf-fill{height:100%;border-radius:3px}
+/* expandable row */
+.fn-detail td{padding:0!important;background:#f8fafc!important}
+.detail-inner{padding:1rem 1.25rem;border-top:2px solid var(--blue)}
+.detail-meta{display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:.75rem;font-size:12px;color:var(--muted)}
+.detail-meta span strong{color:var(--text)}
+/* code */
+pre.code-block{font-family:var(--mono);font-size:12px;line-height:1.6;overflow-x:auto;background:#0f172a;color:#e2e8f0;padding:1rem;border-radius:6px;counter-reset:line}
+.code-line{display:block;position:relative;padding:0 .5rem}
+.code-line:hover{background:rgba(255,255,255,.04)}
+.code-line::before{content:counter(line);counter-increment:line;display:inline-block;width:2.5em;color:#475569;text-align:right;margin-right:1rem;user-select:none}
+.code-line.hl-ai{background:rgba(239,68,68,.18)!important;border-left:2px solid var(--red)}
+/* syntax colors */
+.kw{color:#7dd3fc} .str{color:#86efac} .num{color:#fbbf24} .cmt{color:#64748b;font-style:italic} .fn-name{color:#fde68a} .type{color:#c4b5fd} .op{color:#94a3b8}
+/* trend chart */
+#trend-svg{width:100%;height:180px}
+/* responsive */
+@media(max-width:640px){.cards{grid-template-columns:1fr 1fr}.summary-row{flex-direction:column}.chart-wrap{flex:0 0 160px}}
+/* author section */
+.author-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.75rem}
+.author-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:.75rem 1rem}
+.author-card .name{font-weight:600;margin-bottom:.3rem;font-size:.85rem}
+.author-ratio{font-size:.75rem;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+<div class="container inner">
+  <div>
+    <h1>AI Code Detection Report</h1>
+    <div class="meta">{{ report.repo_path }} &nbsp;|&nbsp; {{ report.generated_at }} &nbsp;|&nbsp; {{ report.total_files_scanned }} files</div>
+  </div>
+  <div class="meta">ai-code-detector - DetectCodeGPT</div>
+</div>
+</header>
+
+<div class="container">
+
+<!-- ===== SUMMARY ===== -->
+<section id="summary">
+<h2>Summary</h2>
+<div class="summary-row">
+  <div class="cards" style="flex:1">
+    <div class="card {{ suspicion_class }}">
+      <div class="val">{{ "%.1f"|format(report.overall.llm_ratio_by_count * 100) }}%</div>
+      <div class="lbl">LLM Suspected</div>
+    </div>
+    <div class="card info">
+      <div class="val">{{ report.overall.total_functions }}</div>
+      <div class="lbl">Functions Total</div>
+    </div>
+    <div class="card {{ 'danger' if report.overall.llm_count > report.overall.human_count else 'safe' }}">
+      <div class="val">{{ report.overall.llm_count }}</div>
+      <div class="lbl">LLM Suspected</div>
+    </div>
+    <div class="card safe">
+      <div class="val">{{ report.overall.human_count }}</div>
+      <div class="lbl">Human</div>
+    </div>
+    <div class="card">
+      <div class="val" style="color:var(--muted)">{{ report.overall.uncertain_count }}</div>
+      <div class="lbl">Uncertain</div>
+    </div>
+    <div class="card info">
+      <div class="val">{{ "%.2f"|format(report.overall.average_confidence) }}</div>
+      <div class="lbl">Avg Confidence</div>
+    </div>
+  </div>
+  <div class="chart-wrap">
+    <div class="chart-box">
+      <svg id="donut-svg" viewBox="0 0 200 200" width="200" height="200"></svg>
+      <div id="donut-legend" style="font-size:11px;margin-top:.5rem;display:flex;flex-direction:column;gap:3px"></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ===== CHARTS ROW ===== -->
+<section id="charts">
+<h2>Breakdown</h2>
+<div class="chart-grid">
+  <div class="chart-box">
+    <div style="font-weight:600;margin-bottom:.75rem;font-size:.85rem">By Language</div>
+    <div id="lang-chart"></div>
+  </div>
+  <div class="chart-box">
+    <div style="font-weight:600;margin-bottom:.75rem;font-size:.85rem">LOC Distribution (LLM vs Human)</div>
+    <div id="loc-chart"></div>
+  </div>
+</div>
+</section>
+
+<!-- ===== TREEMAP ===== -->
+<section id="treemap-section">
+<h2>Directory Heatmap <span style="font-size:.8rem;font-weight:400;color:var(--muted)">(red = high LLM ratio)</span></h2>
+<div class="treemap-wrap">
+  <div class="treemap" id="treemap-container"></div>
+</div>
+</section>
+
+<!-- ===== TREND ===== -->
+{% if report.monthly_trend %}
+<section id="trend-section">
+<h2>Monthly Trend (git blame)</h2>
+<div class="chart-box">
+  <svg id="trend-svg"></svg>
+</div>
+</section>
+{% endif %}
+
+<!-- ===== AUTHOR ===== -->
+{% if report.by_author %}
+<section id="author-section">
+<h2>By Author (git blame)</h2>
+<div class="author-grid">
+{% for a in report.by_author[:12] %}
+  <div class="author-card">
+    <div class="name">{{ a.author }}</div>
+    <div class="author-ratio">
+      <span style="color:var(--red)">{{ a.llm_count }} LLM</span> / {{ a.total_functions }} total
+      &nbsp;({{ "%.0f"|format(a.llm_ratio * 100) }}%)
+    </div>
+  </div>
+{% endfor %}
+</div>
+</section>
+{% endif %}
+
+<!-- ===== SUSPICIOUS FUNCTIONS TABLE ===== -->
+<section id="fn-section">
+<h2>Suspicious Functions ({{ report.suspicious_functions | length }} high-confidence LLM)</h2>
+<div class="tbl-controls">
+  <input type="text" id="fn-search" placeholder="Search by name, file, or language...">
+  <span style="font-size:12px;color:var(--muted)">Click row to expand source code</span>
+</div>
+<table id="fn-table">
+  <thead>
+    <tr>
+      <th data-col="qname">Function</th>
+      <th data-col="file">File</th>
+      <th data-col="lang">Language</th>
+      <th data-col="confidence">Confidence</th>
+      <th data-col="score">NPR Score</th>
+      <th data-col="loc">LOC</th>
+      <th data-col="stage">Stage</th>
+    </tr>
+  </thead>
+  <tbody id="fn-tbody">
+  {% for fn in report.suspicious_functions %}
+  <tr class="fn-row" data-idx="{{ loop.index0 }}"
+      data-qname="{{ fn.qualified_name }}"
+      data-file="{{ fn.file_path }}"
+      data-lang="{{ fn.language }}"
+      data-confidence="{{ fn.confidence }}"
+      data-score="{{ fn.detect_score if fn.detect_score is not none else -999 }}"
+      data-loc="{{ fn.loc }}"
+      data-stage="{{ fn.stage }}">
+    <td>
+      <span class="badge badge-ai">LLM</span>&nbsp;
+      <strong>{{ fn.qualified_name }}</strong>
+    </td>
+    <td style="color:var(--muted);font-family:var(--mono);font-size:11px">{{ fn.file_path }}:{{ fn.start_line }}</td>
+    <td>{{ fn.language }}</td>
+    <td>
+      <div class="conf-bar">
+        <div class="conf-track"><div class="conf-fill" style="width:{{ (fn.confidence * 100) | int }}%;background:{{ 'var(--red)' if fn.confidence > 0.8 else 'var(--orange)' if fn.confidence > 0.6 else 'var(--blue)' }}"></div></div>
+        {{ "%.2f"|format(fn.confidence) }}
+      </div>
+    </td>
+    <td>{{ "%.3f"|format(fn.detect_score) if fn.detect_score is not none else '--' }}</td>
+    <td>{{ fn.loc }}</td>
+    <td><span class="badge badge-stage">{{ fn.stage }}</span></td>
+  </tr>
+  <tr class="fn-detail" id="fn-detail-{{ loop.index0 }}" style="display:none">
+    <td colspan="7">
+      <div class="detail-inner">
+        <div class="detail-meta">
+          <span><strong>Function:</strong> {{ fn.qualified_name }}</span>
+          <span><strong>File:</strong> {{ fn.file_path }}</span>
+          <span><strong>Lines:</strong> {{ fn.start_line }}--{{ fn.end_line }}</span>
+          <span><strong>Confidence:</strong> {{ "%.3f"|format(fn.confidence) }}</span>
+          {% if fn.log_rank is not none %}<span><strong>Log-Rank:</strong> {{ "%.3f"|format(fn.log_rank) }}</span>{% endif %}
+          {% if fn.detect_score is not none %}<span><strong>NPR Score:</strong> {{ "%.4f"|format(fn.detect_score) }}</span>{% endif %}
+        </div>
+        <pre class="code-block" id="code-{{ loop.index0 }}" data-lang="{{ fn.language }}" data-hl="{{ hl_lines.get(fn.qualified_name, [])|tojson }}">{{ fn.source | e }}</pre>
+      </div>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</section>
+
+<!-- ===== HIGH RISK FILES ===== -->
+<section id="files-section">
+<h2>High Risk Files</h2>
+<table>
+  <thead>
+    <tr>
+      <th>File</th>
+      <th>LLM</th>
+      <th>Total</th>
+      <th>Ratio</th>
+      <th>Top Suspect</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for f in report.high_risk_files %}
+  <tr>
+    <td style="font-family:var(--mono);font-size:11px">{{ f.path }}</td>
+    <td><span style="color:var(--red);font-weight:700">{{ f.llm_count }}</span></td>
+    <td>{{ f.total_functions }}</td>
+    <td>
+      <div class="conf-bar">
+        <div class="conf-track"><div class="conf-fill" style="width:{{ (f.llm_ratio * 100)|int }}%;background:{{ 'var(--red)' if f.llm_ratio >= 0.5 else 'var(--orange)' if f.llm_ratio >= 0.2 else 'var(--green)' }}"></div></div>
+        {{ "%.1f"|format(f.llm_ratio * 100) }}%
+      </div>
+    </td>
+    <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">{{ f.most_suspicious_fn }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</section>
+
+</div><!-- /container -->
+
+<script>
+(function(){
+"use strict";
+
+// ---- Data from server ----
+const PIE_DATA   = {{ pie_data_json }};
+const BAR_DATA   = {{ bar_data_json }};
+const TREEMAP    = {{ treemap_data_json }};
+const TREND_DATA = {{ trend_data_json }};
+
+// ================================================================
+// Donut Chart
+// ================================================================
+function renderDonut(svgId, legendId, segments){
+  const svg = document.getElementById(svgId);
+  const leg = document.getElementById(legendId);
+  if(!svg) return;
+  const total = segments.reduce((s,d)=>s+d.value,0);
+  if(total===0){svg.innerHTML='<text x="100" y="105" text-anchor="middle" fill="#94a3b8">No data</text>';return;}
+  const cx=100,cy=100,R=78,r=48;
+  let a=-Math.PI/2;
+  const arcs=segments.map(d=>{
+    const theta=(d.value/total)*2*Math.PI;
+    const a0=a,a1=a+theta; a=a1;
+    const lg=theta>Math.PI?1:0;
+    const arc=(ra,aa)=>[cx+ra*Math.cos(aa),cy+ra*Math.sin(aa)];
+    const [x1,y1]=arc(R,a0),[x2,y2]=arc(R,a1),[x3,y3]=arc(r,a1),[x4,y4]=arc(r,a0);
+    return `<path d="M${x1},${y1}A${R},${R} 0 ${lg} 1 ${x2},${y2}L${x3},${y3}A${r},${r} 0 ${lg} 0 ${x4},${y4}Z" fill="${d.color}"><title>${d.label}: ${d.value}</title></path>`;
+  });
+  const llmSeg = segments[0];
+  const pct = total ? Math.round(llmSeg.value/total*100) : 0;
+  svg.innerHTML = arcs.join('')
+    + `<text x="${cx}" y="${cy-6}" text-anchor="middle" font-size="22" font-weight="800" fill="#1e293b">${pct}%</text>`
+    + `<text x="${cx}" y="${cy+14}" text-anchor="middle" font-size="11" fill="#64748b">LLM</text>`;
+  if(leg) leg.innerHTML = segments.map(d=>`<div style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:2px;background:${d.color};display:inline-block"></span><span>${d.label}: <strong>${d.value}</strong></span></div>`).join('');
+}
+
+// ================================================================
+// Horizontal Bar Chart
+// ================================================================
+function renderBars(containerId, items){
+  const el = document.getElementById(containerId);
+  if(!el||!items.length) return;
+  const labelW=90, barH=22, gap=6, valW=45, pH=10;
+  const W=Math.min(el.clientWidth||380, 500);
+  const plotW=W-labelW-valW-16;
+  const svgH=items.length*(barH+gap)+pH*2;
+  const maxVal=Math.max(...items.map(d=>d.total||d.value||1),1);
+  const rows=items.map((d,i)=>{
+    const y=pH+i*(barH+gap);
+    const llm=d.llm??d.value??0;
+    const tot=d.total??llm;
+    const pct=tot?Math.round(llm/tot*100):0;
+    const bw=Math.max(2,(tot/maxVal)*plotW);
+    const lw=Math.max(1,(llm/maxVal)*plotW);
+    const col=pct>=50?'#ef4444':pct>=20?'#f97316':'#22c55e';
+    return `<text x="${labelW-4}" y="${y+barH/2+4}" text-anchor="end" font-size="11" fill="#475569">${d.label}</text>
+<rect x="${labelW}" y="${y}" width="${bw}" height="${barH}" fill="#e2e8f0" rx="3"/>
+<rect x="${labelW}" y="${y}" width="${lw}" height="${barH}" fill="${col}" rx="3"/>
+<text x="${labelW+bw+4}" y="${y+barH/2+4}" font-size="11" fill="#334155">${pct}%</text>`;
+  });
+  el.innerHTML=`<svg viewBox="0 0 ${W} ${svgH}" width="${W}" height="${svgH}">${rows.join('')}</svg>`;
+}
+
+// ================================================================
+// LOC Bar Chart (LLM vs Human side by side)
+// ================================================================
+function renderLocChart(containerId, data){
+  const el = document.getElementById(containerId);
+  if(!el||!data.length) return;
+  const items = [{label:'LLM',value:data[0],color:'#ef4444'},{label:'Human',value:data[1],color:'#22c55e'},{label:'Uncertain',value:data[2],color:'#94a3b8'}];
+  renderBars(containerId, items.map(d=>({label:d.label,llm:d.value,total:d.value,_color:d.color})));
+  // Override: rebuild with absolute values
+  const W=Math.min(el.clientWidth||380,400), barH=32, gap=8, labelW=80, pH=10;
+  const plotW=W-labelW-60;
+  const maxVal=Math.max(...items.map(d=>d.value),1);
+  const svgH=items.length*(barH+gap)+pH*2;
+  const rows=items.map((d,i)=>{
+    const y=pH+i*(barH+gap);
+    const bw=Math.max(2,(d.value/maxVal)*plotW);
+    return `<text x="${labelW-4}" y="${y+barH/2+4}" text-anchor="end" font-size="12" fill="#475569">${d.label}</text>
+<rect x="${labelW}" y="${y}" width="${bw}" height="${barH}" fill="${d.color}" rx="4" opacity=".85"/>
+<text x="${labelW+bw+6}" y="${y+barH/2+4}" font-size="12" fill="#334155">${d.value.toLocaleString()} LOC</text>`;
+  });
+  el.innerHTML=`<svg viewBox="0 0 ${W} ${svgH}" width="${W}" height="${svgH}">${rows.join('')}</svg>`;
+}
+
+// ================================================================
+// Treemap (CSS flex-based, hue from green->red)
+// ================================================================
+function renderTreemap(containerId, nodes){
+  const el=document.getElementById(containerId);
+  if(!el||!nodes.length) return;
+  const total=nodes.reduce((s,n)=>s+(n.total||1),0);
+  el.innerHTML=nodes.map(n=>{
+    const pct=n.total?Math.round(n.llm/n.total*100):0;
+    const hue=Math.round((1-pct/100)*120); // 120=green, 0=red
+    const satL=pct<5?'30%,70%':'65%,48%';
+    const bg=`hsl(${hue},${satL})`;
+    const flex=Math.max(1,Math.round((n.total/total)*200));
+    const lbl=n.name.length>14?n.name.slice(0,13)+'..':n.name;
+    return `<div class="tm-cell" style="flex:${flex};background:${bg}" title="${n.path}: ${n.llm}/${n.total} (${pct}%)">${lbl}<br><span style="font-size:9px;opacity:.8">${n.llm}/${n.total}</span></div>`;
+  }).join('');
+}
+
+// ================================================================
+// Trend Line Chart (SVG)
+// ================================================================
+function renderTrend(svgId, data){
+  const svg=document.getElementById(svgId);
+  if(!svg||!data.length) return;
+  const W=svg.clientWidth||700, H=160, padL=40, padB=30, padR=20, padT=15;
+  const plotW=W-padL-padR, plotH=H-padT-padB;
+  const maxVal=Math.max(...data.map(d=>d.total),1);
+  const pts=data.map((d,i)=>({
+    x:padL+(i/(Math.max(data.length-1,1)))*plotW,
+    y:padT+plotH-(d.total/maxVal)*plotH,
+    yl:padT+plotH-(d.llm/maxVal)*plotH,
+    d
+  }));
+  const polyAll=pts.map(p=>`${p.x},${p.y}`).join(' ');
+  const polyLLM=pts.map(p=>`${p.x},${p.yl}`).join(' ');
+  const xLabels=pts.filter((_,i)=>i%(Math.ceil(data.length/6))===0)
+    .map(p=>`<text x="${p.x}" y="${H-8}" text-anchor="middle" font-size="9" fill="#94a3b8">${p.d.year_month}</text>`).join('');
+  svg.innerHTML=`
+<polyline points="${polyAll}" fill="none" stroke="#3b82f6" stroke-width="1.5" opacity=".4"/>
+<polyline points="${polyLLM}" fill="none" stroke="#ef4444" stroke-width="2"/>
+${pts.map(p=>`<circle cx="${p.x}" cy="${p.yl}" r="3" fill="#ef4444"/>`).join('')}
+${xLabels}
+<text x="${padL-5}" y="${padT+plotH/2}" text-anchor="end" font-size="9" fill="#94a3b8" transform="rotate(-90 ${padL-5} ${padT+plotH/2})">Count</text>
+<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT+plotH}" stroke="#e2e8f0"/>
+<line x1="${padL}" y1="${padT+plotH}" x2="${W-padR}" y2="${padT+plotH}" stroke="#e2e8f0"/>
+<text x="${padL+8}" y="${padT+10}" font-size="9" fill="#ef4444">-- LLM</text>
+<text x="${padL+45}" y="${padT+10}" font-size="9" fill="#3b82f6" opacity=".6">-- Total</text>`;
+}
+
+// ================================================================
+// Syntax Highlighter
+// ================================================================
+const KW = {
+  python:['def','class','if','elif','else','for','while','return','import','from','with','try','except','finally','raise','pass','and','or','not','in','is','None','True','False','lambda','yield','async','await','global','nonlocal','del','assert','break','continue'],
+  java:['public','private','protected','class','interface','extends','implements','new','return','if','else','for','while','switch','case','break','continue','void','static','final','abstract','import','package','throws','throw','try','catch','finally','this','super','null','true','false','boolean','int','long','double','float','String'],
+  go:['func','package','import','var','const','type','struct','interface','if','else','for','range','return','switch','case','default','break','continue','go','defer','select','chan','map','nil','true','false','make','new','append','len','cap','delete'],
+  javascript:['function','const','let','var','if','else','for','while','return','class','extends','new','this','import','export','default','async','await','try','catch','finally','throw','typeof','instanceof','null','undefined','true','false','in','of'],
+  typescript:['function','const','let','var','if','else','for','while','return','class','extends','implements','new','this','import','export','default','async','await','try','catch','finally','type','interface','enum','namespace','abstract','readonly','public','private','protected','null','undefined','true','false','in','of'],
+  c:['int','char','float','double','void','if','else','for','while','do','return','struct','typedef','enum','switch','case','break','continue','sizeof','const','static','extern','volatile','signed','unsigned','long','short','NULL'],
+  cpp:['int','char','float','double','void','bool','if','else','for','while','do','return','class','struct','namespace','template','typename','public','private','protected','virtual','override','const','static','new','delete','nullptr','true','false','using','auto','typedef'],
+  rust:['fn','let','mut','const','static','if','else','for','while','loop','match','return','struct','enum','trait','impl','mod','use','pub','crate','self','super','as','where','type','dyn','move','ref','in','break','continue','unsafe','async','await','extern','box','true','false','Some','None','Ok','Err','Self']
+};
+
+function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function tokenize(code, lang){
+  const kws = new Set(KW[lang]||KW.python);
+  // Process char-by-char with simple state machine
+  let out='', i=0;
+  while(i<code.length){
+    // Comment: # (python)
+    if((lang==='python')&&code[i]==='#'){
+      let j=i; while(j<code.length&&code[j]!=='\n') j++;
+      out+=`<span class="cmt">${escHtml(code.slice(i,j))}</span>`; i=j; continue;
+    }
+    // Comment: //
+    if(code[i]==='/'&&code[i+1]==='/'){
+      let j=i; while(j<code.length&&code[j]!=='\n') j++;
+      out+=`<span class="cmt">${escHtml(code.slice(i,j))}</span>`; i=j; continue;
+    }
+    // Comment: /* ... */
+    if(code[i]==='/'&&code[i+1]==='*'){
+      const j=code.indexOf('*/',i+2); const end=j<0?code.length:j+2;
+      out+=`<span class="cmt">${escHtml(code.slice(i,end))}</span>`; i=end; continue;
+    }
+    // String: " or '
+    if(code[i]==='"'||code[i]==="'"){
+      const q=code[i]; let j=i+1;
+      // triple quote
+      if(code[i+1]===q&&code[i+2]===q){
+        j=i+3; const end=code.indexOf(q+q+q,j); const endIdx=end<0?code.length:end+3;
+        out+=`<span class="str">${escHtml(code.slice(i,endIdx))}</span>`; i=endIdx; continue;
+      }
+      while(j<code.length&&code[j]!==q&&code[j]!=='\n'){if(code[j]==='\\')j++;j++;}
+      if(j<code.length&&code[j]===q) j++;
+      out+=`<span class="str">${escHtml(code.slice(i,j))}</span>`; i=j; continue;
+    }
+    // Template literal `
+    if(code[i]==='`'){
+      let j=i+1; while(j<code.length&&code[j]!=='`'){if(code[j]==='\\')j++;j++;} j++;
+      out+=`<span class="str">${escHtml(code.slice(i,j))}</span>`; i=j; continue;
+    }
+    // Number
+    if(/[0-9]/.test(code[i])&&(i===0||!/[a-zA-Z_]/.test(code[i-1]))){
+      let j=i; while(j<code.length&&/[0-9.xXa-fA-FuUlL]/.test(code[j])) j++;
+      out+=`<span class="num">${escHtml(code.slice(i,j))}</span>`; i=j; continue;
+    }
+    // Identifier / keyword
+    if(/[a-zA-Z_$]/.test(code[i])){
+      let j=i; while(j<code.length&&/[a-zA-Z0-9_$]/.test(code[j])) j++;
+      const word=code.slice(i,j);
+      if(kws.has(word)) out+=`<span class="kw">${escHtml(word)}</span>`;
+      else if(j<code.length&&code[j]==='(') out+=`<span class="fn-name">${escHtml(word)}</span>`;
+      else out+=escHtml(word);
+      i=j; continue;
+    }
+    out+=escHtml(code[i]); i++;
+  }
+  return out;
+}
+
+function renderCode(preEl){
+  const lang=(preEl.dataset.lang||'python').toLowerCase();
+  const hlLines=new Set(JSON.parse(preEl.dataset.hl||'[]'));
+  const raw=preEl.textContent;
+  const lines=raw.split('\n');
+  preEl.innerHTML=lines.map((ln,i)=>{
+    const hlClass=hlLines.has(i)?'code-line hl-ai':'code-line';
+    return `<span class="${hlClass}">${tokenize(ln,lang)}</span>`;
+  }).join('\n');
+}
+
+// ================================================================
+// Table: sort + search + expand
+// ================================================================
+let sortCol=null, sortDir=1;
+const tbody=document.getElementById('fn-tbody');
+const searchInput=document.getElementById('fn-search');
+
+function getColVal(row, col){
+  const v=row.dataset[col]??'';
+  return isNaN(v)?v.toLowerCase():parseFloat(v);
+}
+
+function refreshTable(){
+  const q=(searchInput?.value||'').toLowerCase();
+  const rows=[...tbody.querySelectorAll('tr.fn-row')];
+  // filter
+  rows.forEach(row=>{
+    const detail=document.getElementById(`fn-detail-${row.dataset.idx}`);
+    const match=!q||['qname','file','lang'].some(c=>String(row.dataset[c]||'').toLowerCase().includes(q));
+    row.style.display=match?'':'none';
+    if(detail) detail.style.display=(!match||detail.dataset.open!=='1')?'none':'';
+  });
+  // sort
+  if(!sortCol) return;
+  const visible=rows.filter(r=>r.style.display!=='none');
+  visible.sort((a,b)=>{const av=getColVal(a,sortCol),bv=getColVal(b,sortCol);return av<bv?-sortDir:av>bv?sortDir:0;});
+  visible.forEach(row=>{
+    const detail=document.getElementById(`fn-detail-${row.dataset.idx}`);
+    tbody.appendChild(row);
+    if(detail) tbody.appendChild(detail);
+  });
+}
+
+// Sort headers
+document.querySelectorAll('#fn-table thead th[data-col]').forEach(th=>{
+  th.addEventListener('click',()=>{
+    const col=th.dataset.col;
+    if(sortCol===col) sortDir=-sortDir; else {sortCol=col;sortDir=-1;}
+    document.querySelectorAll('#fn-table thead th').forEach(h=>h.classList.remove('asc','desc'));
+    th.classList.add(sortDir===1?'asc':'desc');
+    refreshTable();
+  });
+});
+
+if(searchInput) searchInput.addEventListener('input',refreshTable);
+
+// Expand/collapse rows
+tbody.addEventListener('click',e=>{
+  const row=e.target.closest('tr.fn-row');
+  if(!row) return;
+  const idx=row.dataset.idx;
+  const detail=document.getElementById(`fn-detail-${idx}`);
+  if(!detail) return;
+  const open=detail.dataset.open==='1';
+  detail.style.display=open?'none':'';
+  detail.dataset.open=open?'0':'1';
+  if(!open){
+    const pre=detail.querySelector('pre.code-block');
+    if(pre&&!pre.dataset.rendered){
+      renderCode(pre);
+      pre.dataset.rendered='1';
+    }
+  }
+});
+
+// ================================================================
+// Init
+// ================================================================
+renderDonut('donut-svg','donut-legend',PIE_DATA);
+renderBars('lang-chart', BAR_DATA);
+renderLocChart('loc-chart', [{{ report.overall.llm_ratio_by_loc | float * report.overall.total_loc }}, {{ (1 - report.overall.llm_ratio_by_loc | float) * report.overall.total_loc }}, 0]);
+renderTreemap('treemap-container', TREEMAP);
+{% if report.monthly_trend %}
+window.addEventListener('load',()=>renderTrend('trend-svg', TREND_DATA));
+{% endif %}
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Code Detection Report -- {{ repo_posix }}</title>
+  <style>
+    /* ---- Reset & base ---- */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f8f9fa; color: #212529; line-height: 1.5; }
+    code, pre { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 0.85rem; }
+
+    /* ---- Layout ---- */
+    .container { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+    header { background: #1e1e2e; color: #cdd6f4; padding: 1.5rem 2rem; margin-bottom: 2rem; border-radius: 8px; }
+    header h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 0.25rem; }
+    header .meta { font-size: 0.8rem; opacity: 0.7; }
+
+    /* ---- Summary cards ---- */
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .card { background: #fff; border-radius: 8px; padding: 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .card .value { font-size: 2rem; font-weight: 700; }
+    .card .label { font-size: 0.75rem; color: #6c757d; text-transform: uppercase; letter-spacing: .05em; }
+    .card.danger .value { color: #dc3545; }
+    .card.warning .value { color: #fd7e14; }
+    .card.safe .value { color: #198754; }
+
+    /* ---- File table ---- */
+    .section-title { font-size: 1rem; font-weight: 600; margin-bottom: 0.75rem; color: #495057; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden;
+            box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 2rem; }
+    th { background: #1e1e2e; color: #cdd6f4; text-align: left; padding: 0.75rem 1rem; font-size: 0.8rem;
+         text-transform: uppercase; letter-spacing: .05em; }
+    td { padding: 0.65rem 1rem; border-bottom: 1px solid #e9ecef; font-size: 0.85rem; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f1f3f5; }
+
+    /* ---- Labels / badges ---- */
+    .badge { display: inline-block; padding: .2em .55em; border-radius: 4px; font-size: 0.72rem; font-weight: 600; }
+    .badge-ai { background: #ffe0e0; color: #c0392b; }
+    .badge-human { background: #d4edda; color: #155724; }
+    .badge-skip { background: #e9ecef; color: #6c757d; }
+
+    /* ---- Code snippet ---- */
+    details { margin-top: 0.5rem; }
+    summary { cursor: pointer; font-size: 0.8rem; color: #4361ee; }
+    pre.code-block { background: #1e1e2e; color: #cdd6f4; padding: 1rem; border-radius: 6px;
+                     overflow-x: auto; margin-top: 0.5rem; }
+
+    footer { text-align: center; font-size: 0.75rem; color: #adb5bd; padding: 2rem 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>AI Code Detection Report</h1>
+      <div class="meta">
+        Repository: {{ repo_posix }} &nbsp;|&nbsp;
+        Scanned: {{ report.scanned_at }} &nbsp;|&nbsp;
+        Model: {{ report.model_id }}
+      </div>
+    </header>
+
+    <!-- Summary cards -->
+    <div class="cards">
+      <div class="card">
+        <div class="value">{{ report.summary.total_files }}</div>
+        <div class="label">Files scanned</div>
+      </div>
+      <div class="card">
+        <div class="value">{{ report.summary.total_functions }}</div>
+        <div class="label">Functions found</div>
+      </div>
+      <div class="card">
+        <div class="value">{{ report.summary.analysed_functions }}</div>
+        <div class="label">Functions analysed</div>
+      </div>
+      <div class="card {{ suspicion_class }}">
+        <div class="value">{{ report.summary.ai_suspected }}</div>
+        <div class="label">AI suspected</div>
+      </div>
+      <div class="card {{ suspicion_class }}">
+        <div class="value">{{ "%.1f"|format(report.summary.suspicion_rate * 100) }}%</div>
+        <div class="label">Suspicion rate</div>
+      </div>
+    </div>
+
+    <!-- File results table -->
+    <div class="section-title">Files by suspicion rate</div>
+    <table>
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Language</th>
+          <th>Functions</th>
+          <th>AI suspected</th>
+          <th>Rate</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for file in report.files %}
+        <tr>
+          <td>{{ file.path }}</td>
+          <td>{{ file.language.value }}</td>
+          <td>{{ file.total_functions }}</td>
+          <td>{{ file.ai_suspected }}</td>
+          <td>{{ "%.1f"|format(file.suspicion_rate * 100) }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <!-- Per-function detail (flagged only) -->
+    <div class="section-title">Flagged functions</div>
+    <table>
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Function</th>
+          <th>Line</th>
+          <th>Log-Rank</th>
+          <th>Detect Score</th>
+          <th>Confidence</th>
+          <th>Label</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for file in report.files %}
+          {% for fn in file.functions if fn.label.value == "AI_SUSPECTED" %}
+          <tr>
+            <td>{{ file.path }}</td>
+            <td>
+              {{ fn.chunk.name }}
+              <details>
+                <summary>show code</summary>
+                <pre class="code-block">{{ fn.chunk.source | e }}</pre>
+              </details>
+            </td>
+            <td>{{ fn.chunk.start_line }}</td>
+            <td>{{ "%.3f"|format(fn.log_rank_score) if fn.log_rank_score is not none else "--" }}</td>
+            <td>{{ "%.3f"|format(fn.detect_score) if fn.detect_score is not none else "--" }}</td>
+            <td>{{ "%.2f"|format(fn.confidence) }}</td>
+            <td><span class="badge badge-ai">AI SUSPECTED</span></td>
+          </tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <footer>
+      Generated by ai-code-detector &nbsp;*&nbsp; DetectCodeGPT method &nbsp;*&nbsp; Results are probabilistic, not definitive.
+    </footer>
+  </div>
+</body>
+</html>
