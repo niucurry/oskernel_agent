@@ -117,9 +117,11 @@ def _data():
 def test_generate_template_fallback_no_llm():
     reviewed, recall = _data()
     md, deleted = generate_report(reviewed, recall, client=None)
-    for h in ["一、溯源结论", "二、模块级对照表", "三、高相似代码段清单", "四、创新点分析", "五、附注信号"]:
+    for h in ["一、溯源结论", "二、模块级对照表", "三、高相似代码段清单", "四、创新点分析",
+              "五、附注信号", "六、AI 生成代码检测"]:
         assert h in md
     assert "未启用 LLM" in md
+    assert "未运行 AI 生成代码检测" in md  # 未提供 ai_report 时章六给出说明
 
 
 def test_generate_with_llm_scrubs_hallucinated_ref():
