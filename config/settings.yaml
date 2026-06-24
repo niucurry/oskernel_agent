@@ -46,3 +46,19 @@ llm:
   request_timeout: 60    # 单次请求超时（秒）
   max_retries: 3         # 网络层重试次数
   min_interval: 0.0      # 相邻请求最小间隔（秒），限速用
+
+ai_detect:
+  # AI 生成代码检测（DetectCodeGPT，困惑度/log-rank）。参考模型 14GB，建议在带 GPU 的宿主机
+  # 单独运行 `python -m src.ai_detect --repo X`；VM 无模型时该步骤优雅跳过，报告章节给出说明。
+  model_id: codellama/CodeLlama-7b-hf  # 也可 bigcode/starcoder2-3b（更小更快、精度略低）
+  device: auto                 # auto / cpu / cuda / mps
+  engine: transformers         # transformers / vllm
+  batch_size: 8                # 模型前向批大小
+  k_perturbations: 50          # Stage 2 每函数扰动次数
+  min_loc: 20                  # 低于此有效行数的函数判 Uncertain（信号不足）
+  log_rank_llm_threshold: 1.5  # Stage 1：log_rank < 此值 → LLM（高置信）
+  log_rank_human_threshold: 3.0 # Stage 1：log_rank > 此值 → Human（高置信）
+  detect_score_threshold: 0.1  # Stage 2：NPR score > 此值 → LLM
+  git_blame: true              # 是否按作者/月份聚合（git blame）
+  suspicious_min_confidence: 0.7 # 进入“高度可疑函数”清单的置信下限
+  max_functions: 0             # >0 时只检测前 N 个函数（冒烟/限额用，0=全量）
