@@ -10,7 +10,8 @@ from pathlib import Path
 from loguru import logger
 
 # 流水线步骤顺序（normalize 并入 recall：新作品在召回时在线归一化）
-STEPS = ["ingest", "recall", "exact", "segment", "metadata", "review", "report"]
+# ai_detect：AI 生成代码检测，独立于查重漏斗，产出 {repo}_ai_detect.json 供 report 章六并入
+STEPS = ["ingest", "recall", "exact", "segment", "metadata", "review", "ai_detect", "report"]
 
 
 def is_url(s: str) -> bool:
