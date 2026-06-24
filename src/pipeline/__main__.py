@@ -154,8 +154,6 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         if not s.api_key:
             logger.warning("[review] 无 LLM_API_KEY，跳过复核")
         else:
-            if args.review_limit:
-                s.concurrency = s.concurrency
             res = timed("review", lambda: run_review(
                 final_path, OpenAICompatClient(s), s, output_dir=out, limit=args.review_limit))
             funnel["review_verdicts"] = res["verdict_counts"]
