@@ -1,0 +1,53 @@
+{
+  "date": "2026-06-24",
+  "generated_at": "2026-06-24T07:06:34.239799+00:00",
+  "counts": {
+    "T1": 50,
+    "T2": 50,
+    "T3": 50,
+    "T4": 50,
+    "NEG": 200
+  },
+  "by_class": {
+    "T1": {
+      "n": 50,
+      "recall_layer1": 1.0,
+      "recall_layer2": 1.0,
+      "recall_cascade": 1.0,
+      "recall_final": 1.0
+    },
+    "T2": {
+      "n": 50,
+      "recall_layer1": 0.44,
+      "recall_layer2": 1.0,
+      "recall_cascade": 1.0,
+      "recall_final": 1.0
+    },
+    "T3": {
+      "n": 50,
+      "recall_layer1": 0.76,
+      "recall_layer2": 1.0,
+      "recall_cascade": 1.0,
+      "recall_final": 0.9
+    },
+    "T4": {
+      "n": 50,
+      "recall_layer1": 0.44,
+      "recall_layer2": 0.98,
+      "recall_cascade": 1.0,
+      "recall_final": 1.0
+    }
+  },
+  "overall": {
+    "precision": 1.0,
+    "recall": 0.975,
+    "tp": 195,
+    "fp": 0,
+    "neg_total": 200,
+    "pos_total": 200
+  },
+  "timings_sec": {
+    "embed_all": 6.41,
+    "pipeline": 0.66
+  }
+}
