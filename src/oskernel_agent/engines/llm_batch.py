@@ -22,7 +22,21 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-_OPENCODE = str(Path.home() / ".local" / "bin" / "opencode")
+def _find_opencode() -> str:
+    import shutil
+    found = shutil.which("opencode")
+    if found:
+        return found
+    for c in [
+        Path.home() / ".local" / "bin" / "opencode",
+        Path.home() / "AppData" / "Roaming" / "npm" / "opencode",
+        Path.home() / "AppData" / "Roaming" / "npm" / "opencode.cmd",
+    ]:
+        if c.exists():
+            return str(c)
+    return "opencode"
+
+_OPENCODE = _find_opencode()
 _DEFAULT_CONCURRENCY = 4
 
 

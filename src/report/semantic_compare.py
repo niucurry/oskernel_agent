@@ -30,6 +30,23 @@ DEFAULT_OUTPUT_DIR = "data/output"
 
 # 子模块列表及其显示名称
 MODULES = ["sched", "mm", "fs", "trap", "driver", "arch", "other"]
+
+
+def _find_opencode() -> str:
+    """从 PATH 中找 opencode 可执行文件（兼容 Linux ~/.local/bin 与 Windows npm）。"""
+    import shutil
+    found = shutil.which("opencode")
+    if found:
+        return found
+    candidates = [
+        Path.home() / ".local" / "bin" / "opencode",
+        Path.home() / "AppData" / "Roaming" / "npm" / "opencode",
+        Path.home() / "AppData" / "Roaming" / "npm" / "opencode.cmd",
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c)
+    return "opencode"  # 最终兜底，报 FileNotFoundError 时捕获
 _MODULE_DISPLAY = {
     "sched":  "进程调度",
     "mm":     "内存管理",
@@ -40,7 +57,7 @@ _MODULE_DISPLAY = {
     "other":  "其他",
 }
 
-_OPENCODE = str(Path.home() / ".local" / "bin" / "opencode")
+_OPENCODE = _find_opencode()
 
 
 # ─── 1. 统计：各子模块复制/原创百分比 ─────────────────────────────────────────
@@ -169,98 +186,82 @@ def collect_file_pairs(suspects: list[dict], top_per_module: int = 5) -> list[di
     return result
 
 
-# ─── 3. 构造 opencode 用户消息 ────────────────────────────────────────────────
+# ─── 3. 上下文文件 + opencode 短消息 ─────────────────────────────────────────
+# Windows 命令行限制 ~32K 字符，不能把完整代码对塞进 CLI 参数。
+# 解决方案：把所有数据写到仓库里的临时 JSON 文件，用 read_file MCP 工具读取。
 
-def _build_compare_request(
-    query_repo_id: str,
+_CONTEXT_FILENAME = "_plagiarism_context.json"
+
+
+def _write_context_file(
     query_repo_path: str,
+    query_repo_id: str,
     file_pairs: list[dict],
     submodule_stats: dict,
     output_path: str,
-) -> str:
-    """构造给 os-kernel-plagiarism agent 的用户消息。"""
-    lines = [
-        f"请对新作品（{query_repo_id}）与历史代码库进行语义级功能借鉴分析。",
-        f"新作品路径：{query_repo_path}",
-        "",
-        "## 子模块概况",
-        "",
-    ]
-    for mod, stats in submodule_stats.items():
-        if stats["confirmed"] + stats["review"] + stats["weak"] == 0:
-            continue
-        disp = _MODULE_DISPLAY.get(mod, mod)
-        lines.append(
-            f"- **{disp}**（{mod}）："
-            f"confirmed={stats['confirmed']}, review={stats['review']}, weak={stats['weak']}，"
-            f"估算借鉴比例 {stats['copy_pct']*100:.0f}%，主要来源：{stats['top_source']}"
-        )
-    lines += ["", "## 相似代码对（每模块取相似度最高的若干对）", ""]
+) -> Path:
+    """把分析上下文序列化到 {query_repo_path}/_plagiarism_context.json。"""
+    ctx = {
+        "query_repo_id":   query_repo_id,
+        "output_path":     str(output_path),
+        "submodule_stats": {
+            mod: {
+                "display":      _MODULE_DISPLAY.get(mod, mod),
+                "confirmed":    s["confirmed"],
+                "review":       s["review"],
+                "weak":         s["weak"],
+                "total":        s["total"],
+                "copy_pct_pct": round(s["copy_pct"] * 100, 1),
+                "top_source":   s["top_source"],
+            }
+            for mod, s in submodule_stats.items()
+            if s["confirmed"] + s["review"] + s["weak"] > 0
+        },
+        "file_pairs": file_pairs,
+    }
+    ctx_path = Path(query_repo_path) / _CONTEXT_FILENAME
+    ctx_path.write_text(json.dumps(ctx, ensure_ascii=False, indent=2), encoding="utf-8")
+    return ctx_path
 
-    current_mod = None
-    for p in file_pairs:
-        mod = p["module"]
-        if mod != current_mod:
-            disp = _MODULE_DISPLAY.get(mod, mod)
-            lines += [f"### {disp} ({mod})", ""]
-            current_mod = mod
 
-        tier_label = {"confirmed": "直接复制", "review": "疑似借鉴", "weak": "轻度相似"}.get(p["tier"], p["tier"])
-        lines += [
-            f"**新作品** `{p['query_file']}:{p['query_start']}-{p['query_end']}` "
-            f"函数 `{p['query_func']}` ← {tier_label}（相似度 {p['sim']}）",
-            f"**来源** `{p['ref_repo']}/{p['ref_file']}:{p['ref_start']}-{p['ref_end']}` "
-            f"函数 `{p['ref_func']}`",
-            "",
-            "新作品代码：",
-            "```",
-            p["query_code"],
-            "```",
-            "参考代码：",
-            "```",
-            p["ref_code"],
-            "```",
-            "",
-        ]
-
-    lines += [
-        "## 你的任务",
-        "",
-        "对每个**有嫌疑代码对**的子模块写一段语义分析 HTML 片段，内容包含：",
-        "1. **功能借鉴**：具体借鉴了哪些功能/算法/数据结构（语义层面，不只是「代码相似」）",
-        "2. **借鉴程度**：直接复制 / 变量改名 / 结构保留逻辑改写 / 受启发重新实现",
-        "3. **代码证据**：引用 `文件:行号` 格式（如 `os/src/task/mod.rs:125`），会自动变成可点击链接",
-        "",
-        "你可以用 initialize_analysis + read_file 工具读取新作品更多上下文（可选）。",
-        "**必须用 write_report 将 HTML 写到以下路径**（不要写 Markdown，直接写 HTML 标签）：",
-        "",
-        f"  {output_path}",
-        "",
-        "HTML 格式示例：",
-        "```html",
-        '<section data-module="sched">',
-        "  <h3>进程调度 (sched) 语义分析</h3>",
-        "  <p>借鉴了 rcore-tutorial-v3 的任务切换机制……</p>",
-        "  <ul>",
-        "    <li><strong>功能借鉴</strong>：……</li>",
-        "    <li><strong>借鉴程度</strong>：……</li>",
-        "    <li><strong>证据</strong>：<code>os/src/task/mod.rs:132</code></li>",
-        "  </ul>",
-        "</section>",
-        "```",
-    ]
-    return "\n".join(lines)
+def _build_short_request(query_repo_path: str, output_path: str,
+                          ctx_path: str) -> str:
+    """生成传给 opencode 的精简消息（直接指向绝对路径，用 bash 读写文件）。"""
+    ctx_posix = Path(ctx_path).as_posix()
+    out_posix  = Path(output_path).as_posix()
+    return (
+        f"请对 OS 内核新作品进行语义级功能借鉴分析，生成 HTML 对比报告。\n\n"
+        f"**不要调用 initialize_analysis**（已知会超时）。直接用 bash 读写文件。\n\n"
+        f"步骤：\n"
+        f"1. bash: 读取分析上下文（JSON）\n"
+        f"   命令示例：python -c \"import json; d=json.load(open(r'{ctx_posix}', encoding='utf-8')); "
+        f"print(json.dumps(d['submodule_stats'], ensure_ascii=False, indent=2))\"\n"
+        f"2. 对 file_pairs 中每个子模块，分析功能借鉴（语义层面，不只是文本相似）：\n"
+        f"   - 借鉴了哪些功能/算法/机制\n"
+        f"   - 借鉴程度：直接复制/变量改名/结构保留/受启发重实现\n"
+        f"   - 代码证据：引用 文件:行号 格式\n"
+        f"3. **必须**调用 write 工具将完整 HTML 写入（不要用 bash echo）：\n"
+        f"   output_path: {out_posix}\n\n"
+        f"HTML 格式：\n"
+        f"- 每个模块一个 <section data-module=\"模块tag\">…</section>\n"
+        f"- 用 <h3>模块名</h3><p>分析</p><ul><li>证据</li></ul>\n"
+        f"- 文件引用写 path:line 纯文本（如 os/src/task/mod.rs:125）\n"
+        f"- 不要写 Markdown，只写 HTML 标签\n\n"
+        f"Context 文件：{ctx_posix}"
+    )
 
 
 # ─── 4. 调用 opencode ────────────────────────────────────────────────────────
 
 def _opencode_env() -> dict:
     env = os.environ.copy()
-    local_bin = str(Path.home() / ".local" / "bin")
-    if local_bin not in env.get("PATH", ""):
-        env["PATH"] = local_bin + ":" + env.get("PATH", "")
     env["OPENCODE_SESSION_ID"] = uuid.uuid4().hex
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
+    # 确保 npm 全局 bin 在 PATH 中（Windows）
+    npm_bin = str(Path.home() / "AppData" / "Roaming" / "npm")
+    if npm_bin not in env.get("PATH", ""):
+        sep = ";" if os.name == "nt" else ":"
+        env["PATH"] = npm_bin + sep + env.get("PATH", "")
     return env
 
 
@@ -272,21 +273,95 @@ def _cache_key(*parts: str) -> str:
     return h.hexdigest()
 
 
+_ANALYSIS_SYSTEM = """\
+你是代码原创性分析助手，专注于语义级（功能层面）的对比分析。
+
+分析 OS 内核新作品的功能借鉴情况，对每个子模块输出 HTML 片段。
+
+分析维度：
+1. 功能借鉴：借鉴了哪些算法/机制/数据结构（语义层面，不只是文本相似）
+2. 借鉴程度：直接复制 / 变量改名 / 结构保留逻辑改写 / 受启发重新实现
+3. 代码证据：引用 文件:行号 格式（如 os/src/task/mod.rs:125）
+
+输出格式（严格遵守）：
+- 只输出 HTML 标签，不要输出 Markdown
+- 每个子模块用 <section data-module="模块tag">...</section> 包裹
+- 用 <h3>/<p>/<ul>/<li> 语义标签
+- 文件引用写纯文本 path:line，不要手写 <a> 标签
+"""
+
+
+def _build_analysis_message(
+    query_repo_id: str,
+    file_pairs: list[dict],
+    submodule_stats: dict,
+) -> str:
+    """构造给 DeepSeek API 的完整分析消息（含代码片段）。"""
+    lines = [
+        f"请对新作品（{query_repo_id}）进行语义级功能借鉴分析。",
+        "",
+        "## 子模块统计",
+        "",
+    ]
+    for mod, stats in submodule_stats.items():
+        if stats["confirmed"] + stats["review"] + stats["weak"] == 0:
+            continue
+        disp = _MODULE_DISPLAY.get(mod, mod)
+        lines.append(
+            f"- **{disp}**（{mod}）：confirmed={stats['confirmed']}，"
+            f"review={stats['review']}，weak={stats['weak']}，"
+            f"主要来源：{stats['top_source']}"
+        )
+    lines += ["", "## 相似代码对（按子模块）", ""]
+
+    current_mod = None
+    for p in file_pairs:
+        mod = p["module"]
+        if mod != current_mod:
+            lines.append(f"### {_MODULE_DISPLAY.get(mod, mod)} ({mod})")
+            current_mod = mod
+        tier_label = {"confirmed": "确认借鉴", "review": "疑似借鉴", "weak": "弱相似"}.get(p["tier"], p["tier"])
+        lines += [
+            f"**新作品** `{p['query_file']}:{p['query_start']}` 函数 `{p['query_func']}` "
+            f"← {tier_label}（相似度 {p['sim']}）",
+            f"**来源** `{p['ref_repo']}/{p['ref_file']}:{p['ref_start']}` 函数 `{p['ref_func']}`",
+            "```",
+            p["query_code"],
+            "```",
+            "参考：",
+            "```",
+            p["ref_code"],
+            "```",
+            "",
+        ]
+
+    lines += [
+        "## 任务",
+        "对每个**有相似代码对**的子模块，输出一段语义分析 HTML 片段。",
+        "直接输出 HTML，不要输出 Markdown，不要有任何额外说明文字。",
+    ]
+    return "\n".join(lines)
+
+
 def run_semantic_analysis(
     query_repo_id: str,
     query_repo_path: str,
     file_pairs: list[dict],
     submodule_stats: dict,
     work_dir: Path,
-    timeout: int = 900,
+    timeout: int = 120,
 ) -> str:
-    """调用 os-kernel-plagiarism agent，返回语义分析 HTML 片段。"""
+    """直接调用 DeepSeek API 进行语义分析，返回 HTML 片段。
+
+    使用 config.toml 中的 api.key 和 api.base_url，一次 API 调用完成全部子模块分析，
+    替代 opencode CLI（opencode MCP 超时不稳定）。
+    """
     work_dir.mkdir(parents=True, exist_ok=True)
-    output_path = work_dir / "semantic_analysis.html"
-    cache_dir   = work_dir / "cache"
+    output_path = work_dir.resolve() / "semantic_analysis.html"
+    cache_dir   = work_dir.resolve() / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    # 缓存键：repo_id + file_pairs 签名
+    # 缓存
     pair_sig = json.dumps(
         [(p["module"], p["query_func"], p["ref_func"], p["sim"]) for p in file_pairs],
         ensure_ascii=False, sort_keys=True,
@@ -298,41 +373,63 @@ def run_semantic_analysis(
         logger.info("[semantic] 缓存命中 → {}", html_cache)
         return html_cache.read_text(encoding="utf-8")
 
-    user_msg = _build_compare_request(
-        query_repo_id, query_repo_path,
-        file_pairs, submodule_stats,
-        str(output_path),
-    )
-
-    logger.info("[semantic] 调用 opencode（os-kernel-plagiarism）…")
+    # 读取 API 配置
     try:
-        proc = subprocess.run(
-            [_OPENCODE, "run",
-             "--agent", "os-kernel-plagiarism",
-             "--dangerously-skip-permissions",
-             user_msg],
-            env=_opencode_env(),
-            capture_output=True,
-            text=True,
+        from oskernel_agent import config as _cfg
+        api_key  = _cfg.api.get("key", "").strip()
+        base_url = _cfg.api.get("base_url", "https://api.deepseek.com/v1").strip()
+    except Exception:
+        api_key = base_url = ""
+
+    if not api_key:
+        logger.warning("[semantic] 未找到 API key（config.toml），使用规则兜底")
+        return _fallback_analysis(file_pairs, submodule_stats)
+
+    user_msg = _build_analysis_message(query_repo_id, file_pairs, submodule_stats)
+    logger.info("[semantic] 调用 DeepSeek API 进行语义分析（消息 {} 字符）", len(user_msg))
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
             timeout=timeout,
         )
-        if proc.returncode not in (0, 1):
-            logger.warning("[semantic] opencode 退出码 {}", proc.returncode)
-    except subprocess.TimeoutExpired:
-        logger.warning("[semantic] opencode 超时（{}s）", timeout)
-        return _fallback_analysis(file_pairs, submodule_stats)
-    except FileNotFoundError:
-        logger.warning("[semantic] opencode 未安装，使用规则兜底")
+        resp = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": _ANALYSIS_SYSTEM},
+                {"role": "user",   "content": user_msg},
+            ],
+            temperature=0.3,
+            max_tokens=8000,
+        )
+        html_text = (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        logger.warning("[semantic] API 调用失败：{}，使用规则兜底", e)
         return _fallback_analysis(file_pairs, submodule_stats)
 
-    if output_path.exists():
-        content = output_path.read_text(encoding="utf-8")
-        html_cache.write_text(content, encoding="utf-8")
-        logger.info("[semantic] 分析完成（{} 字符）", len(content))
-        return content
+    # 提取 HTML 片段（模型可能在 markdown 代码块里）
+    html_content = _extract_html_from_text(html_text) or html_text
 
-    logger.warning("[semantic] opencode 未产出文件，使用规则兜底")
-    return _fallback_analysis(file_pairs, submodule_stats)
+    output_path.write_text(html_content, encoding="utf-8")
+    html_cache.write_text(html_content, encoding="utf-8")
+    logger.info("[semantic] 分析完成（{} 字符）", len(html_content))
+    return html_content
+
+
+def _extract_html_from_text(text: str) -> str:
+    """从 opencode stdout 中提取 HTML 片段（agent 有时直接输出而非写文件）。"""
+    import re
+    # 尝试匹配 ```html ... ``` 代码块
+    m = re.search(r'```html\s*(.*?)```', text, re.DOTALL | re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    # 尝试匹配直接包含 <section data-module 的 HTML 内容
+    m2 = re.search(r'(<section\s+data-module=.*?</section>\s*)+', text, re.DOTALL | re.IGNORECASE)
+    if m2:
+        return m2.group(0).strip()
+    return ""
 
 
 def _fallback_analysis(file_pairs: list[dict], submodule_stats: dict) -> str:
@@ -847,7 +944,7 @@ def run_semantic_compare(
     original_funcs  = _original_functions(recall, suspects) if recall else []
 
     # opencode 语义分析
-    out_dir = Path(output_dir)
+    out_dir = Path(output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     work_dir = out_dir / f"{query_repo_id}_semantic_work"
 
