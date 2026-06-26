@@ -44,11 +44,12 @@ def build_local_meta(repo_path: str | Path) -> list[dict]:
     if not (repo_path / ".git").exists():
         return []
     try:
-        out = subprocess.run(
+        raw = subprocess.run(
             ["git", "-C", str(repo_path), "log", "--numstat", "--date=iso-strict",
              "--pretty=format:@@%H|%an|%aI|%s"],
-            check=True, capture_output=True, text=True, timeout=60,
+            check=True, capture_output=True, timeout=60,
         ).stdout
+        out = raw.decode("utf-8", errors="replace")
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
         return []
 
