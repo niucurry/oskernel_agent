@@ -89,16 +89,29 @@ def render_module_table(rows: list[dict]) -> str:
 
 # ---------- 三、高相似代码段清单 ----------
 
-def high_similarity_pairs(suspects: list[dict]) -> list[dict]:
-    """confirmed 或 verdict=likely_clone 的对。"""
+def high_similarity_pairs(suspects: list[dict], recall: dict | None = None,
+                          linker=None) -> list[dict]:
+    """confirmed 或 verdict=likely_clone 的对。linker 非空时 ref 渲染为 GitLab 链接。"""
+    query_repo_id = (recall or {}).get("query_repo_id")
+    if linker and query_repo_id:
+        linker.mark_query_repo(query_repo_id)
     out = []
     for s in suspects:
         if s.get("tier") == "confirmed" or _verdict(s) == "likely_clone":
             q, c = _q(s), _c(s)
             rv = s.get("review") if isinstance(s.get("review"), dict) else {}
+            q_text = f"{q['file_path']}:{q['start_line']}-{q['end_line']}"
+            c_text = f"{c['repo_id']}/{c['file_path']}:{c['start_line']}-{c['end_line']}"
+            if linker:
+                new_ref = linker.link(query_repo_id, q["file_path"],
+                                      q["start_line"], q["end_line"], text=q_text)
+                old_ref = linker.link(c["repo_id"], c["file_path"],
+                                      c["start_line"], c["end_line"], text=c_text)
+            else:
+                new_ref, old_ref = q_text, c_text
             out.append({
-                "new_ref": f"{q['file_path']}:{q['start_line']}-{q['end_line']}",
-                "old_ref": f"{c['repo_id']}/{c['file_path']}:{c['start_line']}-{c['end_line']}",
+                "new_ref": new_ref,
+                "old_ref": old_ref,
                 "sim": round(float(s.get("final_score") or 0.0), 3),
                 "clone_type": rv.get("clone_type") or (s.get("match_type_per_span") or ["—"])[0],
                 "reasoning": rv.get("reasoning", ""),
@@ -117,8 +130,11 @@ def render_high_sim_table(pairs: list[dict], summaries: list[str]) -> str:
 
 # ---------- 四、创新点（从 recall.json） ----------
 
-def innovation_functions(recall: dict, top_n: int = 10) -> list[dict]:
+def innovation_functions(recall: dict, top_n: int = 10, linker=None) -> list[dict]:
     """新作品中与全历史库最高相似度 < 0.5 且行数 > 30 的函数 Top-N（按行数降序）。"""
+    query_repo_id = recall.get("query_repo_id")
+    if linker and query_repo_id:
+        linker.mark_query_repo(query_repo_id)
     out = []
     for item in recall.get("results", []):
         q = item["query"]
@@ -126,8 +142,11 @@ def innovation_functions(recall: dict, top_n: int = 10) -> list[dict]:
         max_sim = max((c["score"] for c in cands), default=0.0)
         lines = q["end_line"] - q["start_line"] + 1
         if max_sim < INNOVATION_SIM_MAX and lines > INNOVATION_MIN_LINES:
+            ref_text = f"{q['file_path']}:{q['start_line']}-{q['end_line']}"
+            ref = linker.link(query_repo_id, q["file_path"],
+                              q["start_line"], q["end_line"], text=ref_text) if linker else ref_text
             out.append({
-                "ref": f"{q['file_path']}:{q['start_line']}-{q['end_line']}",
+                "ref": ref,
                 "func_name": q["func_name"], "lines": lines,
                 "max_sim": round(max_sim, 3), "raw_code": q.get("raw_code", ""),
             })
@@ -137,38 +156,51 @@ def innovation_functions(recall: dict, top_n: int = 10) -> list[dict]:
 
 # ---------- 五、附注信号 ----------
 
-def annotations(suspects: list[dict]) -> dict:
+def annotations(suspects: list[dict], linker=None, query_repo_id: str | None = None) -> dict:
+    if linker and query_repo_id:
+        linker.mark_query_repo(query_repo_id)
     baseline = [s for s in suspects if s.get("tier") == "baseline_derived"]
     commit_hits = [s for s in suspects if (s.get("evidence") or {}).get("commit_signals")]
     disputed = [s for s in suspects if _verdict(s) == "disputed"]
+
+    def _qref(s):
+        q = _q(s)
+        t = f"{q['file_path']}:{q['start_line']}"
+        return linker.link(query_repo_id, q["file_path"], q["start_line"], q["start_line"], text=t) if linker else t
+
+    def _cref(s):
+        c = _c(s)
+        t = f"{c['repo_id']}/{c['file_path']}:{c['start_line']}"
+        return linker.link(c["repo_id"], c["file_path"], c["start_line"], c["start_line"], text=t) if linker else t
+
     # 公共/框架代码：按 query 函数去重（一个函数会有多条对）
     common_q: dict[str, int] = {}
     for s in suspects:
         if s.get("tier") == "common_code":
-            ref = f"{_q(s)['file_path']}:{_q(s)['start_line']}"
+            ref = _qref(s)
             common_q[ref] = max(common_q.get(ref, 0), (s.get("evidence") or {}).get("common_code_repos", 0))
     return {
         "common_code_count": len(common_q),
         "common_code": [{"new": ref, "repos": n} for ref, n in sorted(common_q.items())],
         "baseline_count": len(baseline),
         "baseline": [
-            {"new": f"{_q(s)['file_path']}:{_q(s)['start_line']}", "note": s.get("baseline_note", "")}
+            {"new": _qref(s), "note": s.get("baseline_note", "")}
             for s in baseline
         ],
         "commit_signals": [
-            {"new": f"{_q(s)['file_path']}:{_q(s)['start_line']}",
+            {"new": _qref(s),
              "signals": (s.get("evidence") or {}).get("commit_signals", [])}
             for s in commit_hits
         ],
         "disputed": [
-            {"new": f"{_q(s)['file_path']}:{_q(s)['start_line']}",
-             "old": f"{_c(s)['repo_id']}/{_c(s)['file_path']}:{_c(s)['start_line']}"}
+            {"new": _qref(s), "old": _cref(s)}
             for s in disputed
         ],
     }
 
 
-def ai_detection_data(ai_report: dict | None, *, top_files: int = 8, top_funcs: int = 10) -> dict:
+def ai_detection_data(ai_report: dict | None, *, top_files: int = 8, top_funcs: int = 10,
+                      linker=None, query_repo_id: str | None = None) -> dict:
     """从 {repo}_ai_detect.json 提取「AI 生成代码检测」章节所需结构化数据。
 
     返回 {"status": ok|skipped|missing, ...}。ok 时含 overall/by_language/high_risk_files/
@@ -181,6 +213,8 @@ def ai_detection_data(ai_report: dict | None, *, top_files: int = 8, top_funcs: 
         return {"status": status or "missing", "reason": ai_report.get("reason", ""),
                 "model_id": ai_report.get("model_id", "")}
 
+    if linker and query_repo_id:
+        linker.mark_query_repo(query_repo_id)
     agg = ai_report.get("aggregated", {})
     overall = agg.get("overall", {})
     suspicious = []
@@ -188,9 +222,12 @@ def ai_detection_data(ai_report: dict | None, *, top_files: int = 8, top_funcs: 
         src = (s.get("source") or "").strip()
         if len(src) > 800:
             src = src[:800] + "\n…(截断)"
+        ref_text = f"{s['file_path']}:{s['start_line']}-{s['end_line']}"
+        ref = linker.link(query_repo_id, s["file_path"], s["start_line"], s["end_line"],
+                          text=ref_text) if linker else ref_text
         suspicious.append({
             "name": s.get("qualified_name") or s.get("function_name", ""),
-            "ref": f"{s['file_path']}:{s['start_line']}-{s['end_line']}",
+            "ref": ref,
             "language": s.get("language", ""),
             "confidence": round(float(s.get("confidence") or 0.0), 3),
             "detect_score": s.get("detect_score"),

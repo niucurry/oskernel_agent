@@ -41,16 +41,16 @@ def _sanitize_cell(text: str, limit: int = 50) -> str:
     return text[:limit]
 
 
-async def _generate_async(suspects, recall, client, ai_report=None) -> tuple[str, int]:
+async def _generate_async(suspects, recall, client, ai_report=None, linker=None) -> tuple[str, int]:
     top_repos = S.trace_top_repos(suspects)
     mod_rows = S.module_table_rows(suspects)
-    hi_pairs = S.high_similarity_pairs(suspects)
-    innov = S.innovation_functions(recall)
-    ann = S.annotations(suspects)
+    hi_pairs = S.high_similarity_pairs(suspects, recall, linker)
+    innov = S.innovation_functions(recall, linker=linker)
+    ann = S.annotations(suspects, linker=linker, query_repo_id=recall.get("query_repo_id"))
     allowed = _collect_allowed(suspects, innov)
 
     # 章六：AI 生成代码检测（与其他模块一样唤起独立会话生成结论）
-    ai_data = S.ai_detection_data(ai_report)
+    ai_data = S.ai_detection_data(ai_report, linker=linker, query_repo_id=recall.get("query_repo_id"))
     if ai_data.get("status") == "ok":
         for s in ai_data.get("suspicious", []):
             add_allowed(allowed, s["ref"])  # 登记可疑函数 文件:行 供后置回源校验
@@ -160,13 +160,15 @@ def _ai_section_body(ai_data: dict, s6_text: str, allowed: dict) -> tuple[str, i
     return "\n".join(parts), deleted
 
 
-def generate_report(reviewed_data: dict, recall_data: dict, client=None, ai_report: dict | None = None) -> tuple[str, int]:
+def generate_report(reviewed_data: dict, recall_data: dict, client=None,
+                    ai_report: dict | None = None, linker=None) -> tuple[str, int]:
     """返回 (report_markdown, deleted_count)。client 为 None 时不调用 LLM（模板兜底）。
 
     ai_report：{repo}_ai_detect.json 内容（AI 生成代码检测结果），为 None 时章六给出未运行说明。
+    linker：GitLabLinker，非空时把表格里的 文件:行 渲染成 GitLab blob 链接。
     """
     suspects = reviewed_data.get("suspects", [])
-    return asyncio.run(_generate_async(suspects, recall_data, client, ai_report))
+    return asyncio.run(_generate_async(suspects, recall_data, client, ai_report, linker))
 
 
 def run_report(
@@ -177,18 +179,40 @@ def run_report(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     repo_name: str | None = None,
     ai_detect_path: str | Path | None = None,
+    query_repo_path: str | Path | None = None,
+    heads_cache: str | Path | None = None,
 ) -> dict:
     reviewed = json.loads(Path(reviewed_path).read_text(encoding="utf-8"))
     recall = json.loads(Path(recall_path).read_text(encoding="utf-8"))
     ai_report = None
     if ai_detect_path and Path(ai_detect_path).exists():
         ai_report = json.loads(Path(ai_detect_path).read_text(encoding="utf-8"))
-    md, deleted = generate_report(reviewed, recall, client, ai_report)
+
+    # 构建 GitLab 链接器：repo_id→repo_url（repos.yaml）+ repo_url→HEAD sha（ls-remote 缓存）
+    # + 新作品 repo_url/sha（本地 git remote + rev-parse HEAD）
+    from .gitlab_links import (GitLabLinker, build_repo_url_map, ensure_heads,
+                               query_repo_info)
+    url_map = build_repo_url_map()
+    heads = {}
+    linker = None
+    if url_map:
+        cache = heads_cache or "data/db/repo_heads.json"
+        heads = ensure_heads(list(url_map.values()), cache)
+        q_url = q_sha = None
+        if query_repo_path:
+            q_url, q_sha = query_repo_info(query_repo_path)
+        linker = GitLabLinker(url_map, heads,
+                              query_repo_url=q_url, query_sha=q_sha)
+
+    md, deleted = generate_report(reviewed, recall, client, ai_report, linker)
 
     name = repo_name or (recall.get("query_repo_id") or "report").replace("/", "_")
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{name}_report.md"
-    out_path.write_text(md, encoding="utf-8")
-    logger.info("报告写入 {}（删除无法回源陈述 {} 条）", out_path, deleted)
-    return {"output_path": str(out_path), "deleted": deleted, "report": md}
+    # 富交互单文件 HTML（复用 oskernel_agent.reports.html 基础设施）
+    from .html_render import render_comparison_html
+    html_text = render_comparison_html(md, reviewed, recall)
+    html_path = out_dir / f"{name}_report.html"
+    html_path.write_text(html_text, encoding="utf-8")
+    logger.info("报告写入 {}（删除无法回源陈述 {} 条）", html_path, deleted)
+    return {"output_path": str(html_path), "html_path": str(html_path), "deleted": deleted, "report": md}

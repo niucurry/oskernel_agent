@@ -445,6 +445,8 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
     )
 
     # 子系统/模块不打分，评分只在顶层 verdict 卡片展示
+    # NOTE: role 角标 HTML 提到局部变量，避免 f-string 表达式内出现反斜杠（Python 3.11 兼容）。
+    _role_badge = '<span class="text-xs text-slate-500">(' + role + ')</span>' if role else ""
     head = (
         f'<div class="tree-toggle flex items-baseline gap-2 py-1" @click="open = !open; '
         f'localStorage.setItem(\'tree:{_esc(node_key)}\', open ? \'1\' : \'0\'); '
@@ -452,7 +454,7 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
         f'<span class="text-slate-400 w-4 text-center" x-text="open ? \'▾\' : \'▸\'"></span>'
         f'<span class="font-semibold {title_size} {("text-cyan-700 dark:text-cyan-400" if is_container else "")}">'
         f'{name}{"/" if typ == "dir" else ""}</span>'
-        f'{("<span class=\"text-xs text-slate-500\">("+role+")</span>") if role else ""}'
+        f'{_role_badge}'
         f'{err_badge}'
         f'</div>'
     )
