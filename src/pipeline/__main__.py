@@ -186,8 +186,10 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             client = OpenAICompatClient(s) if s.api_key else None
         res = timed("report", lambda: run_report(
             report_input, recall_path, client=client, output_dir=out, repo_name=repo_name,
-            ai_detect_path=ai_detect_path if ai_detect_path.exists() else None))
+            ai_detect_path=ai_detect_path if ai_detect_path.exists() else None,
+            query_repo_path=str(repo_path) if repo_path else None))
         funnel["report"] = res["output_path"]
+        funnel["report_html"] = res.get("html_path")
         funnel["report_deleted_refs"] = res["deleted"]
 
     logger.info("===== 漏斗 =====")

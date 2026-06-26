@@ -27,8 +27,13 @@ def local_ingest(repo_arg: str, work_root: str | Path) -> Path:
         dest = work_root / name
         if not (dest / ".git").exists():
             logger.info("克隆新作品 {} → {}", repo_arg, dest)
-            subprocess.run(["git", "clone", "--depth", "200", repo_arg, str(dest)],
-                           check=True, capture_output=True, text=True)
+            # core.protectNTFS=false：容忍仓库里被误提交的含 ':' 的 Windows
+            # Zone.Identifier 类垃圾文件名，否则在 Windows 上 checkout 会失败。
+            subprocess.run(
+                ["git", "clone", "-c", "core.protectNTFS=false",
+                 "--depth", "200", repo_arg, str(dest)],
+                check=True, capture_output=True, text=True,
+            )
         return dest
     return Path(repo_arg)
 

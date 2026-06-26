@@ -161,6 +161,10 @@ def normalize_node(node, lang: str, keep: frozenset[str] | None = None) -> NormR
 
 def normalize_snippet(code: str, lang: str, keep: frozenset[str] | None = None) -> NormResult:
     """便捷入口：解析一段源码并归一化其根节点（用于单元测试）。"""
+    # 仅 rust/c 有 tree-sitter grammar；asm 等无 grammar 的语言不解析，
+    # 返回空结果（unique_strings 信号通道对它们自然为空，不影响流水线）。
+    if lang not in ("rust", "c"):
+        return NormResult(code=code, strings=[])
     tree = parse(code.encode("utf-8"), lang)
     return normalize_node(tree.root_node, lang, keep)
 
