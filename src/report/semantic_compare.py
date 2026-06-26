@@ -558,16 +558,31 @@ def _summary_card(
     )
 
 
+def _ref_repo_anchor(linker, ref_repo: str) -> str:
+    """来源仓库列：生成指向该仓库 GitLab 首页的链接。"""
+    if linker is None or not ref_repo:
+        return html.escape(ref_repo)
+    try:
+        url_map = getattr(linker, "url_map", {})
+        repo_url = url_map.get(ref_repo)
+        if repo_url:
+            return (f'<a class="file-jump" href="{html.escape(repo_url)}" '
+                    f'target="_blank">{html.escape(ref_repo)}</a>')
+    except Exception:
+        pass
+    return html.escape(ref_repo)
+
+
 def _module_section(
     mod: str,
     submodule_stats: dict,
     file_pairs: list[dict],
     analysis_html: str,
-    resolver,
+    linker,
+    query_repo_id: str,
     idx: int,
 ) -> tuple[str, str]:
     """返回 (toc_entry_html, section_html)。"""
-    from oskernel_agent.reports.html import linkify_html
     stats = submodule_stats.get(mod, {})
     pairs = [p for p in file_pairs if p["module"] == mod]
 
@@ -598,16 +613,15 @@ def _module_section(
         rows = "".join(
             f'<tr>'
             f'<td class="font-mono text-xs">'
-            + (
-                f'<a class="file-jump" href="{html.escape(_make_link(resolver, p["query_file"], p["query_start"]))}">'
-                f'{html.escape(p["query_file"])}:{p["query_start"]}</a>'
-                if resolver else
-                f'{html.escape(p["query_file"])}:{p["query_start"]}'
-            )
+            + _make_gitlab_anchor(linker, query_repo_id, p["query_file"], p["query_start"])
             + f'</td>'
             f'<td class="text-xs">{html.escape(p["query_func"])}</td>'
-            f'<td class="text-xs text-slate-500">{html.escape(p["ref_repo"])}</td>'
-            f'<td class="font-mono text-xs">{html.escape(p["ref_file"])}:{p["ref_start"]}</td>'
+            f'<td class="text-xs text-slate-500">'
+            + _ref_repo_anchor(linker, p["ref_repo"])
+            + f'</td>'
+            f'<td class="font-mono text-xs">'
+            + _make_gitlab_anchor(linker, p["ref_repo"], p["ref_file"], p["ref_start"])
+            + f'</td>'
             f'<td class="text-xs">{html.escape(p["ref_func"])}</td>'
             f'<td class="text-xs font-semibold '
             + ("text-red-600" if p["sim"] > 0.9 else "text-amber-600" if p["sim"] > 0.7 else "text-slate-500")
@@ -639,10 +653,11 @@ def _module_section(
     else:
         table = ""
 
-    # 语义分析片段（从 opencode 输出中抠取当前模块的部分）
+    # 语义分析片段（从 DeepSeek 输出中抠取当前模块的部分）
     mod_analysis = _extract_module_analysis(analysis_html, mod)
     if mod_analysis:
-        mod_analysis = linkify_html(mod_analysis, resolver)
+        # 用 GitLab linker 将 path:line 转为在线链接
+        mod_analysis = _linkify_with_gitlab(mod_analysis, linker, query_repo_id)
 
     body = stat_row + table
     if mod_analysis:
@@ -680,6 +695,105 @@ def _make_link(resolver, file_path: str, line: int) -> str:
     return url or "#"
 
 
+# ─── GitLab 链接辅助 ──────────────────────────────────────────────────────────
+
+def _build_gitlab_linker(
+    query_repo_path: str | Path | None,
+    query_repo_id: str,
+    ref_repos: set[str],
+) -> "GitLabLinker | None":
+    """构建 GitLabLinker：query 仓库从本地 git 取 URL/SHA，参考仓库从 repos.yaml 取。"""
+    try:
+        from .gitlab_links import (
+            GitLabLinker, build_repo_url_map, ensure_heads, query_repo_info,
+        )
+        url_map = build_repo_url_map()
+        if not url_map and not query_repo_path:
+            return None
+
+        # 取需要 HEAD 的参考仓库 URL
+        ref_urls = [url_map[r] for r in ref_repos if r in url_map]
+        heads: dict[str, str] = {}
+        if ref_urls:
+            heads = ensure_heads(ref_urls, workers=8)
+
+        # 新作品（query）仓库
+        q_url = q_sha = None
+        if query_repo_path:
+            q_url, q_sha = query_repo_info(query_repo_path)
+
+        linker = GitLabLinker(url_map, heads, query_repo_url=q_url, query_sha=q_sha)
+        linker.mark_query_repo(query_repo_id)
+        return linker
+    except Exception as e:
+        logger.warning("[compare] 构建 GitLabLinker 失败：{}，链接降级为纯文本", e)
+        return None
+
+
+def _gitlab_url(linker, repo_id: str, file_path: str, start: int, end: int = 0) -> str | None:
+    """从 linker 取 GitLab blob URL，失败返回 None。"""
+    if linker is None:
+        return None
+    try:
+        from .gitlab_links import gitlab_blob_url, _canonical_repo_url
+        url = linker.url_map.get(repo_id) if hasattr(linker, "url_map") else None
+        # query 仓库
+        if repo_id == linker._query_key() and hasattr(linker, "query_repo_url"):
+            url = linker.query_repo_url
+            sha = linker.query_sha
+        elif url:
+            sha = linker.heads.get(_canonical_repo_url(url))
+        else:
+            return None
+        return gitlab_blob_url(url, sha, file_path, start or 0, end or 0)
+    except Exception:
+        return None
+
+
+def _make_gitlab_anchor(linker, repo_id: str, file_path: str, start: int,
+                         end: int = 0, css_class: str = "file-jump") -> str:
+    """生成 <a href="gitlab_url">file:line</a>，无 URL 时退化为纯文本。"""
+    url = _gitlab_url(linker, repo_id, file_path, start, end)
+    label = f"{html.escape(file_path)}:{start}" if start else html.escape(file_path)
+    if url:
+        return f'<a class="{css_class}" href="{html.escape(url)}" target="_blank">{label}</a>'
+    return label
+
+
+def _linkify_with_gitlab(fragment: str, linker, query_repo_id: str) -> str:
+    """把 HTML 片段里的 path:line 纯文本引用转为 GitLab 在线链接。"""
+    import re
+    if linker is None:
+        return fragment
+    _FILEREF_RE = re.compile(
+        r"([A-Za-z0-9_./\-]+\.(?:rs|c|h|cc|cpp|hpp|S|s|py|sh|toml|md))"
+        r"(?::(\d+)(?:-(\d+))?)?"
+    )
+    _PROTECT_RE = re.compile(r"<(script|style|pre|a|code)\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
+
+    blocks: list[str] = []
+
+    def _stash(m: re.Match) -> str:
+        blocks.append(m.group(0))
+        return f"\x00B{len(blocks)-1}\x00"
+
+    text = _PROTECT_RE.sub(_stash, fragment)
+
+    def _sub(m: re.Match) -> str:
+        fp, start, end = m.group(1), m.group(2), m.group(3)
+        line = int(start) if start else 0
+        end_line = int(end) if end else line
+        url = _gitlab_url(linker, query_repo_id, fp, line, end_line)
+        if not url:
+            return m.group(0)
+        label = m.group(0)
+        return f'<a class="file-jump" href="{html.escape(url)}" target="_blank">{label}</a>'
+
+    text = _FILEREF_RE.sub(_sub, text)
+    text = re.sub(r"\x00B(\d+)\x00", lambda m: blocks[int(m.group(1))], text)
+    return text
+
+
 def _extract_module_analysis(analysis_html: str, mod: str) -> str:
     """从 opencode 产出的完整 HTML 中，尝试提取该模块的 <section> 片段。"""
     import re
@@ -710,9 +824,8 @@ def _extract_module_analysis(analysis_html: str, mod: str) -> str:
     return ""
 
 
-def _original_section(original_funcs: list[dict], resolver) -> tuple[str, str]:
+def _original_section(original_funcs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
     """原创代码章节。"""
-    from oskernel_agent.reports.html import linkify_html
     sid = "sec-original"
     if not original_funcs:
         body = "<p class='text-slate-500 text-sm'>未发现明显原创函数（与历史库相似度 &lt; 0.5 且行数 &gt; 20）。</p>"
@@ -721,12 +834,7 @@ def _original_section(original_funcs: list[dict], resolver) -> tuple[str, str]:
             f'<tr>'
             f'<td class="text-xs">{html.escape(f["func"])}</td>'
             f'<td class="font-mono text-xs">'
-            + (
-                f'<a class="file-jump" href="{html.escape(_make_link(resolver, f["file"], f["start"]))}">'
-                f'{html.escape(f["file"])}:{f["start"]}</a>'
-                if resolver else
-                f'{html.escape(f["file"])}:{f["start"]}'
-            )
+            + _make_gitlab_anchor(linker, query_repo_id, f["file"], f["start"])
             + f'</td>'
             f'<td class="text-xs text-slate-500">{html.escape(_MODULE_DISPLAY.get(f["module"], f["module"]))}</td>'
             f'<td class="text-xs">{f["max_sim"]}</td>'
@@ -787,7 +895,8 @@ body{background:#f6f8fa}
 .toc .toc-link:hover{background:#eef2f7}
 .toc .toc-active{border-left-color:#4a90d9;color:#1a66d4;font-weight:600;background:#eef2fb}
 .main{flex:1;min-width:0}
-.file-jump{color:#1a66d4;text-decoration:underline dotted}
+.file-jump,.repo-link{color:#1a66d4;text-decoration:underline dotted}
+.file-jump:hover,.repo-link:hover{text-decoration:underline solid}
 .pct-bar{display:flex;height:20px;border-radius:4px;overflow:hidden;margin:6px 0}
 .pct-copy{background:#ef4444;color:#fff;font-size:11px;
   display:flex;align-items:center;padding:0 6px;min-width:0;white-space:nowrap}
@@ -849,14 +958,9 @@ def generate_comparison_html(
     analysis_html: str,
     original_funcs: list[dict],
     query_repo_path: Path | None = None,
+    linker=None,
 ) -> str:
     """组装完整的查重对比 HTML 报告（直接产出，不经 Markdown 转换）。"""
-    from oskernel_agent.reports.html import make_file_link_resolver
-    resolver = make_file_link_resolver(
-        [query_repo_path] if query_repo_path else None,
-        scheme="vscode",
-    )
-
     # 摘要卡
     summary_html = _summary_card(query_repo_id, suspects, submodule_stats)
 
@@ -866,13 +970,14 @@ def generate_comparison_html(
     # 各子模块章节
     for idx, mod in enumerate(MODULES):
         toc_entry, section = _module_section(
-            mod, submodule_stats, file_pairs, analysis_html, resolver, idx)
+            mod, submodule_stats, file_pairs, analysis_html,
+            linker, query_repo_id, idx)
         if toc_entry:
             toc_items.append(toc_entry)
             body_parts.append(section)
 
     # 原创代码章节
-    toc_orig, sec_orig = _original_section(original_funcs, resolver)
+    toc_orig, sec_orig = _original_section(original_funcs, linker, query_repo_id)
     toc_items.append(toc_orig)
     body_parts.append(sec_orig)
 
@@ -956,6 +1061,14 @@ def run_semantic_compare(
             query_repo_id, qpath, file_pairs, submodule_stats, work_dir
         )
 
+    # 构建 GitLab linker（取各参考仓库的在线 URL + HEAD sha）
+    ref_repos = {p["ref_repo"] for p in file_pairs}
+    linker = _build_gitlab_linker(
+        Path(query_repo_path).resolve() if query_repo_path else None,
+        query_repo_id,
+        ref_repos,
+    )
+
     # 生成 HTML
     html_text = generate_comparison_html(
         query_repo_id   = query_repo_id,
@@ -965,6 +1078,7 @@ def run_semantic_compare(
         analysis_html   = analysis_html,
         original_funcs  = original_funcs,
         query_repo_path = Path(query_repo_path).resolve() if query_repo_path else None,
+        linker          = linker,
     )
 
     safe_id  = query_repo_id.replace("/", "_")
