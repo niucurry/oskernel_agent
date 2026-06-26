@@ -147,23 +147,6 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         funnel["metadata"] = res["metadata_summary"]
         funnel["after_metadata"] = tier_counts(res["suspects"])
 
-    # ---- review ----
-    report_input = final_path
-    if not args.skip_llm and _should_run("review", args.resume_from):
-        from src.review.config import load_llm_settings
-        from src.review.llm import OpenAICompatClient
-        from src.review.reviewer import run_review
-        s = load_llm_settings()
-        if not s.api_key:
-            logger.warning("[review] 无 LLM_API_KEY，跳过复核")
-        else:
-            res = timed("review", lambda: run_review(
-                final_path, OpenAICompatClient(s), s, output_dir=out, limit=args.review_limit))
-            funnel["review_verdicts"] = res["verdict_counts"]
-            report_input = reviewed_path
-    elif reviewed_path.exists():
-        report_input = reviewed_path
-
     # ---- ai_detect（AI 生成代码检测，独立于查重漏斗；缺模型则优雅跳过）----
     if not args.skip_ai_detect and _should_run("ai_detect", args.resume_from):
         from src.ai_detect.runner import run_ai_detect
@@ -175,22 +158,17 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         else:
             funnel["ai_detect_reason"] = res.get("reason")
 
-    # ---- report ----
+    # ---- report（语义级对比报告，直接产出 HTML + GitLab 在线链接）----
     if _should_run("report", args.resume_from):
-        from src.report.generate import run_report
-        client = None
-        if not args.skip_llm:
-            from src.review.config import load_llm_settings
-            from src.review.llm import OpenAICompatClient
-            s = load_llm_settings()
-            client = OpenAICompatClient(s) if s.api_key else None
-        res = timed("report", lambda: run_report(
-            report_input, recall_path, client=client, output_dir=out, repo_name=repo_name,
-            ai_detect_path=ai_detect_path if ai_detect_path.exists() else None,
-            query_repo_path=str(repo_path) if repo_path else None))
-        funnel["report"] = res["output_path"]
-        funnel["report_html"] = res.get("html_path")
-        funnel["report_deleted_refs"] = res["deleted"]
+        from src.report.semantic_compare import run_semantic_compare
+        res = timed("report", lambda: run_semantic_compare(
+            suspects_path   = final_path,
+            query_repo_path = str(repo_path),
+            recall_path     = recall_path,
+            output_dir      = out,
+        ))
+        funnel["report"] = res["html_path"]
+        funnel["report_html"] = res["html_path"]
 
     logger.info("===== 漏斗 =====")
     for k, v in funnel.items():
