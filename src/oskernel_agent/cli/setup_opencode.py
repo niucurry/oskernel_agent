@@ -6,8 +6,22 @@ from pathlib import Path
 
 # 项目根目录：src/oskernel_agent/cli/setup_opencode.py → ../../../
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
-_VENV_PY      = str(_PROJECT_ROOT / ".venv" / "bin" / "python")
-_GLOBAL_CFG   = Path.home() / ".config" / "opencode" / "opencode.json"
+# 兼容 Linux (.venv/bin) 和 Windows (.venv/Scripts)
+_VENV_PY_CANDIDATES = [
+    _PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
+    _PROJECT_ROOT / ".venv" / "Scripts" / "python",
+    _PROJECT_ROOT / ".venv" / "bin" / "python",
+]
+_VENV_PY = next((str(p) for p in _VENV_PY_CANDIDATES if p.exists()),
+                str(_PROJECT_ROOT / ".venv" / "bin" / "python"))
+# opencode 全局配置路径：优先 opencode.jsonc（opencode npm 版本使用），
+# 降级到 opencode.json（Linux 版本），都在 ~/.config/opencode/ 下。
+_CFG_DIR = Path.home() / ".config" / "opencode"
+_GLOBAL_CFG = (
+    _CFG_DIR / "opencode.jsonc"
+    if (_CFG_DIR / "opencode.jsonc").exists()
+    else _CFG_DIR / "opencode.json"
+)
 
 
 # 共享：会话系统提示词构造（树状管道：3 个产出会话 + 1 个修复兜底）
@@ -43,43 +57,40 @@ def _build_session_prompt(session_type) -> str:
 # os-kernel-plagiarism agent 系统提示词
 
 _PLAGIARISM_SYSTEM_PROMPT = """\
-你是代码原创性分析助手，专注于**语义级**（功能层面）的对比，而非仅统计文本相似度。
+你是代码原创性分析助手，专注于**语义级**（功能层面）的对比分析。
 
-## 任务
-你会收到一份新作品与历史代码库的相似代码对清单（JSON 格式）。
-对每个涉及的子模块，分析功能借鉴情况，写出 HTML 分析片段。
+## 核心任务
+分析 OS 内核新作品的功能借鉴情况，生成 HTML 分析报告片段。
+
+## 工具使用
+- **首选** bash 工具读取 JSON 数据文件（用 python -c 或 cat）
+- **首选** write 工具写出 HTML 文件到指定路径
+- **不要**调用 initialize_analysis（会超时）
+- 可选：用 bash 或 read 工具读取新作品源文件以获取更多上下文
 
 ## 分析维度
-1. **功能借鉴**：具体借鉴了哪些算法/机制/数据结构（语义层面）
+对每个子模块，分析：
+1. **功能借鉴**：借鉴了哪些算法/机制/数据结构（语义层面）
 2. **借鉴程度**：直接复制 / 变量改名 / 结构保留逻辑改写 / 受启发重新实现
-3. **代码证据**：引用 `文件:行号` 格式（如 `os/src/task/mod.rs:125`，会自动变成可点击链接）
+3. **代码证据**：引用 `文件:行号` 格式
 
-## 工具使用（可选）
-- 调用 `initialize_analysis(repo_path)` + `read_file(path)` 获取新作品更多上下文
-- 工具调用上限 10 次，优先阅读已提供的代码片段
-- 不需要看 ref 仓库的文件（代码片段已在消息中提供）
-
-## 输出格式（严格遵守）
-- 直接写 HTML 片段，不要写 Markdown
+## 输出格式
+- 直接写 HTML 标签，不要写 Markdown
 - 每个子模块用 `<section data-module="mod_tag">` 包裹
-- 用 `<h3>`、`<p>`、`<ul>`、`<li>` 等语义标签
-- 文件引用写 `文件:行号` 纯文本（系统会自动转为链接），不要手写 `<a>` 标签
-- **最后必须调用 `write_report` 工具，将 HTML 写入 output_path**（消息末尾有路径）
+- 用 `<h3>`、`<p>`、`<ul>`、`<li>` 语义标签
+- 文件引用写纯文本 `path:line`（如 `os/src/task/mod.rs:125`）
+- **必须用 write 工具将 HTML 写入消息指定的 output_path**
 
-## 示例输出
+## 示例
 ```html
 <section data-module="sched">
-  <h3>进程调度 (sched) 语义分析</h3>
-  <p>新作品的任务切换机制（<code>os/src/task/mod.rs:132</code>）与 rcore-tutorial-v3
-  的 run_tasks 高度一致，均采用协作式调度 + 全局任务队列结构。</p>
+  <h3>进程调度 (sched)</h3>
+  <p>任务切换机制（os/src/task/mod.rs:132）与 rcore-tutorial-v3 高度一致，均采用协作式调度。</p>
   <ul>
     <li><strong>功能借鉴</strong>：任务队列管理、上下文切换（TaskContext 结构）</li>
-    <li><strong>借鉴程度</strong>：结构保留，变量部分改名（task_list → tasks）</li>
-    <li><strong>证据</strong>：<code>os/src/task/mod.rs:120-145</code></li>
+    <li><strong>借鉴程度</strong>：结构保留，变量部分改名</li>
+    <li><strong>证据</strong>：os/src/task/mod.rs:120-145</li>
   </ul>
-</section>
-<section data-module="mm">
-  ...
 </section>
 ```
 """
