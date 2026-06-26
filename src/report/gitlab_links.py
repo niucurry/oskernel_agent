@@ -67,12 +67,12 @@ def fetch_head(repo_url: str) -> str | None:
     try:
         r = subprocess.run(
             ["git", "ls-remote", repo_url, "HEAD"],
-            capture_output=True, text=True, timeout=_LS_REMOTE_TIMEOUT,
+            capture_output=True, timeout=_LS_REMOTE_TIMEOUT,
             env={**__import__("os").environ, "GIT_TERMINAL_PROMPT": "0"},
         )
         if r.returncode != 0 or not r.stdout:
             return None
-        first = r.stdout.splitlines()[0].strip()
+        first = r.stdout.decode("utf-8", errors="replace").splitlines()[0].strip()
         if not first:
             return None
         sha = first.split("\t", 1)[0]
@@ -162,9 +162,9 @@ def query_repo_info(local_path: str | Path) -> tuple[str | None, str | None]:
         try:
             r = subprocess.run(
                 ["git", "-C", str(path), *args],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, timeout=10,
             )
-            return r.stdout.strip() if r.returncode == 0 else None
+            return r.stdout.decode("utf-8", errors="replace").strip() if r.returncode == 0 else None
         except Exception:  # noqa: BLE001
             return None
 
