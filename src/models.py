@@ -76,7 +76,10 @@ class Evidence(BaseModel):
         default=None, description="Layer3：分段向量比对结果（命中段数/覆盖/匹配段对）"
     )
     exact_match_lines: int = Field(
-        default=0, ge=0, description="Layer4：精确匹配的行数"
+        default=0, ge=0, description="Layer4：逐字节相同的精确匹配行数"
+    )
+    renamed_match_lines: int = Field(
+        default=0, ge=0, description="Layer4：仅在标识符/寄存器掩码后才相同的行数（改名复制）"
     )
     unique_string_matches: int = Field(
         default=0, ge=0, description="Layer4：命中的唯一字符串字面量数"
@@ -88,7 +91,7 @@ class Evidence(BaseModel):
 
 
 class SuspectPair(BaseModel):
-    """一对疑似抄袭的函数及其证据与最终评分，是流向 review / report 的产物。"""
+    """一对疑似借鉴/复制的函数及其证据与最终评分，是流向 review / report 的产物。"""
 
     query_func: FunctionRecord = Field(..., description="待查（新提交）函数")
     candidate_func: FunctionRecord = Field(..., description="历史库中的候选函数")

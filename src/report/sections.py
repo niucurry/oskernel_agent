@@ -30,6 +30,23 @@ def _verdict(s) -> str | None:
     return rv.get("verdict") if isinstance(rv, dict) else None
 
 
+def clone_type_of(s) -> str:
+    """整对级 clone_type 聚合：任一段 renamed（或证据含 renamed 行）即 renamed，
+    否则有 exact 行则 exact，再兜底 —。**寄存器/标识符改名必为 renamed，绝不误标 exact**
+    （回应 D2；不取 match_type_per_span 首段，避免首段恰为 exact 掩盖后续 renamed）。
+    """
+    rv = s.get("review") if isinstance(s.get("review"), dict) else {}
+    if rv.get("clone_type"):
+        return rv["clone_type"]
+    types = s.get("match_type_per_span") or []
+    ev = s.get("evidence") or {}
+    if "renamed" in types or (ev.get("renamed_match_lines") or 0) > 0:
+        return "renamed"
+    if "exact" in types or (ev.get("exact_match_lines") or 0) > 0:
+        return "exact"
+    return "—"
+
+
 # ---------- 一、溯源结论 ----------
 
 def trace_top_repos(suspects: list[dict], top_n: int = 3) -> list[dict]:
@@ -113,7 +130,7 @@ def high_similarity_pairs(suspects: list[dict], recall: dict | None = None,
                 "new_ref": new_ref,
                 "old_ref": old_ref,
                 "sim": round(float(s.get("final_score") or 0.0), 3),
-                "clone_type": rv.get("clone_type") or (s.get("match_type_per_span") or ["—"])[0],
+                "clone_type": clone_type_of(s),
                 "reasoning": rv.get("reasoning", ""),
             })
     out.sort(key=lambda x: x["sim"], reverse=True)
@@ -303,10 +320,10 @@ def render_ai_author_table(authors: list[dict]) -> str:
 
 
 def render_annotations(ann: dict) -> str:
-    parts = [f"- **公共/框架代码(common_code)**：{ann.get('common_code_count', 0)} 个函数（高相似命中多个历史仓库，判为教学OS/框架公共代码，不计抄袭）"]
+    parts = [f"- **公共/框架代码(common_code)**：{ann.get('common_code_count', 0)} 个函数（高相似命中多个历史仓库，判为教学OS/框架公共代码，不计入借鉴/复制）"]
     for c in ann.get("common_code", []):
         parts.append(f"  - {c['new']} — 命中 {c['repos']} 个不同历史仓库")
-    parts.append(f"- **基线衍生(baseline_derived)**：{ann['baseline_count']} 对（公共/模板代码，不计抄袭）")
+    parts.append(f"- **基线衍生(baseline_derived)**：{ann['baseline_count']} 对（公共/模板代码，不计入借鉴/复制）")
     for b in ann["baseline"]:
         parts.append(f"  - {b['new']} — {b['note']}")
     parts.append(f"- **commit 异常信号**：{len(ann['commit_signals'])} 处")
