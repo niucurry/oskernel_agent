@@ -1,9 +1,11 @@
 """归一化结果落盘到 SQLite（data/db/functions.db）。
 
-两张表：
+三张表：
   functions(id, repo_id, file_path, start_line, end_line, func_name,
             module_tag, lang, raw_code, normalized_code)
   unique_strings(repo_id, func_id, string_value)   -- func_id 外键指向 functions.id
+  files(id, repo_id, file_path, lang, line_count, func_count, norm_hash, raw_hash)
+            -- L0 文件指纹层：整文件规范化哈希，供 fastpath 检测整文件复制
 
 按 repo_id 幂等写入：重跑同一仓库会先删除其旧记录再插入。
 """
@@ -43,6 +45,19 @@ CREATE TABLE IF NOT EXISTS unique_strings (
 );
 CREATE INDEX IF NOT EXISTS idx_strings_repo ON unique_strings(repo_id);
 CREATE INDEX IF NOT EXISTS idx_strings_func ON unique_strings(func_id);
+
+CREATE TABLE IF NOT EXISTS files (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id     TEXT NOT NULL,
+    file_path   TEXT NOT NULL,
+    lang        TEXT NOT NULL,
+    line_count  INTEGER NOT NULL,
+    func_count  INTEGER NOT NULL,
+    norm_hash   TEXT NOT NULL,   -- 去注释+折叠空白+去空行后 sha1（消化格式差异）
+    raw_hash    TEXT NOT NULL    -- 原文 sha1（逐字节相同判定）
+);
+CREATE INDEX IF NOT EXISTS idx_files_repo ON files(repo_id);
+CREATE INDEX IF NOT EXISTS idx_files_norm_hash ON files(norm_hash);
 """
 
 
@@ -79,6 +94,7 @@ class FunctionStore:
             self.conn.executemany("DELETE FROM unique_strings WHERE func_id=?", [(i,) for i in ids])
         self.conn.execute("DELETE FROM unique_strings WHERE repo_id=?", (repo_id,))
         self.conn.execute("DELETE FROM functions WHERE repo_id=?", (repo_id,))
+        self.conn.execute("DELETE FROM files WHERE repo_id=?", (repo_id,))
 
     def add_function(self, rec: FunctionRecord, strings: list[str], feature_tokens: list[str] | None = None) -> int:
         """插入一条函数记录及其字符串/特征 token，返回新行 id。"""
@@ -107,14 +123,46 @@ class FunctionStore:
             )
         return func_id
 
-    def write_repo(self, repo_id: str, records: list[tuple[FunctionRecord, list[str], list[str]]]) -> int:
-        """替换式写入一个仓库的全部函数记录（rec, strings, feature_tokens），返回写入条数。"""
+    def add_file(self, repo_id: str, file_path: str, lang: str, line_count: int,
+                 func_count: int, norm_hash: str, raw_hash: str) -> None:
+        """插入一条文件指纹记录（L0 文件层）。"""
+        self.conn.execute(
+            """INSERT INTO files
+               (repo_id, file_path, lang, line_count, func_count, norm_hash, raw_hash)
+               VALUES (?,?,?,?,?,?,?)""",
+            (repo_id, file_path, lang, line_count, func_count, norm_hash, raw_hash),
+        )
+
+    def write_repo(
+        self,
+        repo_id: str,
+        records: list[tuple[FunctionRecord, list[str], list[str]]],
+        file_records: list[dict] | None = None,
+    ) -> int:
+        """替换式写入一个仓库的全部函数记录（rec, strings, feature_tokens），返回写入条数。
+
+        file_records 给定时同步写入 files 表（L0 文件指纹）：每条
+        {file_path, lang, line_count, func_count, norm_hash, raw_hash}。
+        """
         self.clear_repo(repo_id)
         for rec, strings, *rest in records:
             feature_tokens = rest[0] if rest else []
             self.add_function(rec, strings, feature_tokens)
+        for fr in file_records or []:
+            self.add_file(repo_id, fr["file_path"], fr["lang"], fr["line_count"],
+                          fr["func_count"], fr["norm_hash"], fr["raw_hash"])
         self.conn.commit()
         return len(records)
+
+    def find_files_by_norm_hash(self, norm_hash: str, *, exclude_repo_id: str | None = None) -> list[dict]:
+        """按规范化哈希查历史文件（用于 fastpath 整文件复制检测）。"""
+        self.conn.row_factory = sqlite3.Row
+        rows = self.conn.execute(
+            "SELECT repo_id, file_path, lang, line_count, func_count, norm_hash, raw_hash "
+            "FROM files WHERE norm_hash=?",
+            (norm_hash,),
+        ).fetchall()
+        return [dict(r) for r in rows if r["repo_id"] != exclude_repo_id]
 
     def module_distribution(self, repo_id: str | None = None) -> dict[str, int]:
         """按 module_tag 统计函数数量（可限定仓库）。"""
