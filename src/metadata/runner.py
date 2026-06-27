@@ -8,6 +8,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from src.exact.matcher import ExactMatcher, remap_spans
+from src.exact.verify import tier_of
 from src.normalize.normalizer import normalize_snippet
 from src.normalize.store import DEFAULT_DB
 
@@ -24,12 +26,23 @@ def _suspect_key(s: dict) -> tuple:
     return (q["file_path"], q["start_line"], c["repo_id"], c["file_path"], c["start_line"])
 
 
+_EXACT_MATCHER = ExactMatcher()
+
+
 def _new_suspect(qf: dict, hf: dict, count: int) -> dict:
-    """字符串通道新建的嫌疑对（独立召回路径）。"""
+    """字符串通道新建的嫌疑对（独立召回路径）。
+
+    旁路通道不再硬编码 ``final_score=0``：对新对实跑行级精确比对，用 similar_line_ratio
+    填 final_score、tier_of 定档（行级相同的对从此显示真实相似度，回应 D1）。独特字符串
+    命中本身即 review 级信号，故 tier 不低于 review（ratio<0.5 时 tier_of 返回 None 也兜底为 review）。
+    """
+    res = _EXACT_MATCHER.match(qf.get("raw_code", ""), hf.get("raw_code", ""), qf.get("lang", "rust"))
+    tier = tier_of(res.similar_line_ratio) or "review"
+    abs_spans = remap_spans(res.matched_spans, qf.get("start_line", 1), hf.get("start_line", 1))
     return {
-        "tier": "review",
+        "tier": tier,
         "source": "string_channel",
-        "final_score": 0.0,
+        "final_score": res.similar_line_ratio,
         "query_func": qf,
         "candidate_func": {
             "repo_id": hf["repo_id"], "file_path": hf["file_path"],
@@ -37,8 +50,14 @@ def _new_suspect(qf: dict, hf: dict, count: int) -> dict:
             "func_name": hf["func_name"], "module_tag": hf["module_tag"],
             "lang": hf["lang"], "raw_code": hf["raw_code"], "normalized_code": hf["normalized_code"],
         },
-        "evidence": {"vector_similarity": None, "exact_match_lines": 0, "unique_string_matches": count},
-        "matched_spans": [], "match_type_per_span": [],
+        "evidence": {
+            "vector_similarity": None,
+            "exact_match_lines": res.exact_match_lines,
+            "renamed_match_lines": res.renamed_match_lines,
+            "unique_string_matches": count,
+        },
+        "matched_spans": abs_spans,
+        "match_type_per_span": res.match_type_per_span,
     }
 
 
@@ -122,7 +141,7 @@ def channel_common_code(data: dict, settings: MetadataSettings) -> int:
                 s["tier"] = "common_code"
                 s.setdefault("evidence", {})["common_code_repos"] = len(strong_repos)
                 s["common_code_note"] = (
-                    f"该函数高相似命中 {len(strong_repos)} 个不同历史仓库，判为公共/框架代码（不计抄袭）"
+                    f"该函数高相似命中 {len(strong_repos)} 个不同历史仓库，判为公共/框架代码（不计入借鉴/复制）"
                 )
                 n += 1
     logger.info("通道4 公共代码广度过滤：{} 个嫌疑对降为 common_code", n)
