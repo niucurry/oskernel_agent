@@ -95,13 +95,21 @@ class CodeT5pEmbedder(BaseEmbedder):
         if not texts:
             return np.zeros((0, getattr(self, "dim", 256)), dtype=np.float32)
 
-        # 1) 切窗，记录每个窗口归属哪个文本
+        # 1) 并行 tokenization（tokenizer 线程安全，多线程绕过 GIL IO 等待）
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _tok(args):
+            i, t = args
+            ids = self.tokenizer.encode(t or " ", add_special_tokens=True, truncation=False)
+            return i, ids or [self.tokenizer.eos_token_id or 1]
+
+        tok_workers = min(8, len(texts))
+        with ThreadPoolExecutor(max_workers=tok_workers) as ex:
+            tok_results = list(ex.map(_tok, enumerate(texts)))
+
         all_windows: list[list[int]] = []
         owners: list[int] = []
-        for i, t in enumerate(texts):
-            ids = self.tokenizer.encode(t or " ", add_special_tokens=True, truncation=False)
-            if not ids:
-                ids = [self.tokenizer.eos_token_id or 1]
+        for i, ids in tok_results:
             for w in _windows(ids, self.cfg.window_size, self.cfg.window_stride):
                 all_windows.append(w)
                 owners.append(i)
