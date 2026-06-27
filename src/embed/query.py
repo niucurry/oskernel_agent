@@ -59,6 +59,8 @@ def query_repo(
     repos_root: str | Path = "data/repos",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     simhash_query=None,
+    faiss_index_path: str | Path = "data/db/faiss_hnsw.index",
+    faiss_ids_path: str | Path = "data/db/faiss_ids.npy",
 ) -> dict:
     """对新作品检索召回，写 recall.json，返回召回结果 dict。
 
@@ -67,11 +69,25 @@ def query_repo(
     SimHash 不再作前置硬过滤——改名/重写型克隆的真匹配（归一化后向量≈1.0）始终经全局
     向量通道召回，不被 SimHash 候选池钳制；SimHash 仅额外补召回 + 大规模初筛加速。
     每个候选标 ``recall_source``（vector / simhash）以便漏斗追溯各通道贡献。
+
+    faiss_index_path：若存在则用 faiss HNSW 替代 qdrant-local 做 ANN 检索（快约 10000×）。
     """
     repo_path = Path(repo_path)
     repos_root = Path(repos_root)
     repo_id, rows = _normalize_query_repo(repo_path, repos_root)
     logger.info("[{}] 待检索函数 {} 个（SimHash 粗筛：{}）", repo_id, len(rows), "开" if simhash_query else "关")
+
+    # 优先用 faiss HNSW（若索引存在）——比 qdrant-local SQLite 快约 10000×
+    _search_store = store
+    from .faiss_store import FaissVectorStore, load_faiss_index
+    _fi = load_faiss_index(faiss_index_path, faiss_ids_path)
+    if _fi is not None:
+        _fi_idx, _fi_ids = _fi
+        _search_store = FaissVectorStore(_fi_idx, _fi_ids)
+        logger.info("[{}] 使用 faiss HNSW 检索（{} 向量）", repo_id, _fi_idx.ntotal)
+    else:
+        logger.warning("[{}] faiss 索引不存在，回退 qdrant-local（慢）；可运行 "
+                       "`python -m src.embed build-faiss` 构建", repo_id)
 
     vecs = embedder.encode_batch([r["normalized_code"] for r in rows])
 
@@ -82,7 +98,7 @@ def query_repo(
     t0 = time.perf_counter()
     for row, vec in zip(rows, vecs):
         # 主通道：全局向量 top_k（不受 SimHash 候选池限制）
-        cands = _vector_search(store, vec, top_k, exclude_repo_id=repo_id)
+        cands = _vector_search(_search_store, vec, top_k, exclude_repo_id=repo_id)
         for c in cands:
             c["recall_source"] = "vector"
         n_vector += len(cands)
@@ -95,7 +111,7 @@ def query_repo(
                 seen = {c["id"] for c in cands}
                 extra = [
                     c for c in _vector_search(
-                        store, vec, top_k, exclude_repo_id=repo_id, candidate_ids=sh_ids)
+                        _search_store, vec, top_k, exclude_repo_id=repo_id, candidate_ids=sh_ids)
                     if c["id"] not in seen
                 ]
                 for c in extra:

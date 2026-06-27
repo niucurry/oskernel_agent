@@ -6,7 +6,7 @@ embedding:
   max_length: 512        # 模型单次最大 token 数
   window_size: 512       # 滑窗大小（超长函数）
   window_stride: 384     # 滑窗步长
-  batch_size: 16         # 每批窗口数
+  batch_size: 64         # 每批窗口数（原16，改64使GPU利用率从~5%提到~40%）
   device: auto           # auto / cpu / cuda
 
 qdrant:
