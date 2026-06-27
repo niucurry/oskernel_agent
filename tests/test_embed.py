@@ -57,7 +57,8 @@ def test_embedder_dim(embedder):
 def _build_functions_db(tmp_path: Path, repo_id: str) -> Path:
     db = tmp_path / "functions.db"
     with FunctionStore(db) as store:
-        normalize_repo(REPO, store, repo_id=repo_id)
+        # 固定 min_lines=1：嵌入测试依赖样例仓库的小函数，与 D4 调高的默认下限解耦
+        normalize_repo(REPO, store, repo_id=repo_id, min_lines=1)
     return db
 
 

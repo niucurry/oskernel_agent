@@ -37,14 +37,14 @@ CODE_B = """fn run(q: &Vec<usize>) -> usize {
 # ---------- 汉明距离性质 ----------
 
 def test_renamed_variables_keep_feature_tokens_identical():
-    ta = extract_functions(CODE_A, "rust")[0].feature_tokens
-    tb = extract_functions(CODE_B, "rust")[0].feature_tokens
+    ta = extract_functions(CODE_A, "rust", min_lines=1)[0].feature_tokens
+    tb = extract_functions(CODE_B, "rust", min_lines=1)[0].feature_tokens
     assert ta == tb  # 变量改名不影响 cf/ty/call 特征
 
 
 def test_renamed_pair_hamming_le_8():
-    ta = extract_functions(CODE_A, "rust")[0].feature_tokens
-    tb = extract_functions(CODE_B, "rust")[0].feature_tokens
+    ta = extract_functions(CODE_A, "rust", min_lines=1)[0].feature_tokens
+    tb = extract_functions(CODE_B, "rust", min_lines=1)[0].feature_tokens
     corpus = [set(ta), {"cf:while", "call:foo", "ty:u32"}, {"call:bar", "ty:String", "lib:println"}]
     idf, dw = compute_idf(corpus)
     h = SimHasher(idf, dw)
@@ -107,7 +107,7 @@ def test_index_save_load_roundtrip(tmp_path):
 def test_build_index_and_query(tmp_path):
     db = tmp_path / "functions.db"
     with FunctionStore(db) as store:
-        normalize_repo(REPO, store, repo_id="t/sample")
+        normalize_repo(REPO, store, repo_id="t/sample", min_lines=1)
         row = store.conn.execute(
             "SELECT id, feature_tokens FROM functions WHERE func_name='alloc_block'"
         ).fetchone()
