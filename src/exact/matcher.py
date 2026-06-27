@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
@@ -61,6 +62,31 @@ def _strip_comments(line: str, lang: str) -> str:
     if lang == "asm":
         line = re.sub(r"[#;].*$", "", line)
     return line
+
+
+def normalized_file_lines(text: str, lang: str) -> list[str]:
+    """逐行去注释 + 折叠连续空白 + 去空行，返回规范化后的非空行列表。"""
+    out: list[str] = []
+    for line in text.splitlines():
+        stripped = re.sub(r"\s+", " ", _strip_comments(line, lang)).strip()
+        if stripped:
+            out.append(stripped)
+    return out
+
+
+def normalized_file_hash(text: str, lang: str) -> str:
+    """整文件规范化哈希：逐行去注释 + 折叠连续空白 + 去空行后 sha1。
+
+    用于 L0 文件指纹层：消化「仅空格/格式/注释差异」的整文件复制（回应 D3 与待确认 #4）。
+    与 ExactMatcher 共用 _strip_comments，口径一致。
+    """
+    joined = "\n".join(normalized_file_lines(text, lang))
+    return hashlib.sha1(joined.encode("utf-8", "replace")).hexdigest()
+
+
+def raw_file_hash(text: str) -> str:
+    """原文 sha1（逐字节相同判定）。"""
+    return hashlib.sha1(text.encode("utf-8", "replace")).hexdigest()
 
 
 def _mask_line(line: str, lang: str) -> str:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from src.exact.matcher import normalized_file_hash, raw_file_hash
 from src.models import FunctionRecord
 
 from .classify import ModuleClassifier, load_classifier
@@ -49,6 +50,7 @@ def normalize_repo(
     logger.info("[{}] 发现源码文件 {} 个", repo_id, len(files))
 
     records: list[tuple[FunctionRecord, list[str], list[str]]] = []
+    file_records: list[dict] = []
     skipped_big = 0
     for f in files:
         try:
@@ -61,7 +63,8 @@ def normalize_repo(
             skipped_big += 1
             continue
 
-        for fn in extract_functions(text, f.lang, keep=keep, min_lines=min_lines):
+        fns = extract_functions(text, f.lang, keep=keep, min_lines=min_lines)
+        for fn in fns:
             module_tag = classifier.classify(f.rel_path, f.lang, is_macro=fn.is_macro)
             rec = FunctionRecord(
                 repo_id=repo_id,
@@ -75,8 +78,16 @@ def normalize_repo(
                 normalized_code=fn.normalized_code,
             )
             records.append((rec, fn.strings, fn.feature_tokens))
+        file_records.append({
+            "file_path": f.rel_path,
+            "lang": f.lang,
+            "line_count": text.count("\n") + 1,
+            "func_count": len(fns),
+            "norm_hash": normalized_file_hash(text, f.lang),
+            "raw_hash": raw_file_hash(text),
+        })
 
-    store.write_repo(repo_id, records)
+    store.write_repo(repo_id, records, file_records=file_records)
     dist = store.module_distribution(repo_id)
     logger.info(
         "[{}] 写入函数 {} 个（跳过超大文件 {}）；模块分布: {}",
