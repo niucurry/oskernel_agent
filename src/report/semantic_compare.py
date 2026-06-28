@@ -333,10 +333,12 @@ def _build_analysis_message(
             lines.append(f"### {_MODULE_DISPLAY.get(mod, mod)} ({mod})")
             current_mod = mod
         tier_label = {"confirmed": "确认借鉴", "review": "疑似借鉴", "weak": "弱相似"}.get(p["tier"], p["tier"])
+        qf = (p["query_file"] or "").replace("\\", "/")
+        rf = (p["ref_file"] or "").replace("\\", "/")
         lines += [
-            f"**新作品** `{p['query_file']}:{p['query_start']}` 函数 `{p['query_func']}` "
+            f"**新作品** `{qf}:{p['query_start']}` 函数 `{p['query_func']}` "
             f"← {tier_label}（相似度 {p['sim']}）",
-            f"**来源** `{p['ref_repo']}/{p['ref_file']}:{p['ref_start']}` 函数 `{p['ref_func']}`",
+            f"**来源** `{p['ref_repo']}/{rf}:{p['ref_start']}` 函数 `{p['ref_func']}`",
             "```",
             p["query_code"],
             "```",
@@ -668,8 +670,8 @@ def _module_section(
     # 语义分析片段（从 DeepSeek 输出中抠取当前模块的部分）
     mod_analysis = _extract_module_analysis(analysis_html, mod)
     if mod_analysis:
-        # 用 GitLab linker 将 path:line 转为在线链接
-        mod_analysis = _linkify_with_gitlab(mod_analysis, linker, query_repo_id)
+        # 用 GitLab linker 将 path:line 转为在线链接（file_pairs 用于路径归属判断）
+        mod_analysis = _linkify_with_gitlab(mod_analysis, linker, query_repo_id, file_pairs)
 
     body = stat_row + table
     if mod_analysis:
@@ -780,16 +782,45 @@ def _make_gitlab_anchor(linker, repo_id: str, file_path: str, start: int,
     return label
 
 
-def _linkify_with_gitlab(fragment: str, linker, query_repo_id: str) -> str:
-    """把 HTML 片段里的 path:line 纯文本引用转为 GitLab 在线链接。"""
+def _linkify_with_gitlab(fragment: str, linker, query_repo_id: str,
+                          file_pairs: list[dict] | None = None) -> str:
+    """把 HTML 片段（DeepSeek 语义分析）里的 path:line 引用转为 GitLab 在线链接。
+
+    DeepSeek 抄的是 file_pairs 里的**完整路径**（可能含反斜杠），且既有新作品文件，
+    也有历史仓库文件。所以：
+      - 正则字符类含反斜杠，能完整匹配 ``a\b\c.c:120`` 而非只截到 ``c.c:120``；
+      - 路径统一转正斜杠（GitLab URL 格式）；
+      - 用 file_pairs 判断该路径属于新作品还是某个历史仓库，链对应仓库（归属错会 404）；
+      - <code> 内的 path:line 也链接化（证据常写在 <code> 里），仅保护 script/style/pre/a。
+    """
     import re
     if linker is None:
         return fragment
+
+    # 不信任 DeepSeek 写的路径（它会简写/带仓库名前缀/残缺），只用「文件名 + 行号」
+    # 去 file_pairs 里精确反查出**完整路径 + 正确仓库归属**。
+    #   loc_map: (basename, line) → (repo_id, full_path)   ← 精确匹配优先
+    #   base_map: basename → [(repo_id, full_path, line), ...]  ← 行号不精确时取最近
+    loc_map: dict[tuple[str, int], tuple[str, str]] = {}
+    base_map: dict[str, list[tuple[str, str, int]]] = defaultdict(list)
+
+    def _reg(repo_id: str, raw_path: str, line: int) -> None:
+        fp = (raw_path or "").replace("\\", "/")
+        if not fp:
+            return
+        base = fp.rsplit("/", 1)[-1]
+        loc_map[(base, line)] = (repo_id, fp)
+        base_map[base].append((repo_id, fp, line))
+
+    for p in (file_pairs or []):
+        _reg(query_repo_id, p.get("query_file", ""), p.get("query_start", 0))
+        _reg(p.get("ref_repo", ""), p.get("ref_file", ""), p.get("ref_start", 0))
+
     _FILEREF_RE = re.compile(
-        r"([A-Za-z0-9_./\-]+\.(?:rs|c|h|cc|cpp|hpp|S|s|py|sh|toml|md))"
+        r"([A-Za-z0-9_./\\\-]+\.(?:rs|c|h|cc|cpp|hpp|S|s|py|sh|toml|md))"
         r"(?::(\d+)(?:-(\d+))?)?"
     )
-    _PROTECT_RE = re.compile(r"<(script|style|pre|a|code)\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
+    _PROTECT_RE = re.compile(r"<(script|style|pre|a)\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
 
     blocks: list[str] = []
 
@@ -803,11 +834,21 @@ def _linkify_with_gitlab(fragment: str, linker, query_repo_id: str) -> str:
         fp, start, end = m.group(1), m.group(2), m.group(3)
         line = int(start) if start else 0
         end_line = int(end) if end else line
-        url = _gitlab_url(linker, query_repo_id, fp, line, end_line)
+        base = fp.replace("\\", "/").rsplit("/", 1)[-1]
+        # 1) (文件名, 行号) 精确反查
+        hit = loc_map.get((base, line))
+        # 2) 行号对不上时，按文件名取行号最接近的候选
+        if hit is None and base in base_map:
+            repo_id, full_path, _ = min(base_map[base], key=lambda c: abs(c[2] - line))
+            hit = (repo_id, full_path)
+        # 3) file_pairs 里没有此文件 → 保留纯文本，不生成坏链
+        if hit is None:
+            return m.group(0)
+        repo_id, full_path = hit
+        url = _gitlab_url(linker, repo_id, full_path, line, end_line)
         if not url:
             return m.group(0)
-        label = m.group(0)
-        return f'<a class="file-jump" href="{html.escape(url)}" target="_blank">{label}</a>'
+        return f'<a class="file-jump" href="{html.escape(url)}" target="_blank">{m.group(0)}</a>'
 
     text = _FILEREF_RE.sub(_sub, text)
     text = re.sub(r"\x00B(\d+)\x00", lambda m: blocks[int(m.group(1))], text)
