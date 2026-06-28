@@ -11,6 +11,17 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+# 基线仓库的 team 段前缀。baselines.yaml 里公共/模板/第三方库统一以 ``baseline_`` 命名
+# （repo_id 形如 ``0/baseline_arceos``），各层据此判定「公共代码」而无需额外 schema 字段。
+BASELINE_PREFIX = "baseline_"
+
+
+def is_baseline_repo(repo_id: str) -> bool:
+    """repo_id（``{year}/{team}``）是否为基线仓库——按 team 段 ``baseline_`` 前缀约定。"""
+    if not repo_id:
+        return False
+    return repo_id.rsplit("/", 1)[-1].startswith(BASELINE_PREFIX)
+
 
 class ModuleTag(str, Enum):
     """内核子系统标签，用于按模块分桶比对与报告分类。
