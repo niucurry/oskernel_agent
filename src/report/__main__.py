@@ -58,6 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="新作品本地克隆路径（用于文件链接 + opencode 读取上下文）")
     pc.add_argument("--recall", default=None,
                     help="embed 阶段产出的 *_recall.json（用于计算函数总数 / 原创函数）")
+    pc.add_argument("--filematch", default=None,
+                    help="fastpath 产出的 *_filematch.json（L0 整文件复制清单）")
     pc.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR,
                     help=f"HTML 输出目录（默认 {DEFAULT_OUTPUT_DIR}）")
     pc.add_argument("--top-per-module", type=int, default=5,
@@ -101,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
             output_dir      = args.output_dir,
             top_per_module  = args.top_per_module,
             skip_opencode   = args.skip_opencode,
+            filematch_path  = args.filematch,
         )
         logger.info("对比报告 → {}", result["html_path"])
         return 0
