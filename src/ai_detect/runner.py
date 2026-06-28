@@ -72,16 +72,20 @@ def run_ai_detect(
     scorer: LogRankProvider | None = None,
     show_progress: bool = True,
     write: bool = True,
-    focus_funcs: set[tuple[str, str]] | None = None,
+    exclude_files: set[str] | None = None,
+    exclude_funcs: set[tuple[str, str]] | None = None,
 ) -> dict:
     """对单个仓库跑 AI 生成代码检测，返回结果 dict（并按需落盘）。
 
     Args:
         scorer: 注入的 LogRankProvider（单测用 mock）；为 None 时按 settings 加载真实模型，
                 加载失败则返回 status="skipped" 而非抛错（VM 无模型/无磁盘时不阻塞流水线）。
-        focus_funcs: 查重命中的可疑函数集合 {(相对文件路径 posix, 函数名)}。给定时（P2 限范围）
-                检测范围收敛为「可疑清单 ∪ 大函数(LOC>=min_loc)」，不再按 max_functions 取前 N，
-                跳过既不可疑又过小（必判 Uncertain）的函数，显著减少 Stage2 扰动开销。
+        exclude_files: 文件级借鉴的相对路径集合（posix）。命中整文件的函数全部跳过。
+        exclude_funcs: 函数级借鉴集合 {(相对文件路径 posix, 函数名)}。命中的单个函数跳过。
+
+    给定 exclude_files / exclude_funcs（排除借鉴模式）时：抽全量函数后剔除文件级 / 函数级
+    借鉴代码，**只对未匹配上的原创代码**做检测（AI 生成检测只对作者自己写的代码才有意义，
+    借鉴自参考 OS 的代码无论是否疑似 AI 生成都不应计入）。否则按 max_functions 取前 N。
     """
     repo = Path(repo)
     st = settings or load_ai_detect_settings()
@@ -103,29 +107,45 @@ def run_ai_detect(
         return payload
 
     # 1) 抽取函数（复用 normalize 解析器）
-    # 限范围模式（focus_funcs 给定）抽全量后按「可疑∪大函数」过滤，不再用 max_functions 取前 N
-    extract_max = 0 if focus_funcs is not None else st.max_functions
+    # 排除借鉴模式（exclude_files/exclude_funcs 给定）抽全量后剔除借鉴代码，再按 max_functions 截断
+    exclude_mode = exclude_files is not None or exclude_funcs is not None
+    extract_max = 0 if exclude_mode else st.max_functions
     blocks = extract_blocks(repo, max_functions=extract_max)
     if not blocks:
         return _emit({"status": "skipped", "reason": "未抽取到 rust/c 函数"})
 
-    if focus_funcs is not None:
+    if exclude_mode:
+        ex_files = exclude_files or set()
+        ex_funcs = exclude_funcs or set()
         repo_root = repo.resolve()
 
-        def _keep(b) -> bool:
+        def _rel(b) -> str:
             try:
-                rel = Path(b.file_path).resolve().relative_to(repo_root).as_posix()
+                return Path(b.file_path).resolve().relative_to(repo_root).as_posix()
             except ValueError:
-                rel = Path(b.file_path).name
-            return b.loc >= st.min_loc or (rel, b.name) in focus_funcs
+                return Path(b.file_path).name
+
+        def _keep(b) -> bool:
+            rel = _rel(b)
+            if rel in ex_files:            # 文件级借鉴：整文件跳过
+                return False
+            if (rel, b.name) in ex_funcs:  # 函数级借鉴：该函数跳过
+                return False
+            return True
 
         kept = [b for b in blocks if _keep(b)]
-        logger.info("[ai_detect] P2 限范围：可疑∪大函数(LOC>={}) {}/{} 个函数进入检测",
-                    st.min_loc, len(kept), len(blocks))
+        logger.info("[ai_detect] 排除借鉴代码：文件级 {} / 函数级 {} → 跳过 {} 个借鉴函数，"
+                    "{}/{} 个未匹配函数进入检测",
+                    len(ex_files), len(ex_funcs), len(blocks) - len(kept), len(kept), len(blocks))
         blocks = kept
         if not blocks:
-            return _emit({"status": "skipped", "reason": "无可疑或大函数需检测",
+            return _emit({"status": "skipped",
+                          "reason": "全部函数均为借鉴代码，无未匹配原创函数需检测",
                           "total_functions": 0})
+        if st.max_functions and len(blocks) > st.max_functions:
+            logger.info("[ai_detect] 未匹配函数 {} 个超过 max_functions={}，截断",
+                        len(blocks), st.max_functions)
+            blocks = blocks[:st.max_functions]
 
     # 2) 取得 log-rank provider（注入优先；否则加载真实模型，失败则降级跳过）
     if scorer is None:
