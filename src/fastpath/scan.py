@@ -12,6 +12,7 @@ from pathlib import Path
 from loguru import logger
 
 from src.exact.matcher import normalized_file_hash, normalized_file_lines
+from src.models import is_baseline_repo
 from src.normalize.discovery import discover_files
 from src.normalize.runner import DEFAULT_MAX_LINES, DEFAULT_REPOS_ROOT, derive_repo_id
 from src.normalize.store import DEFAULT_DB, FunctionStore
@@ -66,12 +67,15 @@ def scan_repo(
             hist = store.find_files_by_norm_hash(nh, exclude_repo_id=repo_id)
             if not hist:
                 continue
-            repo_count = len({h["repo_id"] for h in hist})
-            # 广泛共享的公共代码（出现在 >= 阈值个历史仓库）：跳过召回省算力，但不报为复制。
-            if repo_count >= common_file_min_repos:
+            repo_ids = {h["repo_id"] for h in hist}
+            # 命中基线库（已知公共/模板/第三方库）→ 公共代码；或出现在 >= 阈值个历史仓库 →
+            # 广泛共享。两者都跳过召回省算力，但不报为复制（基线消化 2 仓库级 vendored 库，
+            # 阈值消化其余广泛共享文件）。
+            if any(is_baseline_repo(r) for r in repo_ids) or len(repo_ids) >= common_file_min_repos:
                 common_files += 1
                 skip_files.append(f.rel_path)
                 continue
+            repo_count = len(repo_ids)
             matched.append({
                 "query_file": f.rel_path,
                 "lang": f.lang,

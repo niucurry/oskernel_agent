@@ -54,6 +54,27 @@ def test_fastpath_detects_whole_file_copy_ignoring_format(tmp_path):
     assert res["matched_files"][0]["matches"][0]["repo_id"] == "2021/hist"
 
 
+def test_fastpath_baseline_match_not_reported_as_copy(tmp_path):
+    # 命中基线库（公共/第三方库）→ 判公共代码：跳过召回但不报为复制
+    repos_root = tmp_path / "repos"
+    base = repos_root / "0" / "baseline_lwext4"
+    (base / "src").mkdir(parents=True)
+    (base / "src" / "compute.rs").write_text(FILE_A, encoding="utf-8")
+    db = tmp_path / "functions.db"
+    with FunctionStore(db) as store:
+        normalize_repo(base, store, repo_id="0/baseline_lwext4", repos_root=repos_root)
+
+    newrepo = tmp_path / "new"
+    (newrepo / "src").mkdir(parents=True)
+    (newrepo / "src" / "compute.rs").write_text(FILE_A_REFORMATTED, encoding="utf-8")
+
+    res = scan_repo(newrepo, repo_id="2024/new", db_path=db, output_dir=tmp_path / "out")
+
+    assert res["matched_files"] == []                       # 不报为复制
+    assert res["common_files"] == 1                          # 计入公共代码
+    assert "src/compute.rs" in _norm(res["skip_files"])      # 仍跳过召回省算力
+
+
 def test_fastpath_no_false_match_for_different_file(tmp_path):
     repos_root = tmp_path / "repos"
     hist = repos_root / "2021" / "hist"
