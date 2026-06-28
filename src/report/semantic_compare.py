@@ -662,11 +662,108 @@ def _echarts_tier_distribution(submodule_stats: dict) -> str:
     )
 
 
+def _echarts_overall_donut(copy_pct: float) -> str:
+    """整体借鉴 vs 原创环形图（按函数加权），中心标注借鉴百分比。"""
+    c = round(copy_pct, 1)
+    o = round(max(0.0, 100 - c), 1)
+    option = {
+        "title": {
+            "text": f"{c}%", "subtext": "整体借鉴(按函数加权)",
+            "left": "center", "top": "38%",
+            "textAlign": "center",
+            "textStyle": {"fontSize": 26, "fontWeight": "bold", "color": "#ef4444"},
+            "subtextStyle": {"fontSize": 11, "color": "#64748b"},
+        },
+        "tooltip": {"trigger": "item", "formatter": "{b}: {c}%"},
+        "legend": {"bottom": 0, "data": ["借鉴", "原创"]},
+        "series": [{
+            "name": "占比", "type": "pie", "radius": ["54%", "78%"],
+            "center": ["50%", "44%"], "avoidLabelOverlap": False,
+            "label": {"show": False}, "labelLine": {"show": False},
+            "data": [
+                {"value": c, "name": "借鉴", "itemStyle": {"color": "#ef4444"}},
+                {"value": o, "name": "原创", "itemStyle": {"color": "#22c55e"}},
+            ],
+        }],
+    }
+    return (
+        '<div class="echarts-chart" style="height:230px">'
+        f'<script type="application/json">{json.dumps(option, ensure_ascii=False)}</script>'
+        '</div>'
+    )
+
+
+def _echarts_top_sources(suspects: list[dict], top: int = 8) -> str:
+    """Top 借鉴来源仓库堆叠柱图：各历史仓库被命中的 confirmed/needReview/weak 对数。"""
+    agg: dict[str, dict] = defaultdict(lambda: {"confirmed": 0, "review": 0, "weak": 0})
+    for s in suspects:
+        t = s.get("tier", "")
+        if t not in ("confirmed", "review", "weak"):
+            continue
+        repo = s.get("candidate_func", {}).get("repo_id", "?")
+        agg[repo][t] += 1
+    if not agg:
+        return ""
+    order = sorted(
+        agg.items(),
+        key=lambda kv: -(kv[1]["confirmed"] * 3 + kv[1]["review"] * 2 + kv[1]["weak"]),
+    )[:top]
+    labels = [k for k, _ in order][::-1]
+    conf = [v["confirmed"] for _, v in order][::-1]
+    rev  = [v["review"] for _, v in order][::-1]
+    wk   = [v["weak"] for _, v in order][::-1]
+    series = [
+        ("已确认借鉴", conf, "#ef4444"),
+        ("needReview", rev, "#f59e0b"),
+        ("弱相似", wk, "#94a3b8"),
+    ]
+    option = {
+        "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
+        "legend": {"data": [s[0] for s in series]},
+        "grid": {"left": "33%", "right": "8%", "top": "14%", "bottom": "6%"},
+        "xAxis": {"type": "value", "name": "命中对数", "minInterval": 1},
+        "yAxis": {"type": "category", "data": labels,
+                  "axisLabel": {"fontSize": 10, "width": 150, "overflow": "truncate"}},
+        "series": [
+            {"name": name, "type": "bar", "stack": "src", "data": vals,
+             "itemStyle": {"color": color},
+             "label": {"show": True, "formatter": "{c}"}}
+            for name, vals, color in series
+        ],
+    }
+    height = max(180, len(order) * 38)
+    return (
+        f'<div class="echarts-chart mt-4" style="height:{height}px">'
+        f'<script type="application/json">{json.dumps(option, ensure_ascii=False)}</script>'
+        '</div>'
+    )
+
+
+_LEGEND_HTML = (
+    '<div class="legend">'
+    '<span><b>档位：</b></span>'
+    '<span><span class="dot" style="background:#ef4444"></span>已确认借鉴（confirmed，证据充分）</span>'
+    '<span><span class="dot" style="background:#f59e0b"></span>needReview（待人工复核）</span>'
+    '<span><span class="dot" style="background:#94a3b8"></span>弱相似（weak）</span>'
+    '<span style="margin-left:.6rem"><b>复制类型：</b></span>'
+    '<span>完全复制（逐字节相同）</span>'
+    '<span>改名复制（仅改寄存器/标识符）</span>'
+    '<span>高度相似（结构保留）</span>'
+    '</div>'
+)
+
+
+def _kpi(value, label: str, color: str = "#0f172a") -> str:
+    return (f'<div class="kpi"><span class="v" style="color:{color}">{value}</span>'
+            f'<span class="l">{html.escape(label)}</span></div>')
+
+
 def _summary_card(
     query_repo_id: str,
     suspects: list[dict],
     submodule_stats: dict,
     file_match_count: int = 0,
+    file_similar_count: int = 0,
 ) -> str:
     confirmed = len([s for s in suspects if s.get("tier") == "confirmed"])
     review    = len([s for s in suspects if s.get("tier") == "review"])
@@ -678,19 +775,30 @@ def _summary_card(
     all_total = sum(st["total"] for st in submodule_stats.values()) or 1
     overall_copy_pct = round(all_copy / all_total * 100, 1)
 
-    # U1：每个数字都带口径/单位
-    pills = (
-        '<div class="flex flex-wrap gap-2 text-sm mt-2">'
-        f'<span class="px-3 py-1 rounded-full bg-slate-100">嫌疑对共 {total} 对</span>'
-        f'<span class="px-3 py-1 rounded-full bg-red-100 text-red-700">已确认借鉴 {confirmed} 对</span>'
-        f'<span class="px-3 py-1 rounded-full bg-amber-100 text-amber-700">needReview {review} 对</span>'
-        f'<span class="px-3 py-1 rounded-full bg-slate-200 text-slate-600">弱相似 {weak} 对</span>'
-        + (f'<span class="px-3 py-1 rounded-full bg-rose-100 text-rose-700">整文件相同 {file_match_count} 个文件</span>'
-           if file_match_count else "")
-        + f'<span class="px-3 py-1 rounded-full bg-violet-100 text-violet-700">'
-        f'整体借鉴估算 {overall_copy_pct}%</span>'
-        '</div>'
+    # U1：每个数字都带口径/单位 —— KPI 卡片（大数字一目了然）
+    kpis = (
+        '<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">'
+        + _kpi(f"{total}", "嫌疑对（对）", "#334155")
+        + _kpi(f"{confirmed}", "已确认借鉴（对）", "#ef4444")
+        + _kpi(f"{review}", "needReview（对）", "#d97706")
+        + _kpi(f"{weak}", "弱相似（对）", "#64748b")
+        + _kpi(f"{file_match_count}", "整文件相同（文件）", "#e11d48")
+        + _kpi(f"{file_similar_count}", "整体相似文件（个）", "#d97706")
+        + '</div>'
     )
+
+    # 头部：环形图（整体借鉴%）+ Top 借鉴来源仓库，左右并排
+    donut = _echarts_overall_donut(overall_copy_pct)
+    top_src = _echarts_top_sources(suspects)
+    head_charts = (
+        '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 items-start">'
+        '<div><div class="text-sm font-semibold text-slate-700">整体借鉴估算（按函数加权）</div>'
+        + donut + '</div>'
+        + ('<div><div class="text-sm font-semibold text-slate-700">主要借鉴来源仓库（Top 8，按命中对数）</div>'
+           + top_src + '</div>' if top_src else '<div></div>')
+        + '</div>'
+    )
+
     tier_chart = (
         '<div class="mt-4 text-sm font-semibold text-slate-700">各模块档位分布（confirmed / needReview / weak，单位：函数数）</div>'
         + _echarts_tier_distribution(submodule_stats)
@@ -707,7 +815,7 @@ def _summary_card(
         f'{html.escape(query_repo_id)} '
         '<span class="text-slate-400 font-normal text-base">查重对比分析报告</span>'
         '</h2>'
-        f'{pills}{tier_chart}{pct_chart}'
+        f'{_LEGEND_HTML}{kpis}{head_charts}{tier_chart}{pct_chart}'
         '</section>'
     )
 
@@ -749,22 +857,89 @@ def _candidates_cell(group: dict, linker) -> str:
     return f'<ul class="text-xs list-disc pl-4 space-y-0.5">{"".join(items)}{more}</ul>'
 
 
+def _diff_cols(left_code: str, right_code: str) -> tuple[str, str]:
+    """逐行对齐高亮：返回 (新作品列 HTML, 来源列 HTML)，差异行加底色。
+
+    用 difflib 对齐两段代码，相同行普通显示，差异行高亮——直接回应「$f0 vs $f3
+    要看得见差异」：寄存器不同的那一行会被标黄/标红，评审一眼可辨「改名复制」。
+    """
+    import difflib
+    ql = left_code.split("\n")
+    rl = right_code.split("\n")
+    sm = difflib.SequenceMatcher(None, ql, rl, autojunk=False)
+    left: list[tuple[str, bool]] = []
+    right: list[tuple[str, bool]] = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        same = tag == "equal"
+        lseg = [(ql[k], not same) for k in range(i1, i2)]
+        rseg = [(rl[k], not same) for k in range(j1, j2)]
+        # 补齐两列行数，保持视觉对齐
+        while len(lseg) < len(rseg):
+            lseg.append(("", True))
+        while len(rseg) < len(lseg):
+            rseg.append(("", True))
+        left.extend(lseg)
+        right.extend(rseg)
+
+    def fmt(rows: list[tuple[str, bool]]) -> str:
+        return "".join(
+            f'<div class="cl{" df" if ch else ""}">{html.escape(t) if t else "&nbsp;"}</div>'
+            for t, ch in rows
+        )
+    return fmt(left), fmt(right)
+
+
+def _code_evidence(group: dict) -> tuple[str, str]:
+    """返回 (toggle_html, panel_row_html)：可折叠的「新作品 vs 最强候选来源」并排代码。
+
+    数据已在 collect_file_pairs 收集（query_code/各候选 ref_code），此前只送给 LLM、
+    从不渲染——评审看不到证据。这里把最强候选的代码并排展示、差异行高亮。
+    """
+    q = group.get("query_code") or ""
+    best = group["candidates"][0] if group.get("candidates") else {}
+    r = best.get("ref_code") or ""
+    if not q.strip() and not r.strip():
+        return "", ""
+    left_html, right_html = _diff_cols(q, r)
+    toggle = (
+        '<button type="button" class="code-toggle text-xs text-blue-600 hover:underline" '
+        '@click="o=!o" x-text="o ? \'收起代码 ▴\' : \'查看代码 ▾\'">查看代码 ▾</button>'
+    )
+    src_label = html.escape(f'{best.get("ref_repo","")}/{best.get("ref_file","")}:{best.get("ref_start","")}')
+    panel = (
+        '<tr x-show="o" x-cloak><td colspan="6" class="p-0">'
+        '<div class="code-pair">'
+        '<div class="code-col"><div class="code-h">新作品（差异行标黄）</div>'
+        f'<div class="code-body">{left_html}</div></div>'
+        f'<div class="code-col"><div class="code-h">最强候选来源 · {src_label}（差异行标红）</div>'
+        f'<div class="code-body">{right_html}</div></div>'
+        '</div></td></tr>'
+    )
+    return toggle, panel
+
+
 def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, accent: str) -> str:
-    """渲染一张「按 query 函数聚合候选」的清单表（U3 分类清单 + U6 全候选）。"""
+    """渲染一张「按 query 函数聚合候选」的清单表（U3 分类清单 + U6 全候选 + 代码证据）。"""
     if not groups:
         return ""
-    rows = "".join(
-        '<tr>'
-        '<td class="font-mono text-xs align-top">'
-        + _make_gitlab_anchor(linker, query_repo_id, g["query_file"], g["query_start"])
-        + '</td>'
-        f'<td class="text-xs align-top">{html.escape(g["query_func"])}</td>'
-        f'<td class="text-xs align-top font-semibold {_sim_class(g["overall_sim"])}">{g["overall_sim"]}</td>'
-        f'<td class="text-xs align-top">{html.escape(_CLONE_TYPE_DISPLAY.get(g["clone_type"], g["clone_type"]))}</td>'
-        '<td class="align-top">' + _candidates_cell(g, linker) + '</td>'
-        '</tr>'
-        for g in groups
-    )
+    bodies = []
+    for g in groups:
+        toggle, panel = _code_evidence(g)
+        main = (
+            '<tr>'
+            '<td class="font-mono text-xs align-top">'
+            + _make_gitlab_anchor(linker, query_repo_id, g["query_file"], g["query_start"])
+            + '</td>'
+            f'<td class="text-xs align-top">{html.escape(g["query_func"])}</td>'
+            f'<td class="text-xs align-top font-semibold {_sim_class(g["overall_sim"])}">{g["overall_sim"]}</td>'
+            f'<td class="text-xs align-top">{html.escape(_CLONE_TYPE_DISPLAY.get(g["clone_type"], g["clone_type"]))}</td>'
+            '<td class="align-top">' + _candidates_cell(g, linker) + '</td>'
+            f'<td class="text-xs align-top whitespace-nowrap">{toggle}</td>'
+            '</tr>'
+        )
+        bodies.append(
+            f'<tbody x-data="{{o:false}}" class="border-b border-slate-100">{main}{panel}</tbody>'
+        )
     return (
         f'<div class="mt-3"><div class="text-sm font-semibold {accent} mb-1">{html.escape(title)}'
         f'（{len(groups)} 个函数）</div>'
@@ -776,8 +951,9 @@ def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, ac
         '<th class="text-left p-2 border-b">整体相似度</th>'
         '<th class="text-left p-2 border-b">复制类型</th>'
         '<th class="text-left p-2 border-b">候选来源（全部）</th>'
+        '<th class="text-left p-2 border-b">代码证据</th>'
         '</tr></thead>'
-        f'<tbody>{rows}</tbody>'
+        f'{"".join(bodies)}'
         '</table></div></div>'
     )
 
@@ -858,7 +1034,12 @@ def _module_section(
         '</div>'
         '</section>'
     )
-    toc = f'<a class="toc-link" href="#{sid}">{html.escape(label)}</a>'
+    n_conf = stats.get("confirmed", 0)
+    n_rev = stats.get("review", 0)
+    badge_n = n_conf or n_rev
+    badge_cls = "toc-badge" if n_conf else ("toc-badge" if n_rev else "toc-badge zero")
+    badge = f'<span class="{badge_cls}" title="已确认借鉴 {n_conf} / needReview {n_rev}">{badge_n}</span>'
+    toc = f'<a class="toc-link" href="#{sid}"><span>{html.escape(label)}</span>{badge}</a>'
     return toc, section
 
 
@@ -1112,11 +1293,15 @@ _STYLES = """
 [x-cloak]{display:none!important}
 body{background:#f6f8fa}
 .layout{display:flex;gap:1.5rem;max-width:1360px;margin:0 auto;padding:1.5rem}
-.toc{position:sticky;top:1.5rem;align-self:flex-start;width:220px;flex-shrink:0;font-size:.85rem}
-.toc .toc-link{display:block;padding:.3rem .5rem;border-left:2px solid transparent;
+.toc{position:sticky;top:1.5rem;align-self:flex-start;width:230px;flex-shrink:0;font-size:.85rem}
+.toc .toc-link{display:flex;align-items:center;justify-content:space-between;gap:.4rem;
+  padding:.3rem .5rem;border-left:2px solid transparent;
   color:#475569;text-decoration:none;border-radius:0 .3rem .3rem 0}
 .toc .toc-link:hover{background:#eef2f7}
 .toc .toc-active{border-left-color:#4a90d9;color:#1a66d4;font-weight:600;background:#eef2fb}
+.toc-badge{font-size:.65rem;line-height:1;padding:.15rem .4rem;border-radius:999px;
+  background:#fee2e2;color:#b91c1c;font-weight:600;flex-shrink:0}
+.toc-badge.zero{background:#e2e8f0;color:#64748b}
 .main{flex:1;min-width:0}
 .file-jump,.repo-link{color:#1a66d4;text-decoration:underline dotted}
 .file-jump:hover,.repo-link:hover{text-decoration:underline solid}
@@ -1128,7 +1313,41 @@ body{background:#f6f8fa}
 .pct-bar div:only-child{border-radius:4px}
 table{border-collapse:collapse}
 td,th{padding:.4rem .6rem;border-bottom:1px solid #e2e8f0;vertical-align:top}
+/* KPI 卡片 */
+.kpi{display:flex;flex-direction:column;gap:.15rem;padding:.7rem .9rem;border-radius:.6rem;
+  background:#fff;border:1px solid #e2e8f0}
+.kpi .v{font-size:1.6rem;font-weight:700;line-height:1.1}
+.kpi .l{font-size:.72rem;color:#64748b}
+/* 档位/类型图例 */
+.legend{display:flex;flex-wrap:wrap;gap:.4rem .9rem;font-size:.72rem;color:#475569;margin-top:.5rem}
+.legend .dot{display:inline-block;width:.7rem;height:.7rem;border-radius:2px;margin-right:.3rem;vertical-align:-1px}
+/* 代码证据并排 */
+.code-toggle{cursor:pointer;background:none;border:none;padding:0}
+.code-pair{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid #e2e8f0}
+.code-col{min-width:0;border-left:1px solid #e2e8f0}
+.code-col:first-child{border-left:none}
+.code-h{font-size:.7rem;font-weight:600;color:#475569;padding:.35rem .6rem;
+  background:#f1f5f9;border-bottom:1px solid #e2e8f0;position:sticky;top:0}
+.code-body{margin:0;max-height:360px;overflow:auto;font-size:.72rem;line-height:1.45;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.cl{white-space:pre;padding:0 .6rem}
+.cl.df{background:#fff1f2}
+.code-col:first-child .cl.df{background:#fef9c3}
+@media(max-width:720px){.code-pair{grid-template-columns:1fr}.code-col{border-left:none;border-top:1px solid #e2e8f0}}
+/* 回到顶部 */
+.to-top{position:fixed;right:1.1rem;bottom:1.1rem;width:2.4rem;height:2.4rem;border-radius:999px;
+  background:#1a66d4;color:#fff;display:flex;align-items:center;justify-content:center;
+  text-decoration:none;box-shadow:0 2px 8px rgba(0,0,0,.2);font-size:1.1rem;opacity:.85}
+.to-top:hover{opacity:1}
 @media(max-width:860px){.layout{flex-direction:column}.toc{position:static;width:auto}}
+@media print{
+  .toc,.to-top{display:none!important}
+  body{background:#fff}
+  .layout{display:block;max-width:none;padding:0}
+  section{break-inside:avoid;box-shadow:none!important}
+  [x-cloak]{display:revert!important}
+  .code-body{max-height:none}
+}
 </style>
 """
 
@@ -1269,7 +1488,8 @@ def generate_comparison_html(
     file_similar = file_similar or []
     # 摘要卡
     summary_html = _summary_card(query_repo_id, suspects, submodule_stats,
-                                 file_match_count=len(file_matches))
+                                 file_match_count=len(file_matches),
+                                 file_similar_count=len(file_similar))
 
     toc_items  = ['<a class="toc-link" href="#summary">总览</a>']
     body_parts = [summary_html]
@@ -1317,6 +1537,7 @@ def generate_comparison_html(
     {main_html}
   </main>
 </div>
+<a href="#summary" class="to-top" title="回到顶部">↑</a>
 {_INIT_SCRIPT}
 </body>
 </html>
