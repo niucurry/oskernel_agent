@@ -24,6 +24,11 @@ MIN_FILE_LINES = 5
 # 文件内 confirmed/review 命中函数占比 >= 此值 → 判「文件整体相似」（后聚合）。
 WHOLE_FILE_SIM_RATIO = 0.95
 
+# 同一规范化文件出现在 >= 此数的历史仓库 → 判「广泛共享的公共代码」（vendored crate、
+# sysroot 头文件、官方测试集等），不计作两队之间的整文件复制。目录排除清单只能覆盖已知基础
+# 设施名；本阈值按数据自动消化其余第三方/模板文件（实测真实语料 L0 误报绝大多数属此类）。
+COMMON_FILE_MIN_REPOS = 3
+
 
 def scan_repo(
     repo_path: str | Path,
@@ -34,6 +39,7 @@ def scan_repo(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     max_lines: int = DEFAULT_MAX_LINES,
     min_file_lines: int = MIN_FILE_LINES,
+    common_file_min_repos: int = COMMON_FILE_MIN_REPOS,
 ) -> dict:
     """扫描新作品的整文件复制，写 {repo}_filematch.json，返回结果 dict。
 
@@ -45,6 +51,7 @@ def scan_repo(
 
     matched: list[dict] = []
     skip_files: list[str] = []
+    common_files = 0
     with FunctionStore(db_path) as store:
         for f in files:
             try:
@@ -59,12 +66,18 @@ def scan_repo(
             hist = store.find_files_by_norm_hash(nh, exclude_repo_id=repo_id)
             if not hist:
                 continue
+            repo_count = len({h["repo_id"] for h in hist})
+            # 广泛共享的公共代码（出现在 >= 阈值个历史仓库）：跳过召回省算力，但不报为复制。
+            if repo_count >= common_file_min_repos:
+                common_files += 1
+                skip_files.append(f.rel_path)
+                continue
             matched.append({
                 "query_file": f.rel_path,
                 "lang": f.lang,
                 "line_count": text.count("\n") + 1,
                 "norm_hash": nh,
-                "hist_repo_count": len({h["repo_id"] for h in hist}),
+                "hist_repo_count": repo_count,
                 "matches": [
                     {"repo_id": h["repo_id"], "file_path": h["file_path"],
                      "line_count": h["line_count"], "func_count": h["func_count"]}
@@ -77,14 +90,15 @@ def scan_repo(
         "query_repo_id": repo_id,
         "scanned_files": len(files),
         "matched_files": matched,
+        "common_files": common_files,
         "skip_files": skip_files,
     }
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{repo_path.name}_filematch.json"
     out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    logger.info("[fastpath] 整文件复制 {} 个（扫描 {} 文件）→ {}",
-                len(matched), len(files), out_path)
+    logger.info("[fastpath] 整文件复制 {} 个、公共代码跳过 {} 个（扫描 {} 文件）→ {}",
+                len(matched), common_files, len(files), out_path)
     result["_output_path"] = str(out_path)
     return result
 
