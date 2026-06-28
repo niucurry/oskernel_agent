@@ -186,6 +186,18 @@ def collect_file_pairs(suspects: list[dict], top_per_module: int = 5) -> list[di
     return result
 
 
+def _limit_per_module(pairs: list[dict], n: int) -> list[dict]:
+    """从已按模块分组、模块内降序的 pairs 中，每模块取前 n 个（送 LLM 控 token 用）。"""
+    cnt: dict[str, int] = defaultdict(int)
+    out: list[dict] = []
+    for p in pairs:
+        mod = p["module"]
+        if cnt[mod] < n:
+            out.append(p)
+            cnt[mod] += 1
+    return out
+
+
 # ─── 3. 上下文文件 + opencode 短消息 ─────────────────────────────────────────
 # Windows 命令行限制 ~32K 字符，不能把完整代码对塞进 CLI 参数。
 # 解决方案：把所有数据写到仓库里的临时 JSON 文件，用 read_file MCP 工具读取。
@@ -702,22 +714,30 @@ def _build_gitlab_linker(
     query_repo_id: str,
     ref_repos: set[str],
 ) -> "GitLabLinker | None":
-    """构建 GitLabLinker：query 仓库从本地 git 取 URL/SHA，参考仓库从 repos.yaml 取。"""
+    """构建 GitLabLinker。
+
+    链接 ref（指向哪个版本）的取值策略，由各仓库可获取的数据决定：
+
+    - **新作品（query）**：本地克隆即分析时的版本，``git rev-parse HEAD`` 取到精确 sha，
+      行号与分析结果一一对应，链接可精确定位到函数。
+    - **参考仓库（历史库）**：functions.db 建库时**未记录 commit sha**，且 data/repos 下
+      历史克隆的工作树已清理（.git 多为残壳，无法 rev-parse），远程最新 HEAD 又可能因仓库
+      更新导致文件移动/删除。因此参考仓库不强行绑定某个 sha（``heads`` 留空），由
+      ``gitlab_blob_url`` 兜底用字面量 ``HEAD``：``/-/blob/HEAD/<path>#L<n>`` —— 文件仍在
+      即可打开（行号尽力定位），避免对不存在的 sha 发起请求或卡在 ls-remote 超时。
+    """
     try:
         from .gitlab_links import (
-            GitLabLinker, build_repo_url_map, ensure_heads, query_repo_info,
+            GitLabLinker, build_repo_url_map, query_repo_info,
         )
         url_map = build_repo_url_map()
         if not url_map and not query_repo_path:
             return None
 
-        # 取需要 HEAD 的参考仓库 URL
-        ref_urls = [url_map[r] for r in ref_repos if r in url_map]
+        # 参考仓库不绑定 sha：heads 留空 → gitlab_blob_url 用 HEAD 作 ref
         heads: dict[str, str] = {}
-        if ref_urls:
-            heads = ensure_heads(ref_urls, workers=8)
 
-        # 新作品（query）仓库
+        # 新作品（query）仓库：本地克隆 = 分析版本，sha 精确
         q_url = q_sha = None
         if query_repo_path:
             q_url, q_sha = query_repo_info(query_repo_path)
@@ -1018,6 +1038,7 @@ def run_semantic_compare(
     recall_path: str | Path | None = None,
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     top_per_module: int = 5,
+    table_top_per_module: int = 50,
     skip_opencode: bool = False,
 ) -> dict:
     """主入口：suspects.json → opencode 分析 → 直接 HTML 报告。
@@ -1027,7 +1048,8 @@ def run_semantic_compare(
         query_repo_path: 新作品本地克隆路径（用于文件链接 + opencode 初始化）
         recall_path:     embed 阶段产出的 *_recall.json（用于计算函数总数 / 原创函数）
         output_dir:      HTML 输出目录
-        top_per_module:  每个子模块送入 opencode 的最大代码对数
+        top_per_module:  每个子模块**送入 LLM 分析**的最大代码对数（控 token，默认 5）
+        table_top_per_module: 每个子模块**表格展示**的最大代码对数（默认 50，展示更全）
         skip_opencode:   True 时跳过 opencode，仅用规则生成报告（调试用）
     """
     suspects_path = Path(suspects_path)
@@ -1043,7 +1065,9 @@ def run_semantic_compare(
 
     # 统计
     submodule_stats = compute_submodule_stats(suspects, recall)
-    file_pairs      = collect_file_pairs(suspects, top_per_module=top_per_module)
+    # 表格展示用大量代码对；送 LLM 的另取每模块前 top_per_module（控 token）
+    file_pairs = collect_file_pairs(suspects, top_per_module=table_top_per_module)
+    llm_pairs  = _limit_per_module(file_pairs, top_per_module)
 
     # 原创候选函数
     original_funcs  = _original_functions(recall, suspects) if recall else []
@@ -1053,12 +1077,12 @@ def run_semantic_compare(
     out_dir.mkdir(parents=True, exist_ok=True)
     work_dir = out_dir / f"{query_repo_id}_semantic_work"
 
-    if skip_opencode or not file_pairs:
-        analysis_html = _fallback_analysis(file_pairs, submodule_stats)
+    if skip_opencode or not llm_pairs:
+        analysis_html = _fallback_analysis(llm_pairs, submodule_stats)
     else:
         qpath = str(Path(query_repo_path).resolve()) if query_repo_path else ""
         analysis_html = run_semantic_analysis(
-            query_repo_id, qpath, file_pairs, submodule_stats, work_dir
+            query_repo_id, qpath, llm_pairs, submodule_stats, work_dir
         )
 
     # 构建 GitLab linker（取各参考仓库的在线 URL + HEAD sha）
