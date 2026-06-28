@@ -135,13 +135,13 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) ->
 
     result = {}
     for mod, data in agg.items():
-        # total 优先用 recall 统计；无 recall 时用嫌疑对数量兜底
+        # total 优先用 recall 统计；无 recall 时用嫌疑对数量兜底。真正无任何函数的模块 total=0
+        # （不再虚构为 1），使其从概览图中自然排除——否则空模块会虚显为「100% 原创」的假条目。
         total = (module_totals.get(mod, 0)
-                 or (data["confirmed"] + data["review"] + data["weak"])
-                 or 1)
+                 or (data["confirmed"] + data["review"] + data["weak"]))
         # 加权：confirmed=1.0, review=0.5, weak=0.2
         copy_score = data["confirmed"] * 1.0 + data["review"] * 0.5 + data["weak"] * 0.2
-        copy_pct = min(1.0, copy_score / total)
+        copy_pct = min(1.0, copy_score / total) if total else 0.0
         top_src = data["sources"].most_common(1)
         result[mod] = {
             "confirmed": data["confirmed"],
