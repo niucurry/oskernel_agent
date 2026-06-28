@@ -12,7 +12,16 @@ from .ts import lang_of
 EXCLUDE_DIRS = {
     "target", "build", ".git", "vendor", "third_party", "third-party",
     "node_modules", ".cargo", "deps", "dependencies",
+    # 竞赛通用基础设施（各队签入的同一份，非内核原创代码）：官方测试集 / 用户态测试程序
+    # / benchmark。不排除会让 L0 文件指纹把它们当「整文件复制」批量误报（实测占跨仓命中绝大多数）。
+    "libc-test", "oscomp", "user_C_program", "testsuits", "testsuites",
+    "lmbench", "busybox", "iozone", "ltp",
+    # 构建产物根文件系统 / sysroot（编译出来的 libc/libstdc++ 头与库，非源码）
+    "sysroot", "rootfs",
 }
+
+# 目录名后缀模式：随仓库签入的预编译交叉工具链 / sysroot（musl-cross 等，整棵都是 libc 头/库）。
+EXCLUDE_DIR_SUFFIXES = ("-musl-cross", "-gcc-cross", "-elf-cross")
 
 
 @dataclass(frozen=True)
@@ -38,7 +47,11 @@ def discover_files(repo: str | Path) -> list[DiscoveredFile]:
 
     for dirpath, dirnames, filenames in os.walk(repo):
         # 排除指定目录（原地修改 dirnames 以阻止 os.walk 下降）
-        dirnames[:] = sorted(d for d in dirnames if d not in EXCLUDE_DIRS)
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if d not in EXCLUDE_DIRS
+            and not any(d.endswith(s) for s in EXCLUDE_DIR_SUFFIXES)
+        )
 
         for fn in sorted(filenames):
             lang = lang_of(fn)
