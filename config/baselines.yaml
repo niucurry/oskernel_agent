@@ -28,3 +28,12 @@ repos:
     year: 0
     team_name: baseline_rcore_v1
     award_level: baseline
+  # 常被各队 vendored 进内核的第三方库（整库签入，命中即扣除，不计两队互抄）。
+  - repo_url: https://github.com/gkostka/lwext4
+    year: 0
+    team_name: baseline_lwext4
+    award_level: baseline
+  - repo_url: https://github.com/rafalh/rust-fatfs
+    year: 0
+    team_name: baseline_rust_fatfs
+    award_level: baseline
