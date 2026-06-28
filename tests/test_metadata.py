@@ -86,6 +86,43 @@ def test_channel_creates_new_pair_via_string(tmp_path):
     assert sp["tier"] == "review"
 
 
+# ---------- D1：字符串通道新建对计算真实 final_score（不再硬编码 0） ----------
+
+def test_string_channel_new_pair_scores_identical_copy(tmp_path):
+    raw = (
+        "fn parse_header(buf: &[u8]) -> Header {\n"
+        "    let magic = read_u32(buf);\n"
+        f'    log("{UNIQUE_STR}");\n'
+        "    let version = read_u16(buf);\n"
+        "    Header { magic, version }\n"
+        "}"
+    )
+    db = tmp_path / "functions.db"
+    with FunctionStore(db) as s:
+        s.add_function(_rec("2021/hist", "parse_header", raw), [UNIQUE_STR], [])
+        s.conn.commit()
+    qf = {
+        "repo_id": "2024/new", "file_path": "k.rs", "start_line": 100,
+        "end_line": 105, "func_name": "parse_header", "module_tag": "fs", "lang": "rust",
+        "raw_code": raw, "normalized_code": "",
+    }
+    data = {"suspects": [{
+        "tier": "weak", "final_score": 0.5, "query_func": qf,
+        "candidate_func": {"repo_id": "2099/other", "file_path": "z.rs", "start_line": 1, "end_line": 3,
+                           "func_name": "zzz", "module_tag": "other", "lang": "rust",
+                           "raw_code": "", "normalized_code": ""},
+        "evidence": {}, "matched_spans": [], "match_type_per_span": [],
+    }]}
+    channel_unique_strings(data, db, SETTINGS)
+    created = [s for s in data["suspects"] if s.get("source") == "string_channel"]
+    assert len(created) == 1
+    sp = created[0]
+    assert sp["final_score"] == 1.0                       # 逐字节相同 → 真实 100%
+    assert sp["tier"] == "confirmed"                      # 不再恒为 review
+    assert sp["evidence"]["exact_match_lines"] > 0
+    assert sp["evidence"]["renamed_match_lines"] == 0
+
+
 # ---------- 通道 2：基线双侧才扣 ----------
 
 def test_baseline_both_sides_same_func():

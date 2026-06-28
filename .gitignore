@@ -47,3 +47,5 @@ session_prompts/
 .opencode.json
 
 test/
+analysis
+config.toml

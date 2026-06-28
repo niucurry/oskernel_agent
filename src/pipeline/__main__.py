@@ -73,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     # ---- ingest ----
     repo_path = local_ingest(args.repo, Path(args.output_dir) / "_repos")
     repo_name = repo_path.name
+    filematch_path = out / f"{repo_name}_filematch.json"
     recall_path = out / f"{repo_name}_recall.json"
     suspects_path = out / f"{repo_name}_suspects.json"
     v2_path = out / f"{repo_name}_suspects_v2.json"
@@ -97,6 +98,17 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             embedder = get_embedder(show_progress=False)
         return embedder
 
+    # ---- fastpath (L0 文件指纹层) ----
+    skip_files: set[str] = set()
+    if _should_run("fastpath", args.resume_from):
+        from src.fastpath.scan import scan_repo
+        fm = timed("fastpath", lambda: scan_repo(
+            repo_path, db_path=args.db, repos_root=args.repos_root, output_dir=out))
+        skip_files = set(fm["skip_files"])
+        funnel["fastpath_filematch"] = len(fm["matched_files"])
+    elif filematch_path.exists():
+        skip_files = set(json.loads(filematch_path.read_text(encoding="utf-8")).get("skip_files", []))
+
     # ---- recall (含 normalize) ----
     if _should_run("recall", args.resume_from):
         from src.embed.query import query_repo
@@ -112,7 +124,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
 
         def _recall():
             return query_repo(repo_path, store, get_emb(), top_k=args.top_k,
-                              repos_root=args.repos_root, output_dir=out, simhash_query=simhash_query)
+                              repos_root=args.repos_root, output_dir=out, simhash_query=simhash_query,
+                              skip_files=skip_files)
         recall = timed("recall", _recall)
         funnel["recall_query_funcs"] = len(recall["results"])
         funnel["recall_candidates"] = recall["simhash"]["total_recalled"]
@@ -150,8 +163,22 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     # ---- ai_detect（AI 生成代码检测，独立于查重漏斗；缺模型则优雅跳过）----
     if not args.skip_ai_detect and _should_run("ai_detect", args.resume_from):
         from src.ai_detect.runner import run_ai_detect
+        # P2 限范围：把查重命中的可疑函数作为检测焦点（∪ 大函数），避免全量/前 N 的浪费
+        focus_funcs: set[tuple[str, str]] | None = None
+        if final_path.exists():
+            try:
+                _sd = json.loads(final_path.read_text(encoding="utf-8"))
+                focus_funcs = {
+                    (s.get("query_func", {}).get("file_path", "").replace("\\", "/"),
+                     s.get("query_func", {}).get("func_name", ""))
+                    for s in _sd.get("suspects", [])
+                    if s.get("tier") in ("confirmed", "review", "weak")
+                }
+            except (OSError, json.JSONDecodeError):
+                focus_funcs = None
         res = timed("ai_detect", lambda: run_ai_detect(
-            repo_path, output_dir=out, repo_name=repo_name, show_progress=False))
+            repo_path, output_dir=out, repo_name=repo_name, show_progress=False,
+            focus_funcs=focus_funcs))
         funnel["ai_detect_status"] = res.get("status")
         if res.get("status") == "ok":
             funnel["ai_detect"] = res["aggregated"]["overall"]
@@ -166,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             query_repo_path = str(repo_path),
             recall_path     = recall_path,
             output_dir      = out,
+            filematch_path  = filematch_path,
         ))
         funnel["report"] = res["html_path"]
         funnel["report_html"] = res["html_path"]

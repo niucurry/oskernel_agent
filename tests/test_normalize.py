@@ -35,7 +35,7 @@ def test_discovery_excludes_build_and_vendor_dirs_by_name():
 
 
 def test_discovery_language_detection():
-    langs = {f.rel_path: f.lang for f in discover_files(REPO)}
+    langs = {f.rel_path.replace("\\", "/"): f.lang for f in discover_files(REPO)}
     assert langs["os/src/sched/task.rs"] == "rust"
     assert langs["os/src/mm/heap.c"] == "c"
     assert langs["os/src/arch/boot.S"] == "asm"
@@ -150,6 +150,13 @@ def test_extract_skips_short_functions():
     assert extract_functions(code, "rust", min_lines=5) == []
 
 
+def test_extract_default_min_lines_is_ten():
+    # D4：默认下限提到 10 行；5–9 行小函数不再入库（整文件复制由 L0 兜底）
+    code = "fn small() -> i32 {\n" + "    let x = 1;\n" * 6 + "    x\n}\n"  # 9 行
+    assert extract_functions(code, "rust") == []           # 默认 min_lines=10
+    assert extract_functions(code, "rust", min_lines=5) != []
+
+
 def test_extract_asm_segments_by_label():
     asm = (REPO / "os/src/arch/boot.S").read_text(encoding="utf-8")
     funcs = extract_functions(asm, "asm", min_lines=2)
@@ -169,7 +176,8 @@ def test_normalize_asm_strips_comments_and_numbers():
 def test_store_roundtrip(tmp_path):
     db = tmp_path / "functions.db"
     with FunctionStore(db) as store:
-        res = normalize_repo(REPO, store, repo_id="2024/sample")
+        # 固定 min_lines=1：本测试验证落盘/模块分布/字符串收集，与 D4 调高的默认下限解耦
+        res = normalize_repo(REPO, store, repo_id="2024/sample", min_lines=1)
         assert res["functions"] >= 3
         # 模块分布应覆盖多类
         dist = store.module_distribution("2024/sample")

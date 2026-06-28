@@ -14,3 +14,30 @@ repos:
     year: 0
     team_name: baseline_contest_template
     award_level: baseline
+  # 公共参考 OS（回应待确认#1：压低「复用比例异常高」误报）。
+  # 拉取入库：`python -m src.ingest --config config/baselines.yaml`；查询时加 `--baselines` 启用扣除。
+  - repo_url: https://github.com/arceos-org/arceos
+    year: 0
+    team_name: baseline_arceos
+    award_level: baseline
+  - repo_url: https://github.com/chyyuu/os_kernel_lab
+    year: 0
+    team_name: baseline_ucore_lab
+    award_level: baseline
+  - repo_url: https://github.com/rcore-os/rCore
+    year: 0
+    team_name: baseline_rcore_v1
+    award_level: baseline
+  # 常被各队 vendored 进内核的第三方库（整库签入，命中即扣除，不计两队互抄）。
+  - repo_url: https://github.com/gkostka/lwext4
+    year: 0
+    team_name: baseline_lwext4
+    award_level: baseline
+  - repo_url: https://github.com/rafalh/rust-fatfs
+    year: 0
+    team_name: baseline_rust_fatfs
+    award_level: baseline
+  - repo_url: https://github.com/rcore-os/virtio-drivers
+    year: 0
+    team_name: baseline_virtio_drivers
+    award_level: baseline

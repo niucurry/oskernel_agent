@@ -26,6 +26,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from src.fastpath.scan import aggregate_file_similarity
+
 DEFAULT_OUTPUT_DIR = "data/output"
 
 # 子模块列表及其显示名称
@@ -56,6 +58,39 @@ _MODULE_DISPLAY = {
     "arch":   "硬件抽象",
     "other":  "其他",
 }
+
+# 展示层 tier 命名映射（U5）：内部 tier 值保持 confirmed/review/weak 不变（不动 JSON/测试/
+# 多模块逻辑），仅在报告里把 review 显示为 needReview，更贴合「需人工复核」语义。
+_TIER_DISPLAY = {
+    "confirmed": "已确认借鉴",
+    "review":    "needReview（待复核）",
+    "weak":      "弱相似",
+}
+# clone_type 展示名（D2 的「完全复制 / 改名复制」细分）。
+_CLONE_TYPE_DISPLAY = {
+    "exact":   "完全复制",
+    "renamed": "改名复制",
+    "near":    "高度相似",
+    "—":       "—",
+}
+
+
+def _tier_disp(tier: str) -> str:
+    return _TIER_DISPLAY.get(tier, tier)
+
+
+def _clone_kind(pair_or_suspect: dict) -> str:
+    """整对级 clone_type 派生（D2）：任一段 renamed 或证据含 renamed 行 → renamed；
+    否则有 exact 行 → exact；其余 near。寄存器/标识符改名绝不标 exact。
+    """
+    types = pair_or_suspect.get("match_type_per_span") or []
+    ev = pair_or_suspect.get("evidence") or {}
+    if "renamed" in types or (ev.get("renamed_match_lines") or 0) > 0:
+        return "renamed"
+    if "exact" in types or (ev.get("exact_match_lines") or 0) > 0:
+        return "exact"
+    return "near"
+
 
 _OPENCODE = _find_opencode()
 
@@ -100,13 +135,13 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) ->
 
     result = {}
     for mod, data in agg.items():
-        # total 优先用 recall 统计；无 recall 时用嫌疑对数量兜底
+        # total 优先用 recall 统计；无 recall 时用嫌疑对数量兜底。真正无任何函数的模块 total=0
+        # （不再虚构为 1），使其从概览图中自然排除——否则空模块会虚显为「100% 原创」的假条目。
         total = (module_totals.get(mod, 0)
-                 or (data["confirmed"] + data["review"] + data["weak"])
-                 or 1)
+                 or (data["confirmed"] + data["review"] + data["weak"]))
         # 加权：confirmed=1.0, review=0.5, weak=0.2
         copy_score = data["confirmed"] * 1.0 + data["review"] * 0.5 + data["weak"] * 0.2
-        copy_pct = min(1.0, copy_score / total)
+        copy_pct = min(1.0, copy_score / total) if total else 0.0
         top_src = data["sources"].most_common(1)
         result[mod] = {
             "confirmed": data["confirmed"],
@@ -151,11 +186,36 @@ def _original_functions(recall: dict, suspects: list[dict], top_n: int = 12) -> 
     return out[:top_n]
 
 
-# ─── 2. 收集代码对（各模块取 top_per_module 对） ──────────────────────────────
+# ─── 2. 收集代码对（按 query 函数聚合全部候选） ──────────────────────────────
 
-def collect_file_pairs(suspects: list[dict], top_per_module: int = 5) -> list[dict]:
-    """从 suspects 按子模块提取代表性相似代码对（含代码片段）。"""
-    by_module: dict[str, list[dict]] = defaultdict(list)
+_TIER_RANK = {"confirmed": 3, "review": 2, "weak": 1}
+
+
+def _pair_sim(s: dict) -> float:
+    """单对相似度，带 D1 兜底：final_score==0 但有精确/改名匹配行时，
+    按 (匹配行数 / query 函数行数) 估算，杜绝「行级相同却显示 0%」。
+    """
+    sim = float(s.get("final_score") or 0.0)
+    if sim <= 0.0:
+        ev = s.get("evidence") or {}
+        matched = (ev.get("exact_match_lines") or 0) + (ev.get("renamed_match_lines") or 0)
+        if matched > 0:
+            q = s.get("query_func", {})
+            qlines = max(1, (q.get("end_line", 0) or 0) - (q.get("start_line", 0) or 0) + 1)
+            sim = min(1.0, matched / qlines)
+    return round(sim, 3)
+
+
+def collect_file_pairs(
+    suspects: list[dict], top_per_module: int = 5, max_candidates: int = 4,
+) -> list[dict]:
+    """按 query 函数聚合候选（U6）：每个 query 函数列出其全部候选 + 各自相似度，并给
+    「整体相似度」(= 最强候选)。每模块取整体相似度最高的 top_per_module 个函数组。
+
+    返回 [{module, query_func, query_file, query_start/end, query_code, overall_sim,
+           overall_tier, clone_type, candidates:[{tier,sim,clone_type,ref_*}, ...]}, ...]
+    """
+    groups: dict[tuple, dict] = {}
     for s in suspects:
         tier = s.get("tier", "")
         if tier in ("dismissed", "baseline_derived", "common_code"):
@@ -163,39 +223,51 @@ def collect_file_pairs(suspects: list[dict], top_per_module: int = 5) -> list[di
         q = s.get("query_func", {})
         c = s.get("candidate_func", {})
         mod = q.get("module_tag", "other")
-        by_module[mod].append({
-            "module":      mod,
-            "tier":        tier,
-            "sim":         round(float(s.get("final_score", 0.0)), 3),
-            "query_func":  q.get("func_name", ""),
-            "query_file":  q.get("file_path", ""),
-            "query_start": q.get("start_line", 0),
-            "query_end":   q.get("end_line", 0),
-            "query_code":  (q.get("raw_code") or "")[:800],
-            "ref_func":    c.get("func_name", ""),
-            "ref_file":    c.get("file_path", ""),
-            "ref_repo":    c.get("repo_id", ""),
-            "ref_start":   c.get("start_line", 0),
-            "ref_end":     c.get("end_line", 0),
-            "ref_code":    (c.get("raw_code") or "")[:800],
+        if mod not in _MODULE_DISPLAY:
+            mod = "other"
+        key = (mod, q.get("file_path", ""), q.get("func_name", ""), q.get("start_line", 0))
+        g = groups.get(key)
+        if g is None:
+            g = {
+                "module":      mod,
+                "query_func":  q.get("func_name", ""),
+                "query_file":  q.get("file_path", ""),
+                "query_start": q.get("start_line", 0),
+                "query_end":   q.get("end_line", 0),
+                "query_code":  (q.get("raw_code") or "")[:800],
+                "candidates":  [],
+            }
+            groups[key] = g
+        g["candidates"].append({
+            "tier":       tier,
+            "sim":        _pair_sim(s),
+            "clone_type": _clone_kind(s),
+            "ref_func":   c.get("func_name", ""),
+            "ref_file":   c.get("file_path", ""),
+            "ref_repo":   c.get("repo_id", ""),
+            "ref_start":  c.get("start_line", 0),
+            "ref_end":    c.get("end_line", 0),
+            "ref_code":   (c.get("raw_code") or "")[:800],
         })
+
+    for g in groups.values():
+        cands = g["candidates"]
+        g["overall_tier"] = max((c["tier"] for c in cands),
+                                key=lambda t: _TIER_RANK.get(t, 0), default="weak")
+        cands.sort(key=lambda x: -x["sim"])
+        g["overall_sim"] = cands[0]["sim"] if cands else 0.0
+        g["clone_type"] = cands[0]["clone_type"] if cands else "—"
+        g["candidate_count"] = len(cands)
+        g["candidates"] = cands[:max_candidates]   # 限制展示候选数，避免报告过长
+
+    by_module: dict[str, list[dict]] = defaultdict(list)
+    for g in groups.values():
+        by_module[g["module"]].append(g)
     result = []
     for mod in MODULES:
-        pairs = sorted(by_module.get(mod, []), key=lambda x: -x["sim"])
-        result.extend(pairs[:top_per_module])
+        gs = sorted(by_module.get(mod, []), key=lambda x: -x["overall_sim"])
+        result.extend(gs[:top_per_module])
     return result
-
-
-def _limit_per_module(pairs: list[dict], n: int) -> list[dict]:
-    """从已按模块分组、模块内降序的 pairs 中，每模块取前 n 个（送 LLM 控 token 用）。"""
-    cnt: dict[str, int] = defaultdict(int)
-    out: list[dict] = []
-    for p in pairs:
-        mod = p["module"]
-        if cnt[mod] < n:
-            out.append(p)
-            cnt[mod] += 1
-    return out
 
 
 # ─── 3. 上下文文件 + opencode 短消息 ─────────────────────────────────────────
@@ -286,14 +358,24 @@ def _cache_key(*parts: str) -> str:
 
 
 _ANALYSIS_SYSTEM = """\
-你是代码原创性分析助手，专注于语义级（功能层面）的对比分析。
+你是 OS 内核代码原创性分析助手，专注于语义级（功能层面）的对比分析，面向评审人员。
 
-分析 OS 内核新作品的功能借鉴情况，对每个子模块输出 HTML 片段。
+对每个子模块输出一段信息充分、可追溯的 HTML 分析片段。
 
-分析维度：
-1. 功能借鉴：借鉴了哪些算法/机制/数据结构（语义层面，不只是文本相似）
-2. 借鉴程度：直接复制 / 变量改名 / 结构保留逻辑改写 / 受启发重新实现
-3. 代码证据：引用 文件:行号 格式（如 os/src/task/mod.rs:125）
+分析维度（每条结论尽量覆盖）：
+1. 借鉴对象：借鉴了哪些**算法**（如调度策略、分配器、置换算法）、**数据结构**
+   （如页表、inode、就绪队列）、**机制**（如 trap 上下文保存/恢复、锁、缓存）。
+2. 借鉴程度（四档，必须明确给出其一）：
+   - 直接复制（逐字节相同）
+   - 改名复制（仅改寄存器/变量/标识符名）
+   - 结构保留逻辑改写（控制流一致、表达式改写）
+   - 受启发重新实现（思路相近、实现独立）
+3. 设计差异：新作品相对来源做了哪些改动/取舍（如换数据结构、改并发策略、增删功能）。
+4. 代码证据：**每条结论都必须附 文件:行号**（如 os/src/task/mod.rs:125），无证据的结论不要写。
+
+写作要求：
+- 每个子模块用 2~4 句概述 + 一个 <ul> 列举具体借鉴点（每点带 file:line）。
+- 用词中性专业：用「借鉴/复制/相似」，不要用「抄袭」等定性指控词。
 
 输出格式（严格遵守）：
 - 只输出 HTML 标签，不要输出 Markdown
@@ -320,33 +402,34 @@ def _build_analysis_message(
             continue
         disp = _MODULE_DISPLAY.get(mod, mod)
         lines.append(
-            f"- **{disp}**（{mod}）：confirmed={stats['confirmed']}，"
-            f"review={stats['review']}，weak={stats['weak']}，"
+            f"- **{disp}**（{mod}）：已确认借鉴 {stats['confirmed']} 个函数，"
+            f"needReview {stats['review']} 个，弱相似 {stats['weak']} 个，"
             f"主要来源：{stats['top_source']}"
         )
-    lines += ["", "## 相似代码对（按子模块）", ""]
+    lines += ["", "## 相似代码对（按子模块、按 query 函数聚合全部候选）", ""]
 
     current_mod = None
-    for p in file_pairs:
-        mod = p["module"]
+    for g in file_pairs:
+        mod = g["module"]
         if mod != current_mod:
             lines.append(f"### {_MODULE_DISPLAY.get(mod, mod)} ({mod})")
             current_mod = mod
-        tier_label = {"confirmed": "确认借鉴", "review": "疑似借鉴", "weak": "弱相似"}.get(p["tier"], p["tier"])
-        qf = (p["query_file"] or "").replace("\\", "/")
-        rf = (p["ref_file"] or "").replace("\\", "/")
+        tier_label = {"confirmed": "已确认借鉴", "review": "needReview", "weak": "弱相似"}.get(
+            g["overall_tier"], g["overall_tier"])
+        lines.append(
+            f"**新作品** `{g['query_file']}:{g['query_start']}` 函数 `{g['query_func']}` "
+            f"← {tier_label}（整体相似度 {g['overall_sim']}，{g['candidate_count']} 个候选来源）"
+        )
+        for c in g["candidates"]:
+            ck = _CLONE_TYPE_DISPLAY.get(c["clone_type"], c["clone_type"])
+            lines.append(
+                f"  - 来源 `{c['ref_repo']}/{c['ref_file']}:{c['ref_start']}` 函数 "
+                f"`{c['ref_func']}`（相似度 {c['sim']}，{ck}）"
+            )
+        best = g["candidates"][0] if g["candidates"] else {}
         lines += [
-            f"**新作品** `{qf}:{p['query_start']}` 函数 `{p['query_func']}` "
-            f"← {tier_label}（相似度 {p['sim']}）",
-            f"**来源** `{p['ref_repo']}/{rf}:{p['ref_start']}` 函数 `{p['ref_func']}`",
-            "```",
-            p["query_code"],
-            "```",
-            "参考：",
-            "```",
-            p["ref_code"],
-            "```",
-            "",
+            "新作品代码：", "```", g["query_code"], "```",
+            "最强候选来源代码：", "```", best.get("ref_code", ""), "```", "",
         ]
 
     lines += [
@@ -377,7 +460,8 @@ def run_semantic_analysis(
 
     # 缓存
     pair_sig = json.dumps(
-        [(p["module"], p["query_func"], p["ref_func"], p["sim"]) for p in file_pairs],
+        [(g["module"], g["query_func"], g["overall_sim"],
+          [c["ref_func"] for c in g["candidates"]]) for g in file_pairs],
         ensure_ascii=False, sort_keys=True,
     )
     ck = _cache_key(query_repo_id, pair_sig)
@@ -447,32 +531,39 @@ def _extract_html_from_text(text: str) -> str:
 
 
 def _fallback_analysis(file_pairs: list[dict], submodule_stats: dict) -> str:
-    """opencode 不可用时的规则兜底分析 HTML。"""
+    """LLM 不可用时的规则兜底分析 HTML（按 query 函数聚合，列出全部候选）。"""
     by_mod: dict[str, list[dict]] = defaultdict(list)
-    for p in file_pairs:
-        by_mod[p["module"]].append(p)
+    for g in file_pairs:
+        by_mod[g["module"]].append(g)
 
     parts = ['<div class="fallback-analysis">']
     for mod in MODULES:
-        pairs = by_mod.get(mod, [])
-        if not pairs:
+        groups = by_mod.get(mod, [])
+        if not groups:
             continue
         disp = _MODULE_DISPLAY.get(mod, mod)
         stats = submodule_stats.get(mod, {})
-        items = "".join(
-            f'<li><code>{p["query_file"]}:{p["query_start"]}</code> ↔ '
-            f'<code>{p["ref_repo"]}/{p["ref_file"]}:{p["ref_start"]}</code> '
-            f'（{p["tier"]}，相似度 {p["sim"]}）</li>'
-            for p in pairs
-        )
+        items = []
+        for g in groups:
+            cands = "；".join(
+                f'{c["ref_repo"]}/{c["ref_file"]}:{c["ref_start"]}'
+                f'（相似度 {c["sim"]}，{_CLONE_TYPE_DISPLAY.get(c["clone_type"], c["clone_type"])}）'
+                for c in g["candidates"]
+            )
+            items.append(
+                f'<li><code>{html.escape(g["query_file"])}:{g["query_start"]}</code> '
+                f'函数 <code>{html.escape(g["query_func"])}</code>'
+                f'（{_tier_disp(g["overall_tier"])}，整体相似度 {g["overall_sim"]}）'
+                f'<br><span class="text-slate-500">候选来源：{html.escape(cands)}</span></li>'
+            )
         parts.append(
             f'<section data-module="{html.escape(mod)}">'
             f'<h3>{html.escape(disp)}（{html.escape(mod)}）</h3>'
-            f'<p>检测到 {stats.get("confirmed",0)} 个 confirmed 对、'
-            f'{stats.get("review",0)} 个 review 对，'
+            f'<p>检测到已确认借鉴 {stats.get("confirmed",0)} 个函数、'
+            f'needReview {stats.get("review",0)} 个，'
             f'主要来源：{html.escape(stats.get("top_source","—"))}。'
-            f'（opencode 未运行，语义分析不可用）</p>'
-            f'<ul>{items}</ul>'
+            f'（未启用 LLM 语义分析，以下为规则汇总）</p>'
+            f'<ul>{"".join(items)}</ul>'
             f'</section>'
         )
     parts.append('</div>')
@@ -533,32 +624,81 @@ def _echarts_overview(submodule_stats: dict) -> str:
     )
 
 
+def _echarts_tier_distribution(submodule_stats: dict) -> str:
+    """ECharts 横向堆叠柱图（U2）：各模块 confirmed / needReview / weak 函数数分段堆叠。"""
+    mods = [m for m in MODULES
+            if (submodule_stats.get(m, {}).get("confirmed", 0)
+                + submodule_stats.get(m, {}).get("review", 0)
+                + submodule_stats.get(m, {}).get("weak", 0)) > 0]
+    if not mods:
+        return ""
+    labels = [_MODULE_DISPLAY.get(m, m) for m in mods]
+    conf = [submodule_stats[m]["confirmed"] for m in mods]
+    rev  = [submodule_stats[m]["review"] for m in mods]
+    wk   = [submodule_stats[m]["weak"] for m in mods]
+    series = [
+        ("已确认借鉴", conf, "#ef4444"),
+        ("needReview", rev, "#f59e0b"),
+        ("弱相似", wk, "#94a3b8"),
+    ]
+    option = {
+        "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
+        "legend": {"data": [s[0] for s in series]},
+        "grid": {"left": "25%", "right": "8%", "top": "12%", "bottom": "6%"},
+        "xAxis": {"type": "value", "name": "函数数", "minInterval": 1},
+        "yAxis": {"type": "category", "data": labels[::-1]},
+        "series": [
+            {"name": name, "type": "bar", "stack": "tier", "data": vals[::-1],
+             "itemStyle": {"color": color},
+             "label": {"show": True, "formatter": "{c}"}}
+            for name, vals, color in series
+        ],
+    }
+    height = max(180, len(mods) * 44)
+    return (
+        f'<div class="echarts-chart mt-4" style="height:{height}px">'
+        f'<script type="application/json">{json.dumps(option, ensure_ascii=False)}</script>'
+        f'</div>'
+    )
+
+
 def _summary_card(
     query_repo_id: str,
     suspects: list[dict],
     submodule_stats: dict,
+    file_match_count: int = 0,
 ) -> str:
-    total = len([s for s in suspects if s.get("tier") not in ("dismissed",)])
     confirmed = len([s for s in suspects if s.get("tier") == "confirmed"])
     review    = len([s for s in suspects if s.get("tier") == "review"])
     weak      = len([s for s in suspects if s.get("tier") == "weak"])
+    total     = confirmed + review + weak
 
     # 加权总借鉴比例
     all_copy = sum(st["copy_pct"] * st["total"] for st in submodule_stats.values())
     all_total = sum(st["total"] for st in submodule_stats.values()) or 1
     overall_copy_pct = round(all_copy / all_total * 100, 1)
 
+    # U1：每个数字都带口径/单位
     pills = (
         '<div class="flex flex-wrap gap-2 text-sm mt-2">'
-        f'<span class="px-3 py-1 rounded-full bg-slate-100">嫌疑对共 {total}</span>'
-        f'<span class="px-3 py-1 rounded-full bg-red-100 text-red-700">confirmed {confirmed}</span>'
-        f'<span class="px-3 py-1 rounded-full bg-amber-100 text-amber-700">review {review}</span>'
-        f'<span class="px-3 py-1 rounded-full bg-slate-200 text-slate-600">weak {weak}</span>'
-        f'<span class="px-3 py-1 rounded-full bg-violet-100 text-violet-700">'
+        f'<span class="px-3 py-1 rounded-full bg-slate-100">嫌疑对共 {total} 对</span>'
+        f'<span class="px-3 py-1 rounded-full bg-red-100 text-red-700">已确认借鉴 {confirmed} 对</span>'
+        f'<span class="px-3 py-1 rounded-full bg-amber-100 text-amber-700">needReview {review} 对</span>'
+        f'<span class="px-3 py-1 rounded-full bg-slate-200 text-slate-600">弱相似 {weak} 对</span>'
+        + (f'<span class="px-3 py-1 rounded-full bg-rose-100 text-rose-700">整文件相同 {file_match_count} 个文件</span>'
+           if file_match_count else "")
+        + f'<span class="px-3 py-1 rounded-full bg-violet-100 text-violet-700">'
         f'整体借鉴估算 {overall_copy_pct}%</span>'
         '</div>'
     )
-    chart = _echarts_overview(submodule_stats)
+    tier_chart = (
+        '<div class="mt-4 text-sm font-semibold text-slate-700">各模块档位分布（confirmed / needReview / weak，单位：函数数）</div>'
+        + _echarts_tier_distribution(submodule_stats)
+    )
+    pct_chart = (
+        '<div class="mt-4 text-sm font-semibold text-slate-700">各模块借鉴 vs 原创占比</div>'
+        + _echarts_overview(submodule_stats)
+    )
 
     return (
         '<section id="summary" data-section-id="summary" '
@@ -567,7 +707,7 @@ def _summary_card(
         f'{html.escape(query_repo_id)} '
         '<span class="text-slate-400 font-normal text-base">查重对比分析报告</span>'
         '</h2>'
-        f'{pills}{chart}'
+        f'{pills}{tier_chart}{pct_chart}'
         '</section>'
     )
 
@@ -585,6 +725,61 @@ def _ref_repo_anchor(linker, ref_repo: str) -> str:
     except Exception:
         pass
     return html.escape(ref_repo)
+
+
+def _sim_class(sim: float) -> str:
+    return "text-red-600" if sim > 0.9 else "text-amber-600" if sim > 0.7 else "text-slate-500"
+
+
+def _candidates_cell(group: dict, linker) -> str:
+    """单个 query 函数的全部候选来源（U6）：每个候选一行，含来源链接/相似度/复制类型。"""
+    extra = group.get("candidate_count", len(group["candidates"])) - len(group["candidates"])
+    items = []
+    for c in group["candidates"]:
+        ck = _CLONE_TYPE_DISPLAY.get(c["clone_type"], c["clone_type"])
+        items.append(
+            '<li class="leading-5">'
+            + _ref_repo_anchor(linker, c["ref_repo"]) + ' '
+            + _make_gitlab_anchor(linker, c["ref_repo"], c["ref_file"], c["ref_start"])
+            + f' <span class="{_sim_class(c["sim"])} font-semibold">相似度 {c["sim"]}</span>'
+            + f' <span class="text-slate-400">{html.escape(ck)}</span>'
+            '</li>'
+        )
+    more = f'<li class="text-slate-400">…另有 {extra} 个候选</li>' if extra > 0 else ""
+    return f'<ul class="text-xs list-disc pl-4 space-y-0.5">{"".join(items)}{more}</ul>'
+
+
+def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, accent: str) -> str:
+    """渲染一张「按 query 函数聚合候选」的清单表（U3 分类清单 + U6 全候选）。"""
+    if not groups:
+        return ""
+    rows = "".join(
+        '<tr>'
+        '<td class="font-mono text-xs align-top">'
+        + _make_gitlab_anchor(linker, query_repo_id, g["query_file"], g["query_start"])
+        + '</td>'
+        f'<td class="text-xs align-top">{html.escape(g["query_func"])}</td>'
+        f'<td class="text-xs align-top font-semibold {_sim_class(g["overall_sim"])}">{g["overall_sim"]}</td>'
+        f'<td class="text-xs align-top">{html.escape(_CLONE_TYPE_DISPLAY.get(g["clone_type"], g["clone_type"]))}</td>'
+        '<td class="align-top">' + _candidates_cell(g, linker) + '</td>'
+        '</tr>'
+        for g in groups
+    )
+    return (
+        f'<div class="mt-3"><div class="text-sm font-semibold {accent} mb-1">{html.escape(title)}'
+        f'（{len(groups)} 个函数）</div>'
+        '<div class="overflow-x-auto">'
+        '<table class="w-full text-sm border-collapse">'
+        '<thead><tr class="bg-slate-50 text-slate-600">'
+        '<th class="text-left p-2 border-b">新作品 文件:行</th>'
+        '<th class="text-left p-2 border-b">函数</th>'
+        '<th class="text-left p-2 border-b">整体相似度</th>'
+        '<th class="text-left p-2 border-b">复制类型</th>'
+        '<th class="text-left p-2 border-b">候选来源（全部）</th>'
+        '</tr></thead>'
+        f'<tbody>{rows}</tbody>'
+        '</table></div></div>'
+    )
 
 
 def _module_section(
@@ -608,70 +803,35 @@ def _module_section(
     label = f"{disp} ({mod})"
     copy_pct = stats.get("copy_pct", 0.0)
 
-    # 子模块统计概要行
+    # 子模块统计概要行（U1：所有数字带单位/口径；U5：review→needReview）
     stat_row = (
         f'<div class="flex flex-wrap gap-3 text-sm mb-3">'
         f'<span class="px-2 py-0.5 rounded bg-red-50 text-red-700">'
-        f'借鉴 {copy_pct*100:.0f}%</span>'
+        f'借鉴估算 {copy_pct*100:.0f}%</span>'
         f'<span class="px-2 py-0.5 rounded bg-green-50 text-green-700">'
-        f'原创 {(1-copy_pct)*100:.0f}%</span>'
-        f'<span class="text-slate-500">函数总数 {stats.get("total","—")} | '
-        f'confirmed {stats.get("confirmed",0)} | review {stats.get("review",0)}</span>'
+        f'原创估算 {(1-copy_pct)*100:.0f}%</span>'
+        f'<span class="text-slate-500">函数总数 {stats.get("total","—")} 个 | '
+        f'已确认借鉴 {stats.get("confirmed",0)} 个 | needReview {stats.get("review",0)} 个</span>'
         f'<span class="text-slate-400">主要来源：{html.escape(stats.get("top_source","—"))}</span>'
         f'</div>'
         + _pct_bar(copy_pct)
     )
 
-    # 相似代码对表格
-    if pairs:
-        rows = "".join(
-            f'<tr>'
-            f'<td class="font-mono text-xs">'
-            + _make_gitlab_anchor(linker, query_repo_id, p["query_file"], p["query_start"])
-            + f'</td>'
-            f'<td class="text-xs">{html.escape(p["query_func"])}</td>'
-            f'<td class="text-xs text-slate-500">'
-            + _ref_repo_anchor(linker, p["ref_repo"])
-            + f'</td>'
-            f'<td class="font-mono text-xs">'
-            + _make_gitlab_anchor(linker, p["ref_repo"], p["ref_file"], p["ref_start"])
-            + f'</td>'
-            f'<td class="text-xs">{html.escape(p["ref_func"])}</td>'
-            f'<td class="text-xs font-semibold '
-            + ("text-red-600" if p["sim"] > 0.9 else "text-amber-600" if p["sim"] > 0.7 else "text-slate-500")
-            + f'">{p["sim"]}</td>'
-            f'<td class="text-xs">'
-            + {"confirmed": '<span class="px-1 rounded bg-red-100 text-red-700">confirmed</span>',
-               "review":    '<span class="px-1 rounded bg-amber-100 text-amber-700">review</span>',
-               "weak":      '<span class="px-1 rounded bg-slate-100 text-slate-600">weak</span>',
-               }.get(p["tier"], p["tier"])
-            + f'</td>'
-            f'</tr>'
-            for p in pairs
-        )
-        table = (
-            '<div class="overflow-x-auto mt-3">'
-            '<table class="w-full text-sm border-collapse">'
-            '<thead><tr class="bg-slate-50 text-slate-600">'
-            '<th class="text-left p-2 border-b">新作品 文件:行</th>'
-            '<th class="text-left p-2 border-b">函数</th>'
-            '<th class="text-left p-2 border-b">来源仓库</th>'
-            '<th class="text-left p-2 border-b">来源 文件:行</th>'
-            '<th class="text-left p-2 border-b">来源函数</th>'
-            '<th class="text-left p-2 border-b">相似度</th>'
-            '<th class="text-left p-2 border-b">档位</th>'
-            '</tr></thead>'
-            f'<tbody>{rows}</tbody>'
-            '</table></div>'
-        )
-    else:
-        table = ""
+    # U3：confirmed / needReview / 弱相似 拆为独立清单（U6：每函数列出全部候选）
+    confirmed = [g for g in pairs if g["overall_tier"] == "confirmed"]
+    review    = [g for g in pairs if g["overall_tier"] == "review"]
+    weak      = [g for g in pairs if g["overall_tier"] == "weak"]
+    table = (
+        _groups_table("已确认借鉴清单", confirmed, linker, query_repo_id, "text-red-700")
+        + _groups_table("needReview（待复核）清单", review, linker, query_repo_id, "text-amber-700")
+        + _groups_table("弱相似清单", weak, linker, query_repo_id, "text-slate-600")
+    )
 
-    # 语义分析片段（从 DeepSeek 输出中抠取当前模块的部分）
+    # 语义分析片段（从 LLM 输出中抠取当前模块的部分）
     mod_analysis = _extract_module_analysis(analysis_html, mod)
     if mod_analysis:
-        # 用 GitLab linker 将 path:line 转为在线链接（file_pairs 用于路径归属判断）
-        mod_analysis = _linkify_with_gitlab(mod_analysis, linker, query_repo_id, file_pairs)
+        # 用 GitLab linker 将 path:line 转为在线链接
+        mod_analysis = _linkify_with_gitlab(mod_analysis, linker, query_repo_id)
 
     body = stat_row + table
     if mod_analysis:
@@ -716,30 +876,22 @@ def _build_gitlab_linker(
     query_repo_id: str,
     ref_repos: set[str],
 ) -> "GitLabLinker | None":
-    """构建 GitLabLinker。
-
-    链接 ref（指向哪个版本）的取值策略，由各仓库可获取的数据决定：
-
-    - **新作品（query）**：本地克隆即分析时的版本，``git rev-parse HEAD`` 取到精确 sha，
-      行号与分析结果一一对应，链接可精确定位到函数。
-    - **参考仓库（历史库）**：functions.db 建库时**未记录 commit sha**，且 data/repos 下
-      历史克隆的工作树已清理（.git 多为残壳，无法 rev-parse），远程最新 HEAD 又可能因仓库
-      更新导致文件移动/删除。因此参考仓库不强行绑定某个 sha（``heads`` 留空），由
-      ``gitlab_blob_url`` 兜底用字面量 ``HEAD``：``/-/blob/HEAD/<path>#L<n>`` —— 文件仍在
-      即可打开（行号尽力定位），避免对不存在的 sha 发起请求或卡在 ls-remote 超时。
-    """
+    """构建 GitLabLinker：query 仓库从本地 git 取 URL/SHA，参考仓库从 repos.yaml 取。"""
     try:
         from .gitlab_links import (
-            GitLabLinker, build_repo_url_map, query_repo_info,
+            GitLabLinker, build_repo_url_map, ensure_heads, query_repo_info,
         )
         url_map = build_repo_url_map()
         if not url_map and not query_repo_path:
             return None
 
-        # 参考仓库不绑定 sha：heads 留空 → gitlab_blob_url 用 HEAD 作 ref
+        # 取需要 HEAD 的参考仓库 URL
+        ref_urls = [url_map[r] for r in ref_repos if r in url_map]
         heads: dict[str, str] = {}
+        if ref_urls:
+            heads = ensure_heads(ref_urls, workers=8)
 
-        # 新作品（query）仓库：本地克隆 = 分析版本，sha 精确
+        # 新作品（query）仓库
         q_url = q_sha = None
         if query_repo_path:
             q_url, q_sha = query_repo_info(query_repo_path)
@@ -782,45 +934,16 @@ def _make_gitlab_anchor(linker, repo_id: str, file_path: str, start: int,
     return label
 
 
-def _linkify_with_gitlab(fragment: str, linker, query_repo_id: str,
-                          file_pairs: list[dict] | None = None) -> str:
-    """把 HTML 片段（DeepSeek 语义分析）里的 path:line 引用转为 GitLab 在线链接。
-
-    DeepSeek 抄的是 file_pairs 里的**完整路径**（可能含反斜杠），且既有新作品文件，
-    也有历史仓库文件。所以：
-      - 正则字符类含反斜杠，能完整匹配 ``a\b\c.c:120`` 而非只截到 ``c.c:120``；
-      - 路径统一转正斜杠（GitLab URL 格式）；
-      - 用 file_pairs 判断该路径属于新作品还是某个历史仓库，链对应仓库（归属错会 404）；
-      - <code> 内的 path:line 也链接化（证据常写在 <code> 里），仅保护 script/style/pre/a。
-    """
+def _linkify_with_gitlab(fragment: str, linker, query_repo_id: str) -> str:
+    """把 HTML 片段里的 path:line 纯文本引用转为 GitLab 在线链接。"""
     import re
     if linker is None:
         return fragment
-
-    # 不信任 DeepSeek 写的路径（它会简写/带仓库名前缀/残缺），只用「文件名 + 行号」
-    # 去 file_pairs 里精确反查出**完整路径 + 正确仓库归属**。
-    #   loc_map: (basename, line) → (repo_id, full_path)   ← 精确匹配优先
-    #   base_map: basename → [(repo_id, full_path, line), ...]  ← 行号不精确时取最近
-    loc_map: dict[tuple[str, int], tuple[str, str]] = {}
-    base_map: dict[str, list[tuple[str, str, int]]] = defaultdict(list)
-
-    def _reg(repo_id: str, raw_path: str, line: int) -> None:
-        fp = (raw_path or "").replace("\\", "/")
-        if not fp:
-            return
-        base = fp.rsplit("/", 1)[-1]
-        loc_map[(base, line)] = (repo_id, fp)
-        base_map[base].append((repo_id, fp, line))
-
-    for p in (file_pairs or []):
-        _reg(query_repo_id, p.get("query_file", ""), p.get("query_start", 0))
-        _reg(p.get("ref_repo", ""), p.get("ref_file", ""), p.get("ref_start", 0))
-
     _FILEREF_RE = re.compile(
-        r"([A-Za-z0-9_./\\\-]+\.(?:rs|c|h|cc|cpp|hpp|S|s|py|sh|toml|md))"
+        r"([A-Za-z0-9_./\-]+\.(?:rs|c|h|cc|cpp|hpp|S|s|py|sh|toml|md))"
         r"(?::(\d+)(?:-(\d+))?)?"
     )
-    _PROTECT_RE = re.compile(r"<(script|style|pre|a)\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
+    _PROTECT_RE = re.compile(r"<(script|style|pre|a|code)\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
 
     blocks: list[str] = []
 
@@ -834,21 +957,11 @@ def _linkify_with_gitlab(fragment: str, linker, query_repo_id: str,
         fp, start, end = m.group(1), m.group(2), m.group(3)
         line = int(start) if start else 0
         end_line = int(end) if end else line
-        base = fp.replace("\\", "/").rsplit("/", 1)[-1]
-        # 1) (文件名, 行号) 精确反查
-        hit = loc_map.get((base, line))
-        # 2) 行号对不上时，按文件名取行号最接近的候选
-        if hit is None and base in base_map:
-            repo_id, full_path, _ = min(base_map[base], key=lambda c: abs(c[2] - line))
-            hit = (repo_id, full_path)
-        # 3) file_pairs 里没有此文件 → 保留纯文本，不生成坏链
-        if hit is None:
-            return m.group(0)
-        repo_id, full_path = hit
-        url = _gitlab_url(linker, repo_id, full_path, line, end_line)
+        url = _gitlab_url(linker, query_repo_id, fp, line, end_line)
         if not url:
             return m.group(0)
-        return f'<a class="file-jump" href="{html.escape(url)}" target="_blank">{m.group(0)}</a>'
+        label = m.group(0)
+        return f'<a class="file-jump" href="{html.escape(url)}" target="_blank">{label}</a>'
 
     text = _FILEREF_RE.sub(_sub, text)
     text = re.sub(r"\x00B(\d+)\x00", lambda m: blocks[int(m.group(1))], text)
@@ -885,39 +998,54 @@ def _extract_module_analysis(analysis_html: str, mod: str) -> str:
     return ""
 
 
-def _original_section(original_funcs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
-    """原创代码章节。"""
+def _original_section(original_funcs: list[dict], linker, query_repo_id: str,
+                      analysis_html: str = "") -> tuple[str, str]:
+    """创新点分析章节（U8）：以设计维度（所属子系统 + 规模 + 定位）为主描述原创实现，
+    相似度仅作辅助标注。若 LLM 产出了创新点片段（data-module="innovation"）则优先展示。
+    """
     sid = "sec-original"
+    llm_innov = _extract_module_analysis(analysis_html, "innovation") if analysis_html else ""
+    if llm_innov:
+        llm_innov = _linkify_with_gitlab(llm_innov, linker, query_repo_id)
     if not original_funcs:
-        body = "<p class='text-slate-500 text-sm'>未发现明显原创函数（与历史库相似度 &lt; 0.5 且行数 &gt; 20）。</p>"
+        body = ("<p class='text-slate-500 text-sm'>未发现明显原创函数"
+                "（与历史库最高相似度 &lt; 0.5 且规模 &gt; 20 行）。</p>")
     else:
         rows = "".join(
             f'<tr>'
+            f'<td class="text-xs">{html.escape(_MODULE_DISPLAY.get(f["module"], f["module"]))}</td>'
             f'<td class="text-xs">{html.escape(f["func"])}</td>'
             f'<td class="font-mono text-xs">'
-            + _make_gitlab_anchor(linker, query_repo_id, f["file"], f["start"])
+            + _make_gitlab_anchor(linker, query_repo_id, f["file"], f["start"], f.get("end", 0))
             + f'</td>'
-            f'<td class="text-xs text-slate-500">{html.escape(_MODULE_DISPLAY.get(f["module"], f["module"]))}</td>'
-            f'<td class="text-xs">{f["max_sim"]}</td>'
-            f'<td class="text-xs">{f["lines"]}</td>'
+            f'<td class="text-xs">{f["lines"]} 行</td>'
+            f'<td class="text-xs text-slate-400">最高相似度 {f["max_sim"]}</td>'
             f'</tr>'
             for f in original_funcs
         )
         body = (
             '<p class="text-sm text-slate-600 mb-3">'
-            '以下函数与历史代码库相似度低（&lt; 0.5）且规模较大（&gt; 20 行），为疑似原创实现：'
+            '以下函数规模较大（&gt; 20 行）且与历史代码库最高相似度低（&lt; 0.5），'
+            '从设计维度看属于该作品的原创/自研实现（按所属子系统与规模排列；相似度仅作辅助参考）：'
             '</p>'
             '<div class="overflow-x-auto">'
             '<table class="w-full text-sm border-collapse">'
             '<thead><tr class="bg-slate-50 text-slate-600">'
+            '<th class="text-left p-2 border-b">子系统</th>'
             '<th class="text-left p-2 border-b">函数</th>'
             '<th class="text-left p-2 border-b">文件:行</th>'
-            '<th class="text-left p-2 border-b">模块</th>'
-            '<th class="text-left p-2 border-b">最高相似度</th>'
-            '<th class="text-left p-2 border-b">行数</th>'
+            '<th class="text-left p-2 border-b">规模</th>'
+            '<th class="text-left p-2 border-b">辅助：相似度</th>'
             '</tr></thead>'
             f'<tbody>{rows}</tbody>'
             '</table></div>'
+        )
+    if llm_innov:
+        body += (
+            '<div class="mt-4 p-4 bg-emerald-50 rounded-lg border border-emerald-100">'
+            '<h4 class="text-sm font-semibold text-emerald-800 mb-2">设计层面创新点分析</h4>'
+            + llm_innov +
+            '</div>'
         )
     section = (
         f'<section id="{sid}" data-section-id="{sid}" '
@@ -1011,6 +1139,85 @@ _INIT_SCRIPT = """
 """
 
 
+def _file_level_section(file_matches: list[dict], file_similar: list[dict],
+                        linker, query_repo_id: str) -> tuple[str, str]:
+    """文件级整体相同/相似清单（U3 的文件维度 + L0 结果）。"""
+    sid = "sec-files"
+    if not file_matches and not file_similar:
+        return "", ""
+    parts: list[str] = []
+    if file_matches:
+        rows = "".join(
+            '<tr>'
+            '<td class="font-mono text-xs align-top">'
+            + _make_gitlab_anchor(linker, query_repo_id, m["query_file"], 0)
+            + '</td>'
+            f'<td class="text-xs align-top">{m.get("line_count","—")} 行</td>'
+            '<td class="align-top"><ul class="text-xs list-disc pl-4">'
+            + "".join(
+                '<li>' + _ref_repo_anchor(linker, c["repo_id"]) + ' '
+                + _make_gitlab_anchor(linker, c["repo_id"], c["file_path"], 0) + '</li>'
+                for c in m.get("matches", [])
+            )
+            + '</ul></td></tr>'
+            for m in file_matches
+        )
+        parts.append(
+            '<div class="text-sm font-semibold text-rose-700 mb-1">'
+            f'整文件相同（规范化哈希一致，仅空格/注释差异）（{len(file_matches)} 个文件）</div>'
+            '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
+            '<thead><tr class="bg-slate-50 text-slate-600">'
+            '<th class="text-left p-2 border-b">新作品文件</th>'
+            '<th class="text-left p-2 border-b">规模</th>'
+            '<th class="text-left p-2 border-b">相同来源文件</th>'
+            '</tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>'
+        )
+    if file_similar:
+        rows = "".join(
+            '<tr>'
+            '<td class="font-mono text-xs">'
+            + _make_gitlab_anchor(linker, query_repo_id, f["file_path"], 0)
+            + '</td>'
+            f'<td class="text-xs">{html.escape(_MODULE_DISPLAY.get(f["module"], f["module"]))}</td>'
+            f'<td class="text-xs">{f["hit"]}/{f["total"]} 个函数</td>'
+            f'<td class="text-xs font-semibold text-amber-700">{round(f["ratio"]*100)}%</td>'
+            '<td class="text-xs text-slate-500">' + _ref_repo_anchor(linker, f["top_source"]) + '</td>'
+            '</tr>'
+            for f in file_similar
+        )
+        parts.append(
+            '<div class="text-sm font-semibold text-amber-700 mt-3 mb-1">'
+            f'文件整体相似（≥95% 函数命中借鉴）（{len(file_similar)} 个文件）</div>'
+            '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
+            '<thead><tr class="bg-slate-50 text-slate-600">'
+            '<th class="text-left p-2 border-b">新作品文件</th>'
+            '<th class="text-left p-2 border-b">子系统</th>'
+            '<th class="text-left p-2 border-b">命中函数</th>'
+            '<th class="text-left p-2 border-b">整体相似</th>'
+            '<th class="text-left p-2 border-b">主要来源</th>'
+            '</tr></thead>'
+            f'<tbody>{rows}</tbody></table></div>'
+        )
+    body = "".join(parts)
+    section = (
+        f'<section id="{sid}" data-section-id="{sid}" '
+        'class="mb-6 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden" '
+        f'x-data="{{open: true}}" '
+        f"x-init=\"(function(){{const s=localStorage.getItem('cmp:{sid}');if(s!==null)open=(s==='1');}})()\">"
+        '<div class="px-6 py-3 flex items-center gap-2 cursor-pointer select-none '
+        'border-b border-slate-200 bg-slate-50" '
+        f"@click=\"open=!open;localStorage.setItem('cmp:{sid}',open?'1':'0')\">"
+        '<span class="text-slate-400 w-4 text-center" x-text="open?\'▾\':\'▸\'"></span>'
+        '<h2 class="text-base font-semibold text-slate-800 m-0">文件级整体相同 / 相似</h2>'
+        '</div>'
+        '<div class="px-6 py-4" x-show="open" x-cloak>' + body + '</div>'
+        '</section>'
+    )
+    toc = f'<a class="toc-link" href="#{sid}">文件级整体相同/相似</a>'
+    return toc, section
+
+
 def generate_comparison_html(
     query_repo_id: str,
     suspects: list[dict],
@@ -1020,13 +1227,24 @@ def generate_comparison_html(
     original_funcs: list[dict],
     query_repo_path: Path | None = None,
     linker=None,
+    file_matches: list[dict] | None = None,
+    file_similar: list[dict] | None = None,
 ) -> str:
     """组装完整的查重对比 HTML 报告（直接产出，不经 Markdown 转换）。"""
+    file_matches = file_matches or []
+    file_similar = file_similar or []
     # 摘要卡
-    summary_html = _summary_card(query_repo_id, suspects, submodule_stats)
+    summary_html = _summary_card(query_repo_id, suspects, submodule_stats,
+                                 file_match_count=len(file_matches))
 
     toc_items  = ['<a class="toc-link" href="#summary">总览</a>']
     body_parts = [summary_html]
+
+    # 文件级整体相同/相似清单（L0 结果，紧随总览）
+    toc_files, sec_files = _file_level_section(file_matches, file_similar, linker, query_repo_id)
+    if toc_files:
+        toc_items.append(toc_files)
+        body_parts.append(sec_files)
 
     # 各子模块章节
     for idx, mod in enumerate(MODULES):
@@ -1037,8 +1255,8 @@ def generate_comparison_html(
             toc_items.append(toc_entry)
             body_parts.append(section)
 
-    # 原创代码章节
-    toc_orig, sec_orig = _original_section(original_funcs, linker, query_repo_id)
+    # 创新点分析章节
+    toc_orig, sec_orig = _original_section(original_funcs, linker, query_repo_id, analysis_html)
     toc_items.append(toc_orig)
     body_parts.append(sec_orig)
 
@@ -1079,19 +1297,19 @@ def run_semantic_compare(
     recall_path: str | Path | None = None,
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     top_per_module: int = 5,
-    table_top_per_module: int = 50,
     skip_opencode: bool = False,
+    filematch_path: str | Path | None = None,
 ) -> dict:
-    """主入口：suspects.json → opencode 分析 → 直接 HTML 报告。
+    """主入口：suspects.json → LLM 语义分析 → 直接 HTML 报告。
 
     Args:
         suspects_path:   exact 阶段产出的 *_suspects.json 路径
-        query_repo_path: 新作品本地克隆路径（用于文件链接 + opencode 初始化）
+        query_repo_path: 新作品本地克隆路径（用于文件链接 + 语义分析）
         recall_path:     embed 阶段产出的 *_recall.json（用于计算函数总数 / 原创函数）
         output_dir:      HTML 输出目录
-        top_per_module:  每个子模块**送入 LLM 分析**的最大代码对数（控 token，默认 5）
-        table_top_per_module: 每个子模块**表格展示**的最大代码对数（默认 50，展示更全）
-        skip_opencode:   True 时跳过 opencode，仅用规则生成报告（调试用）
+        top_per_module:  每个子模块送入 LLM 的最大代码对数
+        skip_opencode:   True 时跳过 LLM，仅用规则生成报告（调试用）
+        filematch_path:  fastpath（L0 文件指纹层）产出的 *_filematch.json（整文件复制清单）
     """
     suspects_path = Path(suspects_path)
     data          = json.loads(suspects_path.read_text(encoding="utf-8"))
@@ -1102,13 +1320,18 @@ def run_semantic_compare(
     if recall_path and Path(recall_path).exists():
         recall = json.loads(Path(recall_path).read_text(encoding="utf-8"))
 
-    logger.info("[compare] 新作品 {}：{} 个嫌疑对", query_repo_id, len(suspects))
+    # L0 文件指纹结果（整文件相同）+ 后聚合（文件整体相似）
+    file_matches: list[dict] = []
+    if filematch_path and Path(filematch_path).exists():
+        file_matches = json.loads(Path(filematch_path).read_text(encoding="utf-8")).get("matched_files", [])
+    file_similar = aggregate_file_similarity(suspects, recall)
+
+    logger.info("[compare] 新作品 {}：{} 个嫌疑对，整文件相同 {} 个，整体相似 {} 个",
+                query_repo_id, len(suspects), len(file_matches), len(file_similar))
 
     # 统计
     submodule_stats = compute_submodule_stats(suspects, recall)
-    # 表格展示用大量代码对；送 LLM 的另取每模块前 top_per_module（控 token）
-    file_pairs = collect_file_pairs(suspects, top_per_module=table_top_per_module)
-    llm_pairs  = _limit_per_module(file_pairs, top_per_module)
+    file_pairs      = collect_file_pairs(suspects, top_per_module=top_per_module)
 
     # 原创候选函数
     original_funcs  = _original_functions(recall, suspects) if recall else []
@@ -1118,16 +1341,17 @@ def run_semantic_compare(
     out_dir.mkdir(parents=True, exist_ok=True)
     work_dir = out_dir / f"{query_repo_id}_semantic_work"
 
-    if skip_opencode or not llm_pairs:
-        analysis_html = _fallback_analysis(llm_pairs, submodule_stats)
+    if skip_opencode or not file_pairs:
+        analysis_html = _fallback_analysis(file_pairs, submodule_stats)
     else:
         qpath = str(Path(query_repo_path).resolve()) if query_repo_path else ""
         analysis_html = run_semantic_analysis(
-            query_repo_id, qpath, llm_pairs, submodule_stats, work_dir
+            query_repo_id, qpath, file_pairs, submodule_stats, work_dir
         )
 
     # 构建 GitLab linker（取各参考仓库的在线 URL + HEAD sha）
-    ref_repos = {p["ref_repo"] for p in file_pairs}
+    ref_repos = {c["ref_repo"] for g in file_pairs for c in g["candidates"]}
+    ref_repos |= {m["repo_id"] for fm in file_matches for m in fm.get("matches", [])}
     linker = _build_gitlab_linker(
         Path(query_repo_path).resolve() if query_repo_path else None,
         query_repo_id,
@@ -1144,6 +1368,8 @@ def run_semantic_compare(
         original_funcs  = original_funcs,
         query_repo_path = Path(query_repo_path).resolve() if query_repo_path else None,
         linker          = linker,
+        file_matches    = file_matches,
+        file_similar    = file_similar,
     )
 
     safe_id  = query_repo_id.replace("/", "_")
@@ -1157,4 +1383,6 @@ def run_semantic_compare(
         "total_suspects":   len(suspects),
         "submodule_stats":  submodule_stats,
         "original_funcs":   len(original_funcs),
+        "file_matches":     len(file_matches),
+        "file_similar":     len(file_similar),
     }
