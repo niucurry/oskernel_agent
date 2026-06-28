@@ -124,12 +124,27 @@ def _log(msg: str) -> None:
 
 
 def _run_opencode_once(task: BatchTask, timeout: int) -> tuple[bool, str]:
-    """跑一次 OpenCode 子进程。返回 (是否产生了 output_path 文件, stdout)。"""
+    """跑一次 OpenCode 子进程。返回 (是否产生了 output_path 文件, stdout)。
+
+    prompt 经临时文件用 `-f` 附件传入，不走 argv：大子系统的文件清单会把整条
+    命令行撑过 Windows 上限，导致 CreateProcess 抛 WinError 206。
+    """
+    prompt_file = task.output_path.parent / f"{task.batch_id}.prompt.md"
+    try:
+        prompt_file.parent.mkdir(parents=True, exist_ok=True)
+        prompt_file.write_text(task.user_request, encoding="utf-8")
+    except OSError as e:
+        _log(f"[llm_batch] {task.batch_id} 写 prompt 文件失败：{e}")
+        return False, ""
+
+    # 注意：positional message 必须在 -f 之前——-f 是 array 选项，若放在
+    # message 之前会把后面的 message 也并吞成附件路径。
     cmd = [
         _OPENCODE, "run",
         "--agent", task.agent_name,
         "--dangerously-skip-permissions",
-        task.user_request,
+        "请完整阅读并执行附件中的全部指令。",
+        "-f", str(prompt_file),
     ]
     try:
         proc = subprocess.run(
@@ -137,11 +152,18 @@ def _run_opencode_once(task: BatchTask, timeout: int) -> tuple[bool, str]:
             env=_opencode_env(),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
         _log(f"[llm_batch] {task.batch_id} 超时 {timeout}s")
         return False, ""
+    finally:
+        try:
+            prompt_file.unlink()
+        except OSError:
+            pass
     if proc.returncode not in (0, 1):
         _log(f"[llm_batch] {task.batch_id} 退出码 {proc.returncode}")
     return task.output_path.exists(), proc.stdout or ""

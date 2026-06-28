@@ -61,6 +61,7 @@ def query_repo(
     simhash_query=None,
     faiss_index_path: str | Path = "data/db/faiss_hnsw.index",
     faiss_ids_path: str | Path = "data/db/faiss_ids.npy",
+    skip_files: set[str] | None = None,
 ) -> dict:
     """对新作品检索召回，写 recall.json，返回召回结果 dict。
 
@@ -71,10 +72,18 @@ def query_repo(
     每个候选标 ``recall_source``（vector / simhash）以便漏斗追溯各通道贡献。
 
     faiss_index_path：若存在则用 faiss HNSW 替代 qdrant-local 做 ANN 检索（快约 10000×）。
+
+    skip_files：L0 文件指纹层命中的整文件复制清单（query 文件相对路径）。命中文件的全部
+    函数跳过嵌入与检索（这些文件已由 fastpath 定案为「文件整体相同」），是 P1 提速核心。
     """
     repo_path = Path(repo_path)
     repos_root = Path(repos_root)
     repo_id, rows = _normalize_query_repo(repo_path, repos_root)
+    if skip_files:
+        before = len(rows)
+        rows = [r for r in rows if r["file_path"] not in skip_files]
+        logger.info("[{}] L0 文件指纹命中 {} 个文件，跳过其 {} 个函数的嵌入/检索",
+                    repo_id, len(skip_files), before - len(rows))
     logger.info("[{}] 待检索函数 {} 个（SimHash 粗筛：{}）", repo_id, len(rows), "开" if simhash_query else "关")
 
     # 优先用 faiss HNSW（若索引存在）——比 qdrant-local SQLite 快约 10000×

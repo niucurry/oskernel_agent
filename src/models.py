@@ -11,6 +11,17 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+# 基线仓库的 team 段前缀。baselines.yaml 里公共/模板/第三方库统一以 ``baseline_`` 命名
+# （repo_id 形如 ``0/baseline_arceos``），各层据此判定「公共代码」而无需额外 schema 字段。
+BASELINE_PREFIX = "baseline_"
+
+
+def is_baseline_repo(repo_id: str) -> bool:
+    """repo_id（``{year}/{team}``）是否为基线仓库——按 team 段 ``baseline_`` 前缀约定。"""
+    if not repo_id:
+        return False
+    return repo_id.rsplit("/", 1)[-1].startswith(BASELINE_PREFIX)
+
 
 class ModuleTag(str, Enum):
     """内核子系统标签，用于按模块分桶比对与报告分类。
@@ -76,7 +87,10 @@ class Evidence(BaseModel):
         default=None, description="Layer3：分段向量比对结果（命中段数/覆盖/匹配段对）"
     )
     exact_match_lines: int = Field(
-        default=0, ge=0, description="Layer4：精确匹配的行数"
+        default=0, ge=0, description="Layer4：逐字节相同的精确匹配行数"
+    )
+    renamed_match_lines: int = Field(
+        default=0, ge=0, description="Layer4：仅在标识符/寄存器掩码后才相同的行数（改名复制）"
     )
     unique_string_matches: int = Field(
         default=0, ge=0, description="Layer4：命中的唯一字符串字面量数"
@@ -88,7 +102,7 @@ class Evidence(BaseModel):
 
 
 class SuspectPair(BaseModel):
-    """一对疑似抄袭的函数及其证据与最终评分，是流向 review / report 的产物。"""
+    """一对疑似借鉴/复制的函数及其证据与最终评分，是流向 review / report 的产物。"""
 
     query_func: FunctionRecord = Field(..., description="待查（新提交）函数")
     candidate_func: FunctionRecord = Field(..., description="历史库中的候选函数")

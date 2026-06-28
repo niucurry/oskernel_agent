@@ -15,6 +15,8 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
+from src.models import is_baseline_repo
+
 from .embedder import BaseEmbedder
 from .vector_store import VectorStore
 
@@ -38,7 +40,7 @@ def _payload(row: sqlite3.Row) -> dict:
         "end_line": row["end_line"],
         "func_name": row["func_name"],
         "module_tag": row["module_tag"],
-        "is_baseline": False,
+        "is_baseline": is_baseline_repo(row["repo_id"]),
     }
 
 

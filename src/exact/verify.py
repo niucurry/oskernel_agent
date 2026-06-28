@@ -107,6 +107,7 @@ def verify_recall(
                     evidence=Evidence(
                         vector_similarity=cand["score"],
                         exact_match_lines=res.exact_match_lines,
+                        renamed_match_lines=res.renamed_match_lines,
                     ),
                     final_score=res.similar_line_ratio,
                     tier=tier,

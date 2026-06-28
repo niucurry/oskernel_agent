@@ -80,6 +80,29 @@ def test_unrelated_low_ratio():
     assert res.similar_line_ratio < 0.5
 
 
+# D2：仅寄存器名不同的汇编必须落 renamed，绝不误判 exact
+ASM_REG_A = (
+    "    mv t0, a0\n"
+    "    ld t1, 0(t0)\n"
+    "    add t2, t1, a1\n"
+    "    sd t2, 0(t0)\n"
+)
+ASM_REG_B = (  # 仅寄存器改名 t0/t1/t2 → s0/s1/s2
+    "    mv s0, a0\n"
+    "    ld s1, 0(s0)\n"
+    "    add s2, s1, a1\n"
+    "    sd s2, 0(s0)\n"
+)
+
+
+def test_asm_register_rename_is_renamed_not_exact():
+    res = ExactMatcher().match(ASM_REG_A, ASM_REG_B, "asm")
+    assert res.similar_line_ratio > 0.95         # 改名后整体高度相似
+    assert res.exact_match_lines == 0            # 没有逐字节相同的行
+    assert res.renamed_match_lines > 0           # 全部经掩码后相同 → renamed
+    assert set(res.match_type_per_span) == {"renamed"}
+
+
 def test_tier_thresholds():
     assert tier_of(0.99) == "confirmed"
     assert tier_of(0.95) == "review"   # 0.95 不算 >0.95

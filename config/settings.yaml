@@ -54,7 +54,7 @@ ai_detect:
   device: auto                 # auto / cpu / cuda / mps
   engine: transformers         # transformers / vllm
   batch_size: 8                # 模型前向批大小
-  k_perturbations: 50          # Stage 2 每函数扰动次数
+  k_perturbations: 20          # Stage 2 每函数扰动次数（P2：50→20，只作用于灰区函数；配合早停+两阶段门，质量影响限于已转人工复核的边界样本）
   min_loc: 20                  # 低于此有效行数的函数判 Uncertain（信号不足）
   log_rank_llm_threshold: 1.5  # Stage 1：log_rank < 此值 → LLM（高置信）
   log_rank_human_threshold: 3.0 # Stage 1：log_rank > 此值 → Human（高置信）

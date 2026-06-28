@@ -19,7 +19,9 @@ from .normalizer import (
 )
 from .ts import parse
 
-DEFAULT_MIN_LINES = 5
+# 小于此行数的函数视为样板/噪音跳过（宏定义除外）。整文件复制由 L0 文件指纹层兜底，
+# 故提高下限不会加重漏报（见反馈 D4：5–9 行小函数泛滥）。
+DEFAULT_MIN_LINES = 10
 
 # 汇编标号：行首（可缩进）的 name: ，允许 . _ $ 开头（本地标号 .L1 等）
 _ASM_LABEL = re.compile(r"^\s*([A-Za-z_.$][\w.$]*)\s*:(?!:)")
