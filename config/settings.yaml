@@ -37,7 +37,7 @@ metadata:
 
 llm:
   # 模型名在此配置；base_url / api_key 从环境变量读（LLM_BASE_URL / LLM_API_KEY）
-  model: deepseek-chat
+  model: deepseek-v4-flash
   temperature: 0.3       # 复核投票温度
   votes: 3               # 每个嫌疑对调用次数（多数表决）
   concurrency: 5         # asyncio 并发度

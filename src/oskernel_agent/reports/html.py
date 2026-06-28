@@ -283,10 +283,17 @@ def make_file_link_resolver(
     repo_roots: list[Path] | None,
     scheme: str = "vscode",
     broken_paths: set[str] | None = None,
+    gitlab_base: tuple[str | None, str | None] | None = None,
 ) -> LinkResolver | None:
-    """构造一个把 file:line 解析为可点击跳转 URL 的解析器。"""
+    """构造一个把 file:line 解析为可点击跳转 URL 的解析器。
+
+    scheme="gitlab" 且给定 gitlab_base=(repo_url, sha) 时，产出 GitLab blob
+    在线行级链接（与查重对比报告一致）；否则产出本地编辑器跳转（vscode 等）。
+    """
     if not repo_roots:
         return None
+    gitlab_url, gitlab_sha = (gitlab_base or (None, None))
+    gitlab_mode = scheme == "gitlab" and bool(gitlab_url)
     template = _JUMP_SCHEMES.get(scheme, _JUMP_SCHEMES["vscode"])
     roots = [Path(r).resolve() for r in repo_roots]
 
@@ -316,6 +323,35 @@ def make_file_link_resolver(
         encoded = quote(abs_path.lstrip("/"), safe="/:")
         return template.format(path="/" + encoded, anchor=anchor)
 
+    def _gitlab_url(rel_path: str, line: str | None) -> str | None:
+        """rel_path（仓库根相对路径）+ 行号 → GitLab blob 永久链接。"""
+        from urllib.parse import urlsplit
+        sp = urlsplit(gitlab_url or "")
+        if not sp.scheme or not sp.netloc:
+            return None
+        nsp = sp.path.strip("/")
+        if nsp.endswith(".git"):
+            nsp = nsp[:-4]
+        fp = (rel_path or "").replace("\\", "/").lstrip("/")
+        if not nsp or not fp:
+            return None
+        ref = gitlab_sha or "HEAD"
+        anchor = f"#L{line}" if line else ""
+        return f"https://{sp.netloc}/{nsp}/-/blob/{ref}/{fp}{anchor}"
+
+    def _root_of(candidate: Path) -> Path | None:
+        try:
+            cr = candidate.resolve()
+        except OSError:
+            cr = candidate
+        for root in roots:
+            try:
+                cr.relative_to(root)
+                return root
+            except ValueError:
+                continue
+        return None
+
     def _resolve(filepath: str, line: str | None) -> str | None:
         candidate: Path | None = None
         p = Path(filepath)
@@ -344,14 +380,29 @@ def make_file_link_resolver(
                 candidate = _suffix_unique_match(filepath)
 
         if candidate is not None:
-            try:
-                abs_path = str(candidate.resolve())
-            except OSError:
-                abs_path = str(candidate)
-            return _build_url(abs_path, line)
+            if gitlab_mode:
+                root = _root_of(candidate)
+                if root is not None:
+                    try:
+                        rel = candidate.resolve().relative_to(root).as_posix()
+                    except (OSError, ValueError):
+                        rel = None
+                    if rel:
+                        u = _gitlab_url(rel, line)
+                        if u:
+                            return u
+            else:
+                try:
+                    abs_path = str(candidate.resolve())
+                except OSError:
+                    abs_path = str(candidate)
+                return _build_url(abs_path, line)
 
         if broken_paths is not None:
             broken_paths.add(filepath)
+        if gitlab_mode:
+            guess = _gitlab_url(filepath, line)
+            return _BROKEN_PREFIX + guess if guess else None
         best_guess = str((roots[0] / filepath).resolve())
         return _BROKEN_PREFIX + _build_url(best_guess, line)
 

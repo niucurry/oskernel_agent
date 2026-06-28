@@ -112,6 +112,26 @@ def _env_disabled(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
 
 
+def _git_remote_and_sha(repo_path: Path) -> tuple[str | None, str | None]:
+    """从本地克隆取 (origin url, HEAD sha)，用于生成 GitLab 在线文件行级链接。
+
+    非 git 目录或取不到时返回 (None, None)，调用方据此回退本地 vscode 链接。
+    """
+    import subprocess
+
+    def _g(*args: str) -> str | None:
+        try:
+            r = subprocess.run(["git", "-C", str(repo_path), *args],
+                               capture_output=True, timeout=10)
+            return r.stdout.decode("utf-8", "replace").strip() if r.returncode == 0 else None
+        except Exception:  # noqa: BLE001 — git 缺失/超时一律回退
+            return None
+
+    url = _g("remote", "get-url", "origin")
+    sha = _g("rev-parse", "HEAD")
+    return (url or None), (sha or None)
+
+
 # 树状报告主入口
 
 def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
@@ -157,8 +177,15 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
     # 5. HTML 渲染
     try:
         from ..reports.html_tree import write_tree_html
+        gl_url, gl_sha = _git_remote_and_sha(repo_path)
+        scheme = "gitlab" if gl_url else "vscode"
+        if gl_url:
+            print(f"[tree] 文件链接 → GitLab 在线（{gl_url} @ {(gl_sha or 'HEAD')[:8]}）")
+        else:
+            print("[tree] 未取到 git origin，文件链接回退本地 vscode://")
         html_path, broken = write_tree_html(
             out_html, tree, repo_roots=[repo_path],
+            scheme=scheme, gitlab_base=(gl_url, gl_sha),
         )
         print(f"\n[完成] HTML 报告：{html_path}")
         if broken:
