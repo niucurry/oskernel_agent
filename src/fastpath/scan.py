@@ -130,7 +130,7 @@ def aggregate_file_similarity(
     sources: dict[str, dict[tuple[str, str], int]] = defaultdict(lambda: defaultdict(int))
     module_of: dict[str, str] = {}
     for s in suspects:
-        if s.get("tier") not in ("confirmed", "review"):
+        if s.get("tier") != "confirmed":  # 只按已确认借鉴统计文件整体相似
             continue
         q = s.get("query_func", {})
         c = s.get("candidate_func", {})
