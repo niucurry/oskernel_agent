@@ -139,8 +139,9 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) ->
         # （不再虚构为 1），使其从概览图中自然排除——否则空模块会虚显为「100% 原创」的假条目。
         total = (module_totals.get(mod, 0)
                  or (data["confirmed"] + data["review"] + data["weak"]))
-        # 加权：confirmed=1.0, review=0.5, weak=0.2
-        copy_score = data["confirmed"] * 1.0 + data["review"] * 0.5 + data["weak"] * 0.2
+        # 借鉴比例只按「已确认借鉴」(confirmed) 计：review(待复核)/weak(弱相似) 属不确定项，
+        # 报告已不展示，也不计入借鉴估算，避免不确定信号拉高比例。
+        copy_score = data["confirmed"]
         copy_pct = min(1.0, copy_score / total) if total else 0.0
         top_src = data["sources"].most_common(1)
         result[mod] = {
@@ -266,12 +267,9 @@ def collect_file_pairs(
     result = []
     for mod in MODULES:
         gs = sorted(by_module.get(mod, []), key=lambda x: -x["overall_sim"])
-        # confirmed（确认借鉴）必须全部展示，不受 top_per_module 限制；
-        # review/weak 仍按 top_per_module 取整体相似度最高的若干个，控制报告长度。
-        confirmed_gs = [g for g in gs if g["overall_tier"] == "confirmed"]
-        other_gs     = [g for g in gs if g["overall_tier"] != "confirmed"]
-        result.extend(confirmed_gs)
-        result.extend(other_gs[:top_per_module])
+        # 只保留「已确认借鉴」(confirmed) 函数组，全部展示；review(待复核)/weak(弱相似)
+        # 属不确定项，按需求不纳入报告。
+        result.extend(g for g in gs if g["overall_tier"] == "confirmed")
     return result
 
 
@@ -417,12 +415,11 @@ def _build_analysis_message(
         "",
     ]
     for mod, stats in submodule_stats.items():
-        if stats["confirmed"] + stats["review"] + stats["weak"] == 0:
+        if stats["confirmed"] == 0:
             continue
         disp = _MODULE_DISPLAY.get(mod, mod)
         lines.append(
             f"- **{disp}**（{mod}）：已确认借鉴 {stats['confirmed']} 个函数，"
-            f"needReview {stats['review']} 个，弱相似 {stats['weak']} 个，"
             f"主要来源：{stats['top_source']}"
         )
     lines += ["", "## 相似代码对（按子模块、按 query 函数聚合全部候选）", ""]
@@ -578,8 +575,7 @@ def _fallback_analysis(file_pairs: list[dict], submodule_stats: dict) -> str:
         parts.append(
             f'<section data-module="{html.escape(mod)}">'
             f'<h3>{html.escape(disp)}（{html.escape(mod)}）</h3>'
-            f'<p>检测到已确认借鉴 {stats.get("confirmed",0)} 个函数、'
-            f'needReview {stats.get("review",0)} 个，'
+            f'<p>检测到已确认借鉴 {stats.get("confirmed",0)} 个函数，'
             f'主要来源：{html.escape(stats.get("top_source","—"))}。'
             f'（未启用 LLM 语义分析，以下为规则汇总）</p>'
             f'<ul>{"".join(items)}</ul>'
@@ -644,21 +640,15 @@ def _echarts_overview(submodule_stats: dict) -> str:
 
 
 def _echarts_tier_distribution(submodule_stats: dict) -> str:
-    """ECharts 横向堆叠柱图（U2）：各模块 confirmed / needReview / weak 函数数分段堆叠。"""
+    """ECharts 横向柱图：各模块「已确认借鉴」函数数（review/weak 不确定项已剔除）。"""
     mods = [m for m in MODULES
-            if (submodule_stats.get(m, {}).get("confirmed", 0)
-                + submodule_stats.get(m, {}).get("review", 0)
-                + submodule_stats.get(m, {}).get("weak", 0)) > 0]
+            if submodule_stats.get(m, {}).get("confirmed", 0) > 0]
     if not mods:
         return ""
     labels = [_MODULE_DISPLAY.get(m, m) for m in mods]
     conf = [submodule_stats[m]["confirmed"] for m in mods]
-    rev  = [submodule_stats[m]["review"] for m in mods]
-    wk   = [submodule_stats[m]["weak"] for m in mods]
     series = [
         ("已确认借鉴", conf, "#ef4444"),
-        ("needReview", rev, "#f59e0b"),
-        ("弱相似", wk, "#94a3b8"),
     ]
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
@@ -713,28 +703,20 @@ def _echarts_overall_donut(copy_pct: float) -> str:
 
 
 def _echarts_top_sources(suspects: list[dict], top: int = 8) -> str:
-    """Top 借鉴来源仓库堆叠柱图：各历史仓库被命中的 confirmed/needReview/weak 对数。"""
-    agg: dict[str, dict] = defaultdict(lambda: {"confirmed": 0, "review": 0, "weak": 0})
+    """Top 借鉴来源仓库柱图：各历史仓库被「已确认借鉴」命中的对数（review/weak 已剔除）。"""
+    agg: dict[str, dict] = defaultdict(lambda: {"confirmed": 0})
     for s in suspects:
-        t = s.get("tier", "")
-        if t not in ("confirmed", "review", "weak"):
+        if s.get("tier") != "confirmed":
             continue
         repo = s.get("candidate_func", {}).get("repo_id", "?")
-        agg[repo][t] += 1
+        agg[repo]["confirmed"] += 1
     if not agg:
         return ""
-    order = sorted(
-        agg.items(),
-        key=lambda kv: -(kv[1]["confirmed"] * 3 + kv[1]["review"] * 2 + kv[1]["weak"]),
-    )[:top]
+    order = sorted(agg.items(), key=lambda kv: -kv[1]["confirmed"])[:top]
     labels = [k for k, _ in order][::-1]
     conf = [v["confirmed"] for _, v in order][::-1]
-    rev  = [v["review"] for _, v in order][::-1]
-    wk   = [v["weak"] for _, v in order][::-1]
     series = [
         ("已确认借鉴", conf, "#ef4444"),
-        ("needReview", rev, "#f59e0b"),
-        ("弱相似", wk, "#94a3b8"),
     ]
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
@@ -762,8 +744,6 @@ _LEGEND_HTML = (
     '<div class="legend">'
     '<span><b>档位：</b></span>'
     '<span><span class="dot" style="background:#ef4444"></span>已确认借鉴（confirmed，证据充分）</span>'
-    '<span><span class="dot" style="background:#f59e0b"></span>needReview（待人工复核）</span>'
-    '<span><span class="dot" style="background:#94a3b8"></span>弱相似（weak）</span>'
     '<span style="margin-left:.6rem"><b>复制类型：</b></span>'
     '<span>完全复制（逐字节相同）</span>'
     '<span>改名复制（仅改寄存器/标识符）</span>'
@@ -785,22 +765,16 @@ def _summary_card(
     file_similar_count: int = 0,
 ) -> str:
     confirmed = len([s for s in suspects if s.get("tier") == "confirmed"])
-    review    = len([s for s in suspects if s.get("tier") == "review"])
-    weak      = len([s for s in suspects if s.get("tier") == "weak"])
-    total     = confirmed + review + weak
 
-    # 加权总借鉴比例
+    # 加权总借鉴比例（只按已确认借鉴）
     all_copy = sum(st["copy_pct"] * st["total"] for st in submodule_stats.values())
     all_total = sum(st["total"] for st in submodule_stats.values()) or 1
     overall_copy_pct = round(all_copy / all_total * 100, 1)
 
-    # U1：每个数字都带口径/单位 —— KPI 卡片（大数字一目了然）
+    # KPI 卡片（只统计已确认借鉴；review/weak 不确定项已剔除）
     kpis = (
-        '<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-3">'
-        + _kpi(f"{total}", "嫌疑对（对）", "#334155")
+        '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">'
         + _kpi(f"{confirmed}", "已确认借鉴（对）", "#ef4444")
-        + _kpi(f"{review}", "needReview（对）", "#d97706")
-        + _kpi(f"{weak}", "弱相似（对）", "#64748b")
         + _kpi(f"{file_match_count}", "整文件相同（文件）", "#e11d48")
         + _kpi(f"{file_similar_count}", "整体相似文件（个）", "#d97706")
         + '</div>'
@@ -819,7 +793,7 @@ def _summary_card(
     )
 
     tier_chart = (
-        '<div class="mt-4 text-sm font-semibold text-slate-700">各模块档位分布（confirmed / needReview / weak，单位：函数数）</div>'
+        '<div class="mt-4 text-sm font-semibold text-slate-700">各模块已确认借鉴函数数</div>'
         + _echarts_tier_distribution(submodule_stats)
     )
     pct_chart = (
@@ -990,7 +964,7 @@ def _module_section(
     stats = submodule_stats.get(mod, {})
     pairs = [p for p in file_pairs if p["module"] == mod]
 
-    if not pairs and stats.get("confirmed", 0) + stats.get("review", 0) == 0:
+    if not pairs and stats.get("confirmed", 0) == 0:
         return "", ""
 
     disp  = _MODULE_DISPLAY.get(mod, mod)
@@ -998,7 +972,7 @@ def _module_section(
     label = f"{disp} ({mod})"
     copy_pct = stats.get("copy_pct", 0.0)
 
-    # 子模块统计概要行（U1：所有数字带单位/口径；U5：review→needReview）
+    # 子模块统计概要行（只统计已确认借鉴；review/weak 不确定项已剔除）
     stat_row = (
         f'<div class="flex flex-wrap gap-3 text-sm mb-3">'
         f'<span class="px-2 py-0.5 rounded bg-red-50 text-red-700">'
@@ -1006,21 +980,15 @@ def _module_section(
         f'<span class="px-2 py-0.5 rounded bg-green-50 text-green-700">'
         f'原创估算 {(1-copy_pct)*100:.0f}%</span>'
         f'<span class="text-slate-500">函数总数 {stats.get("total","—")} 个 | '
-        f'已确认借鉴 {stats.get("confirmed",0)} 个 | needReview {stats.get("review",0)} 个</span>'
+        f'已确认借鉴 {stats.get("confirmed",0)} 个</span>'
         f'<span class="text-slate-400">主要来源：{html.escape(stats.get("top_source","—"))}</span>'
         f'</div>'
         + _pct_bar(copy_pct)
     )
 
-    # U3：confirmed / needReview / 弱相似 拆为独立清单（U6：每函数列出全部候选）
+    # 只展示「已确认借鉴」清单（U6：每函数列出全部候选）
     confirmed = [g for g in pairs if g["overall_tier"] == "confirmed"]
-    review    = [g for g in pairs if g["overall_tier"] == "review"]
-    weak      = [g for g in pairs if g["overall_tier"] == "weak"]
-    table = (
-        _groups_table("已确认借鉴清单", confirmed, linker, query_repo_id, "text-red-700")
-        + _groups_table("needReview（待复核）清单", review, linker, query_repo_id, "text-amber-700")
-        + _groups_table("弱相似清单", weak, linker, query_repo_id, "text-slate-600")
-    )
+    table = _groups_table("已确认借鉴清单", confirmed, linker, query_repo_id, "text-red-700")
 
     # 语义分析片段（从 LLM 输出中抠取当前模块的部分）。
     # 表格已逐函数给出 文件:行 与链接，分析正文只讲语义、不再列地址，故不做链接化；
@@ -1055,10 +1023,8 @@ def _module_section(
         '</section>'
     )
     n_conf = stats.get("confirmed", 0)
-    n_rev = stats.get("review", 0)
-    badge_n = n_conf or n_rev
-    badge_cls = "toc-badge" if n_conf else ("toc-badge" if n_rev else "toc-badge zero")
-    badge = f'<span class="{badge_cls}" title="已确认借鉴 {n_conf} / needReview {n_rev}">{badge_n}</span>'
+    badge_cls = "toc-badge" if n_conf else "toc-badge zero"
+    badge = f'<span class="{badge_cls}" title="已确认借鉴 {n_conf} 个函数">{n_conf}</span>'
     toc = f'<a class="toc-link" href="#{sid}"><span>{html.escape(label)}</span>{badge}</a>'
     return toc, section
 
