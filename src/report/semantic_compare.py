@@ -266,8 +266,25 @@ def collect_file_pairs(
     result = []
     for mod in MODULES:
         gs = sorted(by_module.get(mod, []), key=lambda x: -x["overall_sim"])
-        result.extend(gs[:top_per_module])
+        # confirmed（确认借鉴）必须全部展示，不受 top_per_module 限制；
+        # review/weak 仍按 top_per_module 取整体相似度最高的若干个，控制报告长度。
+        confirmed_gs = [g for g in gs if g["overall_tier"] == "confirmed"]
+        other_gs     = [g for g in gs if g["overall_tier"] != "confirmed"]
+        result.extend(confirmed_gs)
+        result.extend(other_gs[:top_per_module])
     return result
+
+
+def _limit_per_module(groups: list[dict], n: int) -> list[dict]:
+    """每模块取整体相似度最高的 n 个 group（送 LLM 控 token，不影响表格全量展示）。"""
+    by_mod: dict[str, list[dict]] = defaultdict(list)
+    for g in groups:
+        by_mod[g["module"]].append(g)
+    out: list[dict] = []
+    for mod in MODULES:
+        gs = sorted(by_mod.get(mod, []), key=lambda x: -x["overall_sim"])
+        out.extend(gs[:n])
+    return out
 
 
 # ─── 3. 上下文文件 + opencode 短消息 ─────────────────────────────────────────
@@ -371,17 +388,19 @@ _ANALYSIS_SYSTEM = """\
    - 结构保留逻辑改写（控制流一致、表达式改写）
    - 受启发重新实现（思路相近、实现独立）
 3. 设计差异：新作品相对来源做了哪些改动/取舍（如换数据结构、改并发策略、增删功能）。
-4. 代码证据：**每条结论都必须附 文件:行号**（如 os/src/task/mod.rs:125），无证据的结论不要写。
 
 写作要求：
-- 每个子模块用 2~4 句概述 + 一个 <ul> 列举具体借鉴点（每点带 file:line）。
+- 每个子模块用 2~4 句概述 + 一个 <ul> 列举具体借鉴点。
+- 用函数名、算法名、数据结构名指代具体对象（如「run_tasks 的任务切换」「buddy 分配器」）。
+- **不要写文件路径和行号**：报告表格已逐函数给出 文件:行 与可点击链接，分析正文只讲
+  「借鉴了什么功能、借鉴到什么程度、做了哪些改动」，专注语义，不重复罗列地址。
 - 用词中性专业：用「借鉴/复制/相似」，不要用「抄袭」等定性指控词。
 
 输出格式（严格遵守）：
 - 只输出 HTML 标签，不要输出 Markdown
 - 每个子模块用 <section data-module="模块tag">...</section> 包裹
 - 用 <h3>/<p>/<ul>/<li> 语义标签
-- 文件引用写纯文本 path:line，不要手写 <a> 标签
+- 不要写 path:line，不要手写 <a> 标签
 """
 
 
@@ -1003,11 +1022,12 @@ def _module_section(
         + _groups_table("弱相似清单", weak, linker, query_repo_id, "text-slate-600")
     )
 
-    # 语义分析片段（从 LLM 输出中抠取当前模块的部分）
+    # 语义分析片段（从 LLM 输出中抠取当前模块的部分）。
+    # 表格已逐函数给出 文件:行 与链接，分析正文只讲语义、不再列地址，故不做链接化；
+    # 兜底清掉模型偶尔仍写出的裸 path:line 文本，避免与表格重复。
     mod_analysis = _extract_module_analysis(analysis_html, mod)
     if mod_analysis:
-        # 用 GitLab linker 将 path:line 转为在线链接
-        mod_analysis = _linkify_with_gitlab(mod_analysis, linker, query_repo_id, file_pairs)
+        mod_analysis = _strip_addr_refs(mod_analysis)
 
     body = stat_row + table
     if mod_analysis:
@@ -1113,6 +1133,26 @@ def _make_gitlab_anchor(linker, repo_id: str, file_path: str, start: int,
     if url:
         return f'<a class="{css_class}" href="{html.escape(url)}" target="_blank">{label}</a>'
     return label
+
+
+def _strip_addr_refs(fragment: str) -> str:
+    """删除语义分析正文里残留的裸 path:line 引用（表格已给地址，正文不重复）。
+
+    只清「带行号」的文件引用（如 os/src/task/mod.rs:125 或 a\\b\\c.c:120-130），保留
+    <code>函数名</code>、纯文件名等不带行号的指代。顺带清理因删除产生的空括号/孤立标点。
+    """
+    import re
+    if not fragment:
+        return fragment
+    ref = re.compile(
+        r"[A-Za-z0-9_./\\\-]+\.(?:rs|c|h|cc|cpp|hpp|S|s|py|sh|toml|md):\d+(?:-\d+)?"
+    )
+    text = ref.sub("", fragment)
+    # 清掉因删除留下的空 <code></code>、空括号「（）()」、连续标点
+    text = re.sub(r"<code>\s*</code>", "", text)
+    text = re.sub(r"[（(]\s*[)）]", "", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    return text
 
 
 def _linkify_with_gitlab(fragment: str, linker, query_repo_id: str,
@@ -1435,7 +1475,11 @@ def _file_level_section(file_matches: list[dict], file_similar: list[dict],
             f'<td class="text-xs">{html.escape(_MODULE_DISPLAY.get(f["module"], f["module"]))}</td>'
             f'<td class="text-xs">{f["hit"]}/{f["total"]} 个函数</td>'
             f'<td class="text-xs font-semibold text-amber-700">{round(f["ratio"]*100)}%</td>'
-            '<td class="text-xs text-slate-500">' + _ref_repo_anchor(linker, f["top_source"]) + '</td>'
+            '<td class="text-xs text-slate-500">'
+            + _ref_repo_anchor(linker, f["top_source"])
+            + (' ' + _make_gitlab_anchor(linker, f["top_source"], f["top_source_file"], 0)
+               if f.get("top_source_file") else "")
+            + '</td>'
             '</tr>'
             for f in file_similar
         )
@@ -1586,7 +1630,9 @@ def run_semantic_compare(
 
     # 统计
     submodule_stats = compute_submodule_stats(suspects, recall)
-    file_pairs      = collect_file_pairs(suspects, top_per_module=top_per_module)
+    # 表格展示：confirmed 全 + review/weak 限量；送 LLM：每模块再取 sim 最高若干个，控 token
+    file_pairs = collect_file_pairs(suspects, top_per_module=top_per_module)
+    llm_pairs  = _limit_per_module(file_pairs, 5)
 
     # 原创候选函数
     original_funcs  = _original_functions(recall, suspects) if recall else []
@@ -1596,12 +1642,12 @@ def run_semantic_compare(
     out_dir.mkdir(parents=True, exist_ok=True)
     work_dir = out_dir / f"{query_repo_id}_semantic_work"
 
-    if skip_opencode or not file_pairs:
-        analysis_html = _fallback_analysis(file_pairs, submodule_stats)
+    if skip_opencode or not llm_pairs:
+        analysis_html = _fallback_analysis(llm_pairs, submodule_stats)
     else:
         qpath = str(Path(query_repo_path).resolve()) if query_repo_path else ""
         analysis_html = run_semantic_analysis(
-            query_repo_id, qpath, file_pairs, submodule_stats, work_dir
+            query_repo_id, qpath, llm_pairs, submodule_stats, work_dir
         )
 
     # 构建 GitLab linker（取各参考仓库的在线 URL + HEAD sha）
