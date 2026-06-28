@@ -137,6 +137,8 @@ def _run_opencode_once(task: BatchTask, timeout: int) -> tuple[bool, str]:
             env=_opencode_env(),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
