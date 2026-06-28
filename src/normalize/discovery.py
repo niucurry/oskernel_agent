@@ -16,6 +16,8 @@ EXCLUDE_DIRS = {
     # / benchmark。不排除会让 L0 文件指纹把它们当「整文件复制」批量误报（实测占跨仓命中绝大多数）。
     "libc-test", "oscomp", "user_C_program", "testsuits", "testsuites",
     "lmbench", "busybox", "iozone", "ltp",
+    # 性能/压力测试工具（各队签入同一份基准套件，非内核原创代码）
+    "netperf", "iperf", "unixbench", "rt-tests", "byte-unixbench",
     # 构建产物根文件系统 / sysroot（编译出来的 libc/libstdc++ 头与库，非源码）
     "sysroot", "rootfs",
 }
