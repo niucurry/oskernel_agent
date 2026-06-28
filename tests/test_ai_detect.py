@@ -96,27 +96,29 @@ def test_run_ai_detect_writes_json(mini_repo: Path, tmp_path: Path):
     assert p.exists() and res["output_path"] == str(p)
 
 
-def _small_rust(name: str) -> str:
-    return (f"pub fn {name}() -> i64 {{\n    let a = 1;\n    let b = 2;\n"
-            "    let c = 3;\n    let d = 4;\n    a + b + c + d\n}\n")
-
-
-def test_run_ai_detect_focus_limits_scope(tmp_path: Path):
-    # P2 限范围：检测集 = 可疑清单 ∪ 大函数(LOC>=min_loc)；既不可疑又过小的函数被排除
+def test_run_ai_detect_excludes_borrowed(tmp_path: Path):
+    # 排除借鉴模式：文件级 + 函数级借鉴代码跳过，只检测未匹配上的原创函数
     src = tmp_path / "os" / "src"
     src.mkdir(parents=True)
     (src / "lib.rs").write_text(
-        _long_rust("big_fn", "v", n=26) + "\n"          # LOC>=20 → 大函数，保留
-        + _small_rust("small_focused") + "\n"           # 小函数但在可疑清单 → 保留
-        + _small_rust("small_other"),                   # 小函数且不可疑 → 排除
+        _long_rust("borrowed_fn", "v", n=26) + "\n"     # 函数级借鉴 → 跳过
+        + _long_rust("original_fn", "w", n=26),         # 未匹配 → 保留
+        encoding="utf-8",
+    )
+    (src / "copied.rs").write_text(
+        _long_rust("whole_file_fn", "u", n=26),         # 文件级借鉴 → 整文件跳过
         encoding="utf-8",
     )
     st = AIDetectSettings(min_loc=20, git_blame=False)
-    focus = {("os/src/lib.rs", "small_focused")}
-    res = run_ai_detect(tmp_path, settings=st, scorer=FakeScorer(),
-                        show_progress=False, write=False, focus_funcs=focus)
+    res = run_ai_detect(
+        tmp_path, settings=st, scorer=FakeScorer(),
+        show_progress=False, write=False,
+        exclude_files={"os/src/copied.rs"},
+        exclude_funcs={("os/src/lib.rs", "borrowed_fn")},
+    )
     assert res["status"] == "ok"
-    assert res["aggregated"]["overall"]["total_functions"] == 2  # big_fn + small_focused
+    # 只有 original_fn 进入检测（borrowed_fn / whole_file_fn 均被排除）
+    assert res["aggregated"]["overall"]["total_functions"] == 1
 
 
 def test_run_ai_detect_skips_when_no_functions(tmp_path: Path):

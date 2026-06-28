@@ -163,22 +163,24 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     # ---- ai_detect（AI 生成代码检测，独立于查重漏斗；缺模型则优雅跳过）----
     if not args.skip_ai_detect and _should_run("ai_detect", args.resume_from):
         from src.ai_detect.runner import run_ai_detect
-        # P2 限范围：把查重命中的可疑函数作为检测焦点（∪ 大函数），避免全量/前 N 的浪费
-        focus_funcs: set[tuple[str, str]] | None = None
+        # 排除借鉴代码：文件级（fastpath 整文件命中）+ 函数级（查重命中的可疑函数），
+        # 只对未匹配上的原创代码做 AI 生成检测（借鉴自参考 OS 的代码不计入）
+        exclude_files = {p.replace("\\", "/") for p in skip_files}
+        exclude_funcs: set[tuple[str, str]] = set()
         if final_path.exists():
             try:
                 _sd = json.loads(final_path.read_text(encoding="utf-8"))
-                focus_funcs = {
+                exclude_funcs = {
                     (s.get("query_func", {}).get("file_path", "").replace("\\", "/"),
                      s.get("query_func", {}).get("func_name", ""))
                     for s in _sd.get("suspects", [])
                     if s.get("tier") in ("confirmed", "review", "weak")
                 }
             except (OSError, json.JSONDecodeError):
-                focus_funcs = None
+                exclude_funcs = set()
         res = timed("ai_detect", lambda: run_ai_detect(
             repo_path, output_dir=out, repo_name=repo_name, show_progress=False,
-            focus_funcs=focus_funcs))
+            exclude_files=exclude_files, exclude_funcs=exclude_funcs))
         funnel["ai_detect_status"] = res.get("status")
         if res.get("status") == "ok":
             funnel["ai_detect"] = res["aggregated"]["overall"]
