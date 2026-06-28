@@ -29,6 +29,18 @@ EXCLUDE_DIR_SUFFIXES = ("-musl-cross", "-gcc-cross", "-elf-cross")
 # 精确名匹配会漏；这些 token 在内核源码目录名里不会出现，用子串兜底是安全的。
 EXCLUDE_DIR_SUBSTRINGS = ("busybox", "ltp-full", "ltp_full")
 
+# 各队签入的第三方目录大小写不一（UnixBench vs unixbench），统一按小写比对。
+_EXCLUDE_DIRS_LC = {d.lower() for d in EXCLUDE_DIRS}
+_EXCLUDE_SUFFIXES_LC = tuple(s.lower() for s in EXCLUDE_DIR_SUFFIXES)
+_EXCLUDE_SUBSTRINGS_LC = tuple(s.lower() for s in EXCLUDE_DIR_SUBSTRINGS)
+
+
+def _is_excluded_dir(name: str) -> bool:
+    d = name.lower()
+    return (d in _EXCLUDE_DIRS_LC
+            or any(d.endswith(s) for s in _EXCLUDE_SUFFIXES_LC)
+            or any(s in d for s in _EXCLUDE_SUBSTRINGS_LC))
+
 
 @dataclass(frozen=True)
 class DiscoveredFile:
@@ -52,13 +64,8 @@ def discover_files(repo: str | Path) -> list[DiscoveredFile]:
     out: list[DiscoveredFile] = []
 
     for dirpath, dirnames, filenames in os.walk(repo):
-        # 排除指定目录（原地修改 dirnames 以阻止 os.walk 下降）
-        dirnames[:] = sorted(
-            d for d in dirnames
-            if d not in EXCLUDE_DIRS
-            and not any(d.endswith(s) for s in EXCLUDE_DIR_SUFFIXES)
-            and not any(s in d for s in EXCLUDE_DIR_SUBSTRINGS)
-        )
+        # 排除指定目录（原地修改 dirnames 以阻止 os.walk 下降），大小写不敏感
+        dirnames[:] = sorted(d for d in dirnames if not _is_excluded_dir(d))
 
         for fn in sorted(filenames):
             lang = lang_of(fn)
