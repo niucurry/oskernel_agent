@@ -21,7 +21,9 @@ class AIDetectSettings(BaseModel):
     device: str = "auto"
     engine: str = "transformers"          # transformers / vllm
     batch_size: int = 8
-    k_perturbations: int = 50
+    # P2：Stage2 扰动次数是 AI 检测耗时大头，默认从 50 降到 20（精度/速度折中；
+    # 需要更高精度可经 AI_DETECT_K 或 settings.yaml 调回）。
+    k_perturbations: int = 20
     min_loc: int = 20
     log_rank_llm_threshold: float = 1.5
     log_rank_human_threshold: float = 3.0

@@ -96,6 +96,29 @@ def test_run_ai_detect_writes_json(mini_repo: Path, tmp_path: Path):
     assert p.exists() and res["output_path"] == str(p)
 
 
+def _small_rust(name: str) -> str:
+    return (f"pub fn {name}() -> i64 {{\n    let a = 1;\n    let b = 2;\n"
+            "    let c = 3;\n    let d = 4;\n    a + b + c + d\n}\n")
+
+
+def test_run_ai_detect_focus_limits_scope(tmp_path: Path):
+    # P2 限范围：检测集 = 可疑清单 ∪ 大函数(LOC>=min_loc)；既不可疑又过小的函数被排除
+    src = tmp_path / "os" / "src"
+    src.mkdir(parents=True)
+    (src / "lib.rs").write_text(
+        _long_rust("big_fn", "v", n=26) + "\n"          # LOC>=20 → 大函数，保留
+        + _small_rust("small_focused") + "\n"           # 小函数但在可疑清单 → 保留
+        + _small_rust("small_other"),                   # 小函数且不可疑 → 排除
+        encoding="utf-8",
+    )
+    st = AIDetectSettings(min_loc=20, git_blame=False)
+    focus = {("os/src/lib.rs", "small_focused")}
+    res = run_ai_detect(tmp_path, settings=st, scorer=FakeScorer(),
+                        show_progress=False, write=False, focus_funcs=focus)
+    assert res["status"] == "ok"
+    assert res["aggregated"]["overall"]["total_functions"] == 2  # big_fn + small_focused
+
+
 def test_run_ai_detect_skips_when_no_functions(tmp_path: Path):
     (tmp_path / "readme.md").write_text("no code here", encoding="utf-8")
     res = run_ai_detect(tmp_path, settings=AIDetectSettings(), scorer=FakeScorer(),
