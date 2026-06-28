@@ -66,12 +66,15 @@ _TIER_DISPLAY = {
     "review":    "needReview（待复核）",
     "weak":      "弱相似",
 }
-# clone_type 展示名（D2 的「完全复制 / 改名复制」细分）。
+# clone_type 展示名：按「逐字相同行占比」描述相似程度，中性命名，不臆断「改名」动机。
 _CLONE_TYPE_DISPLAY = {
-    "exact":   "完全复制",
-    "renamed": "改名复制",
-    "near":    "高度相似",
-    "—":       "—",
+    "exact":    "完全相同",
+    "near_dup": "近乎相同",
+    "similar":  "高度相似",
+    # 兼容旧缓存/旧数据里的取值
+    "renamed":  "近乎相同",
+    "near":     "高度相似",
+    "—":        "—",
 }
 
 
@@ -80,16 +83,33 @@ def _tier_disp(tier: str) -> str:
 
 
 def _clone_kind(pair_or_suspect: dict) -> str:
-    """整对级 clone_type 派生（D2）：任一段 renamed 或证据含 renamed 行 → renamed；
-    否则有 exact 行 → exact；其余 near。寄存器/标识符改名绝不标 exact。
+    """按「逐字相同行占已匹配行的比例」判克隆程度（中性命名，不臆断改名动机）：
+
+      完全相同(exact)：全部匹配行逐字一致；
+      近乎相同(near_dup)：仅零星行需归一化才匹配（≤15%，如个别变量/常量/注释不同，
+                          也覆盖「只差一两行」的情形——不再误标为「改名复制」）；
+      高度相似(similar)：较多行需归一化才匹配，或仅结构相似。
+
+    旧逻辑「只要有一行 renamed 就整函数标改名复制」非黑即白，导致 99% 逐字相同、
+    仅改一行也被标改名复制；改为按比例判定后更贴合实际。
     """
-    types = pair_or_suspect.get("match_type_per_span") or []
     ev = pair_or_suspect.get("evidence") or {}
-    if "renamed" in types or (ev.get("renamed_match_lines") or 0) > 0:
-        return "renamed"
-    if "exact" in types or (ev.get("exact_match_lines") or 0) > 0:
+    e = ev.get("exact_match_lines") or 0
+    r = ev.get("renamed_match_lines") or 0
+    total = e + r
+    if total == 0:  # 无行级证据，退回 span 类型
+        types = pair_or_suspect.get("match_type_per_span") or []
+        if "exact" in types and "renamed" not in types:
+            return "exact"
+        if "renamed" in types:
+            return "near_dup"
+        return "similar"
+    ratio = r / total
+    if ratio == 0:
         return "exact"
-    return "near"
+    if ratio <= 0.15:
+        return "near_dup"
+    return "similar"
 
 
 _OPENCODE = _find_opencode()
@@ -381,9 +401,9 @@ _ANALYSIS_SYSTEM = """\
 1. 借鉴对象：借鉴了哪些**算法**（如调度策略、分配器、置换算法）、**数据结构**
    （如页表、inode、就绪队列）、**机制**（如 trap 上下文保存/恢复、锁、缓存）。
 2. 借鉴程度（四档，必须明确给出其一）：
-   - 直接复制（逐字节相同）
-   - 改名复制（仅改寄存器/变量/标识符名）
-   - 结构保留逻辑改写（控制流一致、表达式改写）
+   - 完全相同（逐行逐字一致，仅空格/注释差异）
+   - 近乎相同（仅个别变量/常量/少量行不同）
+   - 结构相似（控制流一致、表达式改写）
    - 受启发重新实现（思路相近、实现独立）
 3. 设计差异：新作品相对来源做了哪些改动/取舍（如换数据结构、改并发策略、增删功能）。
 
@@ -745,9 +765,9 @@ _LEGEND_HTML = (
     '<span><b>档位：</b></span>'
     '<span><span class="dot" style="background:#ef4444"></span>已确认借鉴（confirmed，证据充分）</span>'
     '<span style="margin-left:.6rem"><b>复制类型：</b></span>'
-    '<span>完全复制（逐字节相同）</span>'
-    '<span>改名复制（仅改寄存器/标识符）</span>'
-    '<span>高度相似（结构保留）</span>'
+    '<span>完全相同（逐行逐字一致）</span>'
+    '<span>近乎相同（仅零星行不同，≤15%）</span>'
+    '<span>高度相似（较多行需归一化才匹配）</span>'
     '</div>'
 )
 
