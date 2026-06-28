@@ -31,6 +31,12 @@ def _strip_diagrams(content: str) -> str:
     return _MERMAID_RE.sub("", content) if content else content
 
 
+# LLM 直出正文里的 id 属性：剥离以免与结构锚点（#verdict/#tree/#similarity/#sub-*）
+# 撞 id，触发目录定位硬校验（assert_toc_resolves）而中止渲染。正文内图表按 class
+# 初始化、不依赖 id，正文亦无自带目录跳转，故剥离安全。
+_CONTENT_ID_RE = re.compile(r'\s+id="[^"]*"')
+
+
 # 复用 html.py 的 CDN 头：已含 Tailwind + ECharts + Mermaid + Alpine 及其初始化。
 # 折叠节点展开时让其中的 ECharts 重新计算尺寸（初次在 display:none 下 init 会是 0 尺寸）。
 _TREE_HEAD = _CDN_HEAD
@@ -256,6 +262,7 @@ def _render_verdict(verdict: dict, resolver) -> str:
 
     # verdict 详细正文（agent 直出的 HTML，含雷达图）——剥离架构图后嵌入并链接化
     content = _strip_diagrams(verdict.get("content") or "")
+    content = _CONTENT_ID_RE.sub("", content)  # 去掉正文 id，避免撞结构锚点
     content_html = ""
     if content.strip():
         content_html = (
@@ -518,11 +525,17 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
 
 def write_tree_html(out_path: Path, tree_json: dict,
                     repo_roots: list[Path] | None = None,
-                    title: str | None = None) -> tuple[Path, set[str]]:
-    """把 tree.json 渲染为 HTML 并写入 out_path。返回 (path, 断链路径集合)。"""
+                    title: str | None = None,
+                    scheme: str = "vscode",
+                    gitlab_base: tuple[str | None, str | None] | None = None,
+                    ) -> tuple[Path, set[str]]:
+    """把 tree.json 渲染为 HTML 并写入 out_path。返回 (path, 断链路径集合)。
+
+    scheme="gitlab" + gitlab_base=(repo_url, sha) 时文件链接指向 GitLab 在线行级地址。
+    """
     broken: set[str] = set()
     resolver = make_file_link_resolver(
-        repo_roots, scheme="vscode", broken_paths=broken,
+        repo_roots, scheme=scheme, broken_paths=broken, gitlab_base=gitlab_base,
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     html_text = render_tree_html(

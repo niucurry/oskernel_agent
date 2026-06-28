@@ -1,8 +1,8 @@
 [api]
 # 本项目固定使用 DeepSeek 模型（deepseek/deepseek-chat），不可更换。
 # 你只需要填两项：API 密钥与 base_url。
-key      = "sk-8baedbf35e474021a8d923eac557aca8"
-base_url = "https://api.deepseek.com/v1"   # DeepSeek 官方接入点；如需代理转发，改这里即可
+key      = "sk-e81919dd75ff4c7c88161485f82a76c9"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"   # 阿里云百炼 OpenAI 兼容接入点
 
 [data]
 repos_dir    = "./data/historical_repos"

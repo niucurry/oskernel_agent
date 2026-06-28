@@ -530,7 +530,7 @@ def run_semantic_analysis(
             timeout=timeout,
         )
         resp = client.chat.completions.create(
-            model="deepseek-chat",
+            model=os.getenv("LLM_MODEL", "deepseek-v4-flash"),
             messages=[
                 {"role": "system", "content": _ANALYSIS_SYSTEM},
                 {"role": "user",   "content": user_msg},

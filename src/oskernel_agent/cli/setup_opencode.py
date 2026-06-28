@@ -106,10 +106,12 @@ def setup() -> None:
 
     from .. import config
 
-    # 模型锁定：本项目固定使用 DeepSeek（deepseek/deepseek-chat）。
-    # 用户在 config.toml 中只需配置 key 与 base_url。
+    # provider 固定标识为 deepseek；模型名可由环境变量 LLM_MODEL 覆盖
+    # （平台切换到阿里云百炼后用 deepseek-v4-flash 等）。
+    import os as _os
     PROVIDER_ID = "deepseek"
-    MODEL       = f"{PROVIDER_ID}/deepseek-chat"
+    model_id    = (_os.getenv("LLM_MODEL", "deepseek-chat").strip() or "deepseek-chat")
+    MODEL       = f"{PROVIDER_ID}/{model_id}"
 
     api_key   = config.api.get("key", "")
     base_url  = config.api.get("base_url", "").strip()
@@ -161,10 +163,15 @@ def setup() -> None:
     # 若用户配置了自定义 base_url（非 DeepSeek 官方），写入 provider 覆盖，
     # 这样 OpenCode 会用配置的 URL 发请求；官方地址则不需要覆盖。
     if base_url and "api.deepseek.com" not in base_url:
+        # 自定义 OpenAI 兼容端点（如阿里云百炼 DashScope）：写完整 provider 定义，
+        # 显式声明模型，避免 OpenCode 因模型不在内置注册表而报“未知模型”。
         existing.setdefault("provider", {})[PROVIDER_ID] = {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "OpenAI-Compatible (custom)",
             "options": {"baseURL": base_url},
+            "models": {model_id: {"name": model_id}},
         }
-        print(f"[配置] 写入自定义 base_url 覆盖：{base_url}")
+        print(f"[配置] 写入自定义 provider（{base_url}，模型 {model_id}）")
     elif base_url:
         # 即使是官方地址也写入一份，确保 OpenCode 使用用户期望的版本路径
         existing.setdefault("provider", {})[PROVIDER_ID] = {
