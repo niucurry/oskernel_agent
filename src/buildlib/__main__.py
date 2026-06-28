@@ -38,6 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="一键把 repos.yaml 的历史作品建成完整历史库（拉取+归一化+向量化+SimHash）。",
     )
     p.add_argument("--config", default=DEFAULT_CONFIG, help=f"历史作品清单（默认 {DEFAULT_CONFIG}）")
+    p.add_argument("--baselines-config", default="config/baselines.yaml",
+                   help="基线清单（公共/模板/第三方库，入库标 is_baseline 供各层扣除；默认 config/baselines.yaml）")
+    p.add_argument("--skip-baselines", action="store_true", help="不连带建基线库（仅建 --config 的历史作品）")
     p.add_argument("--repos-root", default=DEFAULT_REPOS_ROOT, help=f"仓库克隆根目录（默认 {DEFAULT_REPOS_ROOT}）")
     p.add_argument("--db", default=DEFAULT_DB, help=f"functions.db 路径（默认 {DEFAULT_DB}）")
     p.add_argument("--qdrant-path", default=DEFAULT_QDRANT, help=f"本地向量库目录（默认 {DEFAULT_QDRANT}）")
@@ -99,6 +102,10 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             logger.warning("未设置 GITLAB_TOKEN，私有仓库将克隆失败")
         depth = args.depth or 1
         entries = load_repos(config_path)
+        if not args.skip_baselines and Path(args.baselines_config).exists():
+            base_entries = load_repos(Path(args.baselines_config))
+            logger.info("[reclaim] 连带基线库 {} 个（{}）", len(base_entries), args.baselines_config)
+            entries = entries + base_entries
         repos_root = Path(args.repos_root)
         logger.info("[reclaim] 磁盘安全模式：{} 个仓库，浅克隆 depth={}", len(entries), depth)
 
@@ -158,6 +165,15 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         if ok == 0:
             logger.error("没有任何仓库克隆成功，终止建库。")
             return 1
+        # 连带克隆基线库到同一 repos_root：后续 normalize_all 会一并归一化，
+        # is_baseline 由 repo_id 的 baseline_ 约定自动判定（embed/L0 各层据此扣除）。
+        if not args.skip_baselines and Path(args.baselines_config).exists():
+            bres = timed("ingest-baselines", lambda: ingest(
+                Path(args.baselines_config), args.repos_root, token=token,
+                force=args.force, fetch_commit_stats=False,
+            ))
+            summary["ingest_baselines"] = {"total": len(bres),
+                                           "ok": sum(1 for r in bres if "error" not in r)}
     else:
         logger.info("[ingest] 已跳过（使用 {} 下既有仓库）", args.repos_root)
         if not any(Path(args.repos_root).glob("*")):
