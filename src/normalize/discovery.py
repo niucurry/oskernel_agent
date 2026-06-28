@@ -27,7 +27,7 @@ EXCLUDE_DIR_SUFFIXES = ("-musl-cross", "-gcc-cross", "-elf-cross")
 
 # 目录名子串模式：第三方项目名常被改前缀签入（chcore-busybox、busybox_lua_testsuites 等），
 # 精确名匹配会漏；这些 token 在内核源码目录名里不会出现，用子串兜底是安全的。
-EXCLUDE_DIR_SUBSTRINGS = ("busybox",)
+EXCLUDE_DIR_SUBSTRINGS = ("busybox", "ltp-full", "ltp_full")
 
 
 @dataclass(frozen=True)
