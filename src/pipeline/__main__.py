@@ -141,9 +141,9 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             st = load_settings()
             baseline_matcher = VectorBaselineMatcher(
                 get_emb(), VectorStore(st.qdrant.collection, path=args.qdrant_path))
+        # commit 信号通道已停用（git blame 逐函数分析过慢、对查重结论非必需）
         res = timed("metadata", lambda: run_metadata(
-            v2_path, db_path=args.db, output_dir=out, baseline_matcher=baseline_matcher,
-            query_repo=str(repo_path) if meta_commits else None, meta_commits=meta_commits or None))
+            v2_path, db_path=args.db, output_dir=out, baseline_matcher=baseline_matcher))
         funnel["metadata"] = res["metadata_summary"]
         funnel["after_metadata"] = tier_counts(res["suspects"])
 

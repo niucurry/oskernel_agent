@@ -38,12 +38,15 @@ def parse_blame(porcelain: str) -> tuple[list[str], dict[str, int]]:
 def find_introducing_commit(repo_path: str | Path, file_path: str, start_line: int, end_line: int) -> str | None:
     """blame 函数行范围，取最早 author-time 的 commit 作为「引入」commit。"""
     try:
-        out = subprocess.run(
+        raw = subprocess.run(
             ["git", "-C", str(repo_path), "blame", "-L", f"{start_line},{end_line}",
              "--line-porcelain", "--", file_path],
-            check=True, capture_output=True, text=True, timeout=30,
+            check=True, capture_output=True, timeout=30,
         ).stdout
+        out = raw.decode("utf-8", errors="replace") if raw else ""
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    if not out:
         return None
     line_shas, times = parse_blame(out)
     if not line_shas:

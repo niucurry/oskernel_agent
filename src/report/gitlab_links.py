@@ -141,7 +141,7 @@ def gitlab_blob_url(
     fp = (file_path or "").replace("\\", "/").lstrip("./")
     if not fp:
         return None
-    ref = sha or "master"
+    ref = sha or "HEAD"
     # 行锚：单行 #L5，多行 #L5-10
     if start and end and end > start:
         anchor = f"#L{start}-{end}"
