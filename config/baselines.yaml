@@ -37,3 +37,7 @@ repos:
     year: 0
     team_name: baseline_rust_fatfs
     award_level: baseline
+  - repo_url: https://github.com/rcore-os/virtio-drivers
+    year: 0
+    team_name: baseline_virtio_drivers
+    award_level: baseline
