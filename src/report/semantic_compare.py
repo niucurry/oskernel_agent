@@ -177,7 +177,14 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) ->
 
 
 def _original_functions(recall: dict, suspects: list[dict], top_n: int = 12) -> list[dict]:
-    """从 recall.json 中找出与历史库最高相似度 < 0.5 且行数 > 20 的函数（原创候选）。"""
+    """从 recall.json 中找出未被判为借鉴、且规模可观（>20 行）的函数（原创候选）。
+
+    判据用「是否进入查重命中清单」而非向量相似度阈值：代码嵌入的余弦相似度存在很高的
+    地板——OS 内核里链表操作 / 调度循环等结构高度雷同，实测无关函数 max_sim 也普遍 0.6+，
+    几乎不会 <0.5。用它当原创闸门会把几乎所有函数误判为非原创（实测真实仓库原创数恒为 0）。
+    真正的「行级是否抄袭」由 exact 阶段裁决：函数不在 suspects 里，即其最强候选的精确匹配
+    比例 <0.5，属原创。max_sim 仅随结果展示作辅助参考，不参与判定。
+    """
     suspected_keys = {
         (s.get("query_func", {}).get("file_path", ""),
          s.get("query_func", {}).get("func_name", ""))
@@ -193,7 +200,7 @@ def _original_functions(recall: dict, suspects: list[dict], top_n: int = 12) -> 
         cands = item.get("candidates", [])
         max_sim = max((c.get("score", 0.0) for c in cands), default=0.0)
         lines = (q.get("end_line", 0) or 0) - (q.get("start_line", 0) or 0) + 1
-        if max_sim < 0.5 and lines > 20:
+        if lines > 20:
             out.append({
                 "func":    q.get("func_name", ""),
                 "file":    q.get("file_path", ""),
