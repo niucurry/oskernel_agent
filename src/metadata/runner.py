@@ -138,8 +138,16 @@ def channel_common_code(data: dict, settings: MetadataSettings) -> int:
             for s in group:
                 if s.get("tier") == "baseline_derived":  # 更具体的基线信号优先
                     continue
-                s["tier"] = "common_code"
                 s.setdefault("evidence", {})["common_code_repos"] = len(strong_repos)
+                # confirmed（精确/重命名级完全相同）是确凿事实，必须保留展示在报告中；
+                # 仅加「命中多库」标注供人工判断是否通用框架代码，不降级、不计入 common_code。
+                if s.get("tier") == "confirmed":
+                    s["common_code_note"] = (
+                        f"该函数精确命中 {len(strong_repos)} 个不同历史仓库，"
+                        f"疑为公共/框架代码（仍按确认借鉴展示，供人工判断）"
+                    )
+                    continue
+                s["tier"] = "common_code"
                 s["common_code_note"] = (
                     f"该函数高相似命中 {len(strong_repos)} 个不同历史仓库，判为公共/框架代码（不计入借鉴/复制）"
                 )

@@ -126,16 +126,18 @@ def aggregate_file_similarity(
             total_by_file[q.get("file_path", "")] += 1
 
     hit_funcs: dict[str, set[str]] = defaultdict(set)
-    sources: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    # 来源按 (repo_id, 来源文件路径) 计数，使「主要来源」能链到对应文件而非仅仓库主页
+    sources: dict[str, dict[tuple[str, str], int]] = defaultdict(lambda: defaultdict(int))
     module_of: dict[str, str] = {}
     for s in suspects:
         if s.get("tier") not in ("confirmed", "review"):
             continue
         q = s.get("query_func", {})
+        c = s.get("candidate_func", {})
         fp = q.get("file_path", "")
         hit_funcs[fp].add(q.get("func_name", ""))
         module_of.setdefault(fp, q.get("module_tag", "other"))
-        sources[fp][s.get("candidate_func", {}).get("repo_id", "?")] += 1
+        sources[fp][(c.get("repo_id", "?"), c.get("file_path", ""))] += 1
         if fp not in total_by_file:
             total_by_file[fp] = 0
 
@@ -147,14 +149,16 @@ def aggregate_file_similarity(
         r = len(hits) / total
         if r < ratio:
             continue
-        top = max(sources[fp].items(), key=lambda kv: kv[1], default=("—", 0))
+        (top_repo, top_file), _ = max(
+            sources[fp].items(), key=lambda kv: kv[1], default=(("—", ""), 0))
         out.append({
             "file_path": fp,
             "module": module_of.get(fp, "other"),
             "total": total,
             "hit": len(hits),
             "ratio": round(r, 3),
-            "top_source": top[0],
+            "top_source": top_repo,
+            "top_source_file": top_file,
         })
     out.sort(key=lambda x: -x["ratio"])
     return out
