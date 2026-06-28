@@ -234,7 +234,7 @@ def extract_asm_feature_tokens(text: str) -> list[str]:
         line = line.strip()
         if not line or line.endswith(":") or line.startswith("."):
             continue
-        op = re.split(r"[ \t,]", line, 1)[0]
+        op = re.split(r"[ \t,]", line, maxsplit=1)[0]
         if op:
             feats.add(f"op:{op.lower()}")
     return sorted(feats)
