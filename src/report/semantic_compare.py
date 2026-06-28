@@ -831,7 +831,7 @@ def _module_section(
     mod_analysis = _extract_module_analysis(analysis_html, mod)
     if mod_analysis:
         # 用 GitLab linker 将 path:line 转为在线链接
-        mod_analysis = _linkify_with_gitlab(mod_analysis, linker, query_repo_id)
+        mod_analysis = _linkify_with_gitlab(mod_analysis, linker, query_repo_id, file_pairs)
 
     body = stat_row + table
     if mod_analysis:
@@ -876,22 +876,22 @@ def _build_gitlab_linker(
     query_repo_id: str,
     ref_repos: set[str],
 ) -> "GitLabLinker | None":
-    """构建 GitLabLinker：query 仓库从本地 git 取 URL/SHA，参考仓库从 repos.yaml 取。"""
+    """构建 GitLabLinker：新作品用本地克隆精确 sha，参考仓库用字面量 HEAD。"""
     try:
         from .gitlab_links import (
-            GitLabLinker, build_repo_url_map, ensure_heads, query_repo_info,
+            GitLabLinker, build_repo_url_map, query_repo_info,
         )
         url_map = build_repo_url_map()
         if not url_map and not query_repo_path:
             return None
 
-        # 取需要 HEAD 的参考仓库 URL
-        ref_urls = [url_map[r] for r in ref_repos if r in url_map]
+        # 参考仓库（历史库）不绑定具体 sha：functions.db 建库时未记录 commit sha，
+        # data/repos 历史克隆工作树已清理（无法 rev-parse），远程最新 HEAD 又可能因仓库
+        # 更新导致文件移动/删除。heads 留空 → gitlab_blob_url 兜底用字面量 HEAD
+        # （/-/blob/HEAD/<path>），文件仍在即可打开；也省掉 ls-remote 的逐仓超时。
         heads: dict[str, str] = {}
-        if ref_urls:
-            heads = ensure_heads(ref_urls, workers=8)
 
-        # 新作品（query）仓库
+        # 新作品（query）仓库：本地克隆 = 分析版本，sha 精确，行号一一对应
         q_url = q_sha = None
         if query_repo_path:
             q_url, q_sha = query_repo_info(query_repo_path)
@@ -934,16 +934,43 @@ def _make_gitlab_anchor(linker, repo_id: str, file_path: str, start: int,
     return label
 
 
-def _linkify_with_gitlab(fragment: str, linker, query_repo_id: str) -> str:
-    """把 HTML 片段里的 path:line 纯文本引用转为 GitLab 在线链接。"""
+def _linkify_with_gitlab(fragment: str, linker, query_repo_id: str,
+                          file_pairs: list[dict] | None = None) -> str:
+    """把 HTML 片段（LLM 语义分析）里的 path:line 引用转为 GitLab 在线链接。
+
+    LLM 写的路径不可信（会简写成纯文件名、带仓库名前缀、残缺），所以不直接用它的路径，
+    而是用「文件名 + 行号」去 file_pairs（按 query 函数聚合的 group）里精确反查出
+    **完整路径 + 正确仓库归属**：
+      - loc_map (basename, line) → (repo_id, full_path)  精确匹配优先
+      - base_map basename → [(repo_id, full_path, line), ...]  行号不精确时取最近
+    命中新作品→用精确 sha；命中历史仓库→用 HEAD；file_pairs 无此文件→保留纯文本（不造坏链）。
+    正则字符类含反斜杠以完整匹配 a\\b\\c.c:120；<code> 内也链接化（证据常写在 <code> 里）。
+    """
     import re
     if linker is None:
         return fragment
+
+    loc_map: dict[tuple[str, int], tuple[str, str]] = {}
+    base_map: dict[str, list[tuple[str, str, int]]] = defaultdict(list)
+
+    def _reg(repo_id: str, raw_path: str, line: int) -> None:
+        fp = (raw_path or "").replace("\\", "/")
+        if not fp:
+            return
+        base = fp.rsplit("/", 1)[-1]
+        loc_map[(base, line)] = (repo_id, fp)
+        base_map[base].append((repo_id, fp, line))
+
+    for g in (file_pairs or []):
+        _reg(query_repo_id, g.get("query_file", ""), g.get("query_start", 0))
+        for c in g.get("candidates", []):
+            _reg(c.get("ref_repo", ""), c.get("ref_file", ""), c.get("ref_start", 0))
+
     _FILEREF_RE = re.compile(
-        r"([A-Za-z0-9_./\-]+\.(?:rs|c|h|cc|cpp|hpp|S|s|py|sh|toml|md))"
+        r"([A-Za-z0-9_./\\\-]+\.(?:rs|c|h|cc|cpp|hpp|S|s|py|sh|toml|md))"
         r"(?::(\d+)(?:-(\d+))?)?"
     )
-    _PROTECT_RE = re.compile(r"<(script|style|pre|a|code)\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
+    _PROTECT_RE = re.compile(r"<(script|style|pre|a)\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
 
     blocks: list[str] = []
 
@@ -957,11 +984,18 @@ def _linkify_with_gitlab(fragment: str, linker, query_repo_id: str) -> str:
         fp, start, end = m.group(1), m.group(2), m.group(3)
         line = int(start) if start else 0
         end_line = int(end) if end else line
-        url = _gitlab_url(linker, query_repo_id, fp, line, end_line)
+        base = fp.replace("\\", "/").rsplit("/", 1)[-1]
+        hit = loc_map.get((base, line))
+        if hit is None and base in base_map:
+            repo_id, full_path, _ = min(base_map[base], key=lambda c: abs(c[2] - line))
+            hit = (repo_id, full_path)
+        if hit is None:
+            return m.group(0)
+        repo_id, full_path = hit
+        url = _gitlab_url(linker, repo_id, full_path, line, end_line)
         if not url:
             return m.group(0)
-        label = m.group(0)
-        return f'<a class="file-jump" href="{html.escape(url)}" target="_blank">{label}</a>'
+        return f'<a class="file-jump" href="{html.escape(url)}" target="_blank">{m.group(0)}</a>'
 
     text = _FILEREF_RE.sub(_sub, text)
     text = re.sub(r"\x00B(\d+)\x00", lambda m: blocks[int(m.group(1))], text)
