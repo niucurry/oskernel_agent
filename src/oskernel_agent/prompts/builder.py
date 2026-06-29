@@ -57,21 +57,24 @@ LAYER_2_CONSTRAINTS = """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 【硬性约束 — 违反任何一条则整个输出无效】
 
-〔约束 1：语言规范——中文写作 + 技术术语英文原文〕
-所有产出（JSON 字段、Markdown 正文、注释、说明）一律使用**简体中文**书写。
-但以下类别**必须保留英文原文**，不做翻译：
+〔约束 1：语言规范——所有正文必须是中文句子〕
+**所有输出（JSON 字段值、HTML 正文、说明段落）的句子和段落必须用简体中文写作。**
+**严禁出现独立的英文句子、英文段落，或由多个纯英文短语拼成的描述。**
+
+在中文句子中，下列类别**保留英文原文，不做翻译**（直接嵌入中文句子里）：
   - 函数名 / 结构体名 / 变量名 / 文件名 / 路径（如 usertrap、TaskControlBlock）
   - 关键字 / 类型名 / 宏（如 unsafe、static、SYSCALL_FORK）
-  - 通用技术术语：syscall、page table、buddy system、scheduler、trap、
+  - 公认技术缩写：syscall、page table、buddy system、scheduler、trap、
     interrupt、mutex、semaphore、IPC、VFS、inode、page fault、TLB、MMU、
     kernel/user mode、context switch、ELF、ABI、FFI、SMP、cache、heap、
     stack、bootstrap、trait、impl、enum、struct、typedef
   - 工具 / 库 / 协议 / 标准名：xv6、rCore、Linux、POSIX、RISC-V、LoongArch、
     Cargo、ctags、LSP、Mermaid、ECharts
-反面示例（禁止）：把 syscall 翻成"系统调用"、把 page table 翻成"页表"、
-                  把 trait 翻成"特征"、把 scheduler 翻成"调度器"。
-正面示例：本目录实现 syscall 分发（kernel/trap.c:42），ecall 触发后
-          通过 scause 路由到对应 handler。
+❌ 禁止（整句英文）：`This module handles process scheduling and context switching.`
+❌ 禁止（整句英文）：`lazy-removal strategy may cause redundant callbacks`
+❌ 禁止（翻译术语）：把 syscall 翻成"系统调用"、把 scheduler 翻成"调度器"
+✅ 正确：本模块实现 syscall 分发（kernel/trap.c:42），ecall 触发后通过 scause 路由到对应 handler。
+✅ 正确：<code>FilesystemOps</code> trait 定义 VFS 统一操作接口，lazy allocation 路径见 mm/alloc.rs:88。
 
 〔约束 2：JSON 不嵌长 Markdown〕
 JSON 中所有字符串字段（summary / role / quote / reason / note）≤200 字符。
