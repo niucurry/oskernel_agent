@@ -17,5 +17,9 @@ repo_id = ""
 rust_analyzer_timeout = 120   # 路径A 等待索引完成的最长秒数
 clangd_timeout        = 60    # 路径B 等待索引完成的最长秒数
 max_call_depth        = 3     # get_call_chain 默认展开层数
-max_steps             = 200   # MCP server 每会话最大工具调用步数（预算控制）
+max_steps             = 30    # MCP server 每会话最大探索类工具调用步数（预算控制）。
+                              # 子系统 prompt 要求探索调用 ≤12 次；30 为安全垫，超出即提示
+                              # agent 停止探索、直接出报告。write_report/initialize_analysis
+                              # 不计步、不受此限，故调低不会掐断写盘。原值 200 易让推理模型
+                              # 在内存管理/设备驱动等大子系统里失控空转直至 600s 超时。
 skip_dirs = ["vendor", "third_party", "target"]  # 路径C 跳过的目录

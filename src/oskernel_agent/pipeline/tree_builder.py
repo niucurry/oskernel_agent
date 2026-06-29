@@ -36,10 +36,15 @@ from ..engines.llm_batch import (
 )
 
 SCHEMA_VERSION = "tree-v3"
-PROMPT_VERSION_SUBSYS  = "subsys-v7"
+PROMPT_VERSION_SUBSYS  = "subsys-v8"   # v8: 大子系统文件清单按 size 降序截断至 MAX_FILES_IN_PROMPT
 PROMPT_VERSION_VERDICT = "verdict-v14"
 
 MAX_MODULES_PER_SUBSYS = 8   # 每个子系统至多 N 个模块槽位
+
+# SUBSYS prompt 里最多列出的文件数。内存管理/设备驱动等大子系统文件可达数百个，
+# 完整清单会撑大每一轮输入、拖慢推理并诱使 agent 过度探索。按文件大小降序只列
+# 最有料的前 N 个；未列出的文件 agent 仍可凭 analyze_subtree/read_file 按需访问。
+MAX_FILES_IN_PROMPT = 80
 
 # 顶层评判 5 维度及其在总分中的权重（默认等权；如需侧重可调）。
 # score_total 由这些维度加权平均确定性算出，不再采信 LLM 自填的总分。
@@ -197,16 +202,25 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
                            outputs: dict, facts: dict | None) -> str:
     """构造 SUBSYS agent 的 user message。"""
     files = subsys_node["files"]
+    total_files = len(files)
+    # 大子系统按 size 降序只列前 N 个最有料的文件（详见 MAX_FILES_IN_PROMPT 注释）。
+    listed = sorted(files, key=lambda f: f.get("size", 0), reverse=True)[:MAX_FILES_IN_PROMPT]
+    omitted = total_files - len(listed)
     payload = {
         "repo_path":      str(repo_path),
         "subsystem":      subsys_node["name"],
         "reference_os":   (facts or {}).get("meta", {}).get("reference_os"),
         "files":          [
             {"path": f["path"], "name": f["name"], "lang": f["lang"]}
-            for f in files
+            for f in listed
         ],
         "outputs":        outputs,
     }
+    if omitted > 0:
+        payload["note"] = (
+            f"本子系统共 {total_files} 个文件，清单仅列出体量最大的 {len(listed)} 个；"
+            f"另有 {omitted} 个较小文件未列出，如需可用 analyze_subtree(目录) 查看。"
+        )
     return (
         "你负责分析仓库中的某一个 OS 子系统（如文件系统、内存管理）。"
         "请阅读这些代码，**自己决定该子系统内部的模块拆分**"
