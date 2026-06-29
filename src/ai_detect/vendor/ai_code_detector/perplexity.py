@@ -114,12 +114,19 @@ class PerplexityScorer:
         if self._tokenizer.pad_token_id is None:
             self._tokenizer.pad_token_id = self._tokenizer.eos_token_id
 
+        # transformers 4.56 才把 `torch_dtype` 改名为 `dtype`；4.49（本项目为
+        # codet5p 兼容固定的版本）只认 `torch_dtype`，传 `dtype` 会 TypeError 直接
+        # 让 AI 检测整步降级跳过。按版本选键名，兼容新旧。
+        import transformers as _tf
+        _dtype_kw = "dtype" if tuple(
+            int(x) for x in _tf.__version__.split(".")[:2]
+        ) >= (4, 56) else "torch_dtype"
         self._model = AutoModelForCausalLM.from_pretrained(
             self.model_id,
-            dtype=dtype,
             cache_dir=cache_str,
             trust_remote_code=True,
             low_cpu_mem_usage=True,
+            **{_dtype_kw: dtype},
         ).to(self._device).eval()
 
     def _ensure_loaded(self) -> None:

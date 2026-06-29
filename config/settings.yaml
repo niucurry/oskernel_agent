@@ -50,7 +50,7 @@ llm:
 ai_detect:
   # AI 生成代码检测（DetectCodeGPT，困惑度/log-rank）。参考模型 14GB，建议在带 GPU 的宿主机
   # 单独运行 `python -m src.ai_detect --repo X`；VM 无模型时该步骤优雅跳过，报告章节给出说明。
-  model_id: codellama/CodeLlama-7b-hf  # 也可 bigcode/starcoder2-3b（更小更快、精度略低）
+  model_id: data/models/starcoder2-3b  # 本地权重（bigcode/starcoder2-3b），3B/bf16≈6GB 可整模型上 RTX 4060(8GB)；CodeLlama-7b-hf≈13GB 会 OOM
   device: auto                 # auto / cpu / cuda / mps
   engine: transformers         # transformers / vllm
   batch_size: 8                # 模型前向批大小

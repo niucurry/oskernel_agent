@@ -31,6 +31,36 @@ def _strip_diagrams(content: str) -> str:
     return _MERMAID_RE.sub("", content) if content else content
 
 
+# LLM 直出正文偶发 <div> 不配平：多出的 </div> 会冲出我们的包裹容器、提前关闭
+# verdict 卡片或树节点，使其后所有内容（含目录锚点对齐）整体上移一层 →「目录移位」。
+# 这里丢弃会让深度变负的游离 </div>，并在结尾补足未闭合的 <div>，把正文限制在自己的盒子里。
+_DIV_TAG_RE = re.compile(r'<div\b[^>]*>|</div\s*>', re.IGNORECASE)
+
+
+def _balance_divs(content: str) -> str:
+    if not content or "<div" not in content.lower():
+        return content
+    depth = 0
+    out: list[str] = []
+    pos = 0
+    for m in _DIV_TAG_RE.finditer(content):
+        out.append(content[pos:m.start()])
+        tag = m.group()
+        if tag.startswith("</"):
+            if depth > 0:           # 正常闭合
+                depth -= 1
+                out.append(tag)
+            # depth==0：游离 </div>，丢弃（否则会冲出包裹容器）
+        else:                       # <div ...>（div 不可自闭合，一律当开标签）
+            depth += 1
+            out.append(tag)
+        pos = m.end()
+    out.append(content[pos:])
+    if depth > 0:                   # 补足未闭合的 <div>
+        out.append("</div>" * depth)
+    return "".join(out)
+
+
 # LLM 直出正文里的 id 属性：剥离以免与结构锚点（#verdict/#tree/#similarity/#sub-*）
 # 撞 id，触发目录定位硬校验（assert_toc_resolves）而中止渲染。正文内图表按 class
 # 初始化、不依赖 id，正文亦无自带目录跳转，故剥离安全。
@@ -263,6 +293,7 @@ def _render_verdict(verdict: dict, resolver) -> str:
     # verdict 详细正文（agent 直出的 HTML，含雷达图）——剥离架构图后嵌入并链接化
     content = _strip_diagrams(verdict.get("content") or "")
     content = _CONTENT_ID_RE.sub("", content)  # 去掉正文 id，避免撞结构锚点
+    content = _balance_divs(content)           # 配平 <div>，避免游离 </div> 冲出卡片
     content_html = ""
     if content.strip():
         content_html = (
@@ -482,6 +513,7 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
 
     # 详细叙述正文（subsystem / module 的 agent HTML 输出）——原样嵌入并链接化
     content = _strip_diagrams(node.get("content") or "")
+    content = _balance_divs(content)  # 配平 <div>，避免游离 </div> 冲出节点卡片
     if content.strip():
         body_parts.append(
             f'<div class="node-content prose prose-sm dark:prose-invert max-w-none mt-1 mb-2">'
