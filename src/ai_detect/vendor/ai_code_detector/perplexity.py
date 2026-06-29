@@ -121,13 +121,22 @@ class PerplexityScorer:
         _dtype_kw = "dtype" if tuple(
             int(x) for x in _tf.__version__.split(".")[:2]
         ) >= (4, 56) else "torch_dtype"
-        self._model = AutoModelForCausalLM.from_pretrained(
-            self.model_id,
+        common = dict(
             cache_dir=cache_str,
             trust_remote_code=True,
             low_cpu_mem_usage=True,
             **{_dtype_kw: dtype},
-        ).to(self._device).eval()
+        )
+        # device_map="auto"：让 accelerate 把放不下的层卸载到 CPU，避免 7B 在 8GB 卡上
+        # OOM（放得下的小模型则整模型留在 GPU）。无 accelerate 时退回单设备 .to()。
+        try:
+            self._model = AutoModelForCausalLM.from_pretrained(
+                self.model_id, device_map="auto", **common
+            ).eval()
+        except (ImportError, ValueError):
+            self._model = AutoModelForCausalLM.from_pretrained(
+                self.model_id, **common
+            ).to(self._device).eval()
 
     def _ensure_loaded(self) -> None:
         if self._model is None:

@@ -17,7 +17,7 @@ DEFAULT_SETTINGS_PATH = "config/settings.yaml"
 
 
 class AIDetectSettings(BaseModel):
-    model_id: str = "codellama/CodeLlama-7b-hf"
+    model_id: str = "bigcode/starcoder2-3b"
     device: str = "auto"
     engine: str = "transformers"          # transformers / vllm
     batch_size: int = 8
@@ -25,9 +25,11 @@ class AIDetectSettings(BaseModel):
     # 需要更高精度可经 AI_DETECT_K 或 settings.yaml 调回）。
     k_perturbations: int = 20
     min_loc: int = 20
-    log_rank_llm_threshold: float = 1.5
-    log_rank_human_threshold: float = 3.0
-    detect_score_threshold: float = 0.1
+    # 默认阈值针对 starcoder2-3b 标定（真人 log-rank 均值≈0.625）；工具原默认 1.5/3.0 不可用。
+    # 阈值与打分模型强相关，换模型需重新标定。详见 config/settings.yaml 注释。
+    log_rank_llm_threshold: float = 0.31
+    log_rank_human_threshold: float = 0.31
+    detect_score_threshold: float = 0.20
     git_blame: bool = True
     suspicious_min_confidence: float = 0.7
     max_functions: int = 0                # >0 时只检测前 N 个函数（限额/冒烟）
