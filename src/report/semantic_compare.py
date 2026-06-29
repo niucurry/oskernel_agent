@@ -26,7 +26,10 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.fastpath.scan import aggregate_file_similarity
+from src.fastpath.scan import (WHOLE_FILE_LINE_RATIO, WHOLE_FILE_SIM_RATIO,
+                               aggregate_file_similarity)
+
+from .libraries import match_library, reused_library_stats, tag_library_reuse
 
 DEFAULT_OUTPUT_DIR = "data/output"
 
@@ -117,90 +120,170 @@ _OPENCODE = _find_opencode()
 
 # ─── 1. 统计：各子模块复制/原创百分比 ─────────────────────────────────────────
 
-def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) -> dict:
-    """计算各子模块的复制/原创比例。
+# 一个 confirmed query 函数命中 >= 此数的不同历史仓库 → 公共/样板代码（如 print/println 宏），
+# 不计入「值得关注的借鉴」。复用上游 metadata 通道4 的判定（与 config common_code_repo_threshold 一致）。
+COMMON_CODE_REPO_THRESHOLD = 5
 
-    Returns: dict[module_tag] → {confirmed, review, weak, total,
-                                  copy_pct, original_pct, top_source}
+
+def _is_common_code(s: dict) -> bool:
+    """confirmed 但命中多个历史仓库的公共/样板代码（多队都有的同款 print 宏 / 样板函数）。
+
+    直接复用上游 metadata 通道4 的标注：confirmed 高广度命中只标注、不降级（见 metadata/runner.py），
+    这里据此把它从借鉴图/清单剔除，归入「公共/样板代码」小节。
     """
-    # recall.json 提供每个模块的函数总数（更准确）
-    module_totals: Counter = Counter()
-    if recall:
-        for item in recall.get("results", []):
-            q = item.get("query", {})
-            module_totals[q.get("module_tag", "other")] += 1
+    if s.get("common_code_note"):
+        return True
+    return (s.get("evidence") or {}).get("common_code_repos", 0) >= COMMON_CODE_REPO_THRESHOLD
 
-    agg: dict[str, dict] = {
-        mod: {"confirmed": 0, "review": 0, "weak": 0, "sources": Counter()}
-        for mod in MODULES
-    }
 
-    # 按 (file_path, func_name) 去重，避免同函数命中多个候选重复计数
-    seen_query: set[tuple[str, str]] = set()
+def _is_excluded_pair(s: dict) -> bool:
+    """不计入「值得关注的借鉴」的对：① vendored 库复用；② 公共/样板代码（命中多仓库）。"""
+    return bool(s.get("reuse_library")) or _is_common_code(s)
+
+
+def common_code_stats(suspects: list[dict]) -> list[dict]:
+    """公共/样板代码统计：命中多个历史仓库的公共/框架/样板函数（如 print/println 宏）。
+
+    含两类：① confirmed 但高广度命中（上游只标注未降级）；② 已降级为 common_code 档的。
+    按 query 函数去重、按命中仓库数降序。返回 [{name, file, start, module, repos}, ...]。
+    """
+    funcs: dict[tuple, dict] = {}
     for s in suspects:
-        tier = s.get("tier", "")
-        if tier in ("dismissed", "baseline_derived", "common_code"):
+        # 库复用单列；其余「命中多仓库」的公共/样板（confirmed-标注 或 已降级 common_code）都收进来
+        if s.get("reuse_library"):
+            continue
+        if not (_is_common_code(s) or s.get("tier") == "common_code"):
             continue
         q = s.get("query_func", {})
         key = (q.get("file_path", ""), q.get("func_name", ""))
+        repos = (s.get("evidence") or {}).get("common_code_repos", 0)
+        f = funcs.setdefault(key, {
+            "name": q.get("func_name", ""), "file": q.get("file_path", ""),
+            "start": q.get("start_line", 0), "module": q.get("module_tag", "other"), "repos": 0})
+        f["repos"] = max(f["repos"], repos)
+    out = list(funcs.values())
+    out.sort(key=lambda x: -x["repos"])
+    return out
+
+
+def baseline_stats(suspects: list[dict]) -> list[dict]:
+    """基线衍生统计：双侧均与同一基线库（教学OS/模板/官方第三方库）相似的函数。
+
+    按 query 函数去重。返回 [{name, file, start, module, source, note}, ...]。
+    """
+    funcs: dict[tuple, dict] = {}
+    for s in suspects:
+        if s.get("tier") != "baseline_derived":
+            continue
+        q = s.get("query_func", {})
+        key = (q.get("file_path", ""), q.get("func_name", ""))
+        funcs.setdefault(key, {
+            "name": q.get("func_name", ""), "file": q.get("file_path", ""),
+            "start": q.get("start_line", 0), "module": q.get("module_tag", "other"),
+            "source": s.get("candidate_func", {}).get("repo_id", ""),
+            "note": s.get("baseline_note", "")})
+    return sorted(funcs.values(), key=lambda x: (x["module"], x["name"]))
+
+
+def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) -> dict:
+    """各子模块 借鉴 / 待复核 / 原创 三类**函数数**统计（口径互斥、相加=total）。
+
+    按 query 函数去重、取最高档归类：
+      借鉴(confirmed)：confirmed 且非库复用、非公共/样板；
+      待复核(review)：review/weak（有命中但未确认），非库非样板；
+      原创(original)：recall 中（非库）完全未进入嫌疑清单的函数。
+    库复用 / 公共样板 / baseline 既不算借鉴也不算原创，**不计入 total**（在各自小节单列），
+    所以 total = 借鉴 + 待复核 + 原创，三者占比相加为 100%，且「原创」数与原创清单一致。
+
+    Returns: dict[module] → {confirmed, review, weak, original, total,
+                             copy_pct, review_pct, original_pct, top_source}
+    """
+    rank = {"confirmed": 3, "review": 2, "weak": 1}
+    best: dict[tuple, list] = {}                 # key -> [rank, module]
+    sources: dict[str, Counter] = defaultdict(Counter)
+    matched_keys: set[tuple] = set()             # 任何非 dismissed 命中（含库/公共）→ 不算原创
+    for s in suspects:
+        tier = s.get("tier", "")
+        q = s.get("query_func", {})
+        key = (q.get("file_path", ""), q.get("func_name", ""))
+        if tier != "dismissed":
+            matched_keys.add(key)
+        if _is_excluded_pair(s) or tier in ("dismissed", "baseline_derived", "common_code"):
+            continue
+        if tier not in rank:
+            continue
         mod = q.get("module_tag", "other")
-        if mod not in agg:
+        if mod not in MODULES:
             mod = "other"
-        c_repo = s.get("candidate_func", {}).get("repo_id", "?")
-        agg[mod]["sources"][c_repo] += 1
-        if key not in seen_query:
-            seen_query.add(key)
-            if tier in ("confirmed", "review", "weak"):
-                agg[mod][tier] += 1
+        r = rank[tier]
+        cur = best.get(key)
+        if cur is None or r > cur[0]:
+            best[key] = [r, mod]
+        if tier == "confirmed":
+            sources[mod][s.get("candidate_func", {}).get("repo_id", "?")] += 1
+
+    agg = {mod: {"confirmed": 0, "review": 0, "original": 0} for mod in MODULES}
+    for _key, (r, mod) in best.items():
+        agg[mod]["confirmed" if r == 3 else "review"] += 1
+
+    # 原创 = recall 中（非库）完全未进入嫌疑清单的函数
+    if recall:
+        for item in recall.get("results", []):
+            q = item.get("query", {})
+            if match_library(q.get("file_path")):
+                continue
+            key = (q.get("file_path", ""), q.get("func_name", ""))
+            if key in matched_keys:
+                continue
+            mod = q.get("module_tag", "other")
+            if mod not in MODULES:
+                mod = "other"
+            agg[mod]["original"] += 1
 
     result = {}
-    for mod, data in agg.items():
-        # total 优先用 recall 统计；无 recall 时用嫌疑对数量兜底。真正无任何函数的模块 total=0
-        # （不再虚构为 1），使其从概览图中自然排除——否则空模块会虚显为「100% 原创」的假条目。
-        total = (module_totals.get(mod, 0)
-                 or (data["confirmed"] + data["review"] + data["weak"]))
-        # 借鉴比例只按「已确认借鉴」(confirmed) 计：review(待复核)/weak(弱相似) 属不确定项，
-        # 报告已不展示，也不计入借鉴估算，避免不确定信号拉高比例。
-        copy_score = data["confirmed"]
-        copy_pct = min(1.0, copy_score / total) if total else 0.0
-        top_src = data["sources"].most_common(1)
+    for mod, d in agg.items():
+        total = d["confirmed"] + d["review"] + d["original"]
+        top = sources[mod].most_common(1)
         result[mod] = {
-            "confirmed": data["confirmed"],
-            "review":    data["review"],
-            "weak":      data["weak"],
-            "total":     total,
-            "copy_pct":     round(copy_pct, 3),
-            "original_pct": round(max(0.0, 1.0 - copy_pct), 3),
-            "top_source":   top_src[0][0] if top_src else "—",
+            "confirmed":    d["confirmed"],
+            "review":       d["review"],
+            "weak":         0,            # weak 已并入「待复核」(review)，保留键以兼容
+            "original":     d["original"],
+            "total":        total,
+            "copy_pct":     round(d["confirmed"] / total, 3) if total else 0.0,
+            "review_pct":   round(d["review"] / total, 3) if total else 0.0,
+            "original_pct": round(d["original"] / total, 3) if total else 0.0,
+            "top_source":   top[0][0] if top else "—",
         }
     return result
 
 
-def _original_functions(recall: dict, suspects: list[dict], top_n: int = 12) -> list[dict]:
-    """从 recall.json 中找出未被判为借鉴、且规模可观（>20 行）的函数（原创候选）。
+def _original_functions(recall: dict, suspects: list[dict], top_n: int | None = None) -> list[dict]:
+    """recall 中「完全未进入嫌疑清单（非库复用/非公共样板/非任何命中）」的函数 = 原创/自研。
 
-    判据用「是否进入查重命中清单」而非向量相似度阈值：代码嵌入的余弦相似度存在很高的
-    地板——OS 内核里链表操作 / 调度循环等结构高度雷同，实测无关函数 max_sim 也普遍 0.6+，
-    几乎不会 <0.5。用它当原创闸门会把几乎所有函数误判为非原创（实测真实仓库原创数恒为 0）。
-    真正的「行级是否抄袭」由 exact 阶段裁决：函数不在 suspects 里，即其最强候选的精确匹配
-    比例 <0.5，属原创。max_sim 仅随结果展示作辅助参考，不参与判定。
+    与 compute_submodule_stats 的「原创」同口径（matched = 任何非 dismissed 命中），所以二者
+    数量一致。判据用「是否进入命中清单」而非相似度阈值：代码嵌入余弦相似度有很高地板（OS
+    内核链表/调度循环等结构高度雷同，无关函数 max_sim 也普遍 0.6+），用阈值会把几乎所有函数
+    误判为非原创。返回**全部**原创函数（按行数降序）；展示层自行截断并显示总数。
     """
-    suspected_keys = {
+    matched_keys = {
         (s.get("query_func", {}).get("file_path", ""),
          s.get("query_func", {}).get("func_name", ""))
         for s in suspects
-        if s.get("tier") not in ("dismissed", "baseline_derived", "common_code")
+        if s.get("tier") != "dismissed"   # 任何命中（含库/公共/baseline）都不算原创
     }
     out = []
     for item in recall.get("results", []):
         q = item.get("query", {})
+        if match_library(q.get("file_path")):
+            continue  # vendored 第三方库代码不算原创/自研
         key = (q.get("file_path", ""), q.get("func_name", ""))
-        if key in suspected_keys:
+        if key in matched_keys:
             continue
         cands = item.get("candidates", [])
         max_sim = max((c.get("score", 0.0) for c in cands), default=0.0)
         lines = (q.get("end_line", 0) or 0) - (q.get("start_line", 0) or 0) + 1
-        if lines > 20:
+        if True:
             out.append({
                 "func":    q.get("func_name", ""),
                 "file":    q.get("file_path", ""),
@@ -211,12 +294,16 @@ def _original_functions(recall: dict, suspects: list[dict], top_n: int = 12) -> 
                 "lines":   lines,
             })
     out.sort(key=lambda x: -x["lines"])
-    return out[:top_n]
+    return out[:top_n] if top_n else out
 
 
 # ─── 2. 收集代码对（按 query 函数聚合全部候选） ──────────────────────────────
 
 _TIER_RANK = {"confirmed": 3, "review": 2, "weak": 1}
+
+# 候选来源展示下限：相似度低于此值的候选属召回巧合命中（非真实借鉴来源），不展示。
+# 取「弱相似」档下限 0.5（见 models.py tier 口径），避免 0.02/0.2 这类被误列为来源。
+MIN_CANDIDATE_SIM = 0.5
 
 
 def _pair_sim(s: dict) -> float:
@@ -246,7 +333,8 @@ def collect_file_pairs(
     groups: dict[tuple, dict] = {}
     for s in suspects:
         tier = s.get("tier", "")
-        if tier in ("dismissed", "baseline_derived", "common_code"):
+        # 库复用 / 公共样板代码不进相似清单，另在对应小节单列
+        if tier in ("dismissed", "baseline_derived", "common_code") or _is_excluded_pair(s):
             continue
         q = s.get("query_func", {})
         c = s.get("candidate_func", {})
@@ -285,8 +373,13 @@ def collect_file_pairs(
         cands.sort(key=lambda x: -x["sim"])
         g["overall_sim"] = cands[0]["sim"] if cands else 0.0
         g["clone_type"] = cands[0]["clone_type"] if cands else "—"
-        g["candidate_count"] = len(cands)
-        g["candidates"] = cands[:max_candidates]   # 限制展示候选数，避免报告过长
+        # 只展示「确有相似」的候选来源：相似度 >= 弱相似下限 或 confirmed。否则 recall 残留的
+        # 0.02/0.2 这类巧合命中会被误列为「借鉴来源」。至少保留最强 1 个（必为 confirmed）。
+        strong = [c for c in cands if c["sim"] >= MIN_CANDIDATE_SIM or c["tier"] == "confirmed"]
+        if not strong and cands:
+            strong = cands[:1]
+        g["candidate_count"] = len(strong)
+        g["candidates"] = strong[:max_candidates]   # 限制展示候选数，避免报告过长
 
     by_module: dict[str, list[dict]] = defaultdict(list)
     for g in groups.values():
@@ -614,48 +707,44 @@ def _fallback_analysis(file_pairs: list[dict], submodule_stats: dict) -> str:
 
 # ─── 5. 生成完整 HTML 报告 ────────────────────────────────────────────────────
 
-def _pct_bar(copy_pct: float) -> str:
-    """复制/原创双色进度条（copy 红 + original 绿）。"""
+def _pct_bar(copy_pct: float, review_pct: float = 0.0, original_pct: float | None = None) -> str:
+    """借鉴/待复核/原创 三色进度条（借鉴 红 + 待复核 琥珀 + 原创 绿）。"""
     c = round(copy_pct * 100)
-    o = 100 - c
-    return (
-        f'<div class="pct-bar" title="借鉴 {c}% / 原创 {o}%">'
-        f'<div class="pct-copy" style="width:{c}%">{c}%&nbsp;借鉴</div>'
-        f'<div class="pct-orig" style="width:{o}%">{o}%&nbsp;原创</div>'
-        f'</div>'
-    )
+    rv = round(review_pct * 100)
+    o = max(0, 100 - c - rv)
+    seg = ""
+    if c:
+        seg += f'<div class="pct-copy" style="width:{c}%">{c}%&nbsp;借鉴</div>'
+    if rv:
+        seg += f'<div class="pct-review" style="width:{rv}%">{rv}%&nbsp;待复核</div>'
+    if o:
+        seg += f'<div class="pct-orig" style="width:{o}%">{o}%&nbsp;原创</div>'
+    return f'<div class="pct-bar" title="借鉴 {c}% / 待复核 {rv}% / 原创 {o}%">{seg}</div>'
 
 
 def _echarts_overview(submodule_stats: dict) -> str:
-    """ECharts 堆叠横向柱图：每个模块的借鉴/原创比例。"""
+    """ECharts 堆叠横向柱图：每个模块的 借鉴/待复核/原创 比例（三者相加 100%）。"""
     mods = [m for m in MODULES if submodule_stats.get(m, {}).get("total", 0) > 0]
     if not mods:
         return ""
     labels = [_MODULE_DISPLAY.get(m, m) for m in mods]
-    copy_vals  = [round(submodule_stats[m]["copy_pct"] * 100, 1) for m in mods]
-    orig_vals  = [round(submodule_stats[m]["original_pct"] * 100, 1) for m in mods]
+    copy_vals = [round(submodule_stats[m]["copy_pct"] * 100, 1) for m in mods]
+    rev_vals  = [round(submodule_stats[m].get("review_pct", 0.0) * 100, 1) for m in mods]
+    orig_vals = [round(submodule_stats[m]["original_pct"] * 100, 1) for m in mods]
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
-        "legend": {"data": ["借鉴", "原创"]},
+        "legend": {"data": ["借鉴", "待复核", "原创"]},
         "grid": {"left": "25%", "right": "12%", "top": "8%", "bottom": "6%"},
         "xAxis": {"type": "value", "max": 100,
                   "axisLabel": {"formatter": "{value}%"}},
         "yAxis": {"type": "category", "data": labels[::-1]},
         "series": [
-            {
-                "name": "借鉴",
-                "type": "bar", "stack": "pct",
-                "data": copy_vals[::-1],
-                "itemStyle": {"color": "#ef4444"},
-                "label": {"show": True, "formatter": "{c}%"},
-            },
-            {
-                "name": "原创",
-                "type": "bar", "stack": "pct",
-                "data": orig_vals[::-1],
-                "itemStyle": {"color": "#22c55e"},
-                "label": {"show": True, "formatter": "{c}%"},
-            },
+            {"name": "借鉴", "type": "bar", "stack": "pct", "data": copy_vals[::-1],
+             "itemStyle": {"color": "#ef4444"}, "label": {"show": True, "formatter": "{c}%"}},
+            {"name": "待复核", "type": "bar", "stack": "pct", "data": rev_vals[::-1],
+             "itemStyle": {"color": "#f59e0b"}, "label": {"show": True, "formatter": "{c}%"}},
+            {"name": "原创", "type": "bar", "stack": "pct", "data": orig_vals[::-1],
+             "itemStyle": {"color": "#22c55e"}, "label": {"show": True, "formatter": "{c}%"}},
         ],
     }
     height = max(180, len(mods) * 40)
@@ -698,10 +787,12 @@ def _echarts_tier_distribution(submodule_stats: dict) -> str:
     )
 
 
-def _echarts_overall_donut(copy_pct: float) -> str:
-    """整体借鉴 vs 原创环形图（按函数加权），中心标注借鉴百分比。"""
+def _echarts_overall_donut(copy_pct: float, review_pct: float = 0.0,
+                           original_pct: float | None = None) -> str:
+    """整体 借鉴/待复核/原创 环形图（按函数加权），中心标注借鉴百分比。"""
     c = round(copy_pct, 1)
-    o = round(max(0.0, 100 - c), 1)
+    rv = round(review_pct, 1)
+    o = round(original_pct if original_pct is not None else max(0.0, 100 - c - rv), 1)
     option = {
         "title": {
             "text": f"{c}%", "subtext": "整体借鉴(按函数加权)",
@@ -711,13 +802,14 @@ def _echarts_overall_donut(copy_pct: float) -> str:
             "subtextStyle": {"fontSize": 11, "color": "#64748b"},
         },
         "tooltip": {"trigger": "item", "formatter": "{b}: {c}%"},
-        "legend": {"bottom": 0, "data": ["借鉴", "原创"]},
+        "legend": {"bottom": 0, "data": ["借鉴", "待复核", "原创"]},
         "series": [{
             "name": "占比", "type": "pie", "radius": ["54%", "78%"],
             "center": ["50%", "44%"], "avoidLabelOverlap": False,
             "label": {"show": False}, "labelLine": {"show": False},
             "data": [
                 {"value": c, "name": "借鉴", "itemStyle": {"color": "#ef4444"}},
+                {"value": rv, "name": "待复核", "itemStyle": {"color": "#f59e0b"}},
                 {"value": o, "name": "原创", "itemStyle": {"color": "#22c55e"}},
             ],
         }],
@@ -733,8 +825,8 @@ def _echarts_top_sources(suspects: list[dict], top: int = 8) -> str:
     """Top 借鉴来源仓库柱图：各历史仓库被「已确认借鉴」命中的对数（review/weak 已剔除）。"""
     agg: dict[str, dict] = defaultdict(lambda: {"confirmed": 0})
     for s in suspects:
-        if s.get("tier") != "confirmed":
-            continue
+        if s.get("tier") != "confirmed" or _is_excluded_pair(s):
+            continue  # 库复用 / 公共样板不计入「借鉴来源」排名
         repo = s.get("candidate_func", {}).get("repo_id", "?")
         agg[repo]["confirmed"] += 1
     if not agg:
@@ -791,24 +883,30 @@ def _summary_card(
     file_match_count: int = 0,
     file_similar_count: int = 0,
 ) -> str:
-    confirmed = len([s for s in suspects if s.get("tier") == "confirmed"])
+    # 按**函数**计（与各清单一致）：借鉴/待复核/原创 来自三类口径的统计
+    borrowed_n = sum(st["confirmed"] for st in submodule_stats.values())
+    review_n   = sum(st["review"] for st in submodule_stats.values())
+    original_n = sum(st["original"] for st in submodule_stats.values())
 
-    # 加权总借鉴比例（只按已确认借鉴）
-    all_copy = sum(st["copy_pct"] * st["total"] for st in submodule_stats.values())
+    # 加权总占比（按函数）
     all_total = sum(st["total"] for st in submodule_stats.values()) or 1
-    overall_copy_pct = round(all_copy / all_total * 100, 1)
+    overall_copy_pct = round(borrowed_n / all_total * 100, 1)
+    overall_review_pct = round(review_n / all_total * 100, 1)
+    overall_original_pct = round(original_n / all_total * 100, 1)
 
-    # KPI 卡片（只统计已确认借鉴；review/weak 不确定项已剔除）
+    # KPI 卡片（按函数；库复用 / 公共样板已剔除，单列各自小节）
     kpis = (
         '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">'
-        + _kpi(f"{confirmed}", "已确认借鉴（对）", "#ef4444")
+        + _kpi(f"{borrowed_n}", "已确认借鉴（函数）", "#ef4444")
+        + _kpi(f"{review_n}", "待复核（函数）", "#d97706")
+        + _kpi(f"{original_n}", "原创（函数）", "#16a34a")
         + _kpi(f"{file_match_count}", "整文件相同（文件）", "#e11d48")
         + _kpi(f"{file_similar_count}", "整体相似文件（个）", "#d97706")
         + '</div>'
     )
 
     # 头部：环形图（整体借鉴%）+ Top 借鉴来源仓库，左右并排
-    donut = _echarts_overall_donut(overall_copy_pct)
+    donut = _echarts_overall_donut(overall_copy_pct, overall_review_pct, overall_original_pct)
     top_src = _echarts_top_sources(suspects)
     head_charts = (
         '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 items-start">'
@@ -824,7 +922,7 @@ def _summary_card(
         + _echarts_tier_distribution(submodule_stats)
     )
     pct_chart = (
-        '<div class="mt-4 text-sm font-semibold text-slate-700">各模块借鉴 vs 原创占比</div>'
+        '<div class="mt-4 text-sm font-semibold text-slate-700">各模块 借鉴 / 待复核 / 原创 占比</div>'
         + _echarts_overview(submodule_stats)
     )
 
@@ -998,19 +1096,23 @@ def _module_section(
     sid   = f"sec-mod-{mod}"
     label = f"{disp} ({mod})"
     copy_pct = stats.get("copy_pct", 0.0)
+    review_pct = stats.get("review_pct", 0.0)
+    original_pct = stats.get("original_pct", 0.0)
 
-    # 子模块统计概要行（只统计已确认借鉴；review/weak 不确定项已剔除）
+    # 子模块统计概要行（借鉴/待复核/原创 三类，按函数；库复用/公共样板不计入）
     stat_row = (
         f'<div class="flex flex-wrap gap-3 text-sm mb-3">'
         f'<span class="px-2 py-0.5 rounded bg-red-50 text-red-700">'
-        f'借鉴估算 {copy_pct*100:.0f}%</span>'
+        f'借鉴 {copy_pct*100:.0f}%</span>'
+        f'<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-700">'
+        f'待复核 {review_pct*100:.0f}%</span>'
         f'<span class="px-2 py-0.5 rounded bg-green-50 text-green-700">'
-        f'原创估算 {(1-copy_pct)*100:.0f}%</span>'
+        f'原创 {original_pct*100:.0f}%</span>'
         f'<span class="text-slate-500">函数总数 {stats.get("total","—")} 个 | '
-        f'已确认借鉴 {stats.get("confirmed",0)} 个</span>'
+        f'借鉴 {stats.get("confirmed",0)} / 待复核 {stats.get("review",0)} / 原创 {stats.get("original",0)}</span>'
         f'<span class="text-slate-400">主要来源：{html.escape(stats.get("top_source","—"))}</span>'
         f'</div>'
-        + _pct_bar(copy_pct)
+        + _pct_bar(copy_pct, review_pct, original_pct)
     )
 
     # 只展示「已确认借鉴」清单（U6：每函数列出全部候选）
@@ -1255,10 +1357,12 @@ def _original_section(original_funcs: list[dict], linker, query_repo_id: str,
     llm_innov = _extract_module_analysis(analysis_html, "innovation") if analysis_html else ""
     if llm_innov:
         llm_innov = _linkify_with_gitlab(llm_innov, linker, query_repo_id)
+    _ORIG_TABLE_LIMIT = 50
     if not original_funcs:
-        body = ("<p class='text-slate-500 text-sm'>未发现明显原创函数"
-                "（与历史库最高相似度 &lt; 0.5 且规模 &gt; 20 行）。</p>")
+        body = ("<p class='text-slate-500 text-sm'>未发现原创函数"
+                "（所有函数都与历史代码库有相似命中）。</p>")
     else:
+        shown = original_funcs[:_ORIG_TABLE_LIMIT]
         rows = "".join(
             f'<tr>'
             f'<td class="text-xs">{html.escape(_MODULE_DISPLAY.get(f["module"], f["module"]))}</td>'
@@ -1269,12 +1373,15 @@ def _original_section(original_funcs: list[dict], linker, query_repo_id: str,
             f'<td class="text-xs">{f["lines"]} 行</td>'
             f'<td class="text-xs text-slate-400">最高相似度 {f["max_sim"]}</td>'
             f'</tr>'
-            for f in original_funcs
+            for f in shown
         )
+        more = (f'（按规模降序，列出最大的 {_ORIG_TABLE_LIMIT} 个）'
+                if len(original_funcs) > _ORIG_TABLE_LIMIT else '')
         body = (
             '<p class="text-sm text-slate-600 mb-3">'
-            '以下函数规模较大（&gt; 20 行）且与历史代码库最高相似度低（&lt; 0.5），'
-            '从设计维度看属于该作品的原创/自研实现（按所属子系统与规模排列；相似度仅作辅助参考）：'
+            f'共 <b>{len(original_funcs)}</b> 个函数完全未与历史代码库命中，'
+            f'从设计维度看属于该作品的原创/自研实现{more}。'
+            '此数与上方各模块「原创」占比同口径；相似度列仅作辅助参考（向量相似度有较高地板，不参与判定）：'
             '</p>'
             '<div class="overflow-x-auto">'
             '<table class="w-full text-sm border-collapse">'
@@ -1340,6 +1447,8 @@ body{background:#f6f8fa}
 .file-jump:hover,.repo-link:hover{text-decoration:underline solid}
 .pct-bar{display:flex;height:20px;border-radius:4px;overflow:hidden;margin:6px 0}
 .pct-copy{background:#ef4444;color:#fff;font-size:11px;
+  display:flex;align-items:center;padding:0 6px;min-width:0;white-space:nowrap}
+.pct-review{background:#f59e0b;color:#fff;font-size:11px;
   display:flex;align-items:center;padding:0 6px;min-width:0;white-space:nowrap}
 .pct-orig{background:#22c55e;color:#fff;font-size:11px;
   display:flex;align-items:center;padding:0 6px;min-width:0;white-space:nowrap}
@@ -1425,6 +1534,30 @@ _INIT_SCRIPT = """
 """
 
 
+def _file_similar_row(f: dict, linker, query_repo_id: str) -> str:
+    """「文件整体相似」单行：借鉴函数数 + 非函数(结构体等)行 + 整体相似% + 主要来源。"""
+    if f.get("method") == "line":
+        nf = f.get("line_nonfunc", 0)
+        tot = f.get("line_total", 0) or 1
+        nonfunc = f'{nf} 行（{round(nf / tot * 100)}%）'
+    else:
+        nonfunc = "—"
+    src = _ref_repo_anchor(linker, f["top_source"])
+    if f.get("top_source_file"):
+        src += ' ' + _make_gitlab_anchor(linker, f["top_source"], f["top_source_file"], 0)
+    return (
+        '<tr>'
+        '<td class="font-mono text-xs">'
+        + _make_gitlab_anchor(linker, query_repo_id, f["file_path"], 0) + '</td>'
+        f'<td class="text-xs">{html.escape(_MODULE_DISPLAY.get(f["module"], f["module"]))}</td>'
+        f'<td class="text-xs">{f["hit"]}/{f["total"]} 个函数</td>'
+        f'<td class="text-xs text-slate-500">{nonfunc}</td>'
+        f'<td class="text-xs font-semibold text-amber-700">{round(f["ratio"] * 100)}%</td>'
+        '<td class="text-xs text-slate-500">' + src + '</td>'
+        '</tr>'
+    )
+
+
 def _file_level_section(file_matches: list[dict], file_similar: list[dict],
                         linker, query_repo_id: str) -> tuple[str, str]:
     """文件级整体相同/相似清单（U3 的文件维度 + L0 结果）。"""
@@ -1460,34 +1593,27 @@ def _file_level_section(file_matches: list[dict], file_similar: list[dict],
             f'<tbody>{rows}</tbody></table></div>'
         )
     if file_similar:
-        rows = "".join(
-            '<tr>'
-            '<td class="font-mono text-xs">'
-            + _make_gitlab_anchor(linker, query_repo_id, f["file_path"], 0)
-            + '</td>'
-            f'<td class="text-xs">{html.escape(_MODULE_DISPLAY.get(f["module"], f["module"]))}</td>'
-            f'<td class="text-xs">{f["hit"]}/{f["total"]} 个函数</td>'
-            f'<td class="text-xs font-semibold text-amber-700">{round(f["ratio"]*100)}%</td>'
-            '<td class="text-xs text-slate-500">'
-            + _ref_repo_anchor(linker, f["top_source"])
-            + (' ' + _make_gitlab_anchor(linker, f["top_source"], f["top_source_file"], 0)
-               if f.get("top_source_file") else "")
-            + '</td>'
-            '</tr>'
-            for f in file_similar
-        )
+        rows = "".join(_file_similar_row(f, linker, query_repo_id) for f in file_similar)
+        line_based = any(f.get("method") == "line" for f in file_similar)
+        head = (f'文件整体相似（借鉴函数覆盖行 ≥{round(WHOLE_FILE_LINE_RATIO * 100)}% 文件总行，分母含结构体等非函数内容）'
+                if line_based else f'文件整体相似（≥{round(WHOLE_FILE_SIM_RATIO * 100)}% 函数命中借鉴）')
         parts.append(
             '<div class="text-sm font-semibold text-amber-700 mt-3 mb-1">'
-            f'文件整体相似（≥95% 函数命中借鉴）（{len(file_similar)} 个文件）</div>'
+            f'{head}（{len(file_similar)} 个文件）</div>'
             '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
             '<thead><tr class="bg-slate-50 text-slate-600">'
             '<th class="text-left p-2 border-b">新作品文件</th>'
             '<th class="text-left p-2 border-b">子系统</th>'
-            '<th class="text-left p-2 border-b">命中函数</th>'
+            '<th class="text-left p-2 border-b">借鉴函数</th>'
+            '<th class="text-left p-2 border-b">非函数内容(结构体等)</th>'
             '<th class="text-left p-2 border-b">整体相似</th>'
             '<th class="text-left p-2 border-b">主要来源</th>'
             '</tr></thead>'
             f'<tbody>{rows}</tbody></table></div>'
+            + ('<p class="text-xs text-slate-400 mt-1">'
+               '* 整体相似 = 借鉴(已确认)函数覆盖的非空行 ÷ 文件总非空行；分母含 struct/enum/'
+               '常量/宏/use 等非函数内容，故结构体占比大的文件不会因「函数都被借鉴」而被判整体相似。'
+               '</p>' if line_based else '')
         )
     body = "".join(parts)
     section = (
@@ -1508,6 +1634,182 @@ def _file_level_section(file_matches: list[dict], file_similar: list[dict],
     return toc, section
 
 
+def _reused_libraries_section(lib_stats: list[dict], query_repo_id: str) -> tuple[str, str]:
+    """复用库统计：列出新作品 vendored 的公开第三方库及规模。
+
+    这些库代码（lwext4 / smoltcp / fatfs …）为多队合法共用，已从借鉴图/清单中剔除，
+    此处单列说明，避免「数字凭空消失」。无复用库时返回空（不渲染本节）。
+    """
+    if not lib_stats:
+        return "", ""
+    sid = "sec-reused-libs"
+    total_funcs = sum(x["func_count"] for x in lib_stats)
+    total_pairs = sum(x["pair_count"] for x in lib_stats)
+    rows = "".join(
+        '<tr>'
+        f'<td class="text-xs font-semibold">{html.escape(x["name"])}</td>'
+        f'<td class="text-xs">{x["func_count"]}</td>'
+        f'<td class="text-xs">{x["pair_count"]}</td>'
+        f'<td class="text-xs">{x["repo_count"]}</td>'
+        '</tr>'
+        for x in lib_stats
+    )
+    body = (
+        '<p class="text-sm text-slate-600 mb-3">'
+        '本作品 vendored（整库签入）了以下公开第三方库。这类库代码为多队合法共用，'
+        '<b>不计入值得关注的借鉴/抄袭</b>，已从「主要借鉴来源」图、各模块借鉴占比/清单、'
+        '原创代码清单与文件级清单中剔除，仅在此单列。识别规则见 <code>config/libraries.yaml</code>，'
+        '如有遗漏可在该文件补充。'
+        '</p>'
+        '<div class="flex flex-wrap gap-3 text-sm mb-3">'
+        f'<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">复用库 {len(lib_stats)} 个</span>'
+        f'<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">库函数 {total_funcs} 个</span>'
+        f'<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">已剔除嫌疑对 {total_pairs}</span>'
+        '</div>'
+        '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
+        '<thead><tr class="bg-slate-50 text-slate-600">'
+        '<th class="text-left p-2 border-b">复用库</th>'
+        '<th class="text-left p-2 border-b">新作品中函数数</th>'
+        '<th class="text-left p-2 border-b">已剔除嫌疑对</th>'
+        '<th class="text-left p-2 border-b">命中历史仓库数</th>'
+        '</tr></thead>'
+        f'<tbody>{rows}</tbody></table></div>'
+    )
+    section = (
+        f'<section id="{sid}" data-section-id="{sid}" '
+        'class="mb-6 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden" '
+        f'x-data="{{open: true}}" '
+        f"x-init=\"(function(){{const s=localStorage.getItem('cmp:{sid}');if(s!==null)open=(s==='1');}})()\">"
+        '<div class="px-6 py-3 flex items-center gap-2 cursor-pointer select-none '
+        'border-b border-slate-200 bg-slate-50" '
+        f"@click=\"open=!open;localStorage.setItem('cmp:{sid}',open?'1':'0')\">"
+        '<span class="text-slate-400 w-4 text-center" x-text="open?\'▾\':\'▸\'"></span>'
+        '<h2 class="text-base font-semibold text-slate-800 m-0">复用库统计（不计入借鉴）</h2>'
+        '</div>'
+        '<div class="px-6 py-4" x-show="open" x-cloak>' + body + '</div>'
+        '</section>'
+    )
+    toc = f'<a class="toc-link" href="#{sid}">复用库统计</a>'
+    return toc, section
+
+
+def _common_code_section(cc_funcs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
+    """公共/样板代码小节：confirmed 但命中多个历史仓库的同款函数（不计入借鉴，已剔除）。"""
+    if not cc_funcs:
+        return "", ""
+    sid = "sec-common-code"
+    limit = 50
+    shown = cc_funcs[:limit]
+    rows = "".join(
+        '<tr>'
+        f'<td class="text-xs font-mono">{html.escape(f["name"])}</td>'
+        '<td class="font-mono text-xs">'
+        + _make_gitlab_anchor(linker, query_repo_id, f["file"], f.get("start", 0))
+        + '</td>'
+        f'<td class="text-xs">{f["repos"]} 个</td>'
+        '</tr>'
+        for f in shown
+    )
+    more = f'（按命中仓库数降序，列出前 {limit} 个）' if len(cc_funcs) > limit else ''
+    body = (
+        '<p class="text-sm text-slate-600 mb-3">'
+        f'下列 <b>{len(cc_funcs)}</b> 个函数同时命中 ≥{COMMON_CODE_REPO_THRESHOLD} 个不同历史仓库，'
+        '属多队通用的公共/框架/样板代码（如 console 的 print/println 宏、panic handler、lang_items 等），'
+        f'<b>不计入值得关注的借鉴</b>，已从摘要、借鉴来源图与各模块清单中剔除{more}。'
+        '</p>'
+        '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
+        '<thead><tr class="bg-slate-50 text-slate-600">'
+        '<th class="text-left p-2 border-b">函数</th>'
+        '<th class="text-left p-2 border-b">文件:行</th>'
+        '<th class="text-left p-2 border-b">命中历史仓库数</th>'
+        '</tr></thead>'
+        f'<tbody>{rows}</tbody></table></div>'
+    )
+    section = (
+        f'<section id="{sid}" data-section-id="{sid}" '
+        'class="mb-6 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden" '
+        f'x-data="{{open: true}}" '
+        f"x-init=\"(function(){{const s=localStorage.getItem('cmp:{sid}');if(s!==null)open=(s==='1');}})()\">"
+        '<div class="px-6 py-3 flex items-center gap-2 cursor-pointer select-none '
+        'border-b border-slate-200 bg-slate-50" '
+        f"@click=\"open=!open;localStorage.setItem('cmp:{sid}',open?'1':'0')\">"
+        '<span class="text-slate-400 w-4 text-center" x-text="open?\'▾\':\'▸\'"></span>'
+        '<h2 class="text-base font-semibold text-slate-800 m-0">公共/样板代码（不计入借鉴）</h2>'
+        '</div>'
+        '<div class="px-6 py-4" x-show="open" x-cloak>' + body + '</div>'
+        '</section>'
+    )
+    toc = f'<a class="toc-link" href="#{sid}">公共/样板代码</a>'
+    return toc, section
+
+
+def _baseline_section(base_funcs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
+    """基线衍生小节：双侧均与同一基线库（教学OS/模板/官方第三方库）相似的函数（不计入借鉴）。"""
+    if not base_funcs:
+        return "", ""
+    sid = "sec-baseline"
+    limit = 50
+    shown = base_funcs[:limit]
+    rows = "".join(
+        '<tr>'
+        f'<td class="text-xs font-mono">{html.escape(f["name"])}</td>'
+        '<td class="font-mono text-xs">'
+        + _make_gitlab_anchor(linker, query_repo_id, f["file"], f.get("start", 0))
+        + '</td>'
+        f'<td class="text-xs">{html.escape(f.get("source", "") or "—")}</td>'
+        f'<td class="text-xs text-slate-500">{html.escape(f.get("note", "") or "—")}</td>'
+        '</tr>'
+        for f in shown
+    )
+    more = f'（列出前 {limit} 个）' if len(base_funcs) > limit else ''
+    body = (
+        '<p class="text-sm text-slate-600 mb-3">'
+        f'下列 <b>{len(base_funcs)}</b> 个函数与新作品、历史库**同时**高度相似于某个基线库'
+        '（教学 OS rCore/uCore/xv6、组委会模板、官方第三方库等），属公共模板代码，'
+        f'<b>不计入值得关注的借鉴</b>{more}。'
+        '</p>'
+        '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
+        '<thead><tr class="bg-slate-50 text-slate-600">'
+        '<th class="text-left p-2 border-b">函数</th>'
+        '<th class="text-left p-2 border-b">文件:行</th>'
+        '<th class="text-left p-2 border-b">基线来源</th>'
+        '<th class="text-left p-2 border-b">说明</th>'
+        '</tr></thead>'
+        f'<tbody>{rows}</tbody></table></div>'
+    )
+    section = (
+        f'<section id="{sid}" data-section-id="{sid}" '
+        'class="mb-6 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden" '
+        f'x-data="{{open: false}}" '
+        f"x-init=\"(function(){{const s=localStorage.getItem('cmp:{sid}');if(s!==null)open=(s==='1');}})()\">"
+        '<div class="px-6 py-3 flex items-center gap-2 cursor-pointer select-none '
+        'border-b border-slate-200 bg-slate-50" '
+        f"@click=\"open=!open;localStorage.setItem('cmp:{sid}',open?'1':'0')\">"
+        '<span class="text-slate-400 w-4 text-center" x-text="open?\'▾\':\'▸\'"></span>'
+        '<h2 class="text-base font-semibold text-slate-800 m-0">基线衍生（不计入借鉴）</h2>'
+        '</div>'
+        '<div class="px-6 py-4" x-show="open" x-cloak>' + body + '</div>'
+        '</section>'
+    )
+    toc = f'<a class="toc-link" href="#{sid}">基线衍生</a>'
+    return toc, section
+
+
+def _excluded_divider() -> tuple[str, str]:
+    """「不计入借鉴的代码」分隔横幅 + TOC 锚（其后跟 库复用/公共样板/基线衍生 各小节）。"""
+    sid = "sec-excluded"
+    section = (
+        f'<section id="{sid}" data-section-id="{sid}" class="mt-10 mb-3">'
+        '<h2 class="text-base font-bold text-slate-500 border-t-2 border-dashed border-slate-300 pt-4 m-0">'
+        '附：不计入借鉴的代码（已从上方统计与清单中剔除，仅供核对）</h2>'
+        '<p class="text-xs text-slate-400 mt-1">以下各类为「多队合法共用」或「非作者原创」的代码——'
+        'vendored 第三方库、命中多仓库的公共/样板函数、基线模板衍生——均不属于值得关注的借鉴。</p>'
+        '</section>'
+    )
+    toc = f'<a class="toc-link" href="#{sid}">— 不计入借鉴的代码 —</a>'
+    return toc, section
+
+
 def generate_comparison_html(
     query_repo_id: str,
     suspects: list[dict],
@@ -1519,6 +1821,9 @@ def generate_comparison_html(
     linker=None,
     file_matches: list[dict] | None = None,
     file_similar: list[dict] | None = None,
+    lib_stats: list[dict] | None = None,
+    cc_funcs: list[dict] | None = None,
+    base_funcs: list[dict] | None = None,
 ) -> str:
     """组装完整的查重对比 HTML 报告（直接产出，不经 Markdown 转换）。"""
     file_matches = file_matches or []
@@ -1550,6 +1855,20 @@ def generate_comparison_html(
     toc_orig, sec_orig = _original_section(original_funcs, linker, query_repo_id, analysis_html)
     toc_items.append(toc_orig)
     body_parts.append(sec_orig)
+
+    # ── 报告最下方：不计入借鉴的代码（库复用 / 公共样板 / 基线衍生），分类单列 ──
+    bottom = [
+        _excluded_divider(),
+        _reused_libraries_section(lib_stats or [], query_repo_id),
+        _common_code_section(cc_funcs or [], linker, query_repo_id),
+        _baseline_section(base_funcs or [], linker, query_repo_id),
+    ]
+    # 分隔横幅仅在确有被剔除内容时才显示
+    if any(toc for toc, _ in bottom[1:]):
+        for toc, sec in bottom:
+            if toc:
+                toc_items.append(toc)
+                body_parts.append(sec)
 
     toc_html  = "\n".join(toc_items)
     main_html = "\n".join(body_parts)
@@ -1588,7 +1907,7 @@ def run_semantic_compare(
     query_repo_path: str | Path | None = None,
     recall_path: str | Path | None = None,
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    top_per_module: int = 5,
+    top_per_module: int = 20,
     skip_opencode: bool = False,
     filematch_path: str | Path | None = None,
 ) -> dict:
@@ -1599,7 +1918,8 @@ def run_semantic_compare(
         query_repo_path: 新作品本地克隆路径（用于文件链接 + 语义分析）
         recall_path:     embed 阶段产出的 *_recall.json（用于计算函数总数 / 原创函数）
         output_dir:      HTML 输出目录
-        top_per_module:  每个子模块送入 LLM 的最大代码对数
+        top_per_module:  每个子模块送入 LLM 语义分析的最大代码对数（默认 20；
+                         模块借鉴对 <20 时即全部做语义分析，仅超量时截断以控 token）
         skip_opencode:   True 时跳过 LLM，仅用规则生成报告（调试用）
         filematch_path:  fastpath（L0 文件指纹层）产出的 *_filematch.json（整文件复制清单）
     """
@@ -1607,6 +1927,7 @@ def run_semantic_compare(
     data          = json.loads(suspects_path.read_text(encoding="utf-8"))
     suspects      = data.get("suspects", [])
     query_repo_id = data.get("query_repo_id") or suspects_path.stem.split("_suspects")[0]
+    reuse_n       = tag_library_reuse(suspects)  # 标注 vendored 库复用，供各图/清单剔除
 
     recall: dict | None = None
     if recall_path and Path(recall_path).exists():
@@ -1616,16 +1937,23 @@ def run_semantic_compare(
     file_matches: list[dict] = []
     if filematch_path and Path(filematch_path).exists():
         file_matches = json.loads(Path(filematch_path).read_text(encoding="utf-8")).get("matched_files", [])
-    file_similar = aggregate_file_similarity(suspects, recall)
+    file_similar = aggregate_file_similarity(suspects, recall, query_repo_path=query_repo_path)
+    # 库复用文件（vendored 第三方库）不进文件级清单，另在「复用库统计」小节单列
+    file_matches = [m for m in file_matches if not match_library(m.get("query_file"))]
+    file_similar = [f for f in file_similar if not match_library(f.get("file_path"))]
 
-    logger.info("[compare] 新作品 {}：{} 个嫌疑对，整文件相同 {} 个，整体相似 {} 个",
-                query_repo_id, len(suspects), len(file_matches), len(file_similar))
+    logger.info("[compare] 新作品 {}：{} 个嫌疑对（其中库复用 {} 个已剔除），整文件相同 {} 个，整体相似 {} 个",
+                query_repo_id, len(suspects), reuse_n, len(file_matches), len(file_similar))
 
     # 统计
     submodule_stats = compute_submodule_stats(suspects, recall)
-    # 表格展示：confirmed 全 + review/weak 限量；送 LLM：每模块再取 sim 最高若干个，控 token
-    file_pairs = collect_file_pairs(suspects, top_per_module=top_per_module)
-    llm_pairs  = _limit_per_module(file_pairs, 5)
+    lib_stats       = reused_library_stats(suspects, recall)
+    cc_funcs        = common_code_stats(suspects)
+    base_funcs      = baseline_stats(suspects)
+    # 表格展示：confirmed 全量；送 LLM 做语义分析：每模块取 sim 最高的 top_per_module 个
+    # （默认 20——模块借鉴对 <20 时即全部送语义分析，仅在超量时截断以控 token）
+    file_pairs = collect_file_pairs(suspects)
+    llm_pairs  = _limit_per_module(file_pairs, top_per_module)
 
     # 原创候选函数
     original_funcs  = _original_functions(recall, suspects) if recall else []
@@ -1664,6 +1992,9 @@ def run_semantic_compare(
         linker          = linker,
         file_matches    = file_matches,
         file_similar    = file_similar,
+        lib_stats       = lib_stats,
+        cc_funcs        = cc_funcs,
+        base_funcs      = base_funcs,
     )
 
     safe_id  = query_repo_id.replace("/", "_")
@@ -1679,4 +2010,7 @@ def run_semantic_compare(
         "original_funcs":   len(original_funcs),
         "file_matches":     len(file_matches),
         "file_similar":     len(file_similar),
+        "library_reuse_pairs": reuse_n,
+        "reused_libraries":    lib_stats,
+        "common_code_funcs":   len(cc_funcs),
     }

@@ -62,8 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="fastpath 产出的 *_filematch.json（L0 整文件复制清单）")
     pc.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR,
                     help=f"HTML 输出目录（默认 {DEFAULT_OUTPUT_DIR}）")
-    pc.add_argument("--top-per-module", type=int, default=5,
-                    help="每个子模块送入 opencode 的最大相似代码对数（默认 5）")
+    pc.add_argument("--top-per-module", type=int, default=20,
+                    help="每个子模块送入语义分析的最大相似代码对数（默认 20；模块借鉴对 <20 时全部分析）")
     pc.add_argument("--skip-opencode", action="store_true",
                     help="跳过 opencode，仅用规则生成报告（调试用）")
 
