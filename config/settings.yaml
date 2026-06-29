@@ -50,15 +50,22 @@ llm:
 ai_detect:
   # AI 生成代码检测（DetectCodeGPT，困惑度/log-rank）。参考模型 14GB，建议在带 GPU 的宿主机
   # 单独运行 `python -m src.ai_detect --repo X`；VM 无模型时该步骤优雅跳过，报告章节给出说明。
-  model_id: data/models/starcoder2-3b  # 本地权重（bigcode/starcoder2-3b），3B/bf16≈6GB 可整模型上 RTX 4060(8GB)；CodeLlama-7b-hf≈13GB 会 OOM
-  device: auto                 # auto / cpu / cuda / mps
+  # 打分模型：本系统选定 bigcode/starcoder2-3b（3B/bf16≈6GB，可整模型上 8GB 卡如 RTX 4060；
+  # 比 CodeLlama-7b 更轻更快）。首次使用需把权重下到 HF 缓存，之后离线即可加载：
+  #   HF_ENDPOINT=https://hf-mirror.com huggingface-cli download bigcode/starcoder2-3b
+  # （权重为 fp32≈12GB，加载时按 bf16 上卡只占 ~6GB）。未下到权重时该步骤优雅跳过、报告章节给出说明。
+  model_id: bigcode/starcoder2-3b
+  device: auto                 # auto / cpu / cuda / mps（loader 用 device_map=auto：放得下整模型上 GPU，放不下自动卸载部分层到 CPU）
   engine: transformers         # transformers / vllm
   batch_size: 8                # 模型前向批大小
   k_perturbations: 20          # Stage 2 每函数扰动次数（P2：50→20，只作用于灰区函数；配合早停+两阶段门，质量影响限于已转人工复核的边界样本）
   min_loc: 20                  # 低于此有效行数的函数判 Uncertain（信号不足）
-  log_rank_llm_threshold: 1.5  # Stage 1：log_rank < 此值 → LLM（高置信）
-  log_rank_human_threshold: 3.0 # Stage 1：log_rank > 此值 → Human（高置信）
-  detect_score_threshold: 0.1  # Stage 2：NPR score > 此值 → LLM
+  # 阈值标定（针对 starcoder2-3b 的实测最佳值；真人 log-rank 均值≈0.625）。
+  # 注意：工具原默认 1.5/3.0 不可用——会把几乎所有代码判成 AI。阈值与打分模型强相关，
+  # 换模型（如 CodeLlama-7b）必须重新标定，不能照搬这里的值。
+  log_rank_llm_threshold: 0.31  # Stage 1：log_rank < 此值 → LLM（高置信，AI 生成）
+  log_rank_human_threshold: 0.31 # Stage 1：log_rank > 此值 → Human（高置信，真人）；与上者相等 = 以 0.31 为单一判定线，NPR 仅兜边界
+  detect_score_threshold: 0.20  # Stage 2：NPR score > 此值 → LLM（辅助信号）
   git_blame: true              # 是否按作者/月份聚合（git blame）
   suspicious_min_confidence: 0.7 # 进入“高度可疑函数”清单的置信下限
   max_functions: 0             # >0 时只检测前 N 个函数（冒烟/限额用，0=全量）

@@ -305,13 +305,15 @@ def _get_blame_info(
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",      # git 输出是 UTF-8；中文 Windows 默认 GBK 解码会 UnicodeDecodeError
+            errors="replace",      # 个别非法字节用替换符兜底，避免整步崩溃
             cwd=str(repo_root),
             timeout=8,
         )
-        if result.returncode != 0:
+        if result.returncode != 0 or not result.stdout:
             return None
         return _parse_blame_output(result.stdout)
-    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+    except (subprocess.SubprocessError, FileNotFoundError, OSError, ValueError):
         return None
 
 
