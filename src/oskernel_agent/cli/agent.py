@@ -132,6 +132,22 @@ def _git_remote_and_sha(repo_path: Path) -> tuple[str | None, str | None]:
     return (url or None), (sha or None)
 
 
+def _finalize_tree_output(html_path: Path, work_dir: Path, tree_json_path: Path,
+                          repo_name: str) -> Path:
+    """删除生成期间的衍生产物，只保留最终 HTML，归档到以仓库名命名的子目录。"""
+    import shutil
+
+    shutil.rmtree(work_dir, ignore_errors=True)
+    Path(tree_json_path).unlink(missing_ok=True)
+
+    final_dir = Path(html_path).parent / repo_name
+    final_dir.mkdir(parents=True, exist_ok=True)
+    final_html = final_dir / Path(html_path).name
+    if Path(html_path).resolve() != final_html.resolve():
+        Path(html_path).replace(final_html)
+    return final_html
+
+
 # 树状报告主入口
 
 def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
@@ -194,11 +210,15 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
             scheme=scheme, gitlab_base=(gl_url, gl_sha),
         )
         print(f"[计时] HTML 渲染：{time.perf_counter() - _tr:.1f}s")
-        print(f"\n[完成] HTML 报告：{html_path}")
         if broken:
             print(f"[警告] HTML 中有 {len(broken)} 个文件引用断链",
                   file=sys.stderr)
-        return html_path
+
+        # 6. 清理衍生中间产物（work_dir、tree.json 仅用于生成 HTML，渲染完即可丢弃），
+        #    最终 HTML 归档到以仓库名命名的子目录，便于与查重对比报告共用同一输出根目录。
+        final_html = _finalize_tree_output(html_path, work_dir, tree_json_path, repo_name)
+        print(f"\n[完成] 报告：{final_html}")
+        return final_html
     except Exception as e:
         print(f"[错误] HTML 渲染失败：{e}", file=sys.stderr)
         return None
