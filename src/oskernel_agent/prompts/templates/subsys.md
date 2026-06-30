@@ -9,17 +9,17 @@
 - 第 1 层（子系统）：1 份子系统总览 .md + 1 份结构化 JSON
 - 第 2 层（模块）：N 份模块详细 .md（你自己决定 N，典型 2–5 个，最多 8 个）
 
-━━ 初始化（必须第一步）━━
+━━ 初始化（由工具自动完成，禁止手动调用）━━
 
-1. initialize_analysis(repo_path)
-2. analyze_subtree('') — 一次性获取整个仓库的符号清单（你只关心
+1. 不要调用 initialize_analysis；分析工具会在首次调用时根据 repo_path 自动初始化。
+2. 直接调用 analyze_subtree('') — 一次性获取整个仓库的符号清单（你只关心
    本子系统的文件，但调用图可能跨子系统）
 
 ━━ 工作步骤 ━━
 
 1. 读 user message 中的 repo_path / subsystem / reference_os / files / outputs
 
-2. initialize_analysis(repo_path)
+2. 不要调用 initialize_analysis；直接使用 analyze_subtree/read_file/find_symbol_definition。
 
 3. analyze_subtree('') — 拿到全仓库符号地图
 
@@ -115,19 +115,12 @@ JSON 中不要出现 score 字段。
 你产出的内容会**原样嵌入**最终页面（不经过任何 Markdown 转换），页面已加载
 Tailwind CSS 排版。所以请直接输出**语义化 HTML 片段**：
 
-- **所有正文必须用简体中文写作，严禁出现独立的英文句子或英文段落。** 代码标识符
-  （函数名、类型名、关键字等）可保留英文并用 `<code>` 包裹，但承载它们的句子本身必须是中文。
 - 正文用 `<h3>` / `<h4>` / `<p>` / `<ul><li>` / `<table>` / `<strong>` / `<code>`。
   外层会套 `prose` 排版样式，写干净的语义标签即可，无需自己加 class。
 - **文件引用**直接写 `path:line`（例如 `kernel/trap.c:42`），系统会自动把它变成
   可点击跳转到源文件的链接——纯文本或 `<code>kernel/trap.c:42</code>` 均可，
   **不要**自己写 `<a>`。**凡是提到具体函数 / 结构 / 代码位置，都要带上 file:line**。
-  路径一律用**相对仓库根的完整路径**（files[*].path 原样），**散文里也不例外**：
-  写 `src/task/processor.rs:42`，**绝不要**写成 `processor.rs:42` 或 `processor.rs`。
-  裸文件名无法唯一定位，会被降级成不可点击的纯文本（不再渲染为链接），等于白写。
-  **尤其是双架构 / 多子树仓库**（如 `src/` 与 `src-la/` 并存、同名文件分布在多处）：
-  `manager.rs`、`task.rs` 这类名字在两棵子树都存在，必须带上 `src/` 或 `src-la/`
-  前缀指明是哪一个；若一句话同时涉及两套实现，就分别写出两个完整路径。
+  路径一律用**相对仓库根的完整路径**（files[*].path 原样），**不要只写文件名**。
 
 **不要画架构图 / 流程图**（不要输出 `<pre class="mermaid">` 或任何 Mermaid/流程图）——
 用简洁的文字 + 列表说明模块关系即可。**禁止**输出 ``` 这类 Markdown 围栏。

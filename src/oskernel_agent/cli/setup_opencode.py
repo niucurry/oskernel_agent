@@ -106,16 +106,27 @@ def setup() -> None:
 
     from .. import config
 
-    # provider 固定标识为 deepseek；模型名可由环境变量 LLM_MODEL 覆盖
-    # （平台切换到阿里云百炼后用 deepseek-v4-flash 等）。
     import os as _os
-    PROVIDER_ID = "deepseek"
-    model_id    = (_os.getenv("LLM_MODEL", "deepseek-chat").strip() or "deepseek-chat")
-    MODEL       = f"{PROVIDER_ID}/{model_id}"
 
     api_key   = config.api.get("key", "")
     base_url  = config.api.get("base_url", "").strip()
     max_steps = config.engine.get("max_steps", 200)
+
+    # provider 固定标识为 deepseek；模型名可由环境变量覆盖。
+    # 当前项目使用 DashScope OpenAI-compatible 入口时，deepseek-chat 会返回
+    # model not found，因此默认跟主报告链路保持一致使用 deepseek-v4-flash。
+    PROVIDER_ID = "deepseek"
+    default_model = (
+        "deepseek-v4-flash"
+        if "dashscope.aliyuncs.com" in base_url.lower()
+        else "deepseek-chat"
+    )
+    model_id = (
+        _os.getenv("LLM_MODEL")
+        or _os.getenv("AGENT_LLM_MODEL")
+        or default_model
+    ).strip() or default_model
+    MODEL = f"{PROVIDER_ID}/{model_id}"
 
     if not api_key:
         print("[错误] config.toml [api].key 未配置，请填写 DeepSeek API Key。",
@@ -133,15 +144,25 @@ def setup() -> None:
     _AUTH_FILE.write_text(json.dumps(auth, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[配置] 已写入 API 密钥到 {_AUTH_FILE}（provider: {PROVIDER_ID}）")
 
-    # MCP server 通过 `python -m oskernel_agent.cli.mcp_server` 启动，
-    # 需要项目以可编辑模式安装（pip install -e .），setup.sh 已自动处理。
+    # MCP server 通过当前项目 src 直接启动，避免依赖外部 shell 的 PYTHONPATH
+    # 或 editable install 状态；OpenCode 会把后续参数原样传给 python -c。
+    src_root = str(_PROJECT_ROOT / "src")
+    mcp_boot = (
+        "import runpy,sys;"
+        f"sys.path.insert(0,{src_root!r});"
+        "runpy.run_module('oskernel_agent.cli.mcp_server',run_name='__main__')"
+    )
     mcp_entry = {
         "type":    "local",
         "enabled": True,
         "command": [
-            _VENV_PY, "-m", "oskernel_agent.cli.mcp_server",
+            _VENV_PY, "-c", mcp_boot,
             "--max-steps", str(max_steps),
         ],
+        "environment": {
+            "PYTHONPATH": str(_PROJECT_ROOT / "src"),
+            "PYTHONIOENCODING": "utf-8",
+        },
     }
 
     # 读取或初始化全局配置
@@ -202,9 +223,18 @@ def setup() -> None:
             "model": MODEL,
             "system": prompt,
             "permission": {
-                "bash":  {"type": "deny"},
-                "edit":  {"type": "deny"},
-                "write": {"type": "deny"},
+                "bash":  {"*": "deny"},
+                "edit":  {"*": "deny"},
+                "write": {"*": "deny"},
+                "read":  {"*": "deny"},
+                "glob":  {"*": "deny"},
+                "grep":  {"*": "deny"},
+                "task":  {"*": "deny"},
+                "os-kernel-tools_initialize_analysis": {"*": "deny"},
+                "webfetch":  "deny",
+                "websearch": "deny",
+                "todowrite": "deny",
+                "skill":     {"*": "deny"},
             },
         }
         print(f"[配置] 注册 agent：{agent_name}（{len(prompt)} 字符）")
@@ -215,9 +245,18 @@ def setup() -> None:
         "model": MODEL,
         "system": plagiarism_system,
         "permission": {
-            "bash":  {"type": "deny"},
-            "edit":  {"type": "deny"},
-            "write": {"type": "deny"},
+            "bash":  {"*": "deny"},
+            "edit":  {"*": "deny"},
+            "write": {"*": "deny"},
+            "read":  {"*": "deny"},
+            "glob":  {"*": "deny"},
+            "grep":  {"*": "deny"},
+            "task":  {"*": "deny"},
+            "os-kernel-tools_initialize_analysis": {"*": "deny"},
+            "webfetch":  "deny",
+            "websearch": "deny",
+            "todowrite": "deny",
+            "skill":     {"*": "deny"},
         },
     }
     print(f"[配置] 注册 agent：os-kernel-plagiarism（{len(plagiarism_system)} 字符）")

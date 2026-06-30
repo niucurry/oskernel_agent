@@ -19,6 +19,8 @@ import numpy as np
 
 from loguru import logger
 
+from src.models import is_baseline_repo
+
 from .settings import EmbeddingSettings
 from .vector_store import VectorStore
 
@@ -127,8 +129,8 @@ class FaissVectorStore:
             # candidate_ids 限定时：用 IndexFlatIP 在子集上暴力搜（子集通常很小）
             if not candidate_ids:
                 return []
-            rows = np.array([self._id_to_row[fid] for fid in candidate_ids
-                             if fid in self._id_to_row], dtype="int64")
+            row_func_ids = [int(fid) for fid in candidate_ids if fid in self._id_to_row]
+            rows = np.array([self._id_to_row[fid] for fid in row_func_ids], dtype="int64")
             if len(rows) == 0:
                 return []
             sub_vecs = self._idx.reconstruct_batch(rows)  # type: ignore[attr-defined]
@@ -136,7 +138,7 @@ class FaissVectorStore:
             flat.add(sub_vecs)
             k = min(top_k + 1, len(rows))
             D, I = flat.search(q, k)
-            func_ids_found = [int(candidate_ids[i]) for i in I[0] if i >= 0]
+            func_ids_found = [row_func_ids[int(i)] for i in I[0] if i >= 0]
             scores = list(D[0])
         else:
             # 全局 HNSW 检索
@@ -155,15 +157,21 @@ class FaissVectorStore:
                 continue
             if module_tag and p["module_tag"] != module_tag:
                 continue
+            if baseline_only and not is_baseline_repo(p["repo_id"]):
+                continue
             results.append({
                 "id": fid,
                 "score": float(score),
-                "repo_id": p["repo_id"],
-                "file_path": p["file_path"],
-                "start_line": p["start_line"],
-                "end_line": p["end_line"],
-                "func_name": p["func_name"],
-                "module_tag": p["module_tag"],
+                "payload": {
+                    "repo_id": p["repo_id"],
+                    "year": int(p["repo_id"].split("/", 1)[0]) if p["repo_id"].split("/", 1)[0].isdigit() else None,
+                    "file_path": p["file_path"],
+                    "start_line": p["start_line"],
+                    "end_line": p["end_line"],
+                    "func_name": p["func_name"],
+                    "module_tag": p["module_tag"],
+                    "is_baseline": is_baseline_repo(p["repo_id"]),
+                },
             })
             if len(results) >= top_k:
                 break

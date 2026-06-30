@@ -112,48 +112,11 @@ def _env_disabled(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
 
 
-def _git_remote_and_sha(repo_path: Path) -> tuple[str | None, str | None]:
-    """从本地克隆取 (origin url, HEAD sha)，用于生成 GitLab 在线文件行级链接。
-
-    非 git 目录或取不到时返回 (None, None)，调用方据此回退本地 vscode 链接。
-    """
-    import subprocess
-
-    def _g(*args: str) -> str | None:
-        try:
-            r = subprocess.run(["git", "-C", str(repo_path), *args],
-                               capture_output=True, timeout=10)
-            return r.stdout.decode("utf-8", "replace").strip() if r.returncode == 0 else None
-        except Exception:  # noqa: BLE001 — git 缺失/超时一律回退
-            return None
-
-    url = _g("remote", "get-url", "origin")
-    sha = _g("rev-parse", "HEAD")
-    return (url or None), (sha or None)
-
-
-def _finalize_tree_output(html_path: Path, work_dir: Path, tree_json_path: Path,
-                          repo_name: str) -> Path:
-    """删除生成期间的衍生产物，只保留最终 HTML，归档到以仓库名命名的子目录。"""
-    import shutil
-
-    shutil.rmtree(work_dir, ignore_errors=True)
-    Path(tree_json_path).unlink(missing_ok=True)
-
-    final_dir = Path(html_path).parent / repo_name
-    final_dir.mkdir(parents=True, exist_ok=True)
-    final_html = final_dir / Path(html_path).name
-    if Path(html_path).resolve() != final_html.resolve():
-        Path(html_path).replace(final_html)
-    return final_html
-
-
 # 树状报告主入口
 
 def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
                    cli_depth: int = 3) -> Path | None:
     """自底向上构建 tree.json，并产出终端打印 + HTML 报告。"""
-    import time
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # 1. 采集共享事实档案
@@ -162,9 +125,7 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
         try:
             from ..analysis.repo_facts import build_repo_facts
             print("\n[预处理] 采集项目级共享事实档案 ...")
-            _tf = time.perf_counter()
             facts = build_repo_facts(repo_path, repo_name, ts)
-            print(f"[计时] 事实档案采集：{time.perf_counter() - _tf:.1f}s")
         except Exception as e:
             print(f"[警告] 事实档案构建失败：{e}（继续）", file=sys.stderr)
             facts = None
@@ -178,10 +139,8 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
     out_html.parent.mkdir(parents=True, exist_ok=True)
     work_dir = out_html.parent / f"{out_html.stem}_tree_work"
 
-    _tt = time.perf_counter()
     tree = build_tree(repo_path, repo_name, ts, facts=facts,
                        output_dir=work_dir)
-    print(f"[计时] tree 构建合计（A+B+C）：{time.perf_counter() - _tt:.1f}s")
 
     # 3. 写 tree.json（单一真相源）
     tree_json_path = out_html.with_suffix(".tree.json")
@@ -198,27 +157,14 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
     # 5. HTML 渲染
     try:
         from ..reports.html_tree import write_tree_html
-        _tr = time.perf_counter()
-        gl_url, gl_sha = _git_remote_and_sha(repo_path)
-        scheme = "gitlab" if gl_url else "vscode"
-        if gl_url:
-            print(f"[tree] 文件链接 → GitLab 在线（{gl_url} @ {(gl_sha or 'HEAD')[:8]}）")
-        else:
-            print("[tree] 未取到 git origin，文件链接回退本地 vscode://")
         html_path, broken = write_tree_html(
             out_html, tree, repo_roots=[repo_path],
-            scheme=scheme, gitlab_base=(gl_url, gl_sha),
         )
-        print(f"[计时] HTML 渲染：{time.perf_counter() - _tr:.1f}s")
+        print(f"\n[完成] HTML 报告：{html_path}")
         if broken:
             print(f"[警告] HTML 中有 {len(broken)} 个文件引用断链",
                   file=sys.stderr)
-
-        # 6. 清理衍生中间产物（work_dir、tree.json 仅用于生成 HTML，渲染完即可丢弃），
-        #    最终 HTML 归档到以仓库名命名的子目录，便于与查重对比报告共用同一输出根目录。
-        final_html = _finalize_tree_output(html_path, work_dir, tree_json_path, repo_name)
-        print(f"\n[完成] 报告：{final_html}")
-        return final_html
+        return html_path
     except Exception as e:
         print(f"[错误] HTML 渲染失败：{e}", file=sys.stderr)
         return None
