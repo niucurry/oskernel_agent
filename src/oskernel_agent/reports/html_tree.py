@@ -8,6 +8,7 @@ HTML 渲染：tree.json → 多层 Alpine.js 折叠树报告。
 from __future__ import annotations
 
 import html
+import json
 import re
 from pathlib import Path
 
@@ -25,46 +26,19 @@ _MERMAID_RE = re.compile(
     r'<pre\b[^>]*class="[^"]*\bmermaid\b[^"]*"[^>]*>.*?</pre>',
     re.DOTALL | re.IGNORECASE,
 )
+_ECHARTS_CHART_RE = re.compile(
+    r'<div\b(?=[^>]*class="[^"]*\becharts-chart\b)[^>]*>\s*'
+    r'<script\b[^>]*type=["\']application/json["\'][^>]*>.*?</script>\s*</div>',
+    re.DOTALL | re.IGNORECASE,
+)
 
 
 def _strip_diagrams(content: str) -> str:
     return _MERMAID_RE.sub("", content) if content else content
 
 
-# LLM 直出正文偶发 <div> 不配平：多出的 </div> 会冲出我们的包裹容器、提前关闭
-# verdict 卡片或树节点，使其后所有内容（含目录锚点对齐）整体上移一层 →「目录移位」。
-# 这里丢弃会让深度变负的游离 </div>，并在结尾补足未闭合的 <div>，把正文限制在自己的盒子里。
-_DIV_TAG_RE = re.compile(r'<div\b[^>]*>|</div\s*>', re.IGNORECASE)
-
-
-def _balance_divs(content: str) -> str:
-    if not content or "<div" not in content.lower():
-        return content
-    depth = 0
-    out: list[str] = []
-    pos = 0
-    for m in _DIV_TAG_RE.finditer(content):
-        out.append(content[pos:m.start()])
-        tag = m.group()
-        if tag.startswith("</"):
-            if depth > 0:           # 正常闭合
-                depth -= 1
-                out.append(tag)
-            # depth==0：游离 </div>，丢弃（否则会冲出包裹容器）
-        else:                       # <div ...>（div 不可自闭合，一律当开标签）
-            depth += 1
-            out.append(tag)
-        pos = m.end()
-    out.append(content[pos:])
-    if depth > 0:                   # 补足未闭合的 <div>
-        out.append("</div>" * depth)
-    return "".join(out)
-
-
-# LLM 直出正文里的 id 属性：剥离以免与结构锚点（#verdict/#tree/#similarity/#sub-*）
-# 撞 id，触发目录定位硬校验（assert_toc_resolves）而中止渲染。正文内图表按 class
-# 初始化、不依赖 id，正文亦无自带目录跳转，故剥离安全。
-_CONTENT_ID_RE = re.compile(r'\s+id="[^"]*"')
+def _strip_echarts_charts(content: str) -> str:
+    return _ECHARTS_CHART_RE.sub("", content) if content else content
 
 
 # 复用 html.py 的 CDN 头：已含 Tailwind + ECharts + Mermaid + Alpine 及其初始化。
@@ -158,6 +132,45 @@ def _score_pill(score) -> str:
     return f'<span class="score-pill {cls}">{s}</span>'
 
 
+def _render_verdict_radar(verdict: dict) -> str:
+    dims = [d for d in verdict.get("dimensions", []) if isinstance(d, dict)]
+    points: list[tuple[str, int]] = []
+    for d in dims:
+        name = str(d.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            score = int(round(float(d.get("score") or 0)))
+        except (TypeError, ValueError):
+            score = 0
+        points.append((name, max(0, min(100, score))))
+    if not points:
+        return ""
+
+    option = {
+        "title": {"text": f"{len(points)}维雷达图", "left": "center"},
+        "tooltip": {},
+        "radar": {
+            "indicator": [{"name": name, "max": 100} for name, _ in points],
+            "center": ["50%", "55%"],
+            "radius": "65%",
+        },
+        "series": [{
+            "name": "评分",
+            "type": "radar",
+            "data": [{"name": "评分", "value": [score for _, score in points]}],
+            "areaStyle": {"opacity": 0.18},
+            "lineStyle": {"width": 2},
+        }],
+    }
+    option_json = json.dumps(option, ensure_ascii=False).replace("</", "<\\/")
+    return (
+        '<div class="echarts-chart" style="height:380px">'
+        f'<script type="application/json">{option_json}</script>'
+        '</div>'
+    )
+
+
 def _resolve_path_anchor(path_with_line: str, resolver) -> str:
     """形如 'kernel/trap.c:42' 的字符串解析为链接。"""
     if not path_with_line:
@@ -169,9 +182,10 @@ def _resolve_path_anchor(path_with_line: str, resolver) -> str:
         f, line = path_with_line, None
     url = resolver(f, line) if resolver else None
     if url:
-        if url.startswith(_BROKEN_PREFIX):
-            return _esc(path_with_line)  # 无法唯一定位 → 纯文本，不生成 404 链接
-        return f'<a class="file-jump" href="{_esc(url)}">{_esc(path_with_line)}</a>'
+        broken = url.startswith(_BROKEN_PREFIX)
+        href = url[len(_BROKEN_PREFIX):] if broken else url
+        cls = "file-jump file-broken" if broken else "file-jump"
+        return f'<a class="{cls}" href="{_esc(href)}">{_esc(path_with_line)}</a>'
     return f'<span class="file-jump">{_esc(path_with_line)}</span>'
 
 
@@ -289,10 +303,11 @@ def _render_verdict(verdict: dict, resolver) -> str:
         for i in verdict.get("issues", [])
     )
 
-    # verdict 详细正文（agent 直出的 HTML，含雷达图）——剥离架构图后嵌入并链接化
-    content = _strip_diagrams(verdict.get("content") or "")
-    content = _CONTENT_ID_RE.sub("", content)  # 去掉正文 id，避免撞结构锚点
-    content = _balance_divs(content)           # 配平 <div>，避免游离 </div> 冲出卡片
+    radar_html = _render_verdict_radar(verdict)
+
+    # verdict 详细正文（agent 直出的 HTML）——剥离架构图和 LLM 手写图表后嵌入并链接化。
+    # 雷达图统一由结构化 dimensions 确定性生成，避免模型写出占位 0 分或尺度错误。
+    content = _strip_echarts_charts(_strip_diagrams(verdict.get("content") or ""))
     content_html = ""
     if content.strip():
         content_html = (
@@ -315,6 +330,7 @@ def _render_verdict(verdict: dict, resolver) -> str:
     </tr></thead>
     <tbody>{dims_html}</tbody>
   </table>
+  {radar_html}
   {content_html}
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
     <div>
@@ -512,7 +528,6 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
 
     # 详细叙述正文（subsystem / module 的 agent HTML 输出）——原样嵌入并链接化
     content = _strip_diagrams(node.get("content") or "")
-    content = _balance_divs(content)  # 配平 <div>，避免游离 </div> 冲出节点卡片
     if content.strip():
         body_parts.append(
             f'<div class="node-content prose prose-sm dark:prose-invert max-w-none mt-1 mb-2">'
@@ -556,17 +571,11 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
 
 def write_tree_html(out_path: Path, tree_json: dict,
                     repo_roots: list[Path] | None = None,
-                    title: str | None = None,
-                    scheme: str = "vscode",
-                    gitlab_base: tuple[str | None, str | None] | None = None,
-                    ) -> tuple[Path, set[str]]:
-    """把 tree.json 渲染为 HTML 并写入 out_path。返回 (path, 断链路径集合)。
-
-    scheme="gitlab" + gitlab_base=(repo_url, sha) 时文件链接指向 GitLab 在线行级地址。
-    """
+                    title: str | None = None) -> tuple[Path, set[str]]:
+    """把 tree.json 渲染为 HTML 并写入 out_path。返回 (path, 断链路径集合)。"""
     broken: set[str] = set()
     resolver = make_file_link_resolver(
-        repo_roots, scheme=scheme, broken_paths=broken, gitlab_base=gitlab_base,
+        repo_roots, scheme="vscode", broken_paths=broken,
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     html_text = render_tree_html(

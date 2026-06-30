@@ -22,7 +22,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -33,29 +32,26 @@ from ..parsers.code_parser import (
     find_source_roots,
 )
 from ..engines.llm_batch import (
-    BatchTask, cache_key, run_batch_task, _log,
+    BatchTask, cache_key, opencode_serial_enabled, run_batch_task,
 )
 
 SCHEMA_VERSION = "tree-v3"
-PROMPT_VERSION_SUBSYS  = "subsys-v9"   # v9: schema 内联 quote 中文点评/禁贴代码/禁英文示例；v8: 文件清单截断
-PROMPT_VERSION_VERDICT = "verdict-v14"
+PROMPT_VERSION_SUBSYS  = "subsys-v7"
+PROMPT_VERSION_VERDICT = "verdict-v15"
 
 MAX_MODULES_PER_SUBSYS = 8   # 每个子系统至多 N 个模块槽位
+MAX_FILES_IN_SUBSYS_PROMPT = 80
 
-# SUBSYS prompt 里最多列出的文件数。内存管理/设备驱动等大子系统文件可达数百个，
-# 完整清单会撑大每一轮输入、拖慢推理并诱使 agent 过度探索。按文件大小降序只列
-# 最有料的前 N 个；未列出的文件 agent 仍可凭 analyze_subtree/read_file 按需访问。
-MAX_FILES_IN_PROMPT = 80
-
-# 顶层评判 5 维度及其在总分中的权重（默认等权；如需侧重可调）。
+# 顶层评判 6 维度及其在总分中的权重（默认等权；如需侧重可调）。
 # score_total 由这些维度加权平均确定性算出，不再采信 LLM 自填的总分。
-VERDICT_DIMENSIONS = ["原创性", "架构合理性", "代码质量", "文档质量", "完整性"]
+VERDICT_DIMENSIONS = ["原创性", "架构合理性", "代码质量", "文档质量", "完整性", "功能性"]
 VERDICT_WEIGHTS = {
     "原创性":     1.0,
     "架构合理性": 1.0,
     "代码质量":   1.0,
     "文档质量":   1.0,
     "完整性":     1.0,
+    "功能性":     1.0,
 }
 
 _LANG_BY_EXT = {
@@ -101,7 +97,7 @@ def _read_md_if_exists(path: Path) -> str:
 
 # 并发度
 
-_DEFAULT_SUBSYS_CONCURRENCY = 4
+_DEFAULT_SUBSYS_CONCURRENCY = 10
 
 
 def _subsys_concurrency() -> int:
@@ -199,29 +195,44 @@ def _build_subsys_outputs(subsys_node: dict, work_dir: Path) -> dict:
     }
 
 
+def _files_for_subsys_prompt(files: list[dict]) -> list[dict]:
+    """控制 user message 长度，避免 Windows CreateProcess 命令行长度限制。"""
+    limit_raw = os.environ.get("AGENT_SUBSYS_PROMPT_FILE_LIMIT", "").strip()
+    try:
+        limit = int(limit_raw) if limit_raw else MAX_FILES_IN_SUBSYS_PROMPT
+    except ValueError:
+        limit = MAX_FILES_IN_SUBSYS_PROMPT
+    limit = max(20, min(limit, 200))
+    if len(files) <= limit:
+        picked = files
+    else:
+        # 覆盖更多目录和语言，比简单取前 N 个更利于 agent 建立子系统轮廓。
+        ranked: list[tuple[tuple[str, str, str], dict]] = []
+        for f in files:
+            path = str(f.get("path", ""))
+            top_dir = path.split("/", 1)[0]
+            ranked.append(((top_dir, str(f.get("lang", "")), path), f))
+        picked = [f for _, f in sorted(ranked)[:limit]]
+    return [
+        {"path": f["path"], "name": f["name"], "lang": f["lang"]}
+        for f in picked
+    ]
+
+
 def _build_subsys_request(subsys_node: dict, repo_path: Path,
                            outputs: dict, facts: dict | None) -> str:
     """构造 SUBSYS agent 的 user message。"""
     files = subsys_node["files"]
-    total_files = len(files)
-    # 大子系统按 size 降序只列前 N 个最有料的文件（详见 MAX_FILES_IN_PROMPT 注释）。
-    listed = sorted(files, key=lambda f: f.get("size", 0), reverse=True)[:MAX_FILES_IN_PROMPT]
-    omitted = total_files - len(listed)
+    prompt_files = _files_for_subsys_prompt(files)
     payload = {
         "repo_path":      str(repo_path),
         "subsystem":      subsys_node["name"],
         "reference_os":   (facts or {}).get("meta", {}).get("reference_os"),
-        "files":          [
-            {"path": f["path"], "name": f["name"], "lang": f["lang"]}
-            for f in listed
-        ],
+        "file_count":     len(files),
+        "files_truncated": len(prompt_files) < len(files),
+        "files":          prompt_files,
         "outputs":        outputs,
     }
-    if omitted > 0:
-        payload["note"] = (
-            f"本子系统共 {total_files} 个文件，清单仅列出体量最大的 {len(listed)} 个；"
-            f"另有 {omitted} 个较小文件未列出，如需可用 analyze_subtree(目录) 查看。"
-        )
     return (
         "你负责分析仓库中的某一个 OS 子系统（如文件系统、内存管理）。"
         "请阅读这些代码，**自己决定该子系统内部的模块拆分**"
@@ -233,26 +244,20 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
         "**不要画架构图/流程图**（不要 `<pre class=\"mermaid\">`），用文字说明模块关系；"
         "文件引用写纯文本 path:line（自动变链接）。\n\n"
         "工作步骤：\n"
-        "1. initialize_analysis(repo_path)\n"
-        "2. analyze_subtree('') 或针对 files 中目录调 analyze_subtree(dir)\n"
-        "3. 浏览 files 列表与符号清单，识别模块拆分\n"
-        "4. read_file / find_symbol_definition 看关键模块的实现细节\n"
-        "5. 工具调用总数 ≤12 次\n\n"
+        "1. 不要调用 initialize_analysis；工具会根据 repo_path 自动初始化\n"
+        "2. files 可能是截断索引；完整代码以 MCP 工具看到的仓库为准\n"
+        "3. 直接调用 analyze_subtree('') 或针对 files 中目录调 analyze_subtree(dir)\n"
+        "4. 浏览 files 列表与符号清单，识别模块拆分\n"
+        "5. read_file / find_symbol_definition 看关键模块的实现细节\n"
+        "6. 工具调用总数 ≤12 次\n\n"
         "**写出顺序**：先写各模块 HTML → 再写子系统总览 HTML → **最后**写 JSON。\n"
         "**不要给子系统或模块打分**（JSON 无 score 字段）。\n\n"
         "**不要对子系统或模块打分**——评分只在顶层 VERDICT 会话产出。\n\n"
-        "**硬性：summary 和 highlights/issues 的 quote 全部用简体中文写**——"
-        "即使源码注释是英文也必须用中文转述，禁止整句英文（函数名/类型名等标识符可保留原文）。\n"
-        "**quote 是「中文一句话点评」——说清这里好在哪 / 问题在哪，绝不能粘贴源代码原文**"
-        "（代码位置已由 path 指出）。\n"
-        "  ✅ 正例 quote：\"用 UPSafeCell 包裹 inode 内部状态，规避裸 static mut 的并发隐患\"\n"
-        "  ❌ 反例 quote：\"pub struct OSInode { readable: bool, writable: bool, ... }\"（贴代码）\n"
-        "  ❌ 反例 quote：\"All traps go through __alltraps defined in trap.S\"（整句英文）\n\n"
         "JSON schema：\n"
         '{\n'
-        '  "name":"...","role":"...","summary":"中文中性事实，≤200字",\n'
-        '  "highlights":[{"path":"fs/inode.rs:42","quote":"中文点评，说清好在哪"}],\n'
-        '  "issues":[{"path":"...","severity":"low|medium|high","quote":"中文说明问题所在"}],\n'
+        '  "name":"...","role":"...","summary":"...",\n'
+        '  "highlights":[{"path":"...","quote":"..."}],\n'
+        '  "issues":[{"path":"...","severity":"low|medium|high","quote":"..."}],\n'
         '  "modules":[\n'
         '    {"slot":1,"name":"模块名","summary":"≤200字",'
         '"file_paths":["..."]}\n'
@@ -310,9 +315,9 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
         cache_dir=sub_cache,
         cache_key=ck,
         fallback=_subsys_fallback(subsys_node),
+        repo_path=repo_path,
         enrich=_enrich,
     )
-    _t0 = time.perf_counter()
     parsed = run_batch_task(
         task,
         schema_hint='{"name":str,"role":str,"summary":str,'
@@ -321,8 +326,6 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
                     'file_paths:[...]}]}',
         timeout=600,
     )
-    _log(f"[计时] 子系统「{subsys_node['name']}」"
-         f"（{len(files)} 文件）：{time.perf_counter() - _t0:.1f}s")
 
     # 填子系统字段（子系统/模块不打分，评分只在顶层 VERDICT）
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
@@ -360,12 +363,18 @@ def run_subsys_stage(tree_root: dict, repo_path: Path,
     if not subsys_nodes:
         return
 
-    workers = _subsys_concurrency()
+    requested_workers = _subsys_concurrency()
+    serial_opencode = opencode_serial_enabled()
+    workers = 1 if serial_opencode else requested_workers
+    scheduled_workers = min(workers, len(subsys_nodes))
+    serial_note = ""
+    if serial_opencode:
+        serial_note = "；OpenCode CLI 串行执行以避免本地数据库锁"
     print(f"[tree] SUBSYS 阶段：{len(subsys_nodes)} 个子系统"
-          f"（并发 {min(workers, len(subsys_nodes))}）",
+          f"（并发 {scheduled_workers}{serial_note}）",
           file=sys.stderr, flush=True)
 
-    with ThreadPoolExecutor(max_workers=min(workers, len(subsys_nodes))) as ex:
+    with ThreadPoolExecutor(max_workers=scheduled_workers) as ex:
         futs = {
             ex.submit(_process_one_subsys, n, repo_path,
                       work_dir, cache_dir, facts): n
@@ -394,21 +403,20 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         "你是仓库顶层评判会话，综合下面"
         "facts + 各 OS 子系统的总结，产出整体评判结论。\n"
         "**详细正文写成独立 HTML 片段，JSON 只放结构化字段**。\n"
-        "正文直接写 HTML（不要 Markdown）：雷达图用 "
-        "`<div class=\"echarts-chart\" style=\"height:380px\"><script type=\"application/json\">{…}"
-        "</script></div>`；文件引用写纯文本 path:line（自动变链接）。\n\n"
+        "正文直接写 HTML（不要 Markdown）：不要输出 ECharts / Mermaid / SVG 图表，"
+        "六维雷达图由最终渲染器根据 JSON 评分自动生成；文件引用写纯文本 path:line（自动变链接）。\n\n"
         "工作步骤：\n"
-        "1. initialize_analysis(repo_path)\n"
+        "1. 不要调用 initialize_analysis；工具会根据 repo_path 自动初始化\n"
         "2. 必要时 compare_with_reference_os(facts.meta.reference_os) "
         "/ search_code 验证关键判断\n"
         "3. 工具调用 ≤5 次\n\n"
         "**写出顺序**：\n"
-        "  a. 详细评判 HTML 片段（含强制雷达图）→ 写到 outputs.content_path\n"
+        "  a. 详细评判 HTML 片段（不含图表）→ 写到 outputs.content_path\n"
         "  b. 结构化 JSON → 写到 outputs.json_path\n\n"
         "JSON schema：\n"
         '{\n'
         '  "score_total":int,\n'
-        '  "dimensions":[5 items: 原创性/架构合理性/代码质量/文档质量/完整性,\n'
+        '  "dimensions":[6 items: 原创性/架构合理性/代码质量/文档质量/完整性/功能性,\n'
         '    each {"name":"...","score":int,"reason":"..."}],\n'
         '  "highlights":[{"path":"...","quote":"..."}],\n'
         '  "issues":[{"path":"...","severity":"low|medium|high","quote":"..."}],\n'
@@ -427,6 +435,7 @@ def _verdict_fallback() -> dict:
             {"name": "代码质量",   "score": 60, "reason": "LLM 评判失败。"},
             {"name": "文档质量",   "score": 60, "reason": "LLM 评判失败。"},
             {"name": "完整性",     "score": 60, "reason": "LLM 评判失败。"},
+            {"name": "功能性",     "score": 60, "reason": "LLM 评判失败。"},
         ],
         "highlights": [],
         "issues":     [],
@@ -445,7 +454,7 @@ def _normalize_verdict(parsed: dict) -> dict:
       2. 重算总分：score_total = round(Σ w·score / Σ w)，覆盖 LLM 自填值。
     幂等：对已归一化的结果再跑一次不变。
     """
-    dims = parsed.get("dimensions") or []
+    dims = [d for d in (parsed.get("dimensions") or []) if isinstance(d, dict)]
     raw_scores: list[float | None] = []
     for d in dims:
         try:
@@ -454,16 +463,45 @@ def _normalize_verdict(parsed: dict) -> dict:
             raw_scores.append(None)
 
     present = [s for s in raw_scores if s is not None]
-    if not present:
-        return parsed
-
-    scale = 10 if max(present) <= 10 else 1
-    num = den = 0.0
+    scale = 10 if present and max(present) <= 10 else 1
+    by_name: dict[str, dict] = {}
     for d, raw in zip(dims, raw_scores):
         if raw is None:
             continue
+        name = str(d.get("name") or "").strip()
+        if not name:
+            continue
         score = max(0, min(100, int(round(raw * scale))))
-        d["score"] = score
+        nd = dict(d)
+        nd["name"] = name
+        nd["score"] = score
+        by_name[name] = nd
+
+    if by_name:
+        fallback_score = int(round(sum(int(d["score"]) for d in by_name.values()) / len(by_name)))
+    else:
+        try:
+            fallback_raw = float(parsed.get("score_total"))
+        except (TypeError, ValueError):
+            fallback_raw = 60
+        fallback_scale = 10 if fallback_raw <= 10 else 1
+        fallback_score = max(0, min(100, int(round(fallback_raw * fallback_scale))))
+
+    ordered_dims: list[dict] = []
+    for name in VERDICT_DIMENSIONS:
+        if name in by_name:
+            ordered_dims.append(by_name[name])
+        else:
+            ordered_dims.append({
+                "name": name,
+                "score": fallback_score,
+                "reason": "LLM 未给出该维度评分，按已有评分均值兜底。",
+            })
+    parsed["dimensions"] = ordered_dims
+
+    num = den = 0.0
+    for d in ordered_dims:
+        score = int(d.get("score") or 0)
         w = VERDICT_WEIGHTS.get(d.get("name"), 1.0)
         num += w * score
         den += w
@@ -526,11 +564,12 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
         cache_dir=verdict_cache,
         cache_key=ck,
         fallback=_verdict_fallback(),
+        repo_path=repo_path or Path("."),
         enrich=_enrich,
     )
     parsed = run_batch_task(
         task,
-        schema_hint='{"score_total":int,"dimensions":[...5 items...],'
+        schema_hint='{"score_total":int,"dimensions":[...6 items...],'
                     '"highlights":[...],"issues":[...],'
                     '"similarity":{reference_os:str,overlap_pct:int,level:str,'
                     'summary:str,borrowed:[...],original:[...]},'
@@ -599,27 +638,21 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
 
     # A. 按子系统枚举
     print(f"\n[tree] 按 OS 子系统归类源文件 ...")
-    _ta = time.perf_counter()
     tree_root, file_count = enumerate_subsystems(repo_path)
     print(f"[tree] 命中 {file_count} 个源文件，"
           f"{len(tree_root['children'])} 个子系统：" +
           " / ".join(c["name"] for c in tree_root["children"]))
-    print(f"[计时] 阶段A 子系统枚举：{time.perf_counter() - _ta:.1f}s")
 
     if file_count == 0:
         print("[tree] 仓库未找到可索引源文件，放弃。", file=sys.stderr)
         return _empty_tree(repo_name, ts, facts)
 
     # B. SUBSYS 并发分析
-    _tb = time.perf_counter()
     run_subsys_stage(tree_root, repo_path, out_dir, cache_dir, facts)
-    print(f"[计时] 阶段B SUBSYS 并发分析（合计）：{time.perf_counter() - _tb:.1f}s")
 
     # C. VERDICT 综合
     print(f"[tree] VERDICT 阶段 ...")
-    _tc = time.perf_counter()
     verdict = run_verdict_stage(tree_root, facts, out_dir, cache_dir, repo_path)
-    print(f"[计时] 阶段C VERDICT：{time.perf_counter() - _tc:.1f}s")
 
     return {
         "meta": {

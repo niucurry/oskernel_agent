@@ -9,6 +9,8 @@ MCP stdio server — 向 OpenCode 暴露 OS 内核分析工具集。
 import argparse
 import asyncio
 import json
+import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -24,7 +26,7 @@ from ..tools.reference_db import ReferenceOSDatabase
 # CLI 参数解析
 
 _ap = argparse.ArgumentParser(add_help=False)
-_ap.add_argument("--max-steps", type=int, default=200)
+_ap.add_argument("--max-steps", type=int, default=20)
 _args, _ = _ap.parse_known_args()
 
 _MAX_STEPS = _args.max_steps
@@ -39,6 +41,7 @@ _MAX_CONSECUTIVE_DUPS      = 5
 _MAX_SUFFIX_HALLUCINATIONS = 3
 
 _step_count:             int        = 0
+_init_repeat_count:      int        = 0
 _failed_symbols:         set[str]   = set()
 _queried_cache:          set[tuple] = set()
 _queried_results:        dict       = {}
@@ -50,6 +53,160 @@ _stop_next:              bool       = False
 
 def _log(msg: str) -> None:
     print(f"[MCP] {msg}", file=sys.stderr, flush=True)
+
+
+_QUICK_TOOL_NAMES = {
+    "read_file",
+    "search_code",
+    "list_implemented_syscalls",
+    "analyze_subtree",
+    "get_index_status",
+}
+
+
+def _normalize_tool_arguments(name: str, arguments: dict) -> dict:
+    args = dict(arguments or {})
+    if name == "read_file" and "path" not in args:
+        alias = args.get("file_path") or args.get("filepath")
+        if alias:
+            args["path"] = alias
+    if name == "analyze_subtree" and "subtree_path" not in args:
+        args["subtree_path"] = args.get("path", "")
+    return args
+
+
+def _quick_source_files(repo_path: Path, subtree_path: str = "") -> list[Path]:
+    source_exts = {".rs", ".c", ".h", ".cc", ".cpp", ".hpp", ".S", ".s", ".asm"}
+    skip_dirs = {"target", ".git", ".venv", "__pycache__", "node_modules"}
+    base = repo_path / subtree_path.strip().lstrip("/\\")
+    if base.is_file():
+        return [base] if base.suffix in source_exts else []
+    if not base.exists():
+        return []
+    files: list[Path] = []
+    for p in base.rglob("*"):
+        if not p.is_file() or p.suffix not in source_exts:
+            continue
+        if any(part in skip_dirs for part in p.relative_to(repo_path).parts):
+            continue
+        files.append(p)
+    return files
+
+
+_QUICK_SYMBOL_RE = re.compile(
+    r"\b(?:pub\s+)?(?:unsafe\s+)?(?:extern\s+\"C\"\s+)?fn\s+([A-Za-z_][\w]*)"
+    r"|^\s*(?:pub\s+)?(?:struct|enum|trait)\s+([A-Za-z_][\w]*)",
+    re.MULTILINE,
+)
+
+
+def _quick_analyze_subtree(repo_path: Path, subtree_path: str = "") -> str:
+    files = _quick_source_files(repo_path, subtree_path)
+    if not files:
+        return f"[快速模式] 子树 {subtree_path or '<root>'} 下未找到源文件。"
+
+    lines = [
+        f"## 子树分析（快速模式）：{subtree_path or '<root>'}",
+        f"文件数：{len(files)}",
+        "",
+        "### 文件列表",
+    ]
+    symbol_total = 0
+    shown_symbols: list[str] = []
+    for p in files[:80]:
+        rel = p.relative_to(repo_path).as_posix()
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        syms = []
+        for m in _QUICK_SYMBOL_RE.finditer(text):
+            name = m.group(1) or m.group(2)
+            if not name:
+                continue
+            line = text[:m.start()].count("\n") + 1
+            syms.append(f"`{name}` ({rel}:{line})")
+        symbol_total += len(syms)
+        lines.append(f"- {rel}（{len(syms)} 个快速符号）")
+        shown_symbols.extend(syms[:8])
+
+    if len(files) > 80:
+        lines.append(f"  ... 还有 {len(files) - 80} 个文件")
+    lines.extend(["", "### 符号样例", f"快速符号总数：{symbol_total}"])
+    lines.extend(f"- {s}" for s in shown_symbols[:120])
+    lines.append("\n[提示] 当前为快速模式，跳过调用图；可继续用 read_file 查看关键文件。")
+    return "\n".join(lines)
+
+
+def _quick_list_syscalls(repo_path: Path) -> str:
+    from ..tools.tool_dispatcher import _STANDARD_SYSCALLS, _SYSCALL_CATEGORIES
+
+    func_re = re.compile(r"\bfn\s+(?:sys_|syscall_)([A-Za-z0-9_]+)")
+    const_re = re.compile(r"\b(?:SYSCALL_|SYS_|NR_)([A-Z0-9_]+)\b")
+    found: dict[str, tuple[str, int, str]] = {}
+    for p in _quick_source_files(repo_path):
+        rel = p.relative_to(repo_path).as_posix()
+        try:
+            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for lineno, line in enumerate(lines, 1):
+            for m in func_re.finditer(line):
+                found.setdefault(m.group(1).lower(), (rel, lineno, "函数定义"))
+            for m in const_re.finditer(line):
+                found.setdefault(m.group(1).lower(), (rel, lineno, "分发表常量"))
+
+    standard_found = sorted(k for k in found if k in _STANDARD_SYSCALLS)
+    lines = [
+        "## Syscall 实现扫描（快速模式）",
+        f"标准 syscall 覆盖：{len(standard_found)}/{len(_STANDARD_SYSCALLS)}",
+        "",
+        "### 按类别",
+    ]
+    for cat, names in _SYSCALL_CATEGORIES.items():
+        hit = sorted(n for n in names if n in found)
+        if hit:
+            lines.append(f"- {cat}: {len(hit)}/{len(names)} — {', '.join(hit)}")
+    lines.extend(["", "### 证据样例"])
+    for name in standard_found[:80]:
+        rel, line, kind = found[name]
+        lines.append(f"- {name}: {rel}:{line}（{kind}）")
+    return "\n".join(lines)
+
+
+def _execute_quick_tool(name: str, arguments: dict, repo_path_str: str) -> str | None:
+    if name not in _QUICK_TOOL_NAMES:
+        return None
+
+    args = _normalize_tool_arguments(name, arguments)
+    repo_path = Path(repo_path_str).resolve()
+    if not repo_path.exists():
+        return f"[错误] 仓库路径不存在：{repo_path}"
+
+    if name == "read_file":
+        from ..tools.tool_handlers import read_file
+        return read_file(
+            str(repo_path),
+            args.get("path", ""),
+            args.get("start_line"),
+            args.get("end_line"),
+        )
+    if name == "search_code":
+        from ..tools.tool_handlers import search_code
+        return search_code(
+            str(repo_path),
+            args.get("pattern", ""),
+            args.get("file_glob"),
+            bool(args.get("case_sensitive", False)),
+            int(args.get("max_results", 50) or 50),
+        )
+    if name == "list_implemented_syscalls":
+        return _quick_list_syscalls(repo_path)
+    if name == "analyze_subtree":
+        return _quick_analyze_subtree(repo_path, args.get("subtree_path", "") or "")
+    if name == "get_index_status":
+        return "[快速模式] 静态索引尚未初始化；read_file/search_code/analyze_subtree 可直接使用。"
+    return None
 
 
 # 引擎懒加载代理：rust-analyzer/clangd 启动可能耗时数十秒，会让 initialize_analysis
@@ -366,13 +523,29 @@ def _make_tool_defs() -> list[types.Tool]:
             name="write_report",
             description=(
                 "将内容原样写入指定文件并返回完成信号（不做任何格式转换）。"
-                "调用前必须先用 validate_refs 验证引用路径，确认无断链后再写入。"
+                "必须实际调用本工具；不要把 <write_report>、JSON 或 XML 工具标签写成普通文本。"
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "content":     {"type": "string", "description": "要写入的内容（HTML 片段或结构化 JSON），原样落盘"},
                     "output_path": {"type": "string", "description": "输出文件的精确路径，原样写入（不会改后缀）"},
+                },
+                "required": ["content", "output_path"],
+            },
+        ),
+        types.Tool(
+            name="write_to_file",
+            description=(
+                "write_report 的兼容别名。将 content 原样写入 path/output_path。"
+                "必须实际调用本工具；不要把工具调用写成普通文本。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "content":     {"type": "string", "description": "要写入的内容，原样落盘"},
+                    "path":        {"type": "string", "description": "输出文件路径"},
+                    "output_path": {"type": "string", "description": "输出文件路径"},
                 },
                 "required": ["content"],
             },
@@ -407,6 +580,8 @@ async def list_tools() -> list[types.Tool]:
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     global _step_count, _consecutive_dup_count, _hallucination_count, _stop_next
 
+    arguments = _normalize_tool_arguments(name, arguments or {})
+
     # initialize_analysis 和 write_report 不参与步数/去重统计
     if name == "initialize_analysis":
         return await _handle_initialize(arguments)
@@ -414,7 +589,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     if name == "validate_refs":
         return _handle_validate_refs(arguments)
 
-    if name == "write_report":
+    if name in ("write_report", "write_to_file"):
         return _handle_write_report(arguments)
 
     if name == "load_skill":
@@ -475,9 +650,22 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
     ctx = _get_context()
     if ctx is None:
-        return [types.TextContent(type="text", text=(
-            "[错误] 尚未初始化分析。请先调用 initialize_analysis(repo_path)。"
-        ))]
+        auto_repo = os.environ.get("OSKERNEL_AGENT_REPO_PATH", "").strip()
+        if auto_repo:
+            quick = _execute_quick_tool(name, arguments, auto_repo)
+            if quick is not None:
+                _queried_cache.add(cache_key)
+                _queried_results[cache_key] = quick
+                _log(f"快速工具 {name} 返回 {len(quick)} 字符")
+                return [types.TextContent(type="text", text=quick)]
+            init_result = await _handle_initialize({"repo_path": auto_repo})
+            ctx = _get_context()
+            if ctx is None:
+                return init_result
+        else:
+            return [types.TextContent(type="text", text=(
+                "[错误] 尚未初始化分析，且 OSKERNEL_AGENT_REPO_PATH 未设置。"
+            ))]
 
     # 执行工具：放到工作线程，避免懒加载引擎阻塞 asyncio 事件循环
     try:
@@ -501,6 +689,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 # 工具处理器
 
 async def _handle_initialize(arguments: dict) -> list[types.TextContent]:
+    global _init_repeat_count
+
     repo_path_str = arguments.get("repo_path", "").strip()
 
     if not repo_path_str:
@@ -522,8 +712,14 @@ async def _handle_initialize(arguments: dict) -> list[types.TextContent]:
             and getattr(existing, "_cached_init_response", None)):
         engine = existing.engine
         engine_state = "就绪" if getattr(engine, "is_ready", lambda: True)() else "后台初始化中"
-        _log(f"复用已初始化上下文，引擎{engine_state}")
-        return [types.TextContent(type="text", text=existing._cached_init_response)]
+        _init_repeat_count += 1
+        _log(f"重复 initialize_analysis 第 {_init_repeat_count} 次，引擎{engine_state}")
+        return [types.TextContent(type="text", text=(
+            f"[已初始化] 仓库上下文已存在，引擎{engine_state}。"
+            "不要再调用 initialize_analysis。"
+            "请直接继续调用 analyze_subtree/read_file/find_symbol_definition 收集事实，"
+            "或在信息足够时调用 write_report 写入 outputs 中指定的文件。"
+        ))]
 
     try:
         from ..prompts.builder import build_layer_2, detect_crate_roles
@@ -555,6 +751,7 @@ async def _handle_initialize(arguments: dict) -> list[types.TextContent]:
             str(repo_path), engine, level2_idx, profile, structure, ref_db
         )
         _contexts[""] = ctx
+        _init_repeat_count = 0
 
         crate_roles = detect_crate_roles(str(repo_path), profile)
         layer2      = build_layer_2(structure, profile, level1_map, predicted_info, crate_roles)
@@ -719,8 +916,15 @@ def _handle_write_report(arguments: dict) -> list[types.TextContent]:
     统一渲染，本工具不再做任何 markdown→HTML 转换。引用路径的合法性由 validate_refs
     在写入前负责校验。
     """
-    content     = arguments.get("content", "")
-    output_path = arguments.get("output_path", "").strip()
+    content = arguments.get("content", "")
+    if not isinstance(content, str):
+        content = json.dumps(content, ensure_ascii=False, indent=2)
+    output_path = (
+        arguments.get("output_path")
+        or arguments.get("path")
+        or arguments.get("file_path")
+        or ""
+    ).strip()
 
     if not output_path:
         return [types.TextContent(type="text", text="[完成] 报告生成完毕。")]
