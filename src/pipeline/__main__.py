@@ -194,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             recall_path     = recall_path,
             output_dir      = out,
             filematch_path  = filematch_path,
+            ai_detect_path  = ai_detect_path,
         ))
         funnel["report"] = res["html_path"]
         funnel["report_html"] = res["html_path"]
