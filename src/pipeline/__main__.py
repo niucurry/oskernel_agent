@@ -1,10 +1,11 @@
 """全流水线总入口：
 
-  python -m src.pipeline --repo <新作品路径或 git url> [--top-k 20] [--skip-llm]
+  python -m src.pipeline --repo <新作品路径或 git url> [--top-k 20]
                          [--resume-from <step>] [--no-simhash] [--baselines]
 
-按序执行 ingest → recall(含 normalize) → exact → segment → metadata → review → report，
-每步落盘中间结果，打印每步耗时与漏斗数字。
+按序执行 ingest → fastpath → recall(含 normalize) → exact → segment → metadata
+→ ai_detect → report，每步落盘中间结果，打印每步耗时与漏斗数字。
+（LLM 复核步已下线：tier 由 exact/segment/metadata 确定性级联判定。）
 """
 
 from __future__ import annotations
@@ -31,7 +32,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m src.pipeline", description="作品查重全流水线。")
     p.add_argument("--repo", required=True, help="新作品本地路径或 git url")
     p.add_argument("--top-k", type=int, default=20)
-    p.add_argument("--skip-llm", action="store_true", help="跳过 LLM 复核（report 用模板兜底）")
     p.add_argument("--resume-from", choices=STEPS, default=None, help="从指定步骤续跑（需前序产物存在）")
     p.add_argument("--no-simhash", action="store_true", help="召回不启用 SimHash 粗筛")
     p.add_argument("--baselines", action="store_true", help="启用基线扣除（需 Qdrant 已有基线数据）")
@@ -43,7 +43,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--simhash-index", default=DEFAULT_INDEX)
     p.add_argument("--repos-root", default="data/repos")
     p.add_argument("--output-dir", default=DEFAULT_OUTPUT)
-    p.add_argument("--review-limit", type=int, default=None, help="只复核前 N 个 review 档")
     return p
 
 
@@ -78,7 +77,6 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     suspects_path = out / f"{repo_name}_suspects.json"
     v2_path = out / f"{repo_name}_suspects_v2.json"
     final_path = out / f"{repo_name}_suspects_final.json"
-    reviewed_path = out / f"{repo_name}_reviewed.json"
     ai_detect_path = out / f"{repo_name}_ai_detect.json"
 
     meta_commits = []

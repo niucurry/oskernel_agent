@@ -22,9 +22,10 @@ _DEFAULT_LIBRARIES: dict[str, list[str]] = {
     "lwext4": ["lwext4", "lwext4_rust"],
     "smoltcp": ["smoltcp"],
     "fatfs": ["fatfs", "rust-fatfs", "rust_fatfs"],
-    "virtio-drivers": ["virtio-drivers", "virtio_drivers"],
+    "virtio-drivers": ["virtio-drivers", "virtio_drivers", "virtio-drivers-la", "virtio_drivers_la"],
     "buddy_system_allocator": ["buddy_system_allocator"],
     "slab_allocator": ["slab_allocator"],
+    "riscv": ["riscv"],
 }
 _DEFAULT_VENDOR_DIRS = ("vendor", "third_party", "3rdparty", "thirdparty", "extern", "external")
 

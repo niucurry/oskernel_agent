@@ -665,7 +665,8 @@ def detect_reference_os(repo_path: str, structure: dict) -> dict:
     try:
         git_log = subprocess.run(
             ["git", "log", "--oneline", "--reverse", "--max-count=5"],
-            cwd=repo_path, capture_output=True, text=True, timeout=10
+            cwd=repo_path, capture_output=True, text=True, timeout=10,
+            encoding="utf-8", errors="replace",
         ).stdout.lower()
         for ref_name, hints in GIT_FIRST_COMMIT_HINTS.items():
             for hint in hints:

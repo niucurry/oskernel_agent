@@ -1351,18 +1351,17 @@ def _extract_module_analysis(analysis_html: str, mod: str) -> str:
 def _original_section(original_funcs: list[dict], linker, query_repo_id: str,
                       analysis_html: str = "") -> tuple[str, str]:
     """创新点分析章节（U8）：以设计维度（所属子系统 + 规模 + 定位）为主描述原创实现，
-    相似度仅作辅助标注。若 LLM 产出了创新点片段（data-module="innovation"）则优先展示。
+    列出全部原创函数（不再展示相似度列——向量相似度有领域地板、不参与判定，易误读）。
+    若 LLM 产出了创新点片段（data-module="innovation"）则优先展示。
     """
     sid = "sec-original"
     llm_innov = _extract_module_analysis(analysis_html, "innovation") if analysis_html else ""
     if llm_innov:
         llm_innov = _linkify_with_gitlab(llm_innov, linker, query_repo_id)
-    _ORIG_TABLE_LIMIT = 50
     if not original_funcs:
         body = ("<p class='text-slate-500 text-sm'>未发现原创函数"
                 "（所有函数都与历史代码库有相似命中）。</p>")
     else:
-        shown = original_funcs[:_ORIG_TABLE_LIMIT]
         rows = "".join(
             f'<tr>'
             f'<td class="text-xs">{html.escape(_MODULE_DISPLAY.get(f["module"], f["module"]))}</td>'
@@ -1371,17 +1370,14 @@ def _original_section(original_funcs: list[dict], linker, query_repo_id: str,
             + _make_gitlab_anchor(linker, query_repo_id, f["file"], f["start"], f.get("end", 0))
             + f'</td>'
             f'<td class="text-xs">{f["lines"]} 行</td>'
-            f'<td class="text-xs text-slate-400">最高相似度 {f["max_sim"]}</td>'
             f'</tr>'
-            for f in shown
+            for f in original_funcs
         )
-        more = (f'（按规模降序，列出最大的 {_ORIG_TABLE_LIMIT} 个）'
-                if len(original_funcs) > _ORIG_TABLE_LIMIT else '')
         body = (
             '<p class="text-sm text-slate-600 mb-3">'
             f'共 <b>{len(original_funcs)}</b> 个函数完全未与历史代码库命中，'
-            f'从设计维度看属于该作品的原创/自研实现{more}。'
-            '此数与上方各模块「原创」占比同口径；相似度列仅作辅助参考（向量相似度有较高地板，不参与判定）：'
+            '从设计维度看属于该作品的原创/自研实现（按规模降序，全部列出）。'
+            '此数与上方各模块「原创」占比同口径：'
             '</p>'
             '<div class="overflow-x-auto">'
             '<table class="w-full text-sm border-collapse">'
@@ -1390,7 +1386,6 @@ def _original_section(original_funcs: list[dict], linker, query_repo_id: str,
             '<th class="text-left p-2 border-b">函数</th>'
             '<th class="text-left p-2 border-b">文件:行</th>'
             '<th class="text-left p-2 border-b">规模</th>'
-            '<th class="text-left p-2 border-b">辅助：相似度</th>'
             '</tr></thead>'
             f'<tbody>{rows}</tbody>'
             '</table></div>'

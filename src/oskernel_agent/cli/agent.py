@@ -137,6 +137,7 @@ def _git_remote_and_sha(repo_path: Path) -> tuple[str | None, str | None]:
 def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
                    cli_depth: int = 3) -> Path | None:
     """自底向上构建 tree.json，并产出终端打印 + HTML 报告。"""
+    import time
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # 1. 采集共享事实档案
@@ -145,7 +146,9 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
         try:
             from ..analysis.repo_facts import build_repo_facts
             print("\n[预处理] 采集项目级共享事实档案 ...")
+            _tf = time.perf_counter()
             facts = build_repo_facts(repo_path, repo_name, ts)
+            print(f"[计时] 事实档案采集：{time.perf_counter() - _tf:.1f}s")
         except Exception as e:
             print(f"[警告] 事实档案构建失败：{e}（继续）", file=sys.stderr)
             facts = None
@@ -159,8 +162,10 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
     out_html.parent.mkdir(parents=True, exist_ok=True)
     work_dir = out_html.parent / f"{out_html.stem}_tree_work"
 
+    _tt = time.perf_counter()
     tree = build_tree(repo_path, repo_name, ts, facts=facts,
                        output_dir=work_dir)
+    print(f"[计时] tree 构建合计（A+B+C）：{time.perf_counter() - _tt:.1f}s")
 
     # 3. 写 tree.json（单一真相源）
     tree_json_path = out_html.with_suffix(".tree.json")
@@ -177,6 +182,7 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
     # 5. HTML 渲染
     try:
         from ..reports.html_tree import write_tree_html
+        _tr = time.perf_counter()
         gl_url, gl_sha = _git_remote_and_sha(repo_path)
         scheme = "gitlab" if gl_url else "vscode"
         if gl_url:
@@ -187,6 +193,7 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
             out_html, tree, repo_roots=[repo_path],
             scheme=scheme, gitlab_base=(gl_url, gl_sha),
         )
+        print(f"[计时] HTML 渲染：{time.perf_counter() - _tr:.1f}s")
         print(f"\n[完成] HTML 报告：{html_path}")
         if broken:
             print(f"[警告] HTML 中有 {len(broken)} 个文件引用断链",
