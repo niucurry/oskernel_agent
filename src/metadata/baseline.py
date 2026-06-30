@@ -20,18 +20,22 @@ def is_baseline_derived(
     c_match: tuple[int | None, float],
     *,
     threshold: float = 0.85,
+    bilateral_threshold: float = 0.70,
 ) -> tuple[bool, str]:
     """判定是否上游基线衍生（公共/模板代码，不计借鉴）。返回 (是否, 判据)。
 
     两条命中路径（任一即可，系统性覆盖 vendored 上游，不靠目录名枚举）：
-      - 双侧同基线（强信号）：query 与 candidate 都与**同一**基线函数相似 >阈值 → 两队都源自同一上游。
-      - 单侧 query 命中基线（vendored 上游）：query 与某基线函数相似 >阈值 → 新作品该函数本就是
+      - 双侧同基线（强信号）：query 与 candidate 都与**同一**基线函数相似 > bilateral_threshold → 两队都源自同一上游。
+        信号远强于单侧（两侧独立收敛到同一基线 id），故门槛低于单侧。覆盖「4 队共同改造 rcore-v3
+        原始函数、互相 1.0 但对原始版 sim<0.85」的因果倒置场景——只要双方仍与同一基线函数
+        相似 > bilateral_threshold 即判共同衍生。
+      - 单侧 query 命中基线（vendored 上游）：query 与某基线函数相似 > threshold → 新作品该函数本就是
         上游代码（vendored 或紧随上游），无论 candidate 是另一队的副本还是别的。这条覆盖「队伍把
         ArceOS vendored 到任意目录名」的情形——只要函数代码与上游 ArceOS 近似即判基线，不靠路径名。
     """
     qid, qsim = q_match
     cid, csim = c_match
-    if qid is not None and qid == cid and qsim > threshold and csim > threshold:
+    if qid is not None and cid is not None and qid == cid and qsim > bilateral_threshold and csim > bilateral_threshold:
         return True, "双侧均与同一基线函数相似"
     if qid is not None and qsim > threshold:
         return True, "新作品函数与上游基线函数相似（vendored/紧随上游）"

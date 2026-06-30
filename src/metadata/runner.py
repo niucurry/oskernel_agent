@@ -95,40 +95,57 @@ def channel_unique_strings(data: dict, db_path: str | Path, settings: MetadataSe
 
 
 def channel_baseline(data: dict, matcher: BaselineMatcher, settings: MetadataSettings) -> int:
-    """通道 2：基线扣除。query 函数命中上游基线（vendored/紧随上游）则降级 baseline_derived。返回扣除数。
+    """通道 2：基线扣除。query/candidate 命中上游基线（vendored/紧随上游/共同衍生）则降级 baseline_derived。返回扣除数。
 
-    性能：只需判 **query 侧**是否命中基线（单侧即足以判 vendored 上游，candidate 侧多余，
-    见 is_baseline_derived）。去重所有 query normalized_code，一次矩阵乘批量算相似度（~1000
-    唯一 query → 1 次 GPU 矩阵乘，秒级），再回填。
+    性能：去重 query 与 candidate 的 normalized_code，各一次矩阵乘批量算对基线集的相似度
+    （~2546 基线向量；双侧各 ~1000 唯一代码 → 2 次 GPU 矩阵乘，秒级），再回填。
+
+    两条路径（见 is_baseline_derived）：
+      - 双侧同基线（强信号）：query 与 candidate 都命中同一基线函数 > bilateral_threshold → 两队共同衍生自上游。
+        覆盖「4 队共同改造 rcore-v3 原始函数、互相 1.0 但对原始版 sim<0.85」的因果倒置场景。
+      - 单侧 query 命中基线：query 与某基线函数相似 > baseline_sim_threshold → vendored/紧随上游。
     """
     suspects = data["suspects"]
-    uniq: dict[str, None] = {}
+
+    def _batch(codes):
+        if not codes:
+            return {}
+        if hasattr(matcher, "match_batch"):
+            results = matcher.match_batch(codes)
+        else:  # 兜底：非 VectorBaselineMatcher 时逐条
+            results = [matcher.match(c) for c in codes]
+        return dict(zip(codes, results))
+
+    q_uniq: dict[str, None] = {}
+    c_uniq: dict[str, None] = {}
     for s in suspects:
-        nc = (s.get("query_func") or {}).get("normalized_code", "") or " "
-        uniq.setdefault(nc, None)
-    codes = list(uniq)
-    if hasattr(matcher, "match_batch"):
-        results = matcher.match_batch(codes)
-    else:  # 兜底：非 VectorBaselineMatcher 时逐条
-        results = [matcher.match(c) for c in codes]
-    cache = dict(zip(codes, results))
+        q_nc = (s.get("query_func") or {}).get("normalized_code", "") or " "
+        q_uniq.setdefault(q_nc, None)
+        c_nc = (s.get("candidate_func") or {}).get("normalized_code", "") or " "
+        c_uniq.setdefault(c_nc, None)
+    q_cache = _batch(list(q_uniq))
+    c_cache = _batch(list(c_uniq))
 
     n = 0
     for s in suspects:
         q_nc = (s.get("query_func") or {}).get("normalized_code", "") or " "
-        q_match = cache[q_nc]
-        # candidate 侧不再搜：单侧 query 命中基线即判 vendored 上游
-        derived, basis = is_baseline_derived(q_match, (None, 0.0),
-                                             threshold=settings.baseline_sim_threshold)
+        c_nc = (s.get("candidate_func") or {}).get("normalized_code", "") or " "
+        q_match = q_cache.get(q_nc, (None, 0.0))
+        c_match = c_cache.get(c_nc, (None, 0.0))
+        derived, basis = is_baseline_derived(
+            q_match, c_match,
+            threshold=settings.baseline_sim_threshold,
+            bilateral_threshold=settings.baseline_bilateral_threshold)
         if derived:
             ev = s.setdefault("evidence", {})
             ev["baseline_flag"] = True
             s["tier"] = "baseline_derived"
             s["baseline_note"] = (
-                f"{basis} (id={q_match[0]}, q={q_match[1]:.3f} > {settings.baseline_sim_threshold})"
+                f"{basis} (qid={q_match[0]}, q={q_match[1]:.3f}; cid={c_match[0]}, c={c_match[1]:.3f})"
             )
             n += 1
-    logger.info("通道2 基线扣除：{} 个降为 baseline_derived（批量编码 {} 个唯一 query 函数）", n, len(codes))
+    logger.info("通道2 基线扣除：{} 个降为 baseline_derived（批量编码 query {} / candidate {} 个唯一函数）",
+                n, len(q_uniq), len(c_uniq))
     return n
 
 
@@ -158,13 +175,17 @@ def channel_common_code(data: dict, settings: MetadataSettings) -> int:
                 if s.get("tier") == "baseline_derived":  # 更具体的基线信号优先
                     continue
                 s.setdefault("evidence", {})["common_code_repos"] = len(strong_repos)
-                # confirmed（精确/重命名级完全相同）是确凿事实，必须保留展示在报告中；
-                # 仅加「命中多库」标注供人工判断是否通用框架代码，不降级、不计入 common_code。
+                # confirmed（精确/重命名级完全相同）命中 >=阈值 个不同仓库：多队共享同一份代码，
+                # 几乎必然是公共/框架代码（fork-chain 在 >=5 队时概率极低）→ 降为 common_code，
+                # 与报告层 _is_common_code 据 note 排除的口径一致（此前仅加 note、tier 仍写 confirmed，
+                # 导致 JSON 与显示不一致）。通道 2 随后会把其中双侧命中基线的进一步归为 baseline_derived。
                 if s.get("tier") == "confirmed":
+                    s["tier"] = "common_code"
                     s["common_code_note"] = (
                         f"该函数精确命中 {len(strong_repos)} 个不同历史仓库，"
-                        f"疑为公共/框架代码（仍按确认借鉴展示，供人工判断）"
+                        f"判为公共/框架代码（不计入借鉴/复制）"
                     )
+                    n += 1
                     continue
                 s["tier"] = "common_code"
                 s["common_code_note"] = (
