@@ -20,23 +20,58 @@ def is_baseline_derived(
     c_match: tuple[int | None, float],
     *,
     threshold: float = 0.85,
-) -> bool:
-    """双侧都命中同一基线函数且相似度均 > 阈值 才判定 baseline_derived。"""
+) -> tuple[bool, str]:
+    """判定是否上游基线衍生（公共/模板代码，不计借鉴）。返回 (是否, 判据)。
+
+    两条命中路径（任一即可，系统性覆盖 vendored 上游，不靠目录名枚举）：
+      - 双侧同基线（强信号）：query 与 candidate 都与**同一**基线函数相似 >阈值 → 两队都源自同一上游。
+      - 单侧 query 命中基线（vendored 上游）：query 与某基线函数相似 >阈值 → 新作品该函数本就是
+        上游代码（vendored 或紧随上游），无论 candidate 是另一队的副本还是别的。这条覆盖「队伍把
+        ArceOS vendored 到任意目录名」的情形——只要函数代码与上游 ArceOS 近似即判基线，不靠路径名。
+    """
     qid, qsim = q_match
     cid, csim = c_match
-    return qid is not None and qid == cid and qsim > threshold and csim > threshold
+    if qid is not None and qid == cid and qsim > threshold and csim > threshold:
+        return True, "双侧均与同一基线函数相似"
+    if qid is not None and qsim > threshold:
+        return True, "新作品函数与上游基线函数相似（vendored/紧随上游）"
+    return False, ""
 
 
 class VectorBaselineMatcher:
-    """用 Embedder + Qdrant（仅 is_baseline=true 子集）查最相似基线函数。"""
+    """用 Embedder + 内存矩阵乘（仅 is_baseline=true 子集）查最相似基线函数。
+
+    基线子集小（数千），构造时一次性把全部基线向量拉到内存并 L2 归一化；之后 query 批量
+    编码 + 一次矩阵乘即得对全部基线的余弦相似度——取每行 argmax 即最相似基线。彻底甩掉
+    Qdrant local 模式对 20w+ 点逐次带过滤搜索的串行瓶颈（原 9600 次搜索 → 1 次矩阵乘）。
+    """
 
     def __init__(self, embedder, store):
         self.embedder = embedder
         self.store = store
+        import numpy as np
+        vecs, ids = store.fetch_baseline_vectors()
+        self._ids = ids
+        if vecs.size:
+            norm = np.linalg.norm(vecs, axis=1, keepdims=True)
+            norm[norm == 0] = 1.0
+            self._base = (vecs / norm).astype(np.float32)   # [N, dim] 已归一化
+        else:
+            self._base = vecs
 
     def match(self, normalized_code: str) -> tuple[int | None, float]:
-        vec = self.embedder.encode_batch([normalized_code or " "])[0]
-        hits = self.store.search(vec, 1, baseline_only=True)
-        if not hits:
-            return None, 0.0
-        return hits[0]["id"], hits[0]["score"]
+        return self.match_batch([normalized_code])[0]
+
+    def match_batch(self, codes: list[str]) -> list[tuple[int | None, float]]:
+        """批量编码 query + 一次矩阵乘算对全部基线的余弦相似度，取每行最相似基线。
+        返回与 codes 等长的 (baseline_id|None, sim) 列表。"""
+        import numpy as np
+        if not codes or self._base.size == 0:
+            return [(None, 0.0)] * len(codes)
+        q = np.asarray(self.embedder.encode_batch([c or " " for c in codes]), dtype=np.float32)
+        qn = np.linalg.norm(q, axis=1, keepdims=True)
+        qn[qn == 0] = 1.0
+        q = q / qn
+        sims = q @ self._base.T                       # [Q, N] 余弦相似度
+        best = sims.argmax(axis=1)
+        return [(self._ids[j], float(sims[i, j])) for i, j in enumerate(best)]

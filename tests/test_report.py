@@ -205,13 +205,13 @@ def test_generate_comparison_html_has_m2_elements():
     html = SC.generate_comparison_html(
         "2024/new", suspects, stats, groups, analysis, original_funcs=[],
         file_matches=file_matches, file_similar=[])
-    assert "needReview" in html                      # U5 展示映射
-    assert "已确认借鉴清单" in html                   # U3 分类清单
+    assert "报告导读（请先阅读）" in html              # 导读卡（面向老师的语境引导）
+    assert "初步体检" in html                          # 体检结论
+    assert "疑似借鉴清单（待人工判定）" in html         # 分类清单（措辞与「辅助参考」定位一致）
     assert "候选来源（全部）" in html                  # U6 全候选
     assert 'id="sec-files"' in html                  # 文件级清单
     assert "整文件相同" in html
-    assert "改名复制" in html                         # D2 复制类型展示
-    assert "各模块档位分布" in html                    # U2 tier 分布图
+    assert "各模块疑似借鉴函数数（待人工判定）" in html  # tier 分布图
     # 所有 echarts JSON 必须可解析（前端 JSON.parse 不能炸）
     import re
     for blob in re.findall(r'<script type="application/json">(.*?)</script>', html, re.DOTALL):

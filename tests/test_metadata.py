@@ -123,13 +123,16 @@ def test_string_channel_new_pair_scores_identical_copy(tmp_path):
     assert sp["evidence"]["renamed_match_lines"] == 0
 
 
-# ---------- 通道 2：基线双侧才扣 ----------
+# ---------- 通道 2：基线扣除（双侧同基线 或 单侧 query 命中） ----------
 
 def test_baseline_both_sides_same_func():
-    assert is_baseline_derived((7, 0.9), (7, 0.92), threshold=0.85) is True
-    assert is_baseline_derived((7, 0.9), (None, 0.0), threshold=0.85) is False   # 仅一侧
-    assert is_baseline_derived((7, 0.9), (8, 0.95), threshold=0.85) is False     # 不同基线函数
-    assert is_baseline_derived((7, 0.9), (7, 0.80), threshold=0.85) is False     # 一侧低于阈值
+    # 返回 (bool, 判据)
+    assert is_baseline_derived((7, 0.9), (7, 0.92), threshold=0.85)[0] is True       # 双侧同基线
+    assert is_baseline_derived((7, 0.9), (None, 0.0), threshold=0.85)[0] is True     # 单侧 query 命中（vendored 上游）
+    assert is_baseline_derived((7, 0.9), (8, 0.95), threshold=0.85)[0] is True       # query 命中基线 7（candidate 命中别的也算）
+    assert is_baseline_derived((7, 0.9), (7, 0.80), threshold=0.85)[0] is True       # query>阈值即判（candidate 低于阈值不影响）
+    assert is_baseline_derived((None, 0.0), (7, 0.9), threshold=0.85)[0] is False    # query 未命中基线
+    assert is_baseline_derived((7, 0.80), (7, 0.9), threshold=0.85)[0] is False      # query 低于阈值
 
 
 class _FakeMatcher:
@@ -140,16 +143,17 @@ class _FakeMatcher:
         return self.mapping.get(nc, (None, 0.0))
 
 
-def test_channel_baseline_downgrades_only_both_sides():
+def test_channel_baseline_downgrades_both_sides_and_vendored():
     s_both = {"tier": "review", "query_func": {"normalized_code": "Q1"},
               "candidate_func": {"normalized_code": "C1"}, "evidence": {}}
     s_one = {"tier": "review", "query_func": {"normalized_code": "Q2"},
              "candidate_func": {"normalized_code": "C2"}, "evidence": {}}
+    # Q2 命中基线（vendored 上游），C2 不命中 → 单侧也扣
     matcher = _FakeMatcher({"Q1": (5, 0.9), "C1": (5, 0.91), "Q2": (5, 0.9), "C2": (None, 0.0)})
     n = channel_baseline({"suspects": [s_both, s_one]}, matcher, SETTINGS)
-    assert n == 1
+    assert n == 2  # 双侧 + 单侧 vendored 均扣除
     assert s_both["tier"] == "baseline_derived" and s_both["evidence"]["baseline_flag"] is True
-    assert s_one["tier"] == "review"  # 仅一侧命中基线，不扣除
+    assert s_one["tier"] == "baseline_derived"
 
 
 # ---------- 通道 4：公共/框架代码广度过滤 ----------
@@ -160,19 +164,25 @@ def _sp(qfp, qsl, crepo, tier, vec):
 
 
 def test_common_code_downgrades_broad_match():
-    # 公共函数 A：高相似命中 6 个不同仓库 → common_code
+    # 公共函数 A（confirmed）：高相似命中 6 个不同仓库。confirmed 是逐行铁证、确凿事实，
+    # 现行设计**只加「命中多库」标注、不降级**（保留在借鉴清单供人工判断是否通用框架代码），
+    # 故不计入 n。报告层 _is_common_code 据 common_code_note 把它归入「公共/样板」小节展示。
     common = [_sp("a.rs", 1, f"2025/team{i}", "confirmed", 0.99) for i in range(6)]
+    # 公共函数 D（review 档）：高相似命中 6 仓 → 降级 common_code（非 confirmed 才降级）
+    reviewmany = [_sp("d.rs", 1, f"2025/r{i}", "review", 0.95) for i in range(6)]
     # 独有函数 B：只命中 1 个仓库 → 保持 confirmed
     uniq = [_sp("b.rs", 1, "2025/teamX", "confirmed", 1.0)]
     # 函数 C：命中 6 个仓库但相似度都低于阈值 → 不算公共
     weakmany = [_sp("c.rs", 1, f"2025/w{i}", "weak", 0.6) for i in range(6)]
-    data = {"suspects": common + uniq + weakmany}
+    data = {"suspects": common + reviewmany + uniq + weakmany}
     n = channel_common_code(data, SETTINGS)
-    assert n == 6
-    assert all(s["tier"] == "common_code" for s in common)
+    assert n == 6                                            # 仅 review 档的 6 个降级
+    assert all(s["tier"] == "confirmed" for s in common)    # confirmed 不降级，只加标注
+    assert all("common_code_note" in s for s in common)     # 但有命中多库标注
     assert common[0]["evidence"]["common_code_repos"] == 6
+    assert all(s["tier"] == "common_code" for s in reviewmany)  # review 档降级
     assert uniq[0]["tier"] == "confirmed"
-    assert all(s["tier"] == "weak" for s in weakmany)  # 低相似不计入广度
+    assert all(s["tier"] == "weak" for s in weakmany)       # 低相似不计入广度
 
 
 def test_common_code_keeps_baseline_derived():

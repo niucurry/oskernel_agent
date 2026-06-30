@@ -75,6 +75,32 @@ class VectorStore:
             return 0
         return self.client.count(self.collection, exact=True).count
 
+    def fetch_baseline_vectors(self) -> tuple[np.ndarray, list[int]]:
+        """一次性拉取全部 is_baseline=true 的向量到内存，返回 (vectors[N,dim], ids[N])。
+
+        供 metadata 基线扣除用矩阵乘批量算相似度——基线子集小（数千），全量拉到内存后
+        query 批量编码 @ baseline.T 一次 GPU/numpy 矩阵乘即得全部相似度，甩掉 Qdrant local
+        模式对 20w+ 点集合逐次过滤搜索的串行瓶颈。"""
+        if not self.client.collection_exists(self.collection):
+            return np.zeros((0, 0), dtype=np.float32), []
+        flt = models.Filter(must=[models.FieldCondition(
+            key="is_baseline", match=models.MatchValue(value=True))])
+        vecs: list[list[float]] = []
+        ids: list[int] = []
+        offset = None
+        while True:
+            points, offset = self.client.scroll(
+                collection_name=self.collection, scroll_filter=flt,
+                limit=2000, with_payload=False, with_vectors=True, offset=offset,
+            )
+            for p in points:
+                ids.append(int(p.id))
+                vecs.append(p.vector)
+            if offset is None:
+                break
+        arr = np.asarray(vecs, dtype=np.float32) if vecs else np.zeros((0, 0), dtype=np.float32)
+        return arr, ids
+
     # ---- 写入 ----
     def upsert(self, ids: list[int], vectors: np.ndarray, payloads: list[dict]) -> None:
         points = [

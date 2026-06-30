@@ -29,7 +29,11 @@ from loguru import logger
 from src.fastpath.scan import (WHOLE_FILE_LINE_RATIO, WHOLE_FILE_SIM_RATIO,
                                aggregate_file_similarity)
 
+from .false_positives import (FP_REASON_DISP, false_positive_stats,
+                              tag_false_positives, tag_internal_arch_dups)
 from .libraries import match_library, reused_library_stats, tag_library_reuse
+from .upstream_baselines import (is_excluded_file_path, tag_upstream_baselines,
+                                 upstream_baseline_stats)
 
 DEFAULT_OUTPUT_DIR = "data/output"
 
@@ -137,8 +141,15 @@ def _is_common_code(s: dict) -> bool:
 
 
 def _is_excluded_pair(s: dict) -> bool:
-    """不计入「值得关注的借鉴」的对：① vendored 库复用；② 公共/样板代码（命中多仓库）。"""
-    return bool(s.get("reuse_library")) or _is_common_code(s)
+    """不计入「值得关注的借鉴」的对：① vendored 库复用；② 公共/样板代码（命中多仓库）；
+    ③ 疑似误报（跨架构/跨语言/样板汇编）；④ 作品内部跨架构硬拷贝复用；
+    ⑤ 上游基线 vendored（双方同上游根下同相对路径）/ ABI 受限代码。
+
+    后三类由报告层 tag_* 标注，仅「降级 / 归类」——从 KPI/借鉴清单剔除并在各自小节单列，
+    人工仍可核（见 [[false_positives]] [[upstream_baselines]]）。"""
+    return (bool(s.get("reuse_library")) or _is_common_code(s)
+            or bool(s.get("false_positive")) or bool(s.get("internal_arch_dup"))
+            or bool(s.get("upstream_vendored")) or bool(s.get("abi_constrained")))
 
 
 def common_code_stats(suspects: list[dict]) -> list[dict]:
@@ -357,6 +368,7 @@ def collect_file_pairs(
             groups[key] = g
         g["candidates"].append({
             "tier":       tier,
+            "via_review": s.get("confirm_via") == "review_llm",  # 由低端模型复核升为借鉴
             "sim":        _pair_sim(s),
             "clone_type": _clone_kind(s),
             "ref_func":   c.get("func_name", ""),
@@ -371,6 +383,9 @@ def collect_file_pairs(
         cands = g["candidates"]
         g["overall_tier"] = max((c["tier"] for c in cands),
                                 key=lambda t: _TIER_RANK.get(t, 0), default="weak")
+        # 该 confirmed 是否「仅由模型复核认定」（无逐行铁证候选）——供清单加标记区分
+        conf_cands = [c for c in cands if c["tier"] == "confirmed"]
+        g["via_review"] = bool(conf_cands) and all(c.get("via_review") for c in conf_cands)
         cands.sort(key=lambda x: -x["sim"])
         g["overall_sim"] = cands[0]["sim"] if cands else 0.0
         g["clone_type"] = cands[0]["clone_type"] if cands else "—"
@@ -720,7 +735,9 @@ def _pct_bar(copy_pct: float, review_pct: float = 0.0, original_pct: float | Non
         seg += f'<div class="pct-review" style="width:{rv}%">{rv}%&nbsp;疑似借鉴</div>'
     if o:
         seg += f'<div class="pct-orig" style="width:{o}%">{o}%&nbsp;原创</div>'
-    return f'<div class="pct-bar" title="借鉴 {c}% / 疑似借鉴 {rv}% / 原创 {o}%">{seg}</div>'
+    title = (f"借鉴 {c}% / 疑似借鉴 {rv}% / 原创 {o}%" if rv
+             else f"借鉴 {c}% / 原创 {o}%")
+    return f'<div class="pct-bar" title="{title}">{seg}</div>'
 
 
 def _echarts_overview(submodule_stats: dict) -> str:
@@ -732,21 +749,22 @@ def _echarts_overview(submodule_stats: dict) -> str:
     copy_vals = [round(submodule_stats[m]["copy_pct"] * 100, 1) for m in mods]
     rev_vals  = [round(submodule_stats[m].get("review_pct", 0.0) * 100, 1) for m in mods]
     orig_vals = [round(submodule_stats[m]["original_pct"] * 100, 1) for m in mods]
+    show_rev = any(v > 0 for v in rev_vals)   # 复核后 review 档恒 0 → 不显示「疑似借鉴」
+    series = [{"name": "借鉴", "type": "bar", "stack": "pct", "data": copy_vals[::-1],
+               "itemStyle": {"color": "#ef4444"}, "label": {"show": True, "formatter": "{c}%"}}]
+    if show_rev:
+        series.append({"name": "疑似借鉴", "type": "bar", "stack": "pct", "data": rev_vals[::-1],
+                       "itemStyle": {"color": "#f59e0b"}, "label": {"show": True, "formatter": "{c}%"}})
+    series.append({"name": "原创", "type": "bar", "stack": "pct", "data": orig_vals[::-1],
+                   "itemStyle": {"color": "#22c55e"}, "label": {"show": True, "formatter": "{c}%"}})
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
-        "legend": {"data": ["借鉴", "疑似借鉴", "原创"]},
+        "legend": {"data": ["借鉴"] + (["疑似借鉴"] if show_rev else []) + ["原创"]},
         "grid": {"left": "25%", "right": "12%", "top": "8%", "bottom": "6%"},
         "xAxis": {"type": "value", "max": 100,
                   "axisLabel": {"formatter": "{value}%"}},
         "yAxis": {"type": "category", "data": labels[::-1]},
-        "series": [
-            {"name": "借鉴", "type": "bar", "stack": "pct", "data": copy_vals[::-1],
-             "itemStyle": {"color": "#ef4444"}, "label": {"show": True, "formatter": "{c}%"}},
-            {"name": "疑似借鉴", "type": "bar", "stack": "pct", "data": rev_vals[::-1],
-             "itemStyle": {"color": "#f59e0b"}, "label": {"show": True, "formatter": "{c}%"}},
-            {"name": "原创", "type": "bar", "stack": "pct", "data": orig_vals[::-1],
-             "itemStyle": {"color": "#22c55e"}, "label": {"show": True, "formatter": "{c}%"}},
-        ],
+        "series": series,
     }
     height = max(180, len(mods) * 40)
     return (
@@ -765,7 +783,7 @@ def _echarts_tier_distribution(submodule_stats: dict) -> str:
     labels = [_MODULE_DISPLAY.get(m, m) for m in mods]
     conf = [submodule_stats[m]["confirmed"] for m in mods]
     series = [
-        ("已确认借鉴", conf, "#ef4444"),
+        ("疑似借鉴", conf, "#ef4444"),
     ]
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
@@ -796,23 +814,21 @@ def _echarts_overall_donut(copy_pct: float, review_pct: float = 0.0,
     o = round(original_pct if original_pct is not None else max(0.0, 100 - c - rv), 1)
     option = {
         "title": {
-            "text": f"{c}%", "subtext": "整体借鉴(按函数加权)",
+            "text": f"{c}%", "subtext": "疑似借鉴占自研代码",
             "left": "center", "top": "38%",
             "textAlign": "center",
             "textStyle": {"fontSize": 26, "fontWeight": "bold", "color": "#ef4444"},
             "subtextStyle": {"fontSize": 11, "color": "#64748b"},
         },
         "tooltip": {"trigger": "item", "formatter": "{b}: {c}%"},
-        "legend": {"bottom": 0, "data": ["借鉴", "疑似借鉴", "原创"]},
+        "legend": {"bottom": 0, "data": ["疑似借鉴"] + (["待复核"] if rv else []) + ["自研/原创"]},
         "series": [{
             "name": "占比", "type": "pie", "radius": ["54%", "78%"],
             "center": ["50%", "44%"], "avoidLabelOverlap": False,
             "label": {"show": False}, "labelLine": {"show": False},
-            "data": [
-                {"value": c, "name": "借鉴", "itemStyle": {"color": "#ef4444"}},
-                {"value": rv, "name": "疑似借鉴", "itemStyle": {"color": "#f59e0b"}},
-                {"value": o, "name": "原创", "itemStyle": {"color": "#22c55e"}},
-            ],
+            "data": [{"value": c, "name": "疑似借鉴", "itemStyle": {"color": "#ef4444"}}]
+                    + ([{"value": rv, "name": "待复核", "itemStyle": {"color": "#f59e0b"}}] if rv else [])
+                    + [{"value": o, "name": "自研/原创", "itemStyle": {"color": "#22c55e"}}],
         }],
     }
     return (
@@ -836,7 +852,7 @@ def _echarts_top_sources(suspects: list[dict], top: int = 8) -> str:
     labels = [k for k, _ in order][::-1]
     conf = [v["confirmed"] for _, v in order][::-1]
     series = [
-        ("已确认借鉴", conf, "#ef4444"),
+        ("疑似借鉴", conf, "#ef4444"),
     ]
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
@@ -863,8 +879,8 @@ def _echarts_top_sources(suspects: list[dict], top: int = 8) -> str:
 _LEGEND_HTML = (
     '<div class="legend">'
     '<span><b>档位：</b></span>'
-    '<span><span class="dot" style="background:#ef4444"></span>已确认借鉴（confirmed，证据充分）</span>'
-    '<span style="margin-left:.6rem"><b>复制类型：</b></span>'
+    '<span><span class="dot" style="background:#ef4444"></span>疑似借鉴（与历史代码逐行高度相似，待人工判定）</span>'
+    '<span style="margin-left:.6rem"><b>相似程度：</b></span>'
     '<span>完全相同（逐行逐字一致）</span>'
     '<span>近乎相同（仅零星行不同，≤15%）</span>'
     '<span>高度相似（较多行需归一化才匹配）</span>'
@@ -875,6 +891,100 @@ _LEGEND_HTML = (
 def _kpi(value, label: str, color: str = "#0f172a") -> str:
     return (f'<div class="kpi"><span class="v" style="color:{color}">{value}</span>'
             f'<span class="l">{html.escape(label)}</span></div>')
+
+
+def _exclusion_totals(suspects: list[dict]) -> dict:
+    """统计「已扣除的机械误报」各类去重函数数，**互斥归一**（每个函数按优先级只归一类），
+    使各类之和 == 总数，供导读卡透明呈现，避免「分类相加远超总数」让评审困惑。
+
+    优先级（从具体到泛化）：第三方库 > 上游框架/ABI > 上游基线衍生 > 跨架构误报 > 公共样板。
+    """
+    _PRIO = ("library", "upstream", "baseline", "false_positive", "common")
+
+    def _cat_of(s: dict) -> str | None:
+        if s.get("reuse_library"):                    return "library"
+        if s.get("upstream_vendored") or s.get("abi_constrained"): return "upstream"
+        if s.get("tier") == "baseline_derived":       return "baseline"
+        if s.get("false_positive"):                   return "false_positive"
+        if s.get("tier") == "common_code" or s.get("common_code_note"): return "common"
+        return None
+
+    # 每个 query 函数跨其全部嫌疑对取**最高优先级**类别（一函数只归一类）
+    best: dict[tuple, str] = {}
+    for s in suspects:
+        cat = _cat_of(s)
+        if cat is None:
+            continue
+        key = (s.get("query_func", {}).get("file_path", ""),
+               s.get("query_func", {}).get("func_name", ""))
+        cur = best.get(key)
+        if cur is None or _PRIO.index(cat) < _PRIO.index(cur):
+            best[key] = cat
+    out = {k: 0 for k in _PRIO}
+    for cat in best.values():
+        out[cat] += 1
+    out["total_excluded"] = len(best)
+    return out
+
+
+def _reading_guide(query_repo_id: str, borrowed_n: int, original_n: int,
+                   overall_copy_pct: float, excl: dict) -> str:
+    """报告顶部「导读 + 体检结论」卡：用大白话告诉第一次看报告的老师——这是什么、数字怎么读、
+    系统做了哪些自动过滤、该如何使用。回应「辅助参考而非最终裁决」的项目定位。"""
+    total_kept = borrowed_n + original_n
+    # 体检结论（按疑似借鉴占比给一句话定性，中性、不替评审下结论）
+    if overall_copy_pct <= 5:
+        verdict, vcolor, vicon = "原创度高", "#16a34a", "✓"
+        vtext = "绝大多数函数为自研实现，仅少量与历史作品高度相似，原创性良好。"
+    elif overall_copy_pct <= 20:
+        verdict, vcolor, vicon = "原创为主，少量相似", "#16a34a", "✓"
+        vtext = "以自研实现为主，有一部分函数与历史作品相似，建议重点核对相似清单。"
+    elif overall_copy_pct <= 50:
+        verdict, vcolor, vicon = "相似比例偏高，需重点核查", "#d97706", "!"
+        vtext = "相当一部分函数与历史作品相似，建议逐一人工核对借鉴清单。"
+    else:
+        verdict, vcolor, vicon = "相似比例很高，重点核查", "#dc2626", "!"
+        vtext = "多数函数与历史作品高度相似，建议优先人工复核。"
+
+    excl_total = excl.get("total_excluded", 0)
+    excl_parts = []
+    if excl.get("upstream"):  excl_parts.append(f"上游框架/ABI 受限 {excl['upstream']}")
+    if excl.get("baseline"):  excl_parts.append(f"上游基线衍生 {excl['baseline']}")
+    if excl.get("library"):   excl_parts.append(f"第三方库 {excl['library']}")
+    if excl.get("common"):    excl_parts.append(f"公共样板 {excl['common']}")
+    if excl.get("false_positive"): excl_parts.append(f"跨架构/跨语言误报 {excl['false_positive']}")
+    excl_detail = "、".join(excl_parts) if excl_parts else "无"
+
+    return (
+        '<section id="guide" data-section-id="guide" '
+        'class="mb-6 p-5 rounded-lg border-l-4 bg-blue-50/60" style="border-left-color:#3b82f6">'
+        '<div class="flex items-start gap-3">'
+        '<div class="text-2xl leading-none">📋</div>'
+        '<div class="flex-1 min-w-0">'
+        '<div class="text-base font-bold text-slate-800 mb-1">报告导读（请先阅读）</div>'
+        '<p class="text-sm text-slate-700 leading-relaxed m-0">'
+        '本报告由 AI 自动比对该作品与历年参赛作品，标记「与历史代码相似、可能存在借鉴」的函数，'
+        '<b>仅作为人工评审的辅助参考，不构成抄袭的最终认定</b>。'
+        '系统已自动过滤掉所有团队都会用的「上游框架代码、第三方库、ABI/规范受限写法」等机械重复，'
+        '下方数字仅针对<b>作品自研部分</b>。</p>'
+        # 体检结论
+        f'<div class="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-md font-semibold text-sm" '
+        f'style="background:{vcolor}1a;color:{vcolor}">'
+        f'<span class="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs" '
+        f'style="background:{vcolor}">{vicon}</span>'
+        f'初步体检：{verdict}（疑似借鉴占自研代码 {overall_copy_pct}%）</div>'
+        f'<p class="text-sm text-slate-600 mt-2 mb-0">{vtext}</p>'
+        # 透明度：扣除了多少误报
+        '<div class="mt-3 text-xs text-slate-500 bg-white/70 rounded px-3 py-2 border border-slate-200">'
+        f'📊 <b>过滤透明度</b>：系统在 <b>{total_kept}</b> 个自研函数中标记出 <b>{borrowed_n}</b> 个疑似借鉴；'
+        f'另已剔除 <b>{excl_total}</b> 个机械重复函数（{excl_detail}），这些不计入上方借鉴统计，'
+        '在报告末尾「附：不计入借鉴的代码」分类列出，可点开核对。'
+        '</div>'
+        '<p class="text-xs text-slate-400 mt-2 mb-0">'
+        '建议用法：①看本卡体检结论 → ②翻各模块「疑似借鉴清单」逐条核对代码证据与来源链接 → '
+        '③对存疑项点开代码并排对照，结合「语义级分析」判断是真借鉴还是通用写法。</p>'
+        '</div></div></section>'
+    )
 
 
 def _summary_card(
@@ -896,12 +1006,13 @@ def _summary_card(
     overall_original_pct = round(original_n / all_total * 100, 1)
 
     # KPI 卡片（按函数；库复用 / 公共样板已剔除，单列各自小节）
-    # 复核后 review 档已解析为 借鉴/原创，故「疑似借鉴」恒为 0 时不展示（仅复核失败时残留才显示）
+    # 「已确认借鉴」改称「疑似借鉴（待人工判定）」——与「辅助参考非最终裁决」定位一致，
+    # 避免老师误读为系统已定性抄袭。
     kpis = (
         '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">'
-        + _kpi(f"{borrowed_n}", "已确认借鉴（函数）", "#ef4444")
+        + _kpi(f"{borrowed_n}", "疑似借鉴·待人工判定（函数）", "#ef4444")
         + (_kpi(f"{review_n}", "疑似借鉴（函数）", "#d97706") if review_n else "")
-        + _kpi(f"{original_n}", "原创（函数）", "#16a34a")
+        + _kpi(f"{original_n}", "自研/原创（函数）", "#16a34a")
         + _kpi(f"{file_match_count}", "整文件相同（文件）", "#e11d48")
         + _kpi(f"{file_similar_count}", "整体相似文件（个）", "#d97706")
         + '</div>'
@@ -912,29 +1023,38 @@ def _summary_card(
     top_src = _echarts_top_sources(suspects)
     head_charts = (
         '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 items-start">'
-        '<div><div class="text-sm font-semibold text-slate-700">整体借鉴估算（按函数加权）</div>'
+        '<div><div class="text-sm font-semibold text-slate-700">疑似借鉴占比（按自研函数加权）</div>'
         + donut + '</div>'
-        + ('<div><div class="text-sm font-semibold text-slate-700">主要借鉴来源仓库（Top 8，按命中对数）</div>'
+        + ('<div><div class="text-sm font-semibold text-slate-700">相似来源最多的历史作品（Top 8）</div>'
            + top_src + '</div>' if top_src else '<div></div>')
         + '</div>'
     )
 
     tier_chart = (
-        '<div class="mt-4 text-sm font-semibold text-slate-700">各模块已确认借鉴函数数</div>'
+        '<div class="mt-4 text-sm font-semibold text-slate-700">各模块疑似借鉴函数数（待人工判定）</div>'
         + _echarts_tier_distribution(submodule_stats)
     )
+    pct_title = ('各模块 借鉴 / 疑似借鉴 / 原创 占比' if review_n
+                 else '各模块 借鉴 / 原创 占比')
     pct_chart = (
-        '<div class="mt-4 text-sm font-semibold text-slate-700">各模块 借鉴 / 疑似借鉴 / 原创 占比</div>'
+        f'<div class="mt-4 text-sm font-semibold text-slate-700">{pct_title}</div>'
         + _echarts_overview(submodule_stats)
     )
 
+    # 顶部导读 + 体检结论卡（老师第一眼看到，建立正确语境）
+    guide = _reading_guide(query_repo_id, borrowed_n, original_n,
+                           overall_copy_pct, _exclusion_totals(suspects))
+
     return (
+        guide +
         '<section id="summary" data-section-id="summary" '
         'class="mb-8 p-6 rounded-lg border border-slate-300 bg-white shadow-sm">'
         '<h2 class="text-lg font-bold text-slate-800 m-0">'
         f'{html.escape(query_repo_id)} '
         '<span class="text-slate-400 font-normal text-base">查重对比分析报告</span>'
         '</h2>'
+        '<p class="text-xs text-slate-500 mt-1 mb-0">下列数字均为<b>自研代码</b>口径（已扣除上游框架/库/规范受限代码）；'
+        '「疑似借鉴」指与历史作品相似、<b>需人工判定</b>，非系统已认定抄袭。</p>'
         f'{_LEGEND_HTML}{kpis}{head_charts}{tier_chart}{pct_chart}'
         '</section>'
     )
@@ -1071,7 +1191,11 @@ def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, ac
             '<td class="font-mono text-xs align-top">'
             + _make_gitlab_anchor(linker, query_repo_id, g["query_file"], g["query_start"])
             + '</td>'
-            f'<td class="text-xs align-top">{html.escape(g["query_func"])}</td>'
+            f'<td class="text-xs align-top">{html.escape(g["query_func"])}'
+            + ('<span class="ml-1 px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 '
+               'whitespace-nowrap" title="相似度中等、经 AI 模型复核认定为借鉴（非逐行铁证）">'
+               '模型复核认定</span>' if g.get("via_review") else "")
+            + '</td>'
             + (_verdict_cell(g) if show_verdict else "")
             + f'<td class="text-xs align-top font-semibold {_sim_class(g["overall_sim"])}">{g["overall_sim"]}</td>'
             f'<td class="text-xs align-top">{html.escape(_CLONE_TYPE_DISPLAY.get(g["clone_type"], g["clone_type"]))}</td>'
@@ -1083,9 +1207,13 @@ def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, ac
             f'<tbody x-data="{{o:false}}" class="border-b border-slate-100">{main}{panel}</tbody>'
         )
     verdict_th = ('<th class="text-left p-2 border-b">复核结论</th>' if show_verdict else "")
+    # 计数按 query 函数 (文件,函数名) 去重，与导航栏 badge / 模块统计 compute_submodule_stats
+    # 同口径（后者也按 (file_path,func_name) 去重）；len(groups) 会把同名不同起始行的函数
+    # 算成多个，导致「badge 35 / 清单 37」之类前后矛盾。
+    n_funcs = len({(g.get("query_file", ""), g.get("query_func", "")) for g in groups})
     return (
         f'<div class="mt-3"><div class="text-sm font-semibold {accent} mb-1">{html.escape(title)}'
-        f'（{len(groups)} 个函数）</div>'
+        f'（{n_funcs} 个函数）</div>'
         '<div class="overflow-x-auto">'
         '<table class="w-full text-sm border-collapse">'
         '<thead><tr class="bg-slate-50 text-slate-600">'
@@ -1147,7 +1275,7 @@ def _module_section(
 
     # 只展示「已确认借鉴」清单（U6：每函数列出全部候选）
     confirmed = [g for g in pairs if g["overall_tier"] == "confirmed"]
-    table = _groups_table("已确认借鉴清单", confirmed, linker, query_repo_id, "text-red-700")
+    table = _groups_table("疑似借鉴清单（待人工判定）", confirmed, linker, query_repo_id, "text-red-700")
 
     # 语义分析片段（从 LLM 输出中抠取当前模块的部分）。
     # 表格已逐函数给出 文件:行 与链接，分析正文只讲语义、不再列地址，故不做链接化；
@@ -1183,7 +1311,7 @@ def _module_section(
     )
     n_conf = stats.get("confirmed", 0)
     badge_cls = "toc-badge" if n_conf else "toc-badge zero"
-    badge = f'<span class="{badge_cls}" title="已确认借鉴 {n_conf} 个函数">{n_conf}</span>'
+    badge = f'<span class="{badge_cls}" title="疑似借鉴 {n_conf} 个函数（待人工判定）">{n_conf}</span>'
     toc = f'<a class="toc-link" href="#{sid}"><span>{html.escape(label)}</span>{badge}</a>'
     return toc, section
 
@@ -1406,7 +1534,7 @@ def _original_section(original_funcs: list[dict], linker, query_repo_id: str,
         body = (
             '<p class="text-sm text-slate-600 mb-3">'
             f'共 <b>{len(original_funcs)}</b> 个函数未与历史代码库构成借鉴'
-            '（完全未命中，或虽有中等相似命中但经低端模型复核判为疑似 / 非借鉴、'
+            '（完全未命中，或虽有中等相似命中但经 AI 模型复核判为疑似 / 非借鉴、'
             '即独立实现的通用写法），从设计维度看属于该作品的原创 / 自研实现'
             '（按规模降序，全部列出）：'
             '</p>'
@@ -1821,15 +1949,181 @@ def _baseline_section(base_funcs: list[dict], linker, query_repo_id: str) -> tup
     return toc, section
 
 
+def _false_positive_section(fp_funcs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
+    """疑似误报小节：跨架构 / 跨语言 / 行业样板汇编 / 内部跨架构复用（已从借鉴剔除，需人工确认）。
+
+    这些对在「掩码逐行匹配」口径下达到高相似，但属机械误报（详见 false_positives 模块），
+    不计入值得关注的借鉴；此处按成因分组单列，保留来源链接，供人工核对（不直接丢弃）。
+    """
+    if not fp_funcs:
+        return "", ""
+    sid = "sec-false-positive"
+    # 按成因分组
+    by_reason: dict[str, list[dict]] = defaultdict(list)
+    for f in fp_funcs:
+        by_reason[f["reason"]].append(f)
+
+    chips = "".join(
+        f'<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">'
+        f'{html.escape(FP_REASON_DISP.get(r, r).split("（")[0])} {len(items)}</span>'
+        for r, items in by_reason.items()
+    )
+    blocks = []
+    for reason in ("boilerplate_asm", "cross_arch", "cross_lang", "internal_dup"):
+        items = by_reason.get(reason)
+        if not items:
+            continue
+        rows = []
+        for f in items:
+            src = f.get("source") or {}
+            if reason == "internal_dup" and f.get("canonical"):
+                src_cell = ('<span class="text-slate-500">内部复用自 </span>'
+                            + _make_gitlab_anchor(linker, query_repo_id, f["canonical"], 0))
+            else:
+                src_cell = (_ref_repo_anchor(linker, src.get("repo", "")) + ' '
+                            + _make_gitlab_anchor(linker, src.get("repo", ""),
+                                                  src.get("file", ""), src.get("start", 0)))
+            rows.append(
+                '<tr>'
+                f'<td class="text-xs font-mono">{html.escape(f["name"])}</td>'
+                '<td class="font-mono text-xs">'
+                + _make_gitlab_anchor(linker, query_repo_id, f["file"], f.get("start", 0))
+                + '</td>'
+                f'<td class="text-xs text-slate-500">{html.escape(f.get("lang", "") or "—")}</td>'
+                f'<td class="text-xs">{src_cell}</td>'
+                f'<td class="text-xs text-slate-400">{src.get("sim", "—")}</td>'
+                '</tr>'
+            )
+        blocks.append(
+            f'<div class="text-sm font-semibold text-slate-700 mt-3 mb-1">'
+            f'{html.escape(FP_REASON_DISP.get(reason, reason))}（{len(items)} 个函数）</div>'
+            '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
+            '<thead><tr class="bg-slate-50 text-slate-600">'
+            '<th class="text-left p-2 border-b">函数</th>'
+            '<th class="text-left p-2 border-b">新作品 文件:行</th>'
+            '<th class="text-left p-2 border-b">语言</th>'
+            '<th class="text-left p-2 border-b">匹配来源 / 内部副本</th>'
+            '<th class="text-left p-2 border-b">逐行匹配率</th>'
+            '</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>'
+        )
+    body = (
+        '<p class="text-sm text-slate-600 mb-3">'
+        f'下列 <b>{len(fp_funcs)}</b> 个函数在「掩码后逐行匹配」口径下达到高相似，但经成因核查'
+        '属<b>机械误报</b>，<b>不计入值得关注的借鉴</b>，已从摘要、借鉴来源图与各模块清单中剔除。'
+        '保留来源以便人工复核：</p>'
+        '<ul class="text-xs text-slate-500 list-disc pl-5 mb-3 space-y-0.5">'
+        '<li><b>跨指令集架构</b>：如龙芯 <code>csrwr</code> 与 RISC-V <code>csrrw</code>，指令本体在 '
+        '<code>asm!("…")</code> 字符串里、被归一化掩码成占位符，只剩内联汇编外壳相同——面向不同 CPU，'
+        '不可能逐字借鉴。</li>'
+        '<li><b>行业样板汇编</b>：<code>__switch</code> 等任务切换的寄存器存取序列，各队写法固定雷同。</li>'
+        '<li><b>跨编程语言</b>：safe Rust 切片遍历 vs unsafe C 裸指针等，语言与安全范式不同。</li>'
+        '<li><b>内部跨架构复用</b>：作品自身 <code>src/</code> 与 <code>src-la/</code> 硬拷贝同名函数，'
+        '同一次外部借鉴只记一次、其余记为内部复用。</li>'
+        '</ul>'
+        f'<div class="flex flex-wrap gap-2 mb-1">{chips}</div>'
+        + "".join(blocks)
+    )
+    return _collapsible(sid, "疑似误报（不计入借鉴，需人工确认）", body)
+
+
+def _upstream_baseline_section(ub_funcs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
+    """上游基线 / ABI 受限代码 小节：vendored 上游 OS + Linux/POSIX ABI 受限实现（不计入借鉴）。
+
+    ① 双方 file_path 在同一 upstream_root（arceos/rcore/…）下且相对路径相同 → 双方 vendored
+    了同一份上游文件，非跨队抄袭；② 受 ABI 规范硬性限制的唯一性实现（stat 转换、syscall
+    shim、build.rs 等），只有一种正确写法。两类已从借鉴 KPI/清单剔除，此处分组单列供核对。
+    """
+    if not ub_funcs:
+        return "", ""
+    sid = "sec-upstream-baseline"
+    uv = [x for x in ub_funcs if x["reason"] == "upstream_vendored"]
+    abi = [x for x in ub_funcs if x["reason"] == "abi_constrained"]
+    chips = []
+    if uv:
+        chips.append(f'<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">'
+                     f'vendored 上游基线 {len(uv)}</span>')
+    if abi:
+        chips.append(f'<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">'
+                     f'ABI 受限实现 {len(abi)}</span>')
+
+    def _rows(items: list[dict]) -> str:
+        out = []
+        for f in items:
+            src = f.get("source") or {}
+            if f["reason"] == "upstream_vendored":
+                src_cell = (f'<span class="text-slate-500">双方均 vendored 上游 </span>'
+                            f'<code>{html.escape(f.get("root",""))}</code> 同相对路径')
+            else:
+                src_cell = (_ref_repo_anchor(linker, src.get("repo", "")) + ' '
+                            + _make_gitlab_anchor(linker, src.get("repo", ""),
+                                                  src.get("file", ""), src.get("start", 0)))
+            out.append(
+                '<tr>'
+                f'<td class="text-xs font-mono">{html.escape(f["name"])}</td>'
+                '<td class="font-mono text-xs">'
+                + _make_gitlab_anchor(linker, query_repo_id, f["file"], f.get("start", 0))
+                + '</td>'
+                f'<td class="text-xs text-slate-500">{html.escape(f.get("lang", "") or "—")}</td>'
+                f'<td class="text-xs">{src_cell}</td>'
+                f'<td class="text-xs text-slate-400">{src.get("sim", "—")}</td>'
+                '</tr>'
+            )
+        return "".join(out)
+
+    blocks = []
+    if uv:
+        blocks.append(
+            '<div class="text-sm font-semibold text-slate-700 mt-3 mb-1">'
+            f'vendored 上游基线（{len(uv)} 个函数）</div>'
+            '<p class="text-xs text-slate-500 mb-1">双方文件路径位于同一上游根（如 '
+            '<code>arceos/</code>）下、且相对路径相同——即双方都整库签入了同一份上游 OS/框架，'
+            '逐字相同属必然，<b>非跨队抄袭</b>。队伍自研的新模块（其他队无同名相对路径）不受影响。</p>'
+            '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
+            '<thead><tr class="bg-slate-50 text-slate-600">'
+            '<th class="text-left p-2 border-b">函数</th><th class="text-left p-2 border-b">新作品 文件:行</th>'
+            '<th class="text-left p-2 border-b">语言</th><th class="text-left p-2 border-b">说明</th>'
+            '<th class="text-left p-2 border-b">逐行匹配率</th>'
+            '</tr></thead><tbody>' + _rows(uv) + '</tbody></table></div>'
+        )
+    if abi:
+        blocks.append(
+            '<div class="text-sm font-semibold text-slate-700 mt-3 mb-1">'
+            f'ABI 受限的唯一性实现（{len(abi)} 个函数）</div>'
+            '<p class="text-xs text-slate-500 mb-1">受 Linux/POSIX ABI 规范硬性限制的转换 / shim '
+            '（<code>metadata_to_kstat</code>、<code>sys_*</code> 系统调用转换、<code>dummy_stat_*</code>、'
+            'build.rs / scripts 等构建脚本、C 库 shim 层）——字段 / 签名由规范规定、只有一种正确写法，'
+            '多队必然雷同，<b>不计为借鉴</b>。</p>'
+            '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
+            '<thead><tr class="bg-slate-50 text-slate-600">'
+            '<th class="text-left p-2 border-b">函数</th><th class="text-left p-2 border-b">新作品 文件:行</th>'
+            '<th class="text-left p-2 border-b">语言</th><th class="text-left p-2 border-b">匹配来源</th>'
+            '<th class="text-left p-2 border-b">逐行匹配率</th>'
+            '</tr></thead><tbody>' + _rows(abi) + '</tbody></table></div>'
+        )
+    body = (
+        '<p class="text-sm text-slate-600 mb-3">'
+        f'下列 <b>{len(ub_funcs)}</b> 个函数属上游基线 / ABI 受限代码，<b>不计入值得关注的借鉴</b>，'
+        '已从摘要、借鉴来源图与各模块清单中剔除，单列供核对：</p>'
+        f'<div class="flex flex-wrap gap-2 mb-1">{"".join(chips)}</div>'
+        + "".join(blocks)
+    )
+    return _collapsible(sid, "上游基线 / ABI 受限代码（不计入借鉴）", body)
+
+
 def _excluded_divider() -> tuple[str, str]:
     """「不计入借鉴的代码」分隔横幅 + TOC 锚（其后跟 库复用/公共样板/基线衍生 各小节）。"""
     sid = "sec-excluded"
     section = (
         f'<section id="{sid}" data-section-id="{sid}" class="mt-10 mb-3">'
         '<h2 class="text-base font-bold text-slate-500 border-t-2 border-dashed border-slate-300 pt-4 m-0">'
-        '附：不计入借鉴的代码（已从上方统计与清单中剔除，仅供核对）</h2>'
-        '<p class="text-xs text-slate-400 mt-1">以下各类为「多队合法共用」或「非作者原创」的代码——'
-        'vendored 第三方库、命中多仓库的公共/样板函数、基线模板衍生——均不属于值得关注的借鉴。</p>'
+        '附：不计入借鉴的代码（已从上方统计中剔除，供老师核对系统是否扣得合理）</h2>'
+        '<p class="text-xs text-slate-400 mt-1">为避免误判，系统把「所有团队都会用、并非该团队原创」的代码自动剔除，不计入借鉴。'
+        '主要包括：<b>①上游框架自带代码</b>（如 ArceOS/Starry 框架的 axfs/axhal 等模块）；'
+        '<b>②第三方开源库</b>（lwext4、fatfs 等整库签入）；'
+        '<b>③标准规范受限写法</b>（POSIX 系统调用、文件系统魔数、Linux ABI 转换等只有唯一正确写法的代码）；'
+        '<b>④多团队通用样板</b>（print 宏、panic 处理等）；'
+        '<b>⑤教学/模板衍生代码</b>。下方按类别列出，可逐项点开核对扣除是否合理。</p>'
         '</section>'
     )
     toc = f'<a class="toc-link" href="#{sid}">— 不计入借鉴的代码 —</a>'
@@ -1856,14 +2150,32 @@ def _collapsible(sid: str, title: str, body: str) -> tuple[str, str]:
     return toc, section
 
 
+_REVIEW_PROMPT_VERSION = "v3"  # 改 prompt 即 bump，使 review_judgment 缓存按新 prompt 重判
+
 _REVIEW_SYSTEM = """你是 OS 内核代码查重复核助手。给你「新作品的一个函数」和「历史代码库中与它最相似的函数」，\
 判断新作品该函数是否**借鉴**（复制 / 改名 / 改写）了历史函数，还是只是 OS 内核常见的教科书式\
-通用写法（双方各自独立实现）。
+通用写法、或有实质性自研重构（双方各自独立实现 / 为不同目标改写）。
 判定参考：
-- 整体逻辑、结构、命名高度一致，且并非人尽皆知的通用套路 → 借鉴
+- 整体逻辑、结构、命名高度一致，且并非人尽皆知的通用套路、也无实质性机制改动 → 借鉴
 - 属通用算法 / 框架套路（RR 调度、buddy 分配、链表增删、RISC-V trap 上下文、寄存器读写宏等），\
 结构相似但属常识 → 非借鉴
 - 介于两者之间、证据不足 → 疑似
+**判定纪律（评审实测暴露的误报高发区，务必遵守）：**
+1. **看实质机制改动，不只看字段/逐行重合度**：若新作品为适配不同架构 / 异步范式 / 并发模型\
+而改了**数据结构、控制流或同步机制**（哪怕大量字段名或行逐字重合），属自研重构 → 判**非借鉴**。\
+典型：Process/Task 结构体的 new()——即使多数字段与历史一致，但新增了异步调度所需字段\
+（如 child_exit_event/exit_event）、改用 Arc/Future/无锁结构 → 非借鉴。**不要因为「字段结构、\
+命名高度一致」就判借鉴**，OS 内核同类结构体字段本就大量重合，关键看有没有为新目标做结构/机制改造。
+2. 同步↔异步范式重构：一方阻塞式内核线程循环 fn f()，一方改写为 async Future 轮询\
+fn f(cx:&mut Context)->Poll<()>。仅因处理同一队列用了相似出队语法，但执行机制不同 → 非借鉴。
+3. 锁/数据结构不同：顶层逻辑相同（如「回调推入全局数组」），但一方无锁/裸指针\
+（NoPreemptIrqSave+current_ref_mut_raw），另一方 RefCell borrow_mut/trap::disable_local → 非借鉴。
+4. 标准协议 / 硬编码常数约束（规范唯一性）：POSIX 信号号（SIGALRM=14/SIGVTALRM=26/SIGPROF=27）、\
+文件系统魔数（EXT4=0xef53）、枚举→数字映射（SchedPolicy→0,1,2）、/proc/[pid]/stat 字段拼接、\
+robust futex 流程、struct kstat 转换——值/流程由标准硬性规定，只有一种正确写法 → 非借鉴。
+5. 第三方库胶水代码：在 chrono/fatfs 等库 API 间转换（读 .year()/.month() 重组），标准解法唯一 → 非借鉴。
+6. Rust trait 标准方法（from/fmt/into/default/clone/eq/cmp）/ VFS 教科书样板（.与..排序的 cmp）\
+的短小实现：全网千篇一律 → 非借鉴。
 只输出一行 JSON，不要任何额外文字、不要解释：
 {"verdict":"借鉴|疑似|非借鉴","reason":"不超过40字的中文理由"}"""
 
@@ -1900,17 +2212,40 @@ def _review_one(client, model: str, g: dict, timeout: int) -> tuple[str, str]:
         return "未复核", f"复核失败：{type(e).__name__}"
 
 
+# Rust trait 标准方法名 + 通用短函数名——confirmed 档里这类函数最可能是 ABI/样板误报，
+# 一并送 LLM 复核（confirmed 正常不进复核，这些是例外）。
+_BOILERPLATE_NAMES = {
+    "from", "fmt", "into", "default", "new", "as_ref", "as_mut", "deref", "deref_mut",
+    "clone", "eq", "ne", "cmp", "partial_cmp", "hash", "drop", "iter", "next", "len",
+    "is_empty", "clear", "index", "index_mut",
+}
+# 短于等于此非空行的 confirmed 函数也送复核（短函数最易撞文本骨架）。
+_BOILERPLATE_MAX_LINES = 12
+
+
+def _is_boilerplate_candidate(g: dict) -> bool:
+    """confirmed 函数是否需送 LLM 复核：函数名是通用 trait 方法，或函数体很短。"""
+    name = (g.get("query_func") or "").lower().strip()
+    if name in _BOILERPLATE_NAMES:
+        return True
+    code = g.get("query_code") or ""
+    nonblank = sum(1 for ln in code.splitlines() if ln.strip())
+    return 0 < nonblank <= _BOILERPLATE_MAX_LINES
+
+
 def run_review_judgment(review_pairs: list[dict], work_dir: Path,
                         model: str | None = None, timeout: int = 30,
                         workers: int = 5) -> None:
     """对疑似借鉴（review/weak）对用低端模型逐对判借鉴，原地写入 review_verdict/review_reason。
 
-    模型默认 qwen-turbo（可经环境变量 REVIEW_MODEL 覆盖），独立于主链路的 deepseek-v4-flash；
+    模型默认 deepseek-v4-flash（可经环境变量 REVIEW_MODEL 覆盖）；曾用 qwen-turbo，但实测
+    qwen-turbo 无法识别「异步重构 / 不同锁机制 / ABI 受限字段拼接」等语义级非借鉴（把
+    register_timer_callback、fmt 误判为借鉴），deepseek-v4-flash 能正确识别（24 vs 8 个非借鉴）。
     base_url / api_key 复用 config.toml 的 [api]。带逐对缓存，结果同对子不重复调用。
     """
     if not review_pairs:
         return
-    model = model or os.getenv("REVIEW_MODEL", "qwen-turbo")
+    model = model or os.getenv("REVIEW_MODEL", "deepseek-v4-flash")
     try:
         from oskernel_agent import config as _cfg
         api_key  = _cfg.api.get("key", "").strip()
@@ -1929,7 +2264,8 @@ def run_review_judgment(review_pairs: list[dict], work_dir: Path,
 
     def _key(g: dict) -> str:
         cand = (g.get("candidates") or [{}])[0]
-        return _cache_key(model, g.get("query_code", ""), cand.get("ref_code", ""))
+        # 含 prompt 版本：改 prompt 后旧缓存键不命中，自动按新 prompt 重判
+        return _cache_key(_REVIEW_PROMPT_VERSION, model, g.get("query_code", ""), cand.get("ref_code", ""))
 
     if not api_key:
         logger.warning("[review] 未配置 API key，疑似借鉴跳过 LLM 复核")
@@ -1965,11 +2301,12 @@ def run_review_judgment(review_pairs: list[dict], work_dir: Path,
 
 
 def _apply_review_verdicts(suspects: list[dict], groups: list[dict]) -> tuple[int, int]:
-    """据低端模型复核结论改写 review/weak 档 tier，使最终只剩「借鉴 / 原创」两类：
-      - 借鉴      → confirmed（计入「已确认借鉴」，按借鉴展示与统计）
-      - 疑似/非借鉴 → dismissed（归入「原创代码」，不计为借鉴）
+    """据 LLM 复核结论改写 tier，使最终只剩「借鉴 / 原创」两类。
+      - review/weak：借鉴 → confirmed（计入已确认借鉴）；疑似/非借鉴 → dismissed（归原创）
+      - confirmed（全量送复核）：**仅** 非借鉴 → dismissed（保守，不丢失信号）；借鉴/疑似保留 confirmed
       - 未复核（复核失败）→ 保持原档不动
-    若复核整体未生效（全部未复核），不做任何改动。返回 (升为借鉴数, 归原创数)。
+    confirmed 用保守口径：文本相似≠借鉴，但只在 LLM 明确判「非借鉴」（ABI/规范/标准算法/不同机制）
+    时才降级；疑似（拿不准）不降，避免误降真实借鉴。返回 (升为借鉴数, 归原创数)。
     """
     vmap = {(g["query_file"], g["query_func"], g["query_start"]): g.get("review_verdict")
             for g in groups}
@@ -1977,18 +2314,26 @@ def _apply_review_verdicts(suspects: list[dict], groups: list[dict]) -> tuple[in
         return 0, 0
     up = dn = 0
     for s in suspects:
-        if s.get("tier") not in ("review", "weak"):
+        tier = s.get("tier")
+        if tier not in ("review", "weak", "confirmed"):
             continue
         q = s.get("query_func", {})
         v = vmap.get((q.get("file_path", ""), q.get("func_name", ""), q.get("start_line", 0)))
         if v == "借鉴":
-            s["tier"] = "confirmed"
-            s["confirm_via"] = "review_llm"
-            up += 1
-        elif v in ("疑似", "非借鉴"):
+            if tier != "confirmed":       # review/weak 升为 confirmed；已 confirmed 不动
+                s["tier"] = "confirmed"
+                s["confirm_via"] = "review_llm"
+                up += 1
+        elif v == "非借鉴":
             s["tier"] = "dismissed"
-            s["dismiss_reason"] = f"review_{v}"
+            s["dismiss_reason"] = "review_非借鉴"
             dn += 1
+        elif v == "疑似":
+            if tier in ("review", "weak"):   # review/weak 疑似 → dismissed
+                s["tier"] = "dismissed"
+                s["dismiss_reason"] = "review_疑似"
+                dn += 1
+            # confirmed 疑似 → 保留（保守，不丢失真实借鉴信号）
     return up, dn
 
 
@@ -1997,11 +2342,11 @@ def _review_section(review_pairs: list[dict], linker, query_repo_id: str) -> tup
     if not review_pairs:
         return "", ""
     intro = ('<p class="text-sm text-slate-600 mb-3">'
-             f'下列 <b>{len(review_pairs)}</b> 个函数与历史库相似度中等（向量相似度 &gt; 0.7、'
-             '逐行匹配 70%–95%，未达「已确认借鉴」的 95% 铁证线），'
-             '经低端模型逐对复核后<b>判为借鉴或疑似借鉴</b>而保留在此；'
+             f'下列 <b>{len(review_pairs)}</b> 个函数与历史作品相似度中等（逐行匹配 70%–95%，'
+             '未达「疑似借鉴」的 95% 高相似线），'
+             '经 AI 模型逐对复核后<b>判为借鉴或疑似借鉴</b>而保留在此；'
              '复核判为<b>非借鉴（独立实现的通用写法）的已移入「原创代码」节</b>，不在此列。'
-             '下表「复核结论」由模型自动初判，仅供人工复核参考。</p>')
+             '下表「复核结论」由 AI 自动初判，仅供人工复核参考。</p>')
 
     # 复核结论汇总
     summary = ""
@@ -2014,7 +2359,7 @@ def _review_section(review_pairs: list[dict], linker, query_repo_id: str) -> tup
                 cls, lbl = _REVIEW_VERDICT_STYLE.get(v, _REVIEW_VERDICT_STYLE["未复核"])
                 chips.append(f'<span class="px-2 py-0.5 rounded {cls}">{lbl} {cnt[v]}</span>')
         summary = ('<div class="mb-3 p-2.5 rounded bg-amber-50 border border-amber-200 text-xs '
-                   'text-amber-800">⚠️ <b>复核结论仅供参考</b>：由低端模型自动初判，'
+                   'text-amber-800">⚠️ <b>复核结论仅供参考</b>：由 AI 模型自动初判，'
                    '不作为最终定性依据，请以人工复核为准。'
                    '<div class="flex flex-wrap gap-2 mt-2 text-sm">' + "".join(chips) + '</div></div>')
 
@@ -2047,13 +2392,14 @@ def _ai_detect_section(ai_data: dict | None, linker, query_repo_id: str) -> tupl
         + _kpi(f'{ov.get("llm_ratio_by_count", 0.0)*100:.0f}%', "疑似 AI 占比（按函数）", "#9333ea")
         + '</div>'
     )
-    meta = (f'<p class="text-sm text-slate-600 mb-3">在 <b>{ov.get("total_functions", 0)}</b> '
-            f'个原创（非借鉴）函数中检测；疑似 AI 占比按代码行数为 '
+    meta = (f'<p class="text-sm text-slate-600 mb-3">本节<b>独立于上方查重</b>，检测疑似「未声明使用 AI 生成」的代码。'
+            f'在 <b>{ov.get("total_functions", 0)}</b> 个非借鉴函数中检测'
+            f'（此口径含框架等代码，与上方查重「自研函数」数不同，属正常）；疑似 AI 占比按代码行数为 '
             f'{ov.get("llm_ratio_by_loc", 0.0)*100:.0f}%。打分模型 '
             f'<code>{html.escape(ai_data.get("model_id", "") or "")}</code>。'
             '原理：把代码喂给一个代码大模型，统计它对每个 token 的“眼熟程度”——'
-            'AI 写的代码模型普遍更“眼熟”，人写的更“意外”，据此区分。'
-            '（借鉴自历史库的函数已排除，不参与此检测。）</p>')
+            'AI 写的代码模型普遍更“眼熟”，人写的更“意外”，据此区分。结果仅供参考，'
+            '存在误判，<b>不作为认定依据</b>。</p>')
 
     sf = ag.get("suspicious_functions") or []
     sf_table = ""
@@ -2127,6 +2473,8 @@ def generate_comparison_html(
     lib_stats: list[dict] | None = None,
     cc_funcs: list[dict] | None = None,
     base_funcs: list[dict] | None = None,
+    fp_funcs: list[dict] | None = None,
+    ub_funcs: list[dict] | None = None,
 ) -> str:
     """组装完整的查重对比 HTML 报告（直接产出，不经 Markdown 转换）。"""
     file_matches = file_matches or []
@@ -2170,6 +2518,8 @@ def generate_comparison_html(
         _excluded_divider(),
         _reused_libraries_section(lib_stats or [], query_repo_id),
         _common_code_section(cc_funcs or [], linker, query_repo_id),
+        _false_positive_section(fp_funcs or [], linker, query_repo_id),
+        _upstream_baseline_section(ub_funcs or [], linker, query_repo_id),
         _baseline_section(base_funcs or [], linker, query_repo_id),
     ]
     # 分隔横幅仅在确有被剔除内容时才显示
@@ -2238,22 +2588,19 @@ def run_semantic_compare(
     suspects      = data.get("suspects", [])
     query_repo_id = data.get("query_repo_id") or suspects_path.stem.split("_suspects")[0]
     reuse_n       = tag_library_reuse(suspects)  # 标注 vendored 库复用，供各图/清单剔除
+    fp_counts     = tag_false_positives(suspects)  # 标注跨架构/跨语言/样板汇编误报（降级，不丢弃）
+    ub_counts     = tag_upstream_baselines(suspects)  # 标注上游基线 vendored / ABI 受限代码（降级）
 
     recall: dict | None = None
     if recall_path and Path(recall_path).exists():
         recall = json.loads(Path(recall_path).read_text(encoding="utf-8"))
 
-    # L0 文件指纹结果（整文件相同）+ 后聚合（文件整体相似）
+    # L0 文件指纹结果（整文件相同）。file_similar 的后聚合放到所有标注 + 复核之后，
+    # 以便用「已剔除嫌疑对」的口径计算（vendored 上游 / ABI / 库复用 / 公共样板 不计入
+    # 文件整体相似），避免把 arceos/build.rs 等脚手架文件报为整体相似。
     file_matches: list[dict] = []
     if filematch_path and Path(filematch_path).exists():
         file_matches = json.loads(Path(filematch_path).read_text(encoding="utf-8")).get("matched_files", [])
-    file_similar = aggregate_file_similarity(suspects, recall, query_repo_path=query_repo_path)
-    # 库复用文件（vendored 第三方库）不进文件级清单，另在「复用库统计」小节单列
-    file_matches = [m for m in file_matches if not match_library(m.get("query_file"))]
-    file_similar = [f for f in file_similar if not match_library(f.get("file_path"))]
-
-    logger.info("[compare] 新作品 {}：{} 个嫌疑对（其中库复用 {} 个已剔除），整文件相同 {} 个，整体相似 {} 个",
-                query_repo_id, len(suspects), reuse_n, len(file_matches), len(file_similar))
 
     # 输出 / 工作目录（复核与语义分析共用）
     out_dir = Path(output_dir).resolve()
@@ -2265,16 +2612,52 @@ def run_semantic_compare(
     # 必须在统计 / file_pairs / 原创计算之前。
     if not skip_opencode:
         review_pairs = collect_file_pairs(suspects, keep_tiers=("review", "weak"))
+        # 系统化语义复核：**全部** confirmed 对都送 LLM 复核（不只样板候选）——文本相似不等于
+        # 借鉴，ABI/规范/标准算法/不同机制实现的误报只能靠语义判断逐对排除，无法靠枚举模式覆盖。
+        # 保守口径：confirmed 仅当 LLM 明确判「非借鉴」才降为 dismissed（借鉴/疑似保留，不丢失信号）；
+        # review/weak 维持原口径（借鉴升 confirmed，疑似/非借鉴降 dismissed）。
+        confirmed_groups = collect_file_pairs(suspects, keep_tiers=("confirmed",))
+        review_pairs.extend(confirmed_groups)
         run_review_judgment(review_pairs, work_dir)
         up, dn = _apply_review_verdicts(suspects, review_pairs)
         if up or dn:
-            logger.info("[review] 复核：判借鉴 {} 对升入已确认借鉴，疑似/非借鉴 {} 对移入原创",
-                        up, dn)
+            logger.info("[review] 复核：判借鉴 {} 对升入已确认借鉴，非借鉴 {} 对移入原创"
+                        "（含 confirmed 全量送复核 {} 个）",
+                        up, dn, len(confirmed_groups))
+
+    # 内部跨架构硬拷贝复用标注：须在复核升档之后（覆盖升上来的 confirmed），统计之前。
+    dup_n = tag_internal_arch_dups(suspects)
+    if any(fp_counts.values()) or dup_n:
+        logger.info("[compare] 疑似误报降级：跨架构 {} / 跨语言 {} / 样板汇编 {} / 内部跨架构复用 {}（均不计入借鉴，单列「疑似误报」节）",
+                    fp_counts["cross_arch"], fp_counts["cross_lang"],
+                    fp_counts["boilerplate_asm"], dup_n)
+    if any(ub_counts.values()):
+        logger.info("[compare] 上游基线/ABI 降级：vendored 上游 {} / ABI 受限 {}（不计入借鉴，单列「上游基线/ABI 受限」节）",
+                    ub_counts["upstream_vendored"], ub_counts["abi_constrained"])
+
+    # 文件整体相似：用「已剔除嫌疑对」口径计算（vendored 上游 / ABI / 库复用 / 公共样板 /
+    # 误报 不计入），这样 arceos/build.rs、macros.rs、C 库、examples 等脚手架文件不会被
+    # 报为整体相似。file_matches（逐字节整文件相同）按路径口径剔除同类脚手架。
+    non_excluded = [s for s in suspects if not _is_excluded_pair(s)]
+    file_similar = aggregate_file_similarity(non_excluded, recall, query_repo_path=query_repo_path)
+    file_matches = [m for m in file_matches
+                    if not match_library(m.get("query_file"))
+                    and not is_excluded_file_path(m.get("query_file", ""))]
+    file_similar = [f for f in file_similar
+                    if not match_library(f.get("file_path"))
+                    and not is_excluded_file_path(f.get("file_path", ""))]
+
+    logger.info("[compare] 新作品 {}：{} 个嫌疑对（剔除库复用 {} / 上游基线 {} / ABI {} / 误报 {} / 内部复用 {}），整文件相同 {} 个，整体相似 {} 个",
+                query_repo_id, len(suspects), reuse_n, ub_counts["upstream_vendored"],
+                ub_counts["abi_constrained"], sum(fp_counts.values()), dup_n,
+                len(file_matches), len(file_similar))
 
     # 统计（复核已把 review 档解析为 借鉴/原创，此处口径已是复核后的）
     submodule_stats = compute_submodule_stats(suspects, recall)
     lib_stats       = reused_library_stats(suspects, recall)
     cc_funcs        = common_code_stats(suspects)
+    fp_funcs        = false_positive_stats(suspects)
+    ub_funcs        = upstream_baseline_stats(suspects)
     base_funcs      = baseline_stats(suspects)
     # 表格展示：confirmed 全量；送 LLM 做语义分析：每模块取 sim 最高的 top_per_module 个
     file_pairs = collect_file_pairs(suspects)
@@ -2324,6 +2707,8 @@ def run_semantic_compare(
         lib_stats       = lib_stats,
         cc_funcs        = cc_funcs,
         base_funcs      = base_funcs,
+        fp_funcs        = fp_funcs,
+        ub_funcs        = ub_funcs,
     )
 
     safe_id  = query_repo_id.replace("/", "_")
@@ -2342,4 +2727,8 @@ def run_semantic_compare(
         "library_reuse_pairs": reuse_n,
         "reused_libraries":    lib_stats,
         "common_code_funcs":   len(cc_funcs),
+        "false_positive_funcs": len(fp_funcs),
+        "false_positive_counts": {**fp_counts, "internal_dup": dup_n},
+        "upstream_baseline_funcs": len(ub_funcs),
+        "upstream_baseline_counts": ub_counts,
     }
