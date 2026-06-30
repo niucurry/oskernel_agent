@@ -172,10 +172,9 @@ _FILEREF_FULL = re.compile(rf"^\s*{_FILEREF_RE.pattern}\s*$")
 
 def _wrap_anchor(inner_html: str, url: str) -> str:
     if url.startswith(_BROKEN_PREFIX):
-        real_url = url[len(_BROKEN_PREFIX):]
-        return (f'<a href="{html.escape(real_url, quote=True)}"'
-                f' class="file-jump file-broken" title="路径在仓库中未找到，点击为猜测位置">'
-                f'{inner_html}</a>')
+        # 无法在仓库中唯一定位（多为裸文件名在多架构子树中重名）：保持为纯文本，
+        # 不生成会 404 的猜测跳转链接。
+        return inner_html
     return f'<a href="{html.escape(url, quote=True)}" class="file-jump">{inner_html}</a>'
 
 

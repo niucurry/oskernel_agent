@@ -76,8 +76,11 @@ Tailwind CSS + ECharts。请直接输出**语义化 HTML 片段**：
 - **文件引用**直接写 `path:line`（如 `kernel/trap.c:42`），系统会自动变成可点击
   跳转到源文件的链接——纯文本或 `<code>kernel/trap.c:42</code>` 均可，**不要**写 `<a>`。
   正文里提到的关键函数 / 结构 / 位置都要带 file:line。路径一律用**相对仓库根的
-  完整路径**（facts.key_files / 工具返回里的原样路径），**严禁只写文件名或部分路径**——
-  裸文件名无法定位，会渲染成断链。
+  完整路径**（facts.key_files / 工具返回里的原样路径）：写 `src/task/processor.rs:42`，
+  **绝不要**写成 `processor.rs:42` 或 `processor.rs`。裸文件名无法唯一定位，会被降级成
+  不可点击的纯文本（不再渲染为链接）。**双架构 / 多子树仓库**（如 `src/` 与 `src-la/`
+  并存）里 `manager.rs`、`task.rs` 这类同名文件分布在多棵子树，必须带 `src/` 或
+  `src-la/` 前缀指明是哪一个；同时涉及两套实现时分别写出两个完整路径。
 - 唯一允许的图是下面那张 **ECharts 雷达图**（option 必须是合法 JSON：双引号、无注释、无尾逗号）；
   **不要画架构图/流程图**（不要 `<pre class="mermaid">`）。
 - **禁止**输出 ```echarts 这类 Markdown 围栏。
