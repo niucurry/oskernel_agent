@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -32,11 +33,11 @@ from ..parsers.code_parser import (
     find_source_roots,
 )
 from ..engines.llm_batch import (
-    BatchTask, cache_key, run_batch_task,
+    BatchTask, cache_key, run_batch_task, _log,
 )
 
 SCHEMA_VERSION = "tree-v3"
-PROMPT_VERSION_SUBSYS  = "subsys-v8"   # v8: 大子系统文件清单按 size 降序截断至 MAX_FILES_IN_PROMPT
+PROMPT_VERSION_SUBSYS  = "subsys-v9"   # v9: schema 内联 quote 中文点评/禁贴代码/禁英文示例；v8: 文件清单截断
 PROMPT_VERSION_VERDICT = "verdict-v14"
 
 MAX_MODULES_PER_SUBSYS = 8   # 每个子系统至多 N 个模块槽位
@@ -240,11 +241,18 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
         "**写出顺序**：先写各模块 HTML → 再写子系统总览 HTML → **最后**写 JSON。\n"
         "**不要给子系统或模块打分**（JSON 无 score 字段）。\n\n"
         "**不要对子系统或模块打分**——评分只在顶层 VERDICT 会话产出。\n\n"
+        "**硬性：summary 和 highlights/issues 的 quote 全部用简体中文写**——"
+        "即使源码注释是英文也必须用中文转述，禁止整句英文（函数名/类型名等标识符可保留原文）。\n"
+        "**quote 是「中文一句话点评」——说清这里好在哪 / 问题在哪，绝不能粘贴源代码原文**"
+        "（代码位置已由 path 指出）。\n"
+        "  ✅ 正例 quote：\"用 UPSafeCell 包裹 inode 内部状态，规避裸 static mut 的并发隐患\"\n"
+        "  ❌ 反例 quote：\"pub struct OSInode { readable: bool, writable: bool, ... }\"（贴代码）\n"
+        "  ❌ 反例 quote：\"All traps go through __alltraps defined in trap.S\"（整句英文）\n\n"
         "JSON schema：\n"
         '{\n'
-        '  "name":"...","role":"...","summary":"...",\n'
-        '  "highlights":[{"path":"...","quote":"..."}],\n'
-        '  "issues":[{"path":"...","severity":"low|medium|high","quote":"..."}],\n'
+        '  "name":"...","role":"...","summary":"中文中性事实，≤200字",\n'
+        '  "highlights":[{"path":"fs/inode.rs:42","quote":"中文点评，说清好在哪"}],\n'
+        '  "issues":[{"path":"...","severity":"low|medium|high","quote":"中文说明问题所在"}],\n'
         '  "modules":[\n'
         '    {"slot":1,"name":"模块名","summary":"≤200字",'
         '"file_paths":["..."]}\n'
@@ -304,6 +312,7 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
         fallback=_subsys_fallback(subsys_node),
         enrich=_enrich,
     )
+    _t0 = time.perf_counter()
     parsed = run_batch_task(
         task,
         schema_hint='{"name":str,"role":str,"summary":str,'
@@ -312,6 +321,8 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
                     'file_paths:[...]}]}',
         timeout=600,
     )
+    _log(f"[计时] 子系统「{subsys_node['name']}」"
+         f"（{len(files)} 文件）：{time.perf_counter() - _t0:.1f}s")
 
     # 填子系统字段（子系统/模块不打分，评分只在顶层 VERDICT）
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
@@ -588,21 +599,27 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
 
     # A. 按子系统枚举
     print(f"\n[tree] 按 OS 子系统归类源文件 ...")
+    _ta = time.perf_counter()
     tree_root, file_count = enumerate_subsystems(repo_path)
     print(f"[tree] 命中 {file_count} 个源文件，"
           f"{len(tree_root['children'])} 个子系统：" +
           " / ".join(c["name"] for c in tree_root["children"]))
+    print(f"[计时] 阶段A 子系统枚举：{time.perf_counter() - _ta:.1f}s")
 
     if file_count == 0:
         print("[tree] 仓库未找到可索引源文件，放弃。", file=sys.stderr)
         return _empty_tree(repo_name, ts, facts)
 
     # B. SUBSYS 并发分析
+    _tb = time.perf_counter()
     run_subsys_stage(tree_root, repo_path, out_dir, cache_dir, facts)
+    print(f"[计时] 阶段B SUBSYS 并发分析（合计）：{time.perf_counter() - _tb:.1f}s")
 
     # C. VERDICT 综合
     print(f"[tree] VERDICT 阶段 ...")
+    _tc = time.perf_counter()
     verdict = run_verdict_stage(tree_root, facts, out_dir, cache_dir, repo_path)
+    print(f"[计时] 阶段C VERDICT：{time.perf_counter() - _tc:.1f}s")
 
     return {
         "meta": {

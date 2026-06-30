@@ -21,10 +21,18 @@ libraries:
   - name: fatfs
     segments: [fatfs, rust-fatfs, rust_fatfs]
   - name: virtio-drivers
-    segments: [virtio-drivers, virtio_drivers]
+    # virtio-drivers-la 是该库的 LoongArch 移植分支（crate name "virtio-drivers-la"），
+    # 各队 vendored 时目录名常被改，故一并登记，避免被当成跨队抄袭。
+    segments: [virtio-drivers, virtio_drivers, virtio-drivers-la, virtio_drivers_la]
   - name: buddy_system_allocator
     segments: [buddy_system_allocator]
   - name: slab_allocator
     segments: [slab_allocator]
+  # rust-embedded 的 riscv 寄存器抽象 crate（github.com/rust-embedded/riscv），多队整库
+  # vendored（常见目录名 riscv / riscv-0.x.y）。注意：段名匹配是全等任意路径段，若某仓库把
+  # 学生自写的架构代码也放在名为 riscv 的目录下（如 os/src/arch/riscv/），会被一并按库剔除；
+  # 本赛道语料里学生架构代码通常不在恰好名为 riscv 的目录段，故风险可控。
+  - name: riscv
+    segments: [riscv]
 
 vendor_dirs: [vendor, third_party, 3rdparty, thirdparty, extern, external]
