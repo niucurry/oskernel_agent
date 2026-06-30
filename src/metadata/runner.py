@@ -95,21 +95,40 @@ def channel_unique_strings(data: dict, db_path: str | Path, settings: MetadataSe
 
 
 def channel_baseline(data: dict, matcher: BaselineMatcher, settings: MetadataSettings) -> int:
-    """通道 2：基线扣除。双侧命中同一基线函数则降级 baseline_derived。返回扣除数。"""
+    """通道 2：基线扣除。query 函数命中上游基线（vendored/紧随上游）则降级 baseline_derived。返回扣除数。
+
+    性能：只需判 **query 侧**是否命中基线（单侧即足以判 vendored 上游，candidate 侧多余，
+    见 is_baseline_derived）。去重所有 query normalized_code，一次矩阵乘批量算相似度（~1000
+    唯一 query → 1 次 GPU 矩阵乘，秒级），再回填。
+    """
+    suspects = data["suspects"]
+    uniq: dict[str, None] = {}
+    for s in suspects:
+        nc = (s.get("query_func") or {}).get("normalized_code", "") or " "
+        uniq.setdefault(nc, None)
+    codes = list(uniq)
+    if hasattr(matcher, "match_batch"):
+        results = matcher.match_batch(codes)
+    else:  # 兜底：非 VectorBaselineMatcher 时逐条
+        results = [matcher.match(c) for c in codes]
+    cache = dict(zip(codes, results))
+
     n = 0
-    for s in data["suspects"]:
-        q_match = matcher.match(s["query_func"].get("normalized_code", ""))
-        c_match = matcher.match(s["candidate_func"].get("normalized_code", ""))
-        if is_baseline_derived(q_match, c_match, threshold=settings.baseline_sim_threshold):
+    for s in suspects:
+        q_nc = (s.get("query_func") or {}).get("normalized_code", "") or " "
+        q_match = cache[q_nc]
+        # candidate 侧不再搜：单侧 query 命中基线即判 vendored 上游
+        derived, basis = is_baseline_derived(q_match, (None, 0.0),
+                                             threshold=settings.baseline_sim_threshold)
+        if derived:
             ev = s.setdefault("evidence", {})
             ev["baseline_flag"] = True
             s["tier"] = "baseline_derived"
             s["baseline_note"] = (
-                f"双侧均与同一基线函数(id={q_match[0]})相似 "
-                f"(q={q_match[1]:.3f}, c={c_match[1]:.3f} > {settings.baseline_sim_threshold})"
+                f"{basis} (id={q_match[0]}, q={q_match[1]:.3f} > {settings.baseline_sim_threshold})"
             )
             n += 1
-    logger.info("通道2 基线扣除：{} 个降为 baseline_derived", n)
+    logger.info("通道2 基线扣除：{} 个降为 baseline_derived（批量编码 {} 个唯一 query 函数）", n, len(codes))
     return n
 
 

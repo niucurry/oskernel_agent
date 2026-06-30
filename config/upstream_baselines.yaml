@@ -1,0 +1,66 @@
+# 上游基线 / ABI 受限代码 的扣除配置（报告层，与 libraries.yaml 同口径）。
+#
+# 两类「不应计入内核创新查重」的代码（评审实测暴露的判别缺陷）：
+#
+# 1. 上游 OS/框架 整库 vendored（upstream_roots）：
+#    各队把 ArceOS / rCore 等上游整库签进自己仓库（如 `arceos/`），导致「A 队的
+#    arceos/modules/axhal/x.rs」与「B 队的 arceos/modules/axhal/x.rs」逐字相同——
+#    这不是跨队抄袭，而是双方都 vendored 了同一份上游。本系统在 metadata 通道2 的
+#    「双侧都命中同一上游基线函数」向量扣除因候选侧是「另一队的 vendored 副本」而非
+#    上游本身、且各队对副本改动不一，常不触发（baseline_derived=0）；故在此加一条
+#    **路径口径**：双方 file_path 在同一 upstream_root 段下、且该段之后的相对路径相同，
+#    即判为「vendored 上游基线」（upstream_vendored），从借鉴 KPI/清单剔除，单列小节。
+#    安全性：队伍自研的新模块（如 arceos/modules/asynctask/）在其他队无同名相对路径，
+#    不会触发本规则，故自研代码不会被误剔除。
+#
+# 2. 受 Linux/POSIX ABI 限制的唯一性实现（abi_constrained）：
+#    `metadata_to_kstat`（按 Linux struct kstat 字段布局转换）、`dummy_stat_fs`、
+#    `sys_*` 系统调用 shim、vdso 符号等——字段/签名由 ABI 规范硬性规定，只有一种正确
+#    实现，多队写法必然雷同。这类既非 vendored 库、也无单一上游可登记，按**路径 + 函数名**
+#    模式识别。口径保守：只收明显的 ABI shim/转换函数，把 trait 样板（from/new/default）
+#    与真实 VFS 逻辑留给人工复核，避免把原创信号误降。
+#    build.rs / scripts 等构建脚本、工具链也在此一并扣除（非内核创新代码）。
+
+upstream_roots: [arceos, rcore, rcore-v3, xv6-riscv, ucore, os_kernel_lab]
+
+abi_constrained:
+  # 路径 glob（任一命中即判）：归一为正斜杠 + 小写后做**段全等连续匹配**（_glob_in_path）。
+  # 这是「非内核业务逻辑」文件类别的**穷举清单**（构建/示例/测试/工具/脚本/基准 bench/C 库/ABI shim），
+  # 不是逐案打补丁——凡属这些类别的文件，无论相似度多高都不计借鉴（队伍没写这些）。
+  path_globs:
+    # 构建脚本与工具链
+    - build.rs
+    - /scripts/
+    - /tools/
+    - /deptool/
+    - /bwbench_client/      # 基准测试客户端（ArceOS 自带 benchmark）
+    - /examples/            # 官方示例 / demo
+    - /tests/               # 测试
+    - /benches/             # 基准测试
+    # C 标准库 / POSIX 兼容层（上游直接注入的底层支持库）
+    - /ctypes/
+    - /shim/
+    - /musl/
+    - /libc/
+    - /glibc/
+    - /axlibc/c/            # ArceOS axlibc 的 C 源码（printf.c/string.c/math.c/stdlib.c…）
+    - /vdso/
+    # POSIX stat/fs/syscall 结构转换层（ABI 受限）
+    - api/src/file/
+    - api/src/syscall/
+  # 函数名正则（归一化后小写匹配）：明显的 ABI 转换/shim/标准算法名
+  name_patterns:
+    - "_to_kstat$"
+    - "from_kstat$"
+    - "_to_stat$"
+    - "from_stat$"
+    - "^dummy_stat_"
+    - "^metadata_to_"
+    - "^sys_"
+    - "_to_errno$"
+    - "errno_to_"
+    - "_syscall$"
+    # Linux robust futex 机制（exit_robust_list / handle_futex_death）——按 Linux 内核规范
+    # 的死锁清理固定流程，字段/流程由 ABI 规定，多队必然雷同。
+    - "robust"
+    - "futex"
