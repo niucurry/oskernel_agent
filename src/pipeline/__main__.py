@@ -88,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
 
     # 共享后端（按需懒加载）
     embedder = None
+    vector_store = None          # 本地 Qdrant local 模式独占文件锁，全流程共用一个实例，
+                                 # 避免 recall 与 metadata(--baselines) 各建实例触发 AlreadyLocked
 
     def get_emb():
         nonlocal embedder
@@ -95,6 +97,15 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             from src.embed.embedder import get_embedder
             embedder = get_embedder(show_progress=False)
         return embedder
+
+    def get_store():
+        nonlocal vector_store
+        if vector_store is None:
+            from src.embed.settings import load_settings
+            from src.embed.vector_store import VectorStore
+            st = load_settings()
+            vector_store = VectorStore(st.qdrant.collection, path=args.qdrant_path)
+        return vector_store
 
     # ---- fastpath (L0 文件指纹层) ----
     skip_files: set[str] = set()
@@ -110,11 +121,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     # ---- recall (含 normalize) ----
     if _should_run("recall", args.resume_from):
         from src.embed.query import query_repo
-        from src.embed.settings import load_settings
-        from src.embed.vector_store import VectorStore
 
-        st = load_settings()
-        store = VectorStore(st.qdrant.collection, path=args.qdrant_path)
+        store = get_store()
         simhash_query = None
         if not args.no_simhash and Path(args.idf).exists() and Path(args.simhash_index).exists():
             from src.simhash.build import SimHashQuery
@@ -146,12 +154,9 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         from src.metadata.runner import run_metadata
         baseline_matcher = None
         if args.baselines:
-            from src.embed.settings import load_settings
-            from src.embed.vector_store import VectorStore
             from src.metadata.baseline import VectorBaselineMatcher
-            st = load_settings()
-            baseline_matcher = VectorBaselineMatcher(
-                get_emb(), VectorStore(st.qdrant.collection, path=args.qdrant_path))
+            # 复用 recall 步已建的 store（共用 Qdrant local 文件锁），避免 AlreadyLocked
+            baseline_matcher = VectorBaselineMatcher(get_emb(), get_store())
         # commit 信号通道已停用（git blame 逐函数分析过慢、对查重结论非必需）
         res = timed("metadata", lambda: run_metadata(
             v2_path, db_path=args.db, output_dir=out, baseline_matcher=baseline_matcher))
