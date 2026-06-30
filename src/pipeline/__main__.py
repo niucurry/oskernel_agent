@@ -52,6 +52,27 @@ def _should_run(step: str, resume_from: str | None) -> bool:
     return STEPS.index(step) >= STEPS.index(resume_from)
 
 
+def _finalize_comparison_output(out: Path, repo_name: str, html_path: Path,
+                                query_repo_id: str, *intermediate_paths: Path) -> Path:
+    """删除查重流水线落盘的衍生 JSON + semantic_compare 工作目录，只保留最终
+    对比报告 HTML，归档到以仓库名命名的子目录（与描述报告共用同一输出根目录约定）。
+    """
+    import shutil
+
+    for p in intermediate_paths:
+        Path(p).unlink(missing_ok=True)
+
+    work_dir = out / f"{query_repo_id}_semantic_work"
+    shutil.rmtree(work_dir, ignore_errors=True)
+
+    final_dir = out / repo_name
+    final_dir.mkdir(parents=True, exist_ok=True)
+    final_html = final_dir / html_path.name
+    if html_path.resolve() != final_html.resolve():
+        html_path.replace(final_html)
+    return final_html
+
+
 def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     from dotenv import load_dotenv
     load_dotenv()
@@ -201,8 +222,16 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             filematch_path  = filematch_path,
             ai_detect_path  = ai_detect_path,
         ))
-        funnel["report"] = res["html_path"]
-        funnel["report_html"] = res["html_path"]
+
+        # 清理流水线衍生中间产物（fastpath/recall/exact/segment/metadata/ai_detect 的
+        # JSON 落盘 + semantic_compare 的工作目录均只用于生成本次 HTML），只保留最终
+        # 报告，归档到以仓库名命名的子目录。
+        final_html = _finalize_comparison_output(
+            out, repo_name, Path(res["html_path"]), res["query_repo_id"],
+            filematch_path, recall_path, suspects_path, v2_path, final_path, ai_detect_path,
+        )
+        funnel["report"] = str(final_html)
+        funnel["report_html"] = str(final_html)
 
     logger.info("===== 漏斗 =====")
     for k, v in funnel.items():
