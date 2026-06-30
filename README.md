@@ -172,3 +172,109 @@ python -m src.ai_detect --repo <新作品路径>
 ```
 
 模型、阈值等见 [config/settings.yaml](config/settings.yaml) 的 `ai_detect` 段。无 GPU/模型时该步骤优雅跳过，报告章节给出说明。
+
+---
+
+## 六、前端控制台
+
+`frontend/` 提供一个本地 Web 控制台，用于导入作品清单、发起报告生成任务、查看任务日志和打开已生成的 HTML 报告。前端只提交源码与配置；`node_modules/`、`dist/`、`data/`、`reports/*` 等运行产物由 `frontend/.gitignore` 排除。
+
+### 启动方式
+
+首次进入前端目录安装依赖：
+
+```bash
+cd frontend
+npm install
+```
+
+开发模式同时启动 API 服务和 Vite：
+
+```bash
+npm run dev:all
+```
+
+默认地址：
+
+- Web 页面：`http://127.0.0.1:5173`
+- API 服务：`http://127.0.0.1:3130`
+- 报告静态目录：`http://127.0.0.1:3130/reports/...`
+
+也可以分开启动：
+
+```bash
+npm run api      # 仅启动 Node API
+npm run dev      # 仅启动 Vite Web
+npm run build    # 构建前端静态资源到 frontend/dist
+npm run start    # 生产模式启动 Node API，并在 dist 存在时托管静态页面
+```
+
+端口可用环境变量覆盖：
+
+```bash
+FRONTEND_API_PORT=3130
+FRONTEND_WEB_HOST=127.0.0.1
+FRONTEND_WEB_PORT=5173
+PYTHON_BIN=../.venv/Scripts/python.exe   # Windows 可选；不填会自动找项目 .venv
+```
+
+### 导入作品清单
+
+页面支持上传 `.xlsx`。工作簿第一张表需要包含以下列名：
+
+- `年份`
+- `赛事`
+- `子赛事`
+- `学校`
+- `队伍名称`
+- `仓库地址`
+
+导入后会根据仓库地址生成稳定的 `repo_xxxxxxxx` ID，并写入 `frontend/data/app.sqlite`。如果 `frontend/reports/<repo_id>/` 下已有报告，后端会自动同步并标记为可用。
+
+### 生成报告
+
+前端当前支持三类报告：
+
+- `comparison`：查重对比报告，调用 `python -m src.pipeline`。
+- `description`：项目描述报告，调用 `agent.py --repo-path ... --output ...`，依赖 OpenCode 和 `oskernel_agent` MCP。
+- `ai_detect`：AI 生成代码检测报告，调用 `python -m src.ai_detect`，并把 JSON 渲染为 `ai-detect/report.html`。
+
+页面可以对单个作品选择报告类型生成，也可以批量生成缺失报告。生成过程中可在任务列表查看日志；报告完成后从作品详情页直接打开。
+
+### 运行产物目录
+
+- `frontend/data/app.sqlite`：前端本地数据库。
+- `frontend/reports/<repo_id>/`：每个作品的报告目录。
+- `frontend/reports/<repo_id>/_repos/`：前端流水线克隆的新作品仓库。
+- `frontend/reports/<repo_id>/comparison.html`：查重报告入口。
+- `frontend/reports/<repo_id>/description.html`：描述报告入口。
+- `frontend/reports/<repo_id>/ai-detect/report.html`：AI 检测报告入口。
+
+这些产物默认不提交到 Git。需要迁移或备份时，直接拷贝 `frontend/data/` 和 `frontend/reports/` 即可。
+
+### 常用调参
+
+描述报告的 OpenCode 并发可通过环境变量控制：
+
+```bash
+AGENT_SUBSYS_CONCURRENCY=10
+AGENT_LLM_CONCURRENCY=10
+AGENT_OPENCODE_ISOLATED_DATA=1
+AGENT_TREE_NO_CACHE=1
+```
+
+AI 检测使用 GPU 时建议显式限制批量和扰动次数，避免显存峰值过高：
+
+```bash
+AI_DETECT_MODEL=Qwen/Qwen2.5-Coder-1.5B
+AI_DETECT_DEVICE=cuda
+AI_DETECT_BATCH_SIZE=1
+AI_DETECT_K=2
+```
+
+如果只想验证前端构建是否正常，执行：
+
+```bash
+cd frontend
+npm run build
+```
