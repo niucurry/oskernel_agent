@@ -323,6 +323,7 @@ def _pair_sim(s: dict) -> float:
 
 def collect_file_pairs(
     suspects: list[dict], top_per_module: int = 5, max_candidates: int = 4,
+    keep_tiers: tuple[str, ...] = ("confirmed",),
 ) -> list[dict]:
     """按 query 函数聚合候选（U6）：每个 query 函数列出其全部候选 + 各自相似度，并给
     「整体相似度」(= 最强候选)。每模块取整体相似度最高的 top_per_module 个函数组。
@@ -387,9 +388,9 @@ def collect_file_pairs(
     result = []
     for mod in MODULES:
         gs = sorted(by_module.get(mod, []), key=lambda x: -x["overall_sim"])
-        # 只保留「已确认借鉴」(confirmed) 函数组，全部展示；review(待复核)/weak(弱相似)
-        # 属不确定项，按需求不纳入报告。
-        result.extend(g for g in gs if g["overall_tier"] == "confirmed")
+        # 默认只保留 confirmed（已确认借鉴）；keep_tiers 可放开到 review/weak，
+        # 供「待复核清单」单独收集（不影响 confirmed 主表与送 LLM 的输入）。
+        result.extend(g for g in gs if g["overall_tier"] in keep_tiers)
     return result
 
 
@@ -1805,6 +1806,131 @@ def _excluded_divider() -> tuple[str, str]:
     return toc, section
 
 
+def _collapsible(sid: str, title: str, body: str) -> tuple[str, str]:
+    """统一的可折叠 section 外壳。返回 (toc_entry, section_html)。"""
+    section = (
+        f'<section id="{sid}" data-section-id="{sid}" '
+        'class="mb-6 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden" '
+        f'x-data="{{open: true}}" '
+        f"x-init=\"(function(){{const s=localStorage.getItem('cmp:{sid}');if(s!==null)open=(s==='1');}})()\">"
+        '<div class="px-6 py-3 flex items-center gap-2 cursor-pointer select-none '
+        'border-b border-slate-200 bg-slate-50" '
+        f"@click=\"open=!open;localStorage.setItem('cmp:{sid}',open?'1':'0')\">"
+        '<span class="text-slate-400 w-4 text-center" x-text="open?\'▾\':\'▸\'"></span>'
+        f'<h2 class="text-base font-semibold text-slate-800 m-0">{html.escape(title)}</h2>'
+        '</div>'
+        f'<div class="px-6 py-4" x-show="open" x-cloak>{body}</div>'
+        '</section>'
+    )
+    toc = f'<a class="toc-link" href="#{sid}">{html.escape(title)}</a>'
+    return toc, section
+
+
+def _review_section(review_pairs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
+    """待复核（needReview）清单：有命中但未达 confirmed 判据的 review/weak 档函数对。"""
+    if not review_pairs:
+        return "", ""
+    intro = ('<p class="text-sm text-slate-600 mb-3">'
+             f'下列 <b>{len(review_pairs)}</b> 个函数与历史库有相似命中。进入「待复核」的判据是：'
+             '向量相似度 &gt; 0.7 且<b>逐行匹配比例落在 70%–95%</b>'
+             '（含逐字相同与仅改名后相同的行，再经分段覆盖率微调）——'
+             '相似度足够高、值得人看，但未达「已确认借鉴」的 95% 铁证线。'
+             '常见成因：① 真借鉴但删改 / 新增了部分代码，使匹配率被拉低；'
+             '② OS 内核教科书式通用模式（RR 调度、buddy 分配、RISC-V trap 上下文等）'
+             '天然结构雷同。需人工复核确认是否构成借鉴。</p>')
+    table = _groups_table("待复核函数对（needReview）", review_pairs,
+                          linker, query_repo_id, "text-amber-700")
+    return _collapsible("sec-review", "待复核清单", intro + table)
+
+
+_AI_STAGE_DISP = {
+    "fast_filter": "快筛（高置信）",
+    "perturbation": "扰动复核",
+    "npr": "扰动复核",
+    "stage2": "扰动复核",
+}
+
+
+def _ai_detect_section(ai_data: dict | None, linker, query_repo_id: str) -> tuple[str, str]:
+    """AI 生成代码检测：整体 KPI + 疑似 AI 函数明细（含指标通俗说明）。"""
+    if not ai_data or ai_data.get("status") != "ok":
+        return "", ""
+    ov = (ai_data.get("aggregated") or {}).get("overall") or {}
+    if not ov:
+        return "", ""
+    ag = ai_data["aggregated"]
+    kpis = (
+        '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-1 mb-3">'
+        + _kpi(f'{ov.get("llm_count", 0)}', "疑似 AI 生成（函数）", "#9333ea")
+        + _kpi(f'{ov.get("human_count", 0)}', "判为人工编写（函数）", "#16a34a")
+        + _kpi(f'{ov.get("uncertain_count", 0)}', "无法判定（信号不足）", "#64748b")
+        + _kpi(f'{ov.get("llm_ratio_by_count", 0.0)*100:.0f}%', "疑似 AI 占比（按函数）", "#9333ea")
+        + '</div>'
+    )
+    meta = (f'<p class="text-sm text-slate-600 mb-3">在 <b>{ov.get("total_functions", 0)}</b> '
+            f'个原创（非借鉴）函数中检测；疑似 AI 占比按代码行数为 '
+            f'{ov.get("llm_ratio_by_loc", 0.0)*100:.0f}%。打分模型 '
+            f'<code>{html.escape(ai_data.get("model_id", "") or "")}</code>。'
+            '原理：把代码喂给一个代码大模型，统计它对每个 token 的“眼熟程度”——'
+            'AI 写的代码模型普遍更“眼熟”，人写的更“意外”，据此区分。'
+            '（借鉴自历史库的函数已排除，不参与此检测。）</p>')
+
+    sf = ag.get("suspicious_functions") or []
+    sf_table = ""
+    if sf:
+        srows = []
+        for s in sf[:30]:
+            lr = s.get("log_rank")
+            lr_disp = f"{lr:.3f}" if isinstance(lr, (int, float)) else "—"
+            fp = (s.get("file_path", "") or "").replace("\\", "/")
+            stage_disp = _AI_STAGE_DISP.get(s.get("stage", ""), s.get("stage", "") or "—")
+            srows.append(
+                '<tr>'
+                '<td class="font-mono text-xs">'
+                + _make_gitlab_anchor(linker, query_repo_id, fp,
+                                      s.get("start_line", 0), s.get("end_line", 0))
+                + '</td>'
+                f'<td class="text-xs font-mono">{html.escape(s.get("function_name", "") or "")}</td>'
+                f'<td class="text-xs">{s.get("loc", 0)} 行</td>'
+                f'<td class="text-xs font-semibold text-purple-700">{s.get("confidence", 0.0)*100:.0f}%</td>'
+                f'<td class="text-xs">{lr_disp}</td>'
+                f'<td class="text-xs text-slate-500">{html.escape(stage_disp)}</td>'
+                '</tr>'
+            )
+        legend = (
+            '<p class="text-xs text-slate-500 mt-2 leading-relaxed">'
+            '指标说明：'
+            '<b>“眼熟值”(log-rank)</b> = 代码在大模型里的平均 token 排名（对数），'
+            '<b>数值越低越像 AI 生成</b>（本系统判定线约 0.31，真人代码平均约 0.62）；'
+            '<b>把握度</b> = 该条判定的可信程度；'
+            '<b>判定依据</b>：「快筛」=仅凭“眼熟值”就能高把握判定，'
+            '「扰动复核」=“眼熟值”在模糊地带、再做多次微改后看变化（NPR 信号）二次确认。'
+            '</p>'
+        )
+        sf_table = (
+            '<div class="text-sm font-semibold text-slate-700 mb-1">疑似 AI 生成函数（点击文件名跳转源码）</div>'
+            '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
+            '<thead><tr class="bg-slate-50 text-slate-600">'
+            '<th class="text-left p-2 border-b">文件:行（可点击）</th><th class="text-left p-2 border-b">函数</th>'
+            '<th class="text-left p-2 border-b">规模</th>'
+            '<th class="text-left p-2 border-b">把握度</th>'
+            '<th class="text-left p-2 border-b">“眼熟值”(log-rank)</th>'
+            '<th class="text-left p-2 border-b">判定依据</th>'
+            '</tr></thead>'
+            f'<tbody>{"".join(srows)}</tbody></table></div>'
+            + legend
+        )
+
+    disclaimer = (
+        '<div class="mb-3 p-2.5 rounded bg-amber-50 border border-amber-200 '
+        'text-xs text-amber-800">⚠️ <b>仅供参考</b>：本结果基于免训练统计信号'
+        '（“眼熟值”/扰动复核）推断，<b>存在误判，不作为 AI 生成的最终判定依据</b>；'
+        '判定阈值与打分模型强相关、整体准确率（AUC）约 0.86，“无法判定”的函数尤其需要人工核查。</div>'
+    )
+    return _collapsible("sec-aidetect", "AI 生成代码检测",
+                        disclaimer + kpis + meta + sf_table)
+
+
 def generate_comparison_html(
     query_repo_id: str,
     suspects: list[dict],
@@ -1812,6 +1938,8 @@ def generate_comparison_html(
     file_pairs: list[dict],
     analysis_html: str,
     original_funcs: list[dict],
+    review_pairs: list[dict] | None = None,
+    ai_detect_data: dict | None = None,
     query_repo_path: Path | None = None,
     linker=None,
     file_matches: list[dict] | None = None,
@@ -1846,10 +1974,22 @@ def generate_comparison_html(
             toc_items.append(toc_entry)
             body_parts.append(section)
 
+    # 待复核清单（review/weak 档，有命中但未确认借鉴）
+    toc_rev, sec_rev = _review_section(review_pairs or [], linker, query_repo_id)
+    if toc_rev:
+        toc_items.append(toc_rev)
+        body_parts.append(sec_rev)
+
     # 创新点分析章节
     toc_orig, sec_orig = _original_section(original_funcs, linker, query_repo_id, analysis_html)
     toc_items.append(toc_orig)
     body_parts.append(sec_orig)
+
+    # AI 生成代码检测（独立链路，并入对比报告）
+    toc_ai, sec_ai = _ai_detect_section(ai_detect_data, linker, query_repo_id)
+    if toc_ai:
+        toc_items.append(toc_ai)
+        body_parts.append(sec_ai)
 
     # ── 报告最下方：不计入借鉴的代码（库复用 / 公共样板 / 基线衍生），分类单列 ──
     bottom = [
@@ -1905,6 +2045,7 @@ def run_semantic_compare(
     top_per_module: int = 20,
     skip_opencode: bool = False,
     filematch_path: str | Path | None = None,
+    ai_detect_path: str | Path | None = None,
 ) -> dict:
     """主入口：suspects.json → LLM 语义分析 → 直接 HTML 报告。
 
@@ -1949,6 +2090,16 @@ def run_semantic_compare(
     # （默认 20——模块借鉴对 <20 时即全部送语义分析，仅在超量时截断以控 token）
     file_pairs = collect_file_pairs(suspects)
     llm_pairs  = _limit_per_module(file_pairs, top_per_module)
+    # 待复核（review/weak 档）单独收集，列入「待复核清单」（不影响 confirmed 主表/送 LLM）
+    review_pairs = collect_file_pairs(suspects, keep_tiers=("review", "weak"))
+
+    # AI 生成代码检测结果（独立链路产物，可选并入报告）
+    ai_detect_data = None
+    if ai_detect_path and Path(ai_detect_path).exists():
+        try:
+            ai_detect_data = json.loads(Path(ai_detect_path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("[compare] 读取 ai_detect 结果失败：{}", e)
 
     # 原创候选函数
     original_funcs  = _original_functions(recall, suspects) if recall else []
@@ -1983,6 +2134,8 @@ def run_semantic_compare(
         file_pairs      = file_pairs,
         analysis_html   = analysis_html,
         original_funcs  = original_funcs,
+        review_pairs    = review_pairs,
+        ai_detect_data  = ai_detect_data,
         query_repo_path = Path(query_repo_path).resolve() if query_repo_path else None,
         linker          = linker,
         file_matches    = file_matches,
