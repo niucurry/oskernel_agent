@@ -66,7 +66,7 @@ _MODULE_DISPLAY = {
 # 多模块逻辑），仅在报告里把 review 显示为 needReview，更贴合「需人工复核」语义。
 _TIER_DISPLAY = {
     "confirmed": "已确认借鉴",
-    "review":    "needReview（待复核）",
+    "review":    "needReview（疑似借鉴）",
     "weak":      "弱相似",
 }
 # clone_type 展示名：按「逐字相同行占比」描述相似程度，中性命名，不臆断「改名」动机。
@@ -186,14 +186,14 @@ def baseline_stats(suspects: list[dict]) -> list[dict]:
 
 
 def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) -> dict:
-    """各子模块 借鉴 / 待复核 / 原创 三类**函数数**统计（口径互斥、相加=total）。
+    """各子模块 借鉴 / 疑似借鉴 / 原创 三类**函数数**统计（口径互斥、相加=total）。
 
     按 query 函数去重、取最高档归类：
       借鉴(confirmed)：confirmed 且非库复用、非公共/样板；
-      待复核(review)：review/weak（有命中但未确认），非库非样板；
+      疑似借鉴(review)：review/weak（有命中但未确认），非库非样板；
       原创(original)：recall 中（非库）完全未进入嫌疑清单的函数。
     库复用 / 公共样板 / baseline 既不算借鉴也不算原创，**不计入 total**（在各自小节单列），
-    所以 total = 借鉴 + 待复核 + 原创，三者占比相加为 100%，且「原创」数与原创清单一致。
+    所以 total = 借鉴 + 疑似借鉴 + 原创，三者占比相加为 100%，且「原创」数与原创清单一致。
 
     Returns: dict[module] → {confirmed, review, weak, original, total,
                              copy_pct, review_pct, original_pct, top_source}
@@ -247,7 +247,7 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) ->
         result[mod] = {
             "confirmed":    d["confirmed"],
             "review":       d["review"],
-            "weak":         0,            # weak 已并入「待复核」(review)，保留键以兼容
+            "weak":         0,            # weak 已并入「疑似借鉴」(review)，保留键以兼容
             "original":     d["original"],
             "total":        total,
             "copy_pct":     round(d["confirmed"] / total, 3) if total else 0.0,
@@ -389,7 +389,7 @@ def collect_file_pairs(
     for mod in MODULES:
         gs = sorted(by_module.get(mod, []), key=lambda x: -x["overall_sim"])
         # 默认只保留 confirmed（已确认借鉴）；keep_tiers 可放开到 review/weak，
-        # 供「待复核清单」单独收集（不影响 confirmed 主表与送 LLM 的输入）。
+        # 供「疑似借鉴清单」单独收集（不影响 confirmed 主表与送 LLM 的输入）。
         result.extend(g for g in gs if g["overall_tier"] in keep_tiers)
     return result
 
@@ -709,7 +709,7 @@ def _fallback_analysis(file_pairs: list[dict], submodule_stats: dict) -> str:
 # ─── 5. 生成完整 HTML 报告 ────────────────────────────────────────────────────
 
 def _pct_bar(copy_pct: float, review_pct: float = 0.0, original_pct: float | None = None) -> str:
-    """借鉴/待复核/原创 三色进度条（借鉴 红 + 待复核 琥珀 + 原创 绿）。"""
+    """借鉴/疑似借鉴/原创 三色进度条（借鉴 红 + 疑似借鉴 琥珀 + 原创 绿）。"""
     c = round(copy_pct * 100)
     rv = round(review_pct * 100)
     o = max(0, 100 - c - rv)
@@ -717,14 +717,14 @@ def _pct_bar(copy_pct: float, review_pct: float = 0.0, original_pct: float | Non
     if c:
         seg += f'<div class="pct-copy" style="width:{c}%">{c}%&nbsp;借鉴</div>'
     if rv:
-        seg += f'<div class="pct-review" style="width:{rv}%">{rv}%&nbsp;待复核</div>'
+        seg += f'<div class="pct-review" style="width:{rv}%">{rv}%&nbsp;疑似借鉴</div>'
     if o:
         seg += f'<div class="pct-orig" style="width:{o}%">{o}%&nbsp;原创</div>'
-    return f'<div class="pct-bar" title="借鉴 {c}% / 待复核 {rv}% / 原创 {o}%">{seg}</div>'
+    return f'<div class="pct-bar" title="借鉴 {c}% / 疑似借鉴 {rv}% / 原创 {o}%">{seg}</div>'
 
 
 def _echarts_overview(submodule_stats: dict) -> str:
-    """ECharts 堆叠横向柱图：每个模块的 借鉴/待复核/原创 比例（三者相加 100%）。"""
+    """ECharts 堆叠横向柱图：每个模块的 借鉴/疑似借鉴/原创 比例（三者相加 100%）。"""
     mods = [m for m in MODULES if submodule_stats.get(m, {}).get("total", 0) > 0]
     if not mods:
         return ""
@@ -734,7 +734,7 @@ def _echarts_overview(submodule_stats: dict) -> str:
     orig_vals = [round(submodule_stats[m]["original_pct"] * 100, 1) for m in mods]
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
-        "legend": {"data": ["借鉴", "待复核", "原创"]},
+        "legend": {"data": ["借鉴", "疑似借鉴", "原创"]},
         "grid": {"left": "25%", "right": "12%", "top": "8%", "bottom": "6%"},
         "xAxis": {"type": "value", "max": 100,
                   "axisLabel": {"formatter": "{value}%"}},
@@ -742,7 +742,7 @@ def _echarts_overview(submodule_stats: dict) -> str:
         "series": [
             {"name": "借鉴", "type": "bar", "stack": "pct", "data": copy_vals[::-1],
              "itemStyle": {"color": "#ef4444"}, "label": {"show": True, "formatter": "{c}%"}},
-            {"name": "待复核", "type": "bar", "stack": "pct", "data": rev_vals[::-1],
+            {"name": "疑似借鉴", "type": "bar", "stack": "pct", "data": rev_vals[::-1],
              "itemStyle": {"color": "#f59e0b"}, "label": {"show": True, "formatter": "{c}%"}},
             {"name": "原创", "type": "bar", "stack": "pct", "data": orig_vals[::-1],
              "itemStyle": {"color": "#22c55e"}, "label": {"show": True, "formatter": "{c}%"}},
@@ -790,7 +790,7 @@ def _echarts_tier_distribution(submodule_stats: dict) -> str:
 
 def _echarts_overall_donut(copy_pct: float, review_pct: float = 0.0,
                            original_pct: float | None = None) -> str:
-    """整体 借鉴/待复核/原创 环形图（按函数加权），中心标注借鉴百分比。"""
+    """整体 借鉴/疑似借鉴/原创 环形图（按函数加权），中心标注借鉴百分比。"""
     c = round(copy_pct, 1)
     rv = round(review_pct, 1)
     o = round(original_pct if original_pct is not None else max(0.0, 100 - c - rv), 1)
@@ -803,14 +803,14 @@ def _echarts_overall_donut(copy_pct: float, review_pct: float = 0.0,
             "subtextStyle": {"fontSize": 11, "color": "#64748b"},
         },
         "tooltip": {"trigger": "item", "formatter": "{b}: {c}%"},
-        "legend": {"bottom": 0, "data": ["借鉴", "待复核", "原创"]},
+        "legend": {"bottom": 0, "data": ["借鉴", "疑似借鉴", "原创"]},
         "series": [{
             "name": "占比", "type": "pie", "radius": ["54%", "78%"],
             "center": ["50%", "44%"], "avoidLabelOverlap": False,
             "label": {"show": False}, "labelLine": {"show": False},
             "data": [
                 {"value": c, "name": "借鉴", "itemStyle": {"color": "#ef4444"}},
-                {"value": rv, "name": "待复核", "itemStyle": {"color": "#f59e0b"}},
+                {"value": rv, "name": "疑似借鉴", "itemStyle": {"color": "#f59e0b"}},
                 {"value": o, "name": "原创", "itemStyle": {"color": "#22c55e"}},
             ],
         }],
@@ -884,7 +884,7 @@ def _summary_card(
     file_match_count: int = 0,
     file_similar_count: int = 0,
 ) -> str:
-    # 按**函数**计（与各清单一致）：借鉴/待复核/原创 来自三类口径的统计
+    # 按**函数**计（与各清单一致）：借鉴/疑似借鉴/原创 来自三类口径的统计
     borrowed_n = sum(st["confirmed"] for st in submodule_stats.values())
     review_n   = sum(st["review"] for st in submodule_stats.values())
     original_n = sum(st["original"] for st in submodule_stats.values())
@@ -896,10 +896,11 @@ def _summary_card(
     overall_original_pct = round(original_n / all_total * 100, 1)
 
     # KPI 卡片（按函数；库复用 / 公共样板已剔除，单列各自小节）
+    # 复核后 review 档已解析为 借鉴/原创，故「疑似借鉴」恒为 0 时不展示（仅复核失败时残留才显示）
     kpis = (
         '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">'
         + _kpi(f"{borrowed_n}", "已确认借鉴（函数）", "#ef4444")
-        + _kpi(f"{review_n}", "待复核（函数）", "#d97706")
+        + (_kpi(f"{review_n}", "疑似借鉴（函数）", "#d97706") if review_n else "")
         + _kpi(f"{original_n}", "原创（函数）", "#16a34a")
         + _kpi(f"{file_match_count}", "整文件相同（文件）", "#e11d48")
         + _kpi(f"{file_similar_count}", "整体相似文件（个）", "#d97706")
@@ -923,7 +924,7 @@ def _summary_card(
         + _echarts_tier_distribution(submodule_stats)
     )
     pct_chart = (
-        '<div class="mt-4 text-sm font-semibold text-slate-700">各模块 借鉴 / 待复核 / 原创 占比</div>'
+        '<div class="mt-4 text-sm font-semibold text-slate-700">各模块 借鉴 / 疑似借鉴 / 原创 占比</div>'
         + _echarts_overview(submodule_stats)
     )
 
@@ -1037,8 +1038,29 @@ def _code_evidence(group: dict) -> tuple[str, str]:
     return toggle, panel
 
 
-def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, accent: str) -> str:
-    """渲染一张「按 query 函数聚合候选」的清单表（U3 分类清单 + U6 全候选 + 代码证据）。"""
+_REVIEW_VERDICT_STYLE = {
+    "借鉴":   ("bg-red-50 text-red-700", "借鉴"),
+    "疑似":   ("bg-amber-50 text-amber-700", "疑似借鉴"),
+    "非借鉴": ("bg-green-50 text-green-700", "非借鉴"),
+    "未复核": ("bg-slate-100 text-slate-500", "未复核"),
+}
+
+
+def _verdict_cell(g: dict) -> str:
+    """疑似借鉴 LLM 复核结论单元格（借鉴/疑似/非借鉴 + 理由）。"""
+    v = g.get("review_verdict", "未复核")
+    cls, lbl = _REVIEW_VERDICT_STYLE.get(v, _REVIEW_VERDICT_STYLE["未复核"])
+    reason = html.escape(g.get("review_reason", "") or "")
+    return (f'<td class="text-xs align-top">'
+            f'<span class="px-2 py-0.5 rounded {cls} whitespace-nowrap font-semibold">{lbl}</span>'
+            + (f'<div class="text-xs text-slate-400 mt-1 max-w-[16rem]">{reason}</div>' if reason else "")
+            + '</td>')
+
+
+def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, accent: str,
+                  show_verdict: bool = False) -> str:
+    """渲染一张「按 query 函数聚合候选」的清单表（U3 分类清单 + U6 全候选 + 代码证据）。
+    show_verdict=True 时（疑似借鉴清单）额外加一列「复核结论」展示低端模型的借鉴判定。"""
     if not groups:
         return ""
     bodies = []
@@ -1050,7 +1072,8 @@ def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, ac
             + _make_gitlab_anchor(linker, query_repo_id, g["query_file"], g["query_start"])
             + '</td>'
             f'<td class="text-xs align-top">{html.escape(g["query_func"])}</td>'
-            f'<td class="text-xs align-top font-semibold {_sim_class(g["overall_sim"])}">{g["overall_sim"]}</td>'
+            + (_verdict_cell(g) if show_verdict else "")
+            + f'<td class="text-xs align-top font-semibold {_sim_class(g["overall_sim"])}">{g["overall_sim"]}</td>'
             f'<td class="text-xs align-top">{html.escape(_CLONE_TYPE_DISPLAY.get(g["clone_type"], g["clone_type"]))}</td>'
             '<td class="align-top">' + _candidates_cell(g, linker) + '</td>'
             f'<td class="text-xs align-top whitespace-nowrap">{toggle}</td>'
@@ -1059,6 +1082,7 @@ def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, ac
         bodies.append(
             f'<tbody x-data="{{o:false}}" class="border-b border-slate-100">{main}{panel}</tbody>'
         )
+    verdict_th = ('<th class="text-left p-2 border-b">复核结论</th>' if show_verdict else "")
     return (
         f'<div class="mt-3"><div class="text-sm font-semibold {accent} mb-1">{html.escape(title)}'
         f'（{len(groups)} 个函数）</div>'
@@ -1067,6 +1091,7 @@ def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, ac
         '<thead><tr class="bg-slate-50 text-slate-600">'
         '<th class="text-left p-2 border-b">新作品 文件:行</th>'
         '<th class="text-left p-2 border-b">函数</th>'
+        + verdict_th +
         '<th class="text-left p-2 border-b">整体相似度</th>'
         '<th class="text-left p-2 border-b">复制类型</th>'
         '<th class="text-left p-2 border-b">候选来源（全部）</th>'
@@ -1100,17 +1125,21 @@ def _module_section(
     review_pct = stats.get("review_pct", 0.0)
     original_pct = stats.get("original_pct", 0.0)
 
-    # 子模块统计概要行（借鉴/待复核/原创 三类，按函数；库复用/公共样板不计入）
+    # 子模块统计概要行（借鉴/原创，按函数；库复用/公共样板不计入）
+    # 复核后 review 档已解析为 借鉴/原创，「疑似借鉴」恒 0 时不展示（仅复核失败残留才显示）
+    rev_n = stats.get("review", 0)
+    review_chip = (f'<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-700">'
+                   f'疑似借鉴 {review_pct*100:.0f}%</span>') if rev_n else ""
+    review_cnt = f' / 疑似借鉴 {rev_n}' if rev_n else ""
     stat_row = (
         f'<div class="flex flex-wrap gap-3 text-sm mb-3">'
         f'<span class="px-2 py-0.5 rounded bg-red-50 text-red-700">'
         f'借鉴 {copy_pct*100:.0f}%</span>'
-        f'<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-700">'
-        f'待复核 {review_pct*100:.0f}%</span>'
+        + review_chip +
         f'<span class="px-2 py-0.5 rounded bg-green-50 text-green-700">'
         f'原创 {original_pct*100:.0f}%</span>'
         f'<span class="text-slate-500">函数总数 {stats.get("total","—")} 个 | '
-        f'借鉴 {stats.get("confirmed",0)} / 待复核 {stats.get("review",0)} / 原创 {stats.get("original",0)}</span>'
+        f'借鉴 {stats.get("confirmed",0)}{review_cnt} / 原创 {stats.get("original",0)}</span>'
         f'<span class="text-slate-400">主要来源：{html.escape(stats.get("top_source","—"))}</span>'
         f'</div>'
         + _pct_bar(copy_pct, review_pct, original_pct)
@@ -1376,9 +1405,10 @@ def _original_section(original_funcs: list[dict], linker, query_repo_id: str,
         )
         body = (
             '<p class="text-sm text-slate-600 mb-3">'
-            f'共 <b>{len(original_funcs)}</b> 个函数完全未与历史代码库命中，'
-            '从设计维度看属于该作品的原创/自研实现（按规模降序，全部列出）。'
-            '此数与上方各模块「原创」占比同口径：'
+            f'共 <b>{len(original_funcs)}</b> 个函数未与历史代码库构成借鉴'
+            '（完全未命中，或虽有中等相似命中但经低端模型复核判为疑似 / 非借鉴、'
+            '即独立实现的通用写法），从设计维度看属于该作品的原创 / 自研实现'
+            '（按规模降序，全部列出）：'
             '</p>'
             '<div class="overflow-x-auto">'
             '<table class="w-full text-sm border-collapse">'
@@ -1826,21 +1856,171 @@ def _collapsible(sid: str, title: str, body: str) -> tuple[str, str]:
     return toc, section
 
 
+_REVIEW_SYSTEM = """你是 OS 内核代码查重复核助手。给你「新作品的一个函数」和「历史代码库中与它最相似的函数」，\
+判断新作品该函数是否**借鉴**（复制 / 改名 / 改写）了历史函数，还是只是 OS 内核常见的教科书式\
+通用写法（双方各自独立实现）。
+判定参考：
+- 整体逻辑、结构、命名高度一致，且并非人尽皆知的通用套路 → 借鉴
+- 属通用算法 / 框架套路（RR 调度、buddy 分配、链表增删、RISC-V trap 上下文、寄存器读写宏等），\
+结构相似但属常识 → 非借鉴
+- 介于两者之间、证据不足 → 疑似
+只输出一行 JSON，不要任何额外文字、不要解释：
+{"verdict":"借鉴|疑似|非借鉴","reason":"不超过40字的中文理由"}"""
+
+
+def _review_one(client, model: str, g: dict, timeout: int) -> tuple[str, str]:
+    """对单个疑似借鉴 group 调低端模型判借鉴。返回 (verdict, reason)。"""
+    cand = (g.get("candidates") or [{}])[0]
+    user = (
+        f"【新作品函数】{g.get('query_func','')}（{g.get('query_file','')}）：\n"
+        f"```\n{g.get('query_code','')}\n```\n\n"
+        f"【历史库最相似函数】{cand.get('ref_func','')}"
+        f"（{cand.get('ref_repo','')}/{cand.get('ref_file','')}）：\n"
+        f"```\n{cand.get('ref_code','')}\n```\n\n"
+        f"（向量相似度 {g.get('overall_sim','')}，行级匹配类型 "
+        f"{_CLONE_TYPE_DISPLAY.get(g.get('clone_type',''), g.get('clone_type',''))}）\n"
+        "请判定是否借鉴，按系统要求只输出一行 JSON。"
+    )
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "system", "content": _REVIEW_SYSTEM},
+                      {"role": "user", "content": user}],
+            temperature=0.0, max_tokens=200, timeout=timeout,
+        )
+        txt = (resp.choices[0].message.content or "").strip()
+        import re as _re
+        m = _re.search(r"\{.*\}", txt, _re.DOTALL)
+        d = json.loads(m.group(0)) if m else {}
+        v = str(d.get("verdict", "")).strip()
+        if v not in ("借鉴", "疑似", "非借鉴"):
+            v = "疑似"
+        return v, str(d.get("reason", ""))[:60]
+    except Exception as e:
+        return "未复核", f"复核失败：{type(e).__name__}"
+
+
+def run_review_judgment(review_pairs: list[dict], work_dir: Path,
+                        model: str | None = None, timeout: int = 30,
+                        workers: int = 5) -> None:
+    """对疑似借鉴（review/weak）对用低端模型逐对判借鉴，原地写入 review_verdict/review_reason。
+
+    模型默认 qwen-turbo（可经环境变量 REVIEW_MODEL 覆盖），独立于主链路的 deepseek-v4-flash；
+    base_url / api_key 复用 config.toml 的 [api]。带逐对缓存，结果同对子不重复调用。
+    """
+    if not review_pairs:
+        return
+    model = model or os.getenv("REVIEW_MODEL", "qwen-turbo")
+    try:
+        from oskernel_agent import config as _cfg
+        api_key  = _cfg.api.get("key", "").strip()
+        base_url = _cfg.api.get("base_url", "https://api.deepseek.com/v1").strip()
+    except Exception:
+        api_key = base_url = ""
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = work_dir / f"review_judgment_{model}.json"
+    cache: dict = {}
+    if cache_file.exists():
+        try:
+            cache = json.loads(cache_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            cache = {}
+
+    def _key(g: dict) -> str:
+        cand = (g.get("candidates") or [{}])[0]
+        return _cache_key(model, g.get("query_code", ""), cand.get("ref_code", ""))
+
+    if not api_key:
+        logger.warning("[review] 未配置 API key，疑似借鉴跳过 LLM 复核")
+        for g in review_pairs:
+            g["review_verdict"], g["review_reason"] = "未复核", "未配置 API key"
+        return
+
+    from openai import OpenAI
+    from concurrent.futures import ThreadPoolExecutor
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+
+    pending = [g for g in review_pairs if _key(g) not in cache]
+    logger.info("[review] 疑似借鉴 {} 对，缓存命中 {}，用 {} 复核 {} 对",
+                len(review_pairs), len(review_pairs) - len(pending), model, len(pending))
+
+    def _work(g: dict):
+        return _key(g), _review_one(client, model, g, timeout)
+
+    if pending:
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+            for k, (v, r) in ex.map(_work, pending):
+                cache[k] = {"verdict": v, "reason": r}
+        try:
+            cache_file.write_text(json.dumps(cache, ensure_ascii=False, indent=2),
+                                  encoding="utf-8")
+        except OSError:
+            pass
+
+    for g in review_pairs:
+        c = cache.get(_key(g), {})
+        g["review_verdict"] = c.get("verdict", "未复核")
+        g["review_reason"]  = c.get("reason", "")
+
+
+def _apply_review_verdicts(suspects: list[dict], groups: list[dict]) -> tuple[int, int]:
+    """据低端模型复核结论改写 review/weak 档 tier，使最终只剩「借鉴 / 原创」两类：
+      - 借鉴      → confirmed（计入「已确认借鉴」，按借鉴展示与统计）
+      - 疑似/非借鉴 → dismissed（归入「原创代码」，不计为借鉴）
+      - 未复核（复核失败）→ 保持原档不动
+    若复核整体未生效（全部未复核），不做任何改动。返回 (升为借鉴数, 归原创数)。
+    """
+    vmap = {(g["query_file"], g["query_func"], g["query_start"]): g.get("review_verdict")
+            for g in groups}
+    if not any(v in ("借鉴", "疑似", "非借鉴") for v in vmap.values()):
+        return 0, 0
+    up = dn = 0
+    for s in suspects:
+        if s.get("tier") not in ("review", "weak"):
+            continue
+        q = s.get("query_func", {})
+        v = vmap.get((q.get("file_path", ""), q.get("func_name", ""), q.get("start_line", 0)))
+        if v == "借鉴":
+            s["tier"] = "confirmed"
+            s["confirm_via"] = "review_llm"
+            up += 1
+        elif v in ("疑似", "非借鉴"):
+            s["tier"] = "dismissed"
+            s["dismiss_reason"] = f"review_{v}"
+            dn += 1
+    return up, dn
+
+
 def _review_section(review_pairs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
-    """待复核（needReview）清单：有命中但未达 confirmed 判据的 review/weak 档函数对。"""
+    """疑似借鉴清单：相似度中等、经低端模型复核判为借鉴/疑似的函数对（非借鉴已移入原创）。"""
     if not review_pairs:
         return "", ""
     intro = ('<p class="text-sm text-slate-600 mb-3">'
-             f'下列 <b>{len(review_pairs)}</b> 个函数与历史库有相似命中。进入「待复核」的判据是：'
-             '向量相似度 &gt; 0.7 且<b>逐行匹配比例落在 70%–95%</b>'
-             '（含逐字相同与仅改名后相同的行，再经分段覆盖率微调）——'
-             '相似度足够高、值得人看，但未达「已确认借鉴」的 95% 铁证线。'
-             '常见成因：① 真借鉴但删改 / 新增了部分代码，使匹配率被拉低；'
-             '② OS 内核教科书式通用模式（RR 调度、buddy 分配、RISC-V trap 上下文等）'
-             '天然结构雷同。需人工复核确认是否构成借鉴。</p>')
-    table = _groups_table("待复核函数对（needReview）", review_pairs,
-                          linker, query_repo_id, "text-amber-700")
-    return _collapsible("sec-review", "待复核清单", intro + table)
+             f'下列 <b>{len(review_pairs)}</b> 个函数与历史库相似度中等（向量相似度 &gt; 0.7、'
+             '逐行匹配 70%–95%，未达「已确认借鉴」的 95% 铁证线），'
+             '经低端模型逐对复核后<b>判为借鉴或疑似借鉴</b>而保留在此；'
+             '复核判为<b>非借鉴（独立实现的通用写法）的已移入「原创代码」节</b>，不在此列。'
+             '下表「复核结论」由模型自动初判，仅供人工复核参考。</p>')
+
+    # 复核结论汇总
+    summary = ""
+    if any(g.get("review_verdict") for g in review_pairs):
+        from collections import Counter as _C
+        cnt = _C(g.get("review_verdict", "未复核") for g in review_pairs)
+        chips = []
+        for v in ("借鉴", "疑似", "未复核"):
+            if cnt.get(v):
+                cls, lbl = _REVIEW_VERDICT_STYLE.get(v, _REVIEW_VERDICT_STYLE["未复核"])
+                chips.append(f'<span class="px-2 py-0.5 rounded {cls}">{lbl} {cnt[v]}</span>')
+        summary = ('<div class="mb-3 p-2.5 rounded bg-amber-50 border border-amber-200 text-xs '
+                   'text-amber-800">⚠️ <b>复核结论仅供参考</b>：由低端模型自动初判，'
+                   '不作为最终定性依据，请以人工复核为准。'
+                   '<div class="flex flex-wrap gap-2 mt-2 text-sm">' + "".join(chips) + '</div></div>')
+
+    table = _groups_table("疑似借鉴函数对", review_pairs,
+                          linker, query_repo_id, "text-amber-700", show_verdict=True)
+    return _collapsible("sec-review", "疑似借鉴", intro + summary + table)
 
 
 _AI_STAGE_DISP = {
@@ -1974,12 +2154,6 @@ def generate_comparison_html(
             toc_items.append(toc_entry)
             body_parts.append(section)
 
-    # 待复核清单（review/weak 档，有命中但未确认借鉴）
-    toc_rev, sec_rev = _review_section(review_pairs or [], linker, query_repo_id)
-    if toc_rev:
-        toc_items.append(toc_rev)
-        body_parts.append(sec_rev)
-
     # 创新点分析章节
     toc_orig, sec_orig = _original_section(original_funcs, linker, query_repo_id, analysis_html)
     toc_items.append(toc_orig)
@@ -2081,17 +2255,30 @@ def run_semantic_compare(
     logger.info("[compare] 新作品 {}：{} 个嫌疑对（其中库复用 {} 个已剔除），整文件相同 {} 个，整体相似 {} 个",
                 query_repo_id, len(suspects), reuse_n, len(file_matches), len(file_similar))
 
-    # 统计
+    # 输出 / 工作目录（复核与语义分析共用）
+    out_dir = Path(output_dir).resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    work_dir = out_dir / f"{query_repo_id}_semantic_work"
+
+    # 先对 review/weak 档做低端模型复核：判「借鉴」的升为 confirmed（计入已确认借鉴），
+    # 「疑似 / 非借鉴」降为 dismissed（归入原创代码），使最终只剩 借鉴 / 原创 两类。
+    # 必须在统计 / file_pairs / 原创计算之前。
+    if not skip_opencode:
+        review_pairs = collect_file_pairs(suspects, keep_tiers=("review", "weak"))
+        run_review_judgment(review_pairs, work_dir)
+        up, dn = _apply_review_verdicts(suspects, review_pairs)
+        if up or dn:
+            logger.info("[review] 复核：判借鉴 {} 对升入已确认借鉴，疑似/非借鉴 {} 对移入原创",
+                        up, dn)
+
+    # 统计（复核已把 review 档解析为 借鉴/原创，此处口径已是复核后的）
     submodule_stats = compute_submodule_stats(suspects, recall)
     lib_stats       = reused_library_stats(suspects, recall)
     cc_funcs        = common_code_stats(suspects)
     base_funcs      = baseline_stats(suspects)
     # 表格展示：confirmed 全量；送 LLM 做语义分析：每模块取 sim 最高的 top_per_module 个
-    # （默认 20——模块借鉴对 <20 时即全部送语义分析，仅在超量时截断以控 token）
     file_pairs = collect_file_pairs(suspects)
     llm_pairs  = _limit_per_module(file_pairs, top_per_module)
-    # 待复核（review/weak 档）单独收集，列入「待复核清单」（不影响 confirmed 主表/送 LLM）
-    review_pairs = collect_file_pairs(suspects, keep_tiers=("review", "weak"))
 
     # AI 生成代码检测结果（独立链路产物，可选并入报告）
     ai_detect_data = None
@@ -2101,13 +2288,8 @@ def run_semantic_compare(
         except (OSError, json.JSONDecodeError) as e:
             logger.warning("[compare] 读取 ai_detect 结果失败：{}", e)
 
-    # 原创候选函数
+    # 原创候选函数（含复核判「非借鉴」而降级的函数）
     original_funcs  = _original_functions(recall, suspects) if recall else []
-
-    # opencode 语义分析
-    out_dir = Path(output_dir).resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    work_dir = out_dir / f"{query_repo_id}_semantic_work"
 
     if skip_opencode or not llm_pairs:
         analysis_html = _fallback_analysis(llm_pairs, submodule_stats)
@@ -2134,7 +2316,6 @@ def run_semantic_compare(
         file_pairs      = file_pairs,
         analysis_html   = analysis_html,
         original_funcs  = original_funcs,
-        review_pairs    = review_pairs,
         ai_detect_data  = ai_detect_data,
         query_repo_path = Path(query_repo_path).resolve() if query_repo_path else None,
         linker          = linker,

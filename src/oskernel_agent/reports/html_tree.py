@@ -169,10 +169,9 @@ def _resolve_path_anchor(path_with_line: str, resolver) -> str:
         f, line = path_with_line, None
     url = resolver(f, line) if resolver else None
     if url:
-        broken = url.startswith(_BROKEN_PREFIX)
-        href = url[len(_BROKEN_PREFIX):] if broken else url
-        cls = "file-jump file-broken" if broken else "file-jump"
-        return f'<a class="{cls}" href="{_esc(href)}">{_esc(path_with_line)}</a>'
+        if url.startswith(_BROKEN_PREFIX):
+            return _esc(path_with_line)  # 无法唯一定位 → 纯文本，不生成 404 链接
+        return f'<a class="file-jump" href="{_esc(url)}">{_esc(path_with_line)}</a>'
     return f'<span class="file-jump">{_esc(path_with_line)}</span>'
 
 
