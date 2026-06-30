@@ -14,6 +14,8 @@ DEFAULT_SETTINGS_PATH = "config/settings.yaml"
 class MetadataSettings(BaseModel):
     string_generic_repo_threshold: int = 5
     baseline_sim_threshold: float = 0.85
+    # 双侧同基线（query 与 candidate 命中同一基线函数）下限；双侧信号远强于单侧，故低于 baseline_sim_threshold
+    baseline_bilateral_threshold: float = 0.75
     # 公共/框架代码广度过滤：一个 query 函数高相似(>=sim)命中 >=repo 个不同历史仓库 → 判公共代码
     common_code_repo_threshold: int = 5
     common_code_sim_threshold: float = 0.9

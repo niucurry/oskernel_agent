@@ -19,7 +19,8 @@ retrieval:
 
 metadata:
   string_generic_repo_threshold: 5   # 出现在 > 该数量个不同仓库的字符串视为通用，不索引
-  baseline_sim_threshold: 0.85       # 双侧与同一基线函数相似度均 > 此值才扣除
+  baseline_sim_threshold: 0.85            # 单侧：query 与基线函数相似度 > 此值即判 vendored/紧随上游（保守，单侧证据弱）
+  baseline_bilateral_threshold: 0.75      # 双侧：query 与 candidate 命中同一基线函数且两侧均 > 此值 → 共同衍生（信号强，门槛低；实测 remove_timer 双侧 0.826）
   common_code_repo_threshold: 5      # query 函数高相似命中 >= 此数量个不同历史仓库 → 判公共/框架代码
   common_code_sim_threshold: 0.9     # 计入“高相似命中”的向量相似度下限
   contest_start: "2024-05-01"        # 比赛开始日期（用于 commit 早期完整实现信号）
