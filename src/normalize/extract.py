@@ -120,20 +120,20 @@ def _extract_asm(text: str, min_lines: int) -> list[ExtractedFunction]:
     if not segments:
         return []
 
-    # 若首个标号前有内容，作为 _preamble 段
+    # 首个标号前的内容是版权头/指示符样板（_preamble），不是函数，跳过不查重。
     spans: list[tuple[str, int, int]] = []  # (name, start, end)
-    if segments[0][1] > 1:
-        spans.append(("_preamble", 1, segments[0][1] - 1))
     for idx, (name, start) in enumerate(segments):
         end = segments[idx + 1][1] - 1 if idx + 1 < len(segments) else len(lines)
         spans.append((name, start, end))
 
     out: list[ExtractedFunction] = []
     for name, start, end in spans:
-        if (end - start + 1) < min_lines:
-            continue
         raw = "\n".join(lines[start - 1 : end])
         norm = normalize_asm(raw)
+        # 阈值按归一化后的有效行数算：去掉注释/空行后仍 < min_lines 的段是样板噪音，跳过。
+        # （版权注释撑大的“虚胖”段在此被过滤，避免纯指示符骨架误判相似。）
+        if norm.code.count("\n") + 1 < min_lines:
+            continue
         out.append(
             ExtractedFunction(
                 func_name=name,

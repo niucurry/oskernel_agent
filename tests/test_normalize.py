@@ -165,6 +165,29 @@ def test_extract_asm_segments_by_label():
     assert all(f.lang == "asm" for f in funcs)
 
 
+def test_extract_asm_skips_preamble_and_boilerplate_headers():
+    # 版权头 + 纯指示符骨架（无指令）：preamble 不切段，标号段去注释后不足 min_lines 也跳过。
+    asm = (
+        "//\n"
+        "// Created by Someone 2024\n"
+        "// -----------------------\n"
+        "//\n"
+        '#include "asm.h"\n'
+        "\n"
+        ".section .text.tlbrentry\n"
+        ".globl handle_tlbr\n"
+        ".align 0x4\n"
+        "handle_tlbr:\n"
+        "    // just a stub comment\n"
+        "    // another comment line\n"
+        "    nop\n"
+    )
+    funcs = extract_functions(asm, "asm", min_lines=4)
+    names = {f.func_name for f in funcs}
+    assert "_preamble" not in names       # 版权头/指示符样板不再单独成段
+    assert "handle_tlbr" not in names     # 去注释后仅 1 行有效指令 < min_lines，跳过
+
+
 def test_normalize_asm_strips_comments_and_numbers():
     res = normalize_asm("    li t0, 0x80200000   # comment\n    addi sp, sp, 16\n")
     assert "#" not in res.code and "comment" not in res.code
