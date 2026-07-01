@@ -3,7 +3,8 @@ import path from "node:path";
 import { REPORTS_DIR, FRONTEND_ROOT } from "./config.js";
 import { nowIso } from "./db.js";
 
-export const REPORT_KINDS = ["comparison", "description", "ai_detect"];
+// AI 生成代码检测已并入对比报告（第六章），不再作为独立报告类型。
+export const REPORT_KINDS = ["comparison", "description"];
 
 const REPORT_KIND_ORDER = new Map(REPORT_KINDS.map((kind, index) => [kind, index]));
 
@@ -26,7 +27,6 @@ export function reportUrl(repoId, reportPath) {
 
 function reportKindFromName(fileName) {
   const name = fileName.toLowerCase();
-  if (name.includes("ai-detect") || name.includes("ai_detect") || name.includes("detect")) return "ai_detect";
   if (name.includes("description") || name.includes("tree")) return "description";
   return "comparison";
 }
@@ -88,22 +88,6 @@ export async function findExistingReports(repoId) {
         absPath: path.join(dir, entry.name),
         kind: reportKindFromName(entry.name)
       }));
-
-    for (const nestedMain of ["ai-detect/report.html", "ai_detect/report.html"]) {
-      const absPath = path.join(dir, ...nestedMain.split("/"));
-      try {
-        const stat = await fs.stat(absPath);
-        if (stat.isFile()) {
-          reports.push({
-            fileName: nestedMain,
-            absPath,
-            kind: "ai_detect"
-          });
-        }
-      } catch {
-        // The AI report directory is optional.
-      }
-    }
 
     return reports;
   } catch {

@@ -233,11 +233,10 @@ PYTHON_BIN=../.venv/Scripts/python.exe   # Windows 可选；不填会自动找�
 
 ### 生成报告
 
-前端当前支持三类报告：
+前端当前支持两类报告：
 
-- `comparison`：查重对比报告，调用 `python -m src.pipeline`。
+- `comparison`：查重对比报告，调用 `python -m src.pipeline --baselines`。**AI 生成代码检测已并入本报告第六章**（由流水线内部的 `ai_detect` 步产出，只针对非借鉴代码；无 GPU/模型时该章自动省略），不再单独出报告。
 - `description`：项目描述报告，调用 `agent.py --repo-path ... --output ...`，依赖 OpenCode 和 `oskernel_agent` MCP。
-- `ai_detect`：AI 生成代码检测报告，调用 `python -m src.ai_detect`，并把 JSON 渲染为 `ai-detect/report.html`。
 
 页面可以对单个作品选择报告类型生成，也可以批量生成缺失报告。生成过程中可在任务列表查看日志；报告完成后从作品详情页直接打开。
 
@@ -246,9 +245,8 @@ PYTHON_BIN=../.venv/Scripts/python.exe   # Windows 可选；不填会自动找�
 - `frontend/data/app.sqlite`：前端本地数据库。
 - `frontend/reports/<repo_id>/`：每个作品的报告目录。
 - `frontend/reports/<repo_id>/_repos/`：前端流水线克隆的新作品仓库。
-- `frontend/reports/<repo_id>/comparison.html`：查重报告入口。
+- `frontend/reports/<repo_id>/comparison.html`：查重报告入口（含 AI 生成代码检测章节）。
 - `frontend/reports/<repo_id>/description.html`：描述报告入口。
-- `frontend/reports/<repo_id>/ai-detect/report.html`：AI 检测报告入口。
 
 这些产物默认不提交到 Git。需要迁移或备份时，直接拷贝 `frontend/data/` 和 `frontend/reports/` 即可。
 

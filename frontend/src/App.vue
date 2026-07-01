@@ -50,8 +50,7 @@ const statusLabels = {
 
 const reportOptions = [
   { kind: "comparison", label: "查重报告" },
-  { kind: "description", label: "描述报告" },
-  { kind: "ai_detect", label: "AI 代码检测" }
+  { kind: "description", label: "描述报告" }
 ];
 
 const reportKindLabels = Object.fromEntries(reportOptions.map((option) => [option.kind, option.label]));

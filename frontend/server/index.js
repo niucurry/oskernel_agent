@@ -100,7 +100,7 @@ app.get("/api/repositories/:id", asyncRoute(async (req, res) => {
   const reports = db.query(
     `SELECT * FROM reports
      WHERE repo_id = ?
-     ORDER BY CASE kind WHEN 'comparison' THEN 0 WHEN 'description' THEN 1 WHEN 'ai_detect' THEN 2 ELSE 3 END,
+     ORDER BY CASE kind WHEN 'comparison' THEN 0 WHEN 'description' THEN 1 ELSE 2 END,
               created_at DESC`,
     [req.params.id]
   );
@@ -111,7 +111,7 @@ app.get("/api/repositories/:id/reports", (req, res) => {
   const reports = db.query(
     `SELECT * FROM reports
      WHERE repo_id = ?
-     ORDER BY CASE kind WHEN 'comparison' THEN 0 WHEN 'description' THEN 1 WHEN 'ai_detect' THEN 2 ELSE 3 END,
+     ORDER BY CASE kind WHEN 'comparison' THEN 0 WHEN 'description' THEN 1 ELSE 2 END,
               created_at DESC`,
     [req.params.id]
   );
