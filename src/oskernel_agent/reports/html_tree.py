@@ -17,6 +17,7 @@ from .html import (
     _CDN_HEAD,
     _INIT_SCRIPT,
     assert_toc_resolves,
+    derive_repo_web_base,
     linkify_html,
     make_file_link_resolver,
 )
@@ -175,9 +176,11 @@ def _resolve_path_anchor(path_with_line: str, resolver) -> str:
     """形如 'kernel/trap.c:42' 的字符串解析为链接。"""
     if not path_with_line:
         return ""
-    parts = path_with_line.rsplit(":", 1)
-    if len(parts) == 2 and parts[1].isdigit():
-        f, line = parts
+    # 支持单行与行号范围两种写法：`file.c:84`、`file.c:84-88`、`file.c#L84-88`
+    m = re.search(r"(?::|#L)(\d+(?:-L?\d+)?)$", path_with_line)
+    if m:
+        f = path_with_line[:m.start()]
+        line = m.group(1).replace("L", "")
     else:
         f, line = path_with_line, None
     url = resolver(f, line) if resolver else None
@@ -185,7 +188,8 @@ def _resolve_path_anchor(path_with_line: str, resolver) -> str:
         broken = url.startswith(_BROKEN_PREFIX)
         href = url[len(_BROKEN_PREFIX):] if broken else url
         cls = "file-jump file-broken" if broken else "file-jump"
-        return f'<a class="{cls}" href="{_esc(href)}">{_esc(path_with_line)}</a>'
+        tgt = ' target="_blank" rel="noopener"' if href.startswith("http") else ""
+        return f'<a class="{cls}" href="{_esc(href)}"{tgt}>{_esc(path_with_line)}</a>'
     return f'<span class="file-jump">{_esc(path_with_line)}</span>'
 
 
@@ -574,8 +578,13 @@ def write_tree_html(out_path: Path, tree_json: dict,
                     title: str | None = None) -> tuple[Path, set[str]]:
     """把 tree.json 渲染为 HTML 并写入 out_path。返回 (path, 断链路径集合)。"""
     broken: set[str] = set()
+    # 优先生成指向仓库网页的链接（从 git remote+HEAD 推 blob 基址）；
+    # 无 git 信息的本地仓库回退到本地编辑器 scheme。
+    web_bases = ([derive_repo_web_base(Path(r)) for r in repo_roots]
+                 if repo_roots else None)
     resolver = make_file_link_resolver(
         repo_roots, scheme="vscode", broken_paths=broken,
+        repo_web_bases=web_bases,
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     html_text = render_tree_html(

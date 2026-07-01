@@ -173,10 +173,12 @@ _FILEREF_FULL = re.compile(rf"^\s*{_FILEREF_RE.pattern}\s*$")
 def _wrap_anchor(inner_html: str, url: str) -> str:
     if url.startswith(_BROKEN_PREFIX):
         real_url = url[len(_BROKEN_PREFIX):]
-        return (f'<a href="{html.escape(real_url, quote=True)}"'
+        tgt = ' target="_blank" rel="noopener"' if real_url.startswith("http") else ""
+        return (f'<a href="{html.escape(real_url, quote=True)}"{tgt}'
                 f' class="file-jump file-broken" title="路径在仓库中未找到，点击为猜测位置">'
                 f'{inner_html}</a>')
-    return f'<a href="{html.escape(url, quote=True)}" class="file-jump">{inner_html}</a>'
+    tgt = ' target="_blank" rel="noopener"' if url.startswith("http") else ""
+    return f'<a href="{html.escape(url, quote=True)}"{tgt} class="file-jump">{inner_html}</a>'
 
 
 # 原始 HTML 的文件引用链接化（agent 直出 HTML 时使用，不做 markdown 解析）
@@ -283,17 +285,25 @@ def make_file_link_resolver(
     repo_roots: list[Path] | None,
     scheme: str = "vscode",
     broken_paths: set[str] | None = None,
+    repo_web_bases: list[str | None] | None = None,
 ) -> LinkResolver | None:
-    """构造一个把 file:line 解析为可点击跳转 URL 的解析器。"""
+    """构造一个把 file:line 解析为可点击跳转 URL 的解析器。
+
+    repo_web_bases 与 repo_roots 一一对应；若某根提供了远程 blob 基址
+    （形如 https://host/group/repo/-/blob/<ref>），命中该根的文件生成指向
+    仓库网页的链接，否则回退到本地编辑器 scheme。不传则完全等同旧本地行为。
+    """
     if not repo_roots:
         return None
     template = _JUMP_SCHEMES.get(scheme, _JUMP_SCHEMES["vscode"])
     roots = [Path(r).resolve() for r in repo_roots]
+    web_bases = list(repo_web_bases) if repo_web_bases else []
+    web_bases += [None] * (len(roots) - len(web_bases))
 
     # 后缀匹配索引按需懒建（仅在精确/剥前缀都失败时才付出遍历成本）
     index_cache: dict[str, dict[str, list[str]]] = {}
 
-    def _suffix_unique_match(filepath: str) -> Path | None:
+    def _suffix_unique_match(filepath: str) -> tuple[Path, int] | None:
         """在仓库里找路径以 filepath 结尾（按段对齐）的文件；仅唯一命中时返回。
 
         修复「agent 少写前缀」的常见情形，如 `axhal/src/cpu.rs` →
@@ -303,56 +313,119 @@ def make_file_link_resolver(
         if "index" not in index_cache:
             index_cache["index"] = _build_repo_index(roots)
         want = Path(filepath).as_posix()
-        matches: list[Path] = []
+        matches: list[tuple[Path, int]] = []
         for tagged in index_cache["index"].get(base, []):
             ri_str, rel = tagged.split("\x00", 1)
             if rel == want or rel.endswith("/" + want):
-                matches.append(roots[int(ri_str)] / rel)
+                ri = int(ri_str)
+                matches.append((roots[ri] / rel, ri))
         return matches[0] if len(matches) == 1 else None
 
-    def _build_url(abs_path: str, line: str | None) -> str:
+    def _build_local_url(abs_path: str, line: str | None) -> str:
         anchor = f":{line}:1" if (line and scheme != "file") else ""
         from urllib.parse import quote
         encoded = quote(abs_path.lstrip("/"), safe="/:")
         return template.format(path="/" + encoded, anchor=anchor)
 
-    def _resolve(filepath: str, line: str | None) -> str | None:
-        candidate: Path | None = None
+    def _build_remote_url(web_base: str, rel_posix: str, line: str | None) -> str:
+        from urllib.parse import quote
+        anchor = f"#L{line}" if line else ""
+        return f"{web_base}/{quote(rel_posix, safe='/')}{anchor}"
+
+    def _build_url(candidate: Path, ri: int, line: str | None) -> str:
+        base = web_bases[ri] if 0 <= ri < len(web_bases) else None
+        if base:
+            try:
+                rel = candidate.resolve().relative_to(roots[ri]).as_posix()
+                return _build_remote_url(base, rel, line)
+            except (OSError, ValueError):
+                pass
+        try:
+            abs_path = str(candidate.resolve())
+        except OSError:
+            abs_path = str(candidate)
+        return _build_local_url(abs_path, line)
+
+    def _find(filepath: str) -> tuple[Path, int] | None:
         p = Path(filepath)
         if p.is_absolute():
-            if p.exists():
-                candidate = p
-        else:
-            for root in roots:
-                cand = root / filepath
+            if not p.exists():
+                return None
+            rp = p.resolve()
+            for ri, root in enumerate(roots):
+                try:
+                    rp.relative_to(root)
+                    return rp, ri
+                except ValueError:
+                    continue
+            return rp, 0
+        for ri, root in enumerate(roots):
+            cand = root / filepath
+            if cand.exists():
+                return cand, ri
+        parts = p.parts
+        for strip in range(1, len(parts)):
+            suffix = Path(*parts[strip:])
+            for ri, root in enumerate(roots):
+                cand = root / suffix
                 if cand.exists():
-                    candidate = cand
-                    break
-            if candidate is None:
-                parts = p.parts
-                for strip in range(1, len(parts)):
-                    suffix = Path(*parts[strip:])
-                    for root in roots:
-                        cand = root / suffix
-                        if cand.exists():
-                            candidate = cand
-                            break
-                    if candidate is not None:
-                        break
-            # 仍未命中：尝试「后缀唯一匹配」补回缺失的中间前缀
-            if candidate is None:
-                candidate = _suffix_unique_match(filepath)
+                    return cand, ri
+        # 仍未命中：尝试「后缀唯一匹配」补回缺失的中间前缀
+        return _suffix_unique_match(filepath)
 
-        if candidate is not None:
-            try:
-                abs_path = str(candidate.resolve())
-            except OSError:
-                abs_path = str(candidate)
-            return _build_url(abs_path, line)
+    def _resolve(filepath: str, line: str | None) -> str | None:
+        found = _find(filepath)
+        if found is not None:
+            candidate, ri = found
+            return _build_url(candidate, ri, line)
 
         if broken_paths is not None:
             broken_paths.add(filepath)
+        base = web_bases[0] if web_bases else None
+        if base:
+            return _BROKEN_PREFIX + _build_remote_url(
+                base, Path(filepath).as_posix(), line)
         best_guess = str((roots[0] / filepath).resolve())
-        return _BROKEN_PREFIX + _build_url(best_guess, line)
+        return _BROKEN_PREFIX + _build_local_url(best_guess, line)
 
     return _resolve
+
+
+def derive_repo_web_base(root: Path) -> str | None:
+    """从仓库的 git remote + HEAD 推出网页版 blob 基址；无 git 信息返回 None。
+
+    返回形如 https://host/group/repo/-/blob/<commit>（GitLab）或
+    https://github.com/owner/repo/blob/<commit>（GitHub）。文件相对路径与
+    #L<line> 由调用方拼接。
+    """
+    import subprocess
+
+    def _git(*args: str) -> str:
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(root), *args],
+                capture_output=True, text=True, timeout=10,
+            )
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except Exception:
+            return ""
+
+    remote = _git("remote", "get-url", "origin")
+    if not remote:
+        return None
+    ref = _git("rev-parse", "HEAD") or _git("rev-parse", "--abbrev-ref", "HEAD") or "HEAD"
+
+    url = remote.strip()
+    if url.startswith("git@"):                       # git@host:group/repo(.git)
+        host, _, path = url[4:].partition(":")
+        url = f"https://{host}/{path}"
+    elif url.startswith("ssh://"):                   # ssh://git@host[:port]/group/repo(.git)
+        from urllib.parse import urlparse
+        u = urlparse(url)
+        url = f"https://{u.hostname}{u.path}"
+    if url.endswith(".git"):
+        url = url[:-4]
+    url = url.rstrip("/")
+    if "github.com" in url:
+        return f"{url}/blob/{ref}"
+    return f"{url}/-/blob/{ref}"
