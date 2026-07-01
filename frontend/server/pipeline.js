@@ -104,11 +104,39 @@ async function killProcessTree(child) {
   child.kill("SIGTERM");
 }
 
+async function findFilesBySuffix(dir, suffix, skipDirs = new Set(["_repos", "node_modules", ".git"])) {
+  const results = [];
+  async function walk(current) {
+    const entries = await fs.readdir(current, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!skipDirs.has(entry.name)) await walk(full);
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith(suffix)) {
+        results.push(full);
+      }
+    }
+  }
+  await walk(dir);
+  return results;
+}
+
 async function findGeneratedComparisonHtml(repoId) {
-  const reports = await findExistingReports(repoId);
-  const existing = reports.find((report) => report.kind === "comparison");
-  if (existing) return existing.absPath;
-  return null;
+  // 查重流水线（src.pipeline 的 _finalize_comparison_output）会把最终报告归档到
+  //   <output-dir>/<仓库名>/<仓库名>_comparison.html
+  // 的子目录，而不是直接放在 output-dir 顶层，所以这里递归查找 *_comparison.html，
+  // 取最新的一个（promoteReport 随后会拷贝为顶层 comparison.html）。
+  const candidates = await findFilesBySuffix(reportDir(repoId), "_comparison.html");
+  if (!candidates.length) {
+    // 兜底：兼容已 promote 到顶层的旧报告
+    const reports = await findExistingReports(repoId);
+    return reports.find((report) => report.kind === "comparison")?.absPath || null;
+  }
+  const withStat = await Promise.all(
+    candidates.map(async (absPath) => ({ absPath, mtime: (await fs.stat(absPath)).mtimeMs }))
+  );
+  withStat.sort((a, b) => b.mtime - a.mtime);
+  return withStat[0].absPath;
 }
 
 async function pathExists(target) {
@@ -142,88 +170,6 @@ async function findClonedRepoPath(repoId) {
     if (await pathExists(path.join(candidate, ".git"))) return candidate;
   }
   return null;
-}
-
-async function readAiDetectReason(repoId, repoName) {
-  const jsonPath = path.join(reportDir(repoId), `${repoName}_ai_detect.json`);
-  try {
-    const data = JSON.parse(await fs.readFile(jsonPath, "utf8"));
-    return data.reason || data.status || "";
-  } catch {
-    return "";
-  }
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function pct(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? `${(n * 100).toFixed(1)}%` : "0.0%";
-}
-
-async function writeAiDetectHtml(jsonPath, outputDir) {
-  const data = JSON.parse(await fs.readFile(jsonPath, "utf8"));
-  await fs.mkdir(outputDir, { recursive: true });
-  await fs.copyFile(jsonPath, path.join(outputDir, "report.json"));
-
-  const status = data.status || "unknown";
-  const aggregated = data.aggregated || {};
-  const overall = aggregated.overall || {};
-  const highRisk = aggregated.high_risk_files || [];
-  const suspicious = aggregated.suspicious_functions || [];
-  const languages = aggregated.by_language || [];
-  const rows = (items, render) => items.length ? items.map(render).join("\n") : "<tr><td colspan=\"5\">No data</td></tr>";
-  const html = `<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<title>AI Code Detection - ${escapeHtml(data.repo_id || "report")}</title>
-<style>
-body{margin:0;background:#f8fafc;color:#1f2937;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-main{max-width:1120px;margin:0 auto;padding:32px}
-h1{font-size:28px;margin:0 0 8px}h2{font-size:18px;margin:28px 0 12px}
-.muted{color:#64748b}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:20px 0}
-.metric{background:white;border:1px solid #e2e8f0;border-radius:8px;padding:16px}.metric strong{display:block;font-size:24px;margin-top:6px}
-table{width:100%;border-collapse:collapse;background:white;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden}
-th,td{text-align:left;padding:10px 12px;border-bottom:1px solid #e2e8f0;font-size:14px;vertical-align:top}th{background:#eef2f7}
-code{font-family:Consolas,monospace;font-size:13px}.status{display:inline-block;padding:4px 8px;border-radius:999px;background:#e0f2fe;color:#075985;font-size:12px}
-</style>
-</head>
-<body><main>
-<h1>AI Code Detection</h1>
-<p class="muted">Repository: <code>${escapeHtml(aggregated.repo_path || data.repo_id || "")}</code></p>
-<p><span class="status">${escapeHtml(status)}</span> Model: <code>${escapeHtml(data.model_id || data.config?.model_id || "")}</code></p>
-${status === "ok" ? "" : `<p>${escapeHtml(data.reason || "AI detection did not produce an aggregated result.")}</p>`}
-<section class="grid">
-<div class="metric">Total functions<strong>${escapeHtml(overall.total_functions || 0)}</strong></div>
-<div class="metric">LLM suspected<strong>${escapeHtml(overall.llm_count || 0)}</strong></div>
-<div class="metric">Human<strong>${escapeHtml(overall.human_count || 0)}</strong></div>
-<div class="metric">Uncertain<strong>${escapeHtml(overall.uncertain_count || 0)}</strong></div>
-<div class="metric">LLM ratio<strong>${escapeHtml(pct(overall.llm_ratio_by_count))}</strong></div>
-</section>
-<h2>Languages</h2>
-<table><thead><tr><th>Language</th><th>Total</th><th>LLM</th><th>Human/Uncertain</th><th>LLM ratio</th></tr></thead><tbody>
-${rows(languages, (item) => `<tr><td>${escapeHtml(item.language)}</td><td>${escapeHtml(item.total_functions)}</td><td>${escapeHtml(item.llm_count)}</td><td>${escapeHtml((item.human_count || 0) + (item.uncertain_count || 0))}</td><td>${escapeHtml(pct(item.llm_ratio))}</td></tr>`)}
-</tbody></table>
-<h2>High Risk Files</h2>
-<table><thead><tr><th>File</th><th>Total</th><th>LLM</th><th>Ratio</th><th>Top function</th></tr></thead><tbody>
-${rows(highRisk, (item) => `<tr><td><code>${escapeHtml(item.path)}</code></td><td>${escapeHtml(item.total_functions)}</td><td>${escapeHtml(item.llm_count)}</td><td>${escapeHtml(pct(item.llm_ratio))}</td><td>${escapeHtml(item.most_suspicious_fn)}</td></tr>`)}
-</tbody></table>
-<h2>Suspicious Functions</h2>
-<table><thead><tr><th>Function</th><th>File</th><th>Lines</th><th>Confidence</th><th>Score</th></tr></thead><tbody>
-${rows(suspicious, (item) => `<tr><td><code>${escapeHtml(item.qualified_name || item.function_name)}</code></td><td><code>${escapeHtml(item.file_path)}</code></td><td>${escapeHtml(item.start_line)}-${escapeHtml(item.end_line)}</td><td>${escapeHtml(Number(item.confidence || 0).toFixed(3))}</td><td>${escapeHtml(item.detect_score == null ? "-" : Number(item.detect_score).toFixed(4))}</td></tr>`)}
-</tbody></table>
-</main></body></html>`;
-  const htmlPath = path.join(outputDir, "report.html");
-  await fs.writeFile(htmlPath, html, "utf8");
-  return htmlPath;
 }
 
 export class PipelineQueue {
@@ -487,7 +433,11 @@ export class PipelineQueue {
         repo.repo_url,
         "--output-dir",
         reportDir(repo.id),
-        "--skip-ai-detect"
+        // 与后端「正确全流程」对齐：启用基线扣除，否则 confirmed 会因未扣上游基线而虚高
+        // （实测某作品 confirmed 749→33 全靠此项）。缺基线数据时后端会自动降级为无操作。
+        // 不加 --skip-ai-detect：AI 生成代码检测由流水线内部的 ai_detect 步产出，
+        // 并入对比报告第六章（与后端一致，只测非借鉴函数）。无 GPU/模型时后端会优雅跳过。
+        "--baselines"
       ];
       const result = await this.runProcess(id, "comparison", python, args, log, commandLines);
       log = result.log;
@@ -515,7 +465,7 @@ export class PipelineQueue {
       existing = await syncExistingReports(this.db, repo.id);
     }
 
-    const needsLocalRepo = missingKinds.includes("description") || missingKinds.includes("ai_detect");
+    const needsLocalRepo = missingKinds.includes("description");
     let clonedRepoPath = needsLocalRepo ? await findClonedRepoPath(repo.id) : null;
     if (needsLocalRepo && !clonedRepoPath) {
       const reposDir = path.join(reportDir(repo.id), "_repos");
@@ -574,53 +524,6 @@ export class PipelineQueue {
       }
 
       await registerReport(this.db, repo.id, descriptionPath, "pipeline", "description");
-      existing = await syncExistingReports(this.db, repo.id);
-    }
-
-    if (missingKinds.includes("ai_detect")) {
-      const repoName = safeRepoDirectoryName(repo.repo_url, repo.id);
-      const aiReportDir = path.join(reportDir(repo.id), "ai-detect");
-      const aiReportPath = path.join(aiReportDir, "report.html");
-      const aiJsonPath = path.join(reportDir(repo.id), `${repoName}_ai_detect.json`);
-      const aiArgs = [
-        "-X",
-        "utf8",
-        "-m",
-        "src.ai_detect",
-        "--repo",
-        clonedRepoPath,
-        "--output-dir",
-        reportDir(repo.id),
-        "--name",
-        repoName,
-        "--no-progress"
-      ];
-      const result = await this.runProcess(id, "ai_detect", python, aiArgs, log, commandLines);
-      log = result.log;
-      commandLines = result.commandLines;
-
-      if (!this.db.get("SELECT id FROM jobs WHERE id = ?", [id])) return;
-
-      if (result.exitCode !== 0) {
-        const error = failureMessage(log, result.exitCode);
-        await this.setRepoStatus(repo.id, "failed", error);
-        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
-        return;
-      }
-
-      if (await pathExists(aiJsonPath)) {
-        await writeAiDetectHtml(aiJsonPath, aiReportDir);
-      }
-
-      if (!(await pathExists(aiReportPath))) {
-        const reason = await readAiDetectReason(repo.id, repoName);
-        const error = `AI 代码检测报告未生成${reason ? `：${reason}` : ""}`;
-        await this.setRepoStatus(repo.id, "failed", error);
-        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
-        return;
-      }
-
-      await registerReport(this.db, repo.id, aiReportPath, "pipeline", "ai_detect");
       existing = await syncExistingReports(this.db, repo.id);
     }
 
