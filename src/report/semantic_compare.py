@@ -2711,6 +2711,10 @@ def run_semantic_compare(
         ub_funcs        = ub_funcs,
     )
 
+    # 档位标签统一（高度疑似借鉴 / 疑似借鉴（待复核）/ 自研/原创），避免各处叫法不一
+    from .label_normalize import normalize_labels
+    html_text = normalize_labels(html_text)
+
     safe_id  = query_repo_id.replace("/", "_")
     out_path = out_dir / f"{safe_id}_comparison.html"
     out_path.write_text(html_text, encoding="utf-8")
