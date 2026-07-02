@@ -216,6 +216,111 @@ def normalize_tree_language(tree: dict) -> dict:
     return stats
 
 
+# ======================================================================
+# 槽点/亮点 quote 护栏：把粘贴的源码/TODO 改写成中文一句话点评
+# （subsys.md 要求 quote 是「中文一句话点评，不是粘贴源码原文」，但 LLM 常违反）
+# ======================================================================
+
+# quote 里的代码味标记（命中 ≥2 判为源码摘录而非点评）
+_QUOTE_CODE = re.compile(
+    r"->|::|[{}]|\bfn\b|\bpub\b|\bstruct\b|\bimpl\b|\benum\b|\bstatic\b|\breturn\b"
+    r"|#\[|cfg_if!|unimplemented!\(|;\s|\)\s*\{|==|!=|&&|\|\||\[[A-Z_]{3,}\]"
+)
+
+
+def is_code_quote(q: str) -> bool:
+    """quote 是「粘贴的源码/英文原文」而非中文点评 → True。"""
+    if not isinstance(q, str) or len(q) < 10:
+        return False
+    s = _FILELINE.sub("", q)
+    s = _CODE_SPAN.sub("", s)
+    cjk = len(_CJK.findall(s))
+    if len(_QUOTE_CODE.findall(s)) >= 2:
+        return True
+    # 几乎无中文、又不短 → 英文/代码堆砌
+    if cjk < 3 and len(s.strip()) > 15:
+        return True
+    if re.match(r"\s*(TODO|FIXME|XXX|HACK|NOTE)\b", s):
+        return True
+    return False
+
+
+_QUOTE_SYS = (
+    "你是操作系统代码评审助手。用户给你报告里的一个「亮点」或「槽点」条目：含代码位置与一段"
+    "**源码摘录**。请把它改写成**一句简洁准确的中文点评**——亮点说清这里实现了什么/好在哪，"
+    "槽点说清这里存在什么问题。要求："
+    "①直接陈述，不要出现「该亮点/该槽点/本条/这里的代码」之类的自我指代；"
+    "②关键标识符（函数名/类型名/常量）用 <code>…</code> 包裹，不要用反引号 `；"
+    "③不要粘贴原始代码、不要输出位置路径、不要加解释或代码围栏。只输出这一句中文点评。"
+)
+
+
+def rewrite_code_quote(quote: str, path: str, kind: str, model: str) -> str:
+    h = hashlib.sha1(("Q|" + kind + "|" + path + "|" + quote).encode("utf-8", "replace")).hexdigest()
+    if h in _cache:
+        return _cache[h]
+    cli = _get_client()
+    if cli is None:
+        return quote
+    import time
+    msg = f"类型：{kind}\n位置：{path}\n源码摘录：{quote}"
+    for i in range(1, 4):
+        try:
+            r = cli.chat.completions.create(
+                model=model,
+                messages=[{"role": "system", "content": _QUOTE_SYS},
+                          {"role": "user", "content": msg}],
+                temperature=0.2, max_tokens=400,
+            )
+            out = _FENCE.sub("", (r.choices[0].message.content or "").strip()).strip()
+            if out:
+                _cache[h] = out
+                return out
+            return quote
+        except Exception:  # noqa: BLE001
+            time.sleep(min(3 * i, 15))
+    return quote
+
+
+def normalize_tree_quotes(tree: dict) -> dict:
+    """遍历 tree 的 highlights/issues，把「代码摘录型」quote 改写成中文点评。就地修改。"""
+    if os.environ.get("AGENT_QUOTE_GUARD", "").strip().lower() in ("0", "false", "no", "off"):
+        return {"enabled": False}
+    model = os.getenv("LLM_MODEL", "deepseek-v4-flash")
+    targets: list[tuple[dict, str, str]] = []  # (item_dict, kind, quote)
+
+    def walk(o):
+        if isinstance(o, dict):
+            for key, kind in (("highlights", "亮点"), ("issues", "槽点")):
+                for it in (o.get(key) or []):
+                    if isinstance(it, dict) and is_code_quote(it.get("quote", "")):
+                        targets.append((it, kind, it.get("quote", "")))
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for x in o:
+                walk(x)
+
+    walk(tree)
+    stats = {"checked": len(targets), "rewritten": 0}
+    if not targets or _get_client() is None:
+        return stats
+
+    from concurrent.futures import ThreadPoolExecutor
+    def _do(t):
+        it, kind, q = t
+        return rewrite_code_quote(q, it.get("path", ""), kind, model)
+    with ThreadPoolExecutor(max_workers=_workers()) as ex:
+        results = list(ex.map(_do, targets))
+    for (it, _kind, q), nv in zip(targets, results):
+        if nv and nv != q:
+            it["quote"] = nv
+            stats["rewritten"] += 1
+    if stats["rewritten"]:
+        print(f"[quote_guard] 代码摘录改中文点评：{stats['rewritten']}/{stats['checked']} 条")
+    return stats
+
+
 if __name__ == "__main__":  # 冒烟测试
     samples = [
         ("summary", "ArceOS task management module. Provides primitives for scheduling."),
@@ -227,3 +332,15 @@ if __name__ == "__main__":  # 冒烟测试
     ]
     for k, v in samples:
         print(f"{needs_translation(v)!s:5} [{k}] {v[:60]}")
+    print("--- is_code_quote ---")
+    qs = [
+        "pub struct TaskInner { id, name, state, cpumask, ... }",
+        "static uint64 (*syscalls[])(void) = { [SYS_fork] sys_fork, ... };",
+        "TODO: Implement better load balancing across CPUs",
+        "if (strncmp((char const*)(b->data + 82), \"FAT32\", 5)) { brelse(b); }",
+        "支持 20+ CloneFlags 的细粒度 clone 实现，区分线程与进程创建",
+        "fork 为 stub（unimplemented()），用户态不可创建子进程",
+        "AxRunQueue — 每 CPU 运行队列，封装可插拔 Scheduler，提供 yield/exit 调度操作",
+    ]
+    for q in qs:
+        print(f"{is_code_quote(q)!s:5} {q[:64]}")
