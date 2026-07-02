@@ -11,8 +11,18 @@ echo "[0/6] 网络加速 + HF 镜像"
 [ -f /etc/network_turbo ] && source /etc/network_turbo || true
 export HF_ENDPOINT=https://hf-mirror.com
 
-echo "[1/6] Node.js + OpenCode（描述报告依赖）"
-command -v node >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y nodejs npm; }
+echo "[1/6] Node.js(>=18) + OpenCode（描述报告依赖）"
+# apt 的 nodejs 常太老（不支持 ?? 等语法，opencode 装不上）→ 装 Node 20 官方二进制（npmmirror 国内镜像）
+NODE_OK=0
+command -v node >/dev/null 2>&1 && [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 18 ] && NODE_OK=1
+if [ "$NODE_OK" != "1" ]; then
+    NODE_VER=v20.18.0
+    ( cd /tmp && wget -q "https://npmmirror.com/mirrors/node/${NODE_VER}/node-${NODE_VER}-linux-x64.tar.xz" \
+      && tar xf "node-${NODE_VER}-linux-x64.tar.xz" -C /usr/local --strip-components=1 )
+    hash -r
+fi
+echo "  node $(node -v)  npm $(npm -v)"
+npm config set registry https://registry.npmmirror.com
 command -v opencode >/dev/null 2>&1 || npm install -g opencode-ai
 
 echo "[2/6] 系统工具 + venv + Python 依赖 + 注册 opencode（复用 setup.sh）"
