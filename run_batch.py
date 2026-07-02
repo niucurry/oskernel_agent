@@ -1,0 +1,249 @@
+# -*- coding: utf-8 -*-
+"""批量为 作品.txt 里的 50 个作品生成 描述报告 + 对比报告。
+
+每个作品的两份报告归档到 data/output/<队伍编号>/：
+    <队伍编号>_description.html
+    <队伍编号>_comparison.html
+
+特性：
+- 可断点续跑：两份 HTML 都已存在则跳过该作品。
+- 逐个作品串行（显存/磁盘友好），每步落盘日志到 data/output/_batch/。
+- API key 额度不足时自动切换到备用 key（改写 config.toml + .env + 重跑 setup_opencode）。
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+PY = str(ROOT / ".venv" / "Scripts" / "python.exe")
+WORKS = ROOT / "作品.txt"
+OUT = ROOT / "data" / "output"
+REPOS = OUT / "_repos"
+LOGDIR = OUT / "_batch"
+PROGRESS = LOGDIR / "progress.log"
+STATE = LOGDIR / "state.json"
+
+PRIMARY_KEY = "sk-e81919dd75ff4c7c88161485f82a76c9"
+FALLBACK_KEY = "sk-ws-H.RXHMRRD.Ij8W.MEUCIQCPodogVIJeGAfPmi7HOU8_LBZV-IWCMD_xvBw3SypGGwIgewezB0-2BCyy5WSplx_1YvEs4DMQmj95f_j5_MOetbY"
+BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+# 额度耗尽 / 鉴权失败的日志特征
+QUOTA_TOKENS = [
+    "insufficient_quota", "Insufficient Balance", "insufficient balance",
+    "Arrearage", "arrearage", "欠费", "余额不足", "额度", "exceeded your current quota",
+    "AllocationQuota", "Access denied", "invalid_api_key", "InvalidApiKey",
+    "Throttling.User", "402", "401 ", "authentication_error",
+]
+
+LOGDIR.mkdir(parents=True, exist_ok=True)
+
+
+def log(msg: str) -> None:
+    line = f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}"
+    print(line, flush=True)
+    with PROGRESS.open("a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
+def load_state() -> dict:
+    if STATE.exists():
+        return json.loads(STATE.read_text(encoding="utf-8"))
+    return {"key": "primary", "teams": {}}
+
+
+def save_state(st: dict) -> None:
+    STATE.write_text(json.dumps(st, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def set_api_key(which: str) -> None:
+    """把 config.toml [api].key 和 .env LLM_API_KEY 改成 primary/fallback，并重跑 setup_opencode。"""
+    key = PRIMARY_KEY if which == "primary" else FALLBACK_KEY
+    cfg = ROOT / "config.toml"
+    text = cfg.read_text(encoding="utf-8")
+    text = re.sub(r'(?m)^(key\s*=\s*)".*?"', f'\\1"{key}"', text, count=1)
+    cfg.write_text(text, encoding="utf-8")
+
+    env = ROOT / ".env"
+    etext = env.read_text(encoding="utf-8")
+    if re.search(r"(?m)^LLM_API_KEY=", etext):
+        etext = re.sub(r"(?m)^LLM_API_KEY=.*$", f"LLM_API_KEY={key}", etext)
+    else:
+        etext = f"LLM_API_KEY={key}\n" + etext
+    env.write_text(etext, encoding="utf-8")
+
+    # 让 OpenCode（描述报告 DIR/VERDICT agent）用上新 key
+    try:
+        subprocess.run([PY, "setup_opencode.py"], cwd=ROOT, check=False,
+                       capture_output=True, text=True, timeout=120)
+    except Exception as e:  # noqa: BLE001
+        log(f"  setup_opencode 失败（忽略）：{e}")
+    log(f"  已切换 API key → {which}")
+
+
+def child_env() -> dict:
+    env = dict(os.environ)
+    env.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+    env.setdefault("HF_HUB_OFFLINE", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    return env
+
+
+def run_step(name: str, cmd: list[str], logfile: Path, timeout: int) -> tuple[bool, str]:
+    log(f"  {name}: {' '.join(cmd)}")
+    with logfile.open("w", encoding="utf-8", errors="replace") as lf:
+        lf.write(f"# {name}\n# {' '.join(cmd)}\n# start {datetime.now()}\n\n")
+        lf.flush()
+        try:
+            p = subprocess.run(cmd, cwd=ROOT, env=child_env(), stdout=lf,
+                               stderr=subprocess.STDOUT, text=True, timeout=timeout)
+            ok = p.returncode == 0
+        except subprocess.TimeoutExpired:
+            lf.write(f"\n# TIMEOUT after {timeout}s\n")
+            ok = False
+    body = logfile.read_text(encoding="utf-8", errors="replace")
+    return ok, body
+
+
+def quota_exhausted(body: str) -> bool:
+    return any(tok in body for tok in QUOTA_TOKENS)
+
+
+def fork_to_repo_name(url: str) -> str:
+    return url.rstrip("/").split("/")[-1].removesuffix(".git")
+
+
+def ensure_clone(url: str, repo_name: str, retries: int = 4) -> bool:
+    """带重试地把仓库克隆到 data/output/_repos/<repo_name>。
+    gitlab.eduxiji.net 偶发 exit 128（网络抖动），重试可救回。返回是否就位。"""
+    dest = REPOS / repo_name
+    if (dest / ".git").exists():
+        return True
+    REPOS.mkdir(parents=True, exist_ok=True)
+    for i in range(1, retries + 1):
+        if dest.exists():
+            shutil.rmtree(dest, ignore_errors=True)
+        try:
+            subprocess.run(
+                ["git", "clone", "-c", "core.protectNTFS=false", "--depth", "200",
+                 url + ".git", str(dest)],
+                cwd=ROOT, check=True, capture_output=True, text=True, timeout=900,
+            )
+            log(f"  克隆成功（第 {i} 次）→ {dest}")
+            return True
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            log(f"  克隆失败（第 {i}/{retries} 次）：{getattr(e, 'stderr', e) or e}")
+            time.sleep(min(10 * i, 40))
+    return False
+
+
+def do_comparison(team_id: str, url: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
+    repo_name = fork_to_repo_name(url)
+    cmd = [PY, "-m", "src.pipeline", "--repo", url + ".git", "--baselines"]
+    ok, body = run_step("对比报告", cmd, logfile, timeout=3600)
+    # 归档 HTML：pipeline 落到 data/output/<repo_name>/<repo_name>_comparison.html
+    src_html = OUT / repo_name / f"{repo_name}_comparison.html"
+    dst = final_dir / f"{team_id}_comparison.html"
+    if src_html.exists():
+        shutil.copy2(src_html, dst)
+        return True, body
+    # 兜底：直接落在 output 根
+    alt = OUT / f"{repo_name}_comparison.html"
+    if alt.exists():
+        shutil.copy2(alt, dst)
+        return True, body
+    return False, body
+
+
+def do_description(team_id: str, url: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
+    repo_name = fork_to_repo_name(url)
+    cloned = REPOS / repo_name  # 对比报告已克隆
+    dst = final_dir / f"{team_id}_description.html"
+    if cloned.exists():
+        src_arg = ["--repo-path", str(cloned)]
+    else:
+        src_arg = ["--url", url + ".git"]
+    cmd = [PY, "agent.py", *src_arg, "-o", str(dst)]
+    ok, body = run_step("描述报告", cmd, logfile, timeout=2400)
+    return dst.exists(), body
+
+
+def main() -> None:
+    teams = json.loads(WORKS.read_text(encoding="utf-8"))
+    st = load_state()
+    if st.get("key") == "fallback":
+        set_api_key("fallback")
+
+    total = len(teams)
+    log(f"==== 批处理启动，共 {total} 个作品 ====")
+
+    for entry in teams:
+        idx = entry["序号"]
+        team_id = entry["队伍编号"]
+        url = entry["Fork地址"]
+        final_dir = OUT / team_id
+        final_dir.mkdir(parents=True, exist_ok=True)
+        cmp_html = final_dir / f"{team_id}_comparison.html"
+        desc_html = final_dir / f"{team_id}_description.html"
+
+        tstate = st["teams"].setdefault(team_id, {})
+
+        if cmp_html.exists() and desc_html.exists():
+            log(f"[{idx}/{total}] {team_id} 已完成，跳过")
+            tstate["comparison"] = tstate["description"] = "done"
+            save_state(st)
+            continue
+
+        log(f"[{idx}/{total}] {team_id}  {url}")
+
+        # ---- 预克隆（带重试）：让对比/描述两步复用同一份仓库 ----
+        repo_name = fork_to_repo_name(url)
+        need_any = (not cmp_html.exists()) or (not desc_html.exists())
+        if need_any and not ensure_clone(url, repo_name):
+            log(f"  克隆最终失败，跳过 {team_id}（下次重跑会再试）")
+            tstate.setdefault("comparison", "failed")
+            tstate.setdefault("description", "failed")
+            save_state(st)
+            continue
+
+        # ---- 对比报告 ----
+        if not cmp_html.exists():
+            lf = LOGDIR / f"{team_id}_comparison.log"
+            ok, body = do_comparison(team_id, url, final_dir, lf)
+            if not ok and quota_exhausted(body) and st["key"] == "primary":
+                log("  检测到额度/鉴权问题，切换备用 key 后重试对比报告")
+                st["key"] = "fallback"; save_state(st); set_api_key("fallback")
+                ok, body = do_comparison(team_id, url, final_dir, lf)
+            tstate["comparison"] = "done" if ok else "failed"
+            log(f"  对比报告 {'成功' if ok else '失败'}")
+            save_state(st)
+
+        # ---- 描述报告 ----
+        if not desc_html.exists():
+            lf = LOGDIR / f"{team_id}_description.log"
+            ok, body = do_description(team_id, url, final_dir, lf)
+            if not ok and quota_exhausted(body) and st["key"] == "primary":
+                log("  检测到额度/鉴权问题，切换备用 key 后重试描述报告")
+                st["key"] = "fallback"; save_state(st); set_api_key("fallback")
+                ok, body = do_description(team_id, url, final_dir, lf)
+            tstate["description"] = "done" if ok else "failed"
+            log(f"  描述报告 {'成功' if ok else '失败'}")
+            save_state(st)
+
+        log(f"[{idx}/{total}] {team_id} 处理完毕 "
+            f"(cmp={tstate.get('comparison')}, desc={tstate.get('description')})")
+
+    done = sum(1 for t in st["teams"].values()
+               if t.get("comparison") == "done" and t.get("description") == "done")
+    log(f"==== 批处理结束：{done}/{total} 完整完成 ====")
+
+
+if __name__ == "__main__":
+    main()

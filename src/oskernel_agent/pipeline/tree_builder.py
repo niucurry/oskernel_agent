@@ -654,7 +654,7 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
     print(f"[tree] VERDICT 阶段 ...")
     verdict = run_verdict_stage(tree_root, facts, out_dir, cache_dir, repo_path)
 
-    return {
+    result = {
         "meta": {
             "repo":           repo_name,
             "ts":             ts,
@@ -665,3 +665,13 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
         "verdict": verdict,
         "tree":    _clean_tree(tree_root),
     }
+
+    # D. 语言护栏：把 LLM 漏出的英文正文确定性地改成中文（提示词约束之外的兜底）
+    try:
+        from .lang_guard import normalize_tree_language
+        print("[tree] 语言护栏：检测并中文化英文正文 ...")
+        normalize_tree_language(result)
+    except Exception as e:
+        print(f"[警告] 语言护栏失败：{e}（继续）", file=sys.stderr)
+
+    return result

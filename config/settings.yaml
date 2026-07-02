@@ -69,4 +69,7 @@ ai_detect:
   detect_score_threshold: 0.20  # Stage 2：NPR score > 此值 → LLM（辅助信号）
   git_blame: true              # 是否按作者/月份聚合（git blame）
   suspicious_min_confidence: 0.7 # 进入“高度可疑函数”清单的置信下限
-  max_functions: 0             # >0 时只检测前 N 个函数（冒烟/限额用，0=全量）
+  max_functions: 800           # 固定配额：>0 时只检测前 N 个（排除借鉴后）函数。超大仓库
+                               # （如 5000+ 函数）全量检测会让 ai_detect 步耗时数十分钟、触发
+                               # 对比报告超时；截断到固定数量后耗时可控（800≈作品1 的量级，约 7 分钟）。
+                               # 中小仓库函数数 <800 时不受影响=全量。0=全量。
