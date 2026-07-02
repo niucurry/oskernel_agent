@@ -674,4 +674,12 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
     except Exception as e:
         print(f"[警告] 语言护栏失败：{e}（继续）", file=sys.stderr)
 
+    # E. quote 护栏：把亮点/槽点里粘贴的源码摘录改写成中文一句话点评
+    try:
+        from .lang_guard import normalize_tree_quotes
+        print("[tree] quote 护栏：代码摘录改中文点评 ...")
+        normalize_tree_quotes(result)
+    except Exception as e:
+        print(f"[警告] quote 护栏失败：{e}（继续）", file=sys.stderr)
+
     return result
