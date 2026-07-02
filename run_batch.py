@@ -158,11 +158,29 @@ def cleanup_team(repo_name: str) -> None:
     shutil.rmtree(OUT / repo_name, ignore_errors=True)  # 流水线归档子目录（HTML 已入 team 目录）
 
 
+_SRC_EXTS = {".rs", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp",
+             ".go", ".S", ".s", ".asm", ".zig", ".java"}
+
+
+def _clone_has_source(dest: Path) -> bool:
+    """工作区里是否至少有一个源码文件（首个命中即返回，快）。
+    防止大仓库被低速中止截断成「只有 .git」的空壳，导致解析出 0 源文件、报告为空。"""
+    try:
+        for p in dest.rglob("*"):
+            if ".git" in p.parts:
+                continue
+            if p.is_file() and p.suffix in _SRC_EXTS:
+                return True
+    except OSError:
+        pass
+    return False
+
+
 def ensure_clone(url: str, repo_name: str, retries: int = 4) -> bool:
-    """带重试地把仓库克隆到 data/output/_repos/<repo_name>。
-    gitlab.eduxiji.net 偶发 exit 128（网络抖动），重试可救回。返回是否就位。"""
+    """带重试地把仓库克隆到 data/output/_repos/<repo_name>，并校验拉全。
+    gitlab.eduxiji.net 偶发 exit 128（网络抖动）+ 大仓库偶发截断，两者重试可救回。"""
     dest = REPOS / repo_name
-    if (dest / ".git").exists():
+    if (dest / ".git").exists() and _clone_has_source(dest):
         return True
     REPOS.mkdir(parents=True, exist_ok=True)
     for i in range(1, retries + 1):
@@ -171,18 +189,24 @@ def ensure_clone(url: str, repo_name: str, retries: int = 4) -> bool:
         try:
             subprocess.run(
                 ["git",
-                 # 传输速率低于 1KB/s 持续 20s 即判定卡住并中止（避免挂到超时）
-                 "-c", "http.lowSpeedLimit=1024", "-c", "http.lowSpeedTime=20",
-                 "clone", "-c", "core.protectNTFS=false", "--depth", "50",
+                 # 传输低于 1KB/s 持续 60s 才判卡住（放宽，避免大仓库被误中止）
+                 "-c", "http.lowSpeedLimit=1024", "-c", "http.lowSpeedTime=60",
+                 "clone", "-c", "core.protectNTFS=false", "--depth", "200",
                  url + ".git", str(dest)],
-                cwd=ROOT, check=True, capture_output=True, text=True, timeout=300,
+                cwd=ROOT, check=True, capture_output=True, text=True, timeout=600,
             )
-            log(f"  克隆成功（第 {i} 次）→ {dest}")
-            return True
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             log(f"  克隆失败（第 {i}/{retries} 次）：{getattr(e, 'stderr', e) or e}")
             time.sleep(min(10 * i, 40))
-    return False
+            continue
+        # git 成功还不够：校验工作区真有源码，否则视为截断，重试
+        if _clone_has_source(dest):
+            log(f"  克隆成功（第 {i} 次）→ {dest}")
+            return True
+        log(f"  克隆疑似不完整（工作区无源码，第 {i}/{retries} 次），重试")
+        time.sleep(min(10 * i, 40))
+    # 重试用尽：至少 .git 在（可能真是空仓库）→ 放行让流水线自行给出「无源文件」
+    return (dest / ".git").exists()
 
 
 def do_comparison(team_id: str, url: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
