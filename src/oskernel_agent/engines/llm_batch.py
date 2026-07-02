@@ -31,6 +31,17 @@ from pathlib import Path
 
 def _find_opencode() -> str:
     import shutil
+
+    def _prefer_real_exe(path: Path) -> Path:
+        # npm 全局 shim（opencode.cmd/.ps1/无扩展名）经 subprocess 调用时会走 cmd.exe，
+        # 导致 prompt 里的 shell 元字符（如 severity "low|medium|high" 的 `|`）被 cmd
+        # 当成管道符执行 → "'medium' is not recognized"，opencode 直接 255 失败。
+        # 真实 opencode.exe 与 shim 同前缀，直接用它可绕过 cmd 解析。
+        if path.suffix.lower() == ".exe":
+            return path
+        exe = path.parent / "node_modules" / "opencode-ai" / "bin" / "opencode.exe"
+        return exe if exe.exists() else path
+
     for c in [
         Path.home() / "AppData" / "Roaming" / "npm" / "node_modules" / "opencode-ai" / "bin" / "opencode.exe",
         Path.home() / ".local" / "bin" / "opencode",
@@ -38,10 +49,10 @@ def _find_opencode() -> str:
         Path.home() / "AppData" / "Roaming" / "npm" / "opencode.cmd",
     ]:
         if c.exists():
-            return str(c)
+            return str(_prefer_real_exe(c))
     found = shutil.which("opencode")
     if found:
-        return found
+        return str(_prefer_real_exe(Path(found)))
     return "opencode"
 
 _OPENCODE = _find_opencode()
@@ -446,6 +457,9 @@ def _run_opencode_once(task: BatchTask, timeout: int) -> tuple[bool, str]:
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout,
+                # opencode.exe run 即使带 positional message，仍会阻塞读 stdin；
+                # 子进程 stdin 是未关闭的管道时会一直等到超时。给 DEVNULL 立即 EOF。
+                stdin=subprocess.DEVNULL,
             )
     except subprocess.TimeoutExpired:
         _log(f"[llm_batch] {task.batch_id} 超时 {timeout}s")
