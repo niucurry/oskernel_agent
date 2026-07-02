@@ -20,6 +20,7 @@ transformers>=4.40,<5
 torch>=2.0
 numpy>=1.24
 qdrant-client>=1.7
+faiss-cpu>=1.7          # FAISS HNSW 向量检索（src.embed.faiss_store，recall 步必需）
 tqdm>=4.66
 # Layer 1 SimHash 粗筛（src.simhash）
 xxhash>=3.4
