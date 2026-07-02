@@ -23,7 +23,16 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-PY = str(ROOT / ".venv" / "Scripts" / "python.exe")
+# 跨平台定位 venv 解释器：优先当前解释器（激活 venv 后即为 venv python），
+# 否则按平台找 Scripts/python.exe(Windows) 或 bin/python(Linux/AutoDL)。
+def _venv_python() -> str:
+    cand = [ROOT / ".venv" / "bin" / "python",
+            ROOT / ".venv" / "Scripts" / "python.exe"]
+    for c in cand:
+        if c.exists():
+            return str(c)
+    return sys.executable
+PY = _venv_python()
 WORKS = ROOT / "作品.txt"
 OUT = ROOT / "data" / "output"
 REPOS = OUT / "_repos"
@@ -116,8 +125,37 @@ def quota_exhausted(body: str) -> bool:
     return any(tok in body for tok in QUOTA_TOKENS)
 
 
+REPORTS_BAK = LOGDIR / "reports_bak"      # 报告持久备份（防再次误删/清盘丢失）
+MIN_FREE_GB = 3.0                         # 剩余空间低于此值即中止，避免撑爆磁盘
+
+
 def fork_to_repo_name(url: str) -> str:
     return url.rstrip("/").split("/")[-1].removesuffix(".git")
+
+
+def free_gb() -> float:
+    return shutil.disk_usage(ROOT).free / (1024 ** 3)
+
+
+def backup_reports(team_id: str, final_dir: Path) -> None:
+    """把生成好的两份 HTML 立刻拷到持久备份区，磁盘清理/误删也不丢成果。"""
+    REPORTS_BAK.mkdir(parents=True, exist_ok=True)
+    for suf in ("comparison", "description"):
+        src = final_dir / f"{team_id}_{suf}.html"
+        if src.exists():
+            try:
+                shutil.copy2(src, REPORTS_BAK / f"{team_id}_{suf}.html")
+            except OSError as e:
+                log(f"  备份 {suf} 失败：{e}")
+
+
+def cleanup_team(repo_name: str) -> None:
+    """删掉该队伍的克隆 + 遗留中间产物，控制峰值磁盘占用。"""
+    shutil.rmtree(REPOS / repo_name, ignore_errors=True)
+    for p in OUT.glob(f"{repo_name}_*"):        # 遗留的 *_recall/_suspects*.json 等
+        if p.is_file():
+            p.unlink(missing_ok=True)
+    shutil.rmtree(OUT / repo_name, ignore_errors=True)  # 流水线归档子目录（HTML 已入 team 目录）
 
 
 def ensure_clone(url: str, repo_name: str, retries: int = 4) -> bool:
@@ -132,9 +170,12 @@ def ensure_clone(url: str, repo_name: str, retries: int = 4) -> bool:
             shutil.rmtree(dest, ignore_errors=True)
         try:
             subprocess.run(
-                ["git", "clone", "-c", "core.protectNTFS=false", "--depth", "200",
+                ["git",
+                 # 传输速率低于 1KB/s 持续 20s 即判定卡住并中止（避免挂到超时）
+                 "-c", "http.lowSpeedLimit=1024", "-c", "http.lowSpeedTime=20",
+                 "clone", "-c", "core.protectNTFS=false", "--depth", "50",
                  url + ".git", str(dest)],
-                cwd=ROOT, check=True, capture_output=True, text=True, timeout=900,
+                cwd=ROOT, check=True, capture_output=True, text=True, timeout=300,
             )
             log(f"  克隆成功（第 {i} 次）→ {dest}")
             return True
@@ -201,7 +242,13 @@ def main() -> None:
             save_state(st)
             continue
 
-        log(f"[{idx}/{total}] {team_id}  {url}")
+        # ---- 磁盘保护：空间不足直接中止，绝不撑爆磁盘 ----
+        fg = free_gb()
+        if fg < MIN_FREE_GB:
+            log(f"⚠ 剩余磁盘 {fg:.1f}GB < {MIN_FREE_GB}GB，中止批处理（请先清理磁盘再续跑）")
+            break
+
+        log(f"[{idx}/{total}] {team_id}  {url}  (剩余 {fg:.1f}GB)")
 
         # ---- 预克隆（带重试）：让对比/描述两步复用同一份仓库 ----
         repo_name = fork_to_repo_name(url)
@@ -237,8 +284,12 @@ def main() -> None:
             log(f"  描述报告 {'成功' if ok else '失败'}")
             save_state(st)
 
+        # ---- 立即备份成果 + 清理克隆/中间产物（省磁盘、防丢失）----
+        backup_reports(team_id, final_dir)
+        cleanup_team(repo_name)
+
         log(f"[{idx}/{total}] {team_id} 处理完毕 "
-            f"(cmp={tstate.get('comparison')}, desc={tstate.get('description')})")
+            f"(cmp={tstate.get('comparison')}, desc={tstate.get('description')}, 剩余 {free_gb():.1f}GB)")
 
     done = sum(1 for t in st["teams"].values()
                if t.get("comparison") == "done" and t.get("description") == "done")
