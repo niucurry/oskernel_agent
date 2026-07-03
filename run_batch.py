@@ -40,7 +40,7 @@ LOGDIR = OUT / "_batch"
 PROGRESS = LOGDIR / "progress.log"
 STATE = LOGDIR / "state.json"
 
-PRIMARY_KEY = "REDACTED_REVOKED_API_KEY"
+PRIMARY_KEY = "sk-ws-H.RXHMRRD.Ij8W.MEUCIQCPodogVIJeGAfPmi7HOU8_LBZV-IWCMD_xvBw3SypGGwIgewezB0-2BCyy5WSplx_1YvEs4DMQmj95f_j5_MOetbY"
 FALLBACK_KEY = "sk-ws-H.RXHMRRD.Ij8W.MEUCIQCPodogVIJeGAfPmi7HOU8_LBZV-IWCMD_xvBw3SypGGwIgewezB0-2BCyy5WSplx_1YvEs4DMQmj95f_j5_MOetbY"
 BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
