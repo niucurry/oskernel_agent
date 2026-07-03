@@ -212,7 +212,8 @@ def ensure_clone(url: str, repo_name: str, retries: int = 4) -> bool:
 def do_comparison(team_id: str, url: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
     repo_name = fork_to_repo_name(url)
     cmd = [PY, "-m", "src.pipeline", "--repo", url + ".git", "--baselines"]
-    ok, body = run_step("对比报告", cmd, logfile, timeout=3600)
+    cmp_timeout = int(os.environ.get("BATCH_CMP_TIMEOUT", "3600"))  # 巨型仓库可调大
+    ok, body = run_step("对比报告", cmd, logfile, timeout=cmp_timeout)
     # 归档 HTML：pipeline 落到 data/output/<repo_name>/<repo_name>_comparison.html
     src_html = OUT / repo_name / f"{repo_name}_comparison.html"
     dst = final_dir / f"{team_id}_comparison.html"
