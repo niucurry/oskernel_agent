@@ -217,6 +217,96 @@ def normalize_tree_language(tree: dict) -> dict:
 
 
 # ======================================================================
+# 模块标题护栏：把 LLM 漏出的英文模块名（tree 节点 type=="module" 的 name）翻成中文。
+# 该字段渲染在树节点头与目录（TOC）里，不在 PROSE_KEYS 覆盖的正文范围内——
+# 漏翻会造成「正文已中文、目录还是英文」的割裂。
+# 仅处理 module 节点：subsystem 名来自固定中文清单，root 名是仓库目录名，均不可译。
+# ======================================================================
+
+_TITLE_SYS = (
+    "你是操作系统技术报告的中文化器。输入是报告目录里的一个**模块标题**（英文短语）。"
+    "把它翻译成简洁准确的简体中文标题；保留缩写（VFS/ABI/COW…）、函数名/类型名等代码标识符。"
+    "不要加解释、引号或标点结尾。只输出翻译后的标题本身。"
+)
+
+
+def title_needs_translation(s: str) -> bool:
+    """英文短语标题 → True。比 needs_translation 宽（标题常只有 2-4 个词）。"""
+    if not isinstance(s, str) or len(s) < 6:
+        return False
+    if _CJK.search(s):
+        return False
+    prose = _strip_noise(s)
+    if _looks_like_code(prose):
+        return False
+    words = [w for w in _WORD.findall(prose)
+             if not (w.isupper() and len(w) <= 5)]   # 排除 VFS/ABI 之类缩写
+    return len(words) >= 2
+
+
+def _translate_title(s: str, model: str) -> str:
+    h = hashlib.sha1(("T|" + s).encode("utf-8", "replace")).hexdigest()
+    if h in _cache:
+        return _cache[h]
+    cli = _get_client()
+    if cli is None:
+        return s
+    import time
+    for i in range(1, 4):
+        try:
+            r = cli.chat.completions.create(
+                model=model,
+                messages=[{"role": "system", "content": _TITLE_SYS},
+                          {"role": "user", "content": s}],
+                temperature=0.2, max_tokens=200,
+            )
+            out = _FENCE.sub("", (r.choices[0].message.content or "").strip()).strip()
+            if out and _CJK.search(out):
+                _cache[h] = out
+                return out
+            return s
+        except Exception:  # noqa: BLE001
+            time.sleep(min(3 * i, 15))
+    return s
+
+
+def normalize_tree_titles(tree: dict) -> dict:
+    """就地把 module 节点的英文 name 翻成中文（并发、去重）。返回统计。"""
+    if os.environ.get("AGENT_LANG_GUARD", "").strip().lower() in ("0", "false", "no", "off"):
+        return {"enabled": False}
+    model = os.getenv("LLM_MODEL", "deepseek-v4-flash")
+    targets: list[dict] = []
+
+    def walk(obj):
+        if isinstance(obj, dict):
+            if obj.get("type") == "module" and title_needs_translation(obj.get("name", "")):
+                targets.append(obj)
+            for v in obj.values():
+                walk(v)
+        elif isinstance(obj, list):
+            for x in obj:
+                walk(x)
+
+    walk(tree)
+    stats = {"checked": len(targets), "translated": 0}
+    if not targets or _get_client() is None:
+        return stats
+
+    from concurrent.futures import ThreadPoolExecutor
+    uniq = list({n["name"] for n in targets})
+    with ThreadPoolExecutor(max_workers=_workers()) as ex:
+        trans = dict(zip(uniq, ex.map(lambda s: _translate_title(s, model), uniq)))
+    for n in targets:
+        nv = trans.get(n["name"], n["name"])
+        if nv != n["name"]:
+            n["name"] = nv
+            stats["translated"] += 1
+    if stats["translated"]:
+        print(f"[lang_guard] 英文模块标题改中文：{stats['translated']}/{stats['checked']} 个")
+    return stats
+
+
+# ======================================================================
 # 槽点/亮点 quote 护栏：把粘贴的源码/TODO 改写成中文一句话点评
 # （subsys.md 要求 quote 是「中文一句话点评，不是粘贴源码原文」，但 LLM 常违反）
 # ======================================================================
