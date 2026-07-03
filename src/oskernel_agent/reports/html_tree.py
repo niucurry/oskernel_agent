@@ -42,6 +42,15 @@ def _strip_echarts_charts(content: str) -> str:
     return _ECHARTS_CHART_RE.sub("", content) if content else content
 
 
+_ID_ATTR_RE = re.compile(r'\s+id\s*=\s*(?:"[^"]*"|\'[^\']*\')', re.IGNORECASE)
+
+
+def _strip_html_ids(content: str) -> str:
+    """剥离 LLM 正文里自带的 id 属性，避免与报告结构锚点（如 id="verdict"）撞车，
+    导致 assert_toc_resolves 判重复锚点而整份报告渲染失败。"""
+    return _ID_ATTR_RE.sub("", content) if content else content
+
+
 # 复用 html.py 的 CDN 头：已含 Tailwind + ECharts + Mermaid + Alpine 及其初始化。
 # 折叠节点展开时让其中的 ECharts 重新计算尺寸（初次在 display:none 下 init 会是 0 尺寸）。
 _TREE_HEAD = _CDN_HEAD
@@ -311,7 +320,7 @@ def _render_verdict(verdict: dict, resolver) -> str:
 
     # verdict 详细正文（agent 直出的 HTML）——剥离架构图和 LLM 手写图表后嵌入并链接化。
     # 雷达图统一由结构化 dimensions 确定性生成，避免模型写出占位 0 分或尺度错误。
-    content = _strip_echarts_charts(_strip_diagrams(verdict.get("content") or ""))
+    content = _strip_html_ids(_strip_echarts_charts(_strip_diagrams(verdict.get("content") or "")))
     content_html = ""
     if content.strip():
         content_html = (
@@ -531,7 +540,7 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
         )
 
     # 详细叙述正文（subsystem / module 的 agent HTML 输出）——原样嵌入并链接化
-    content = _strip_diagrams(node.get("content") or "")
+    content = _strip_html_ids(_strip_diagrams(node.get("content") or ""))
     if content.strip():
         body_parts.append(
             f'<div class="node-content prose prose-sm dark:prose-invert max-w-none mt-1 mb-2">'
