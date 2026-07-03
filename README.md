@@ -108,7 +108,11 @@ GITLAB_URL=https://gitlab.eduxiji.net
 GITLAB_TOKEN=<你的 token>           # 私有仓库克隆需要，公开仓库可省略
 ```
 
-> 改完 `config.toml` 后请重跑 `python setup_opencode.py` 让 OpenCode 配置生效（模型、max_steps 等）。
+> **改完 `config.toml` 后必须重跑 `python setup_opencode.py`** 让 OpenCode 配置生效（模型、max_steps 等）。
+>
+> **换 API key 是三件套**：`config.toml` 的 `[api].key`、`.env` 的 `LLM_API_KEY`、再重跑 `python setup_opencode.py`
+> （OpenCode 把 key 存在 `~/.local/share/opencode/auth.json`，漏第三步会导致描述报告 LLM 聚合静默失败、
+> 整份报告降级为"规则兜底"）。
 
 ---
 
@@ -144,9 +148,9 @@ docker compose up -d                # 可选，http://localhost:6333/dashboard
 # ① 建历史库：把真实仓库地址填进 config/repos.yaml，一条命令拉取→归一化→向量化→SimHash 索引（写 data/db/）
 python -m src.buildlib              # 私有仓库先 export GITLAB_TOKEN；已在本地只重建索引加 --skip-ingest
 
-# ② 对比新作品：一条命令出对比报告
-python -m src.pipeline --repo <新作品路径或 git url>
-# → data/output/<作品名>_comparison.html
+# ② 对比新作品：一条命令出对比报告（规范用法，始终带 --baselines）
+python -m src.pipeline --repo <新作品路径或 git url> --baselines
+# → data/output/<作品名>/<作品名>_comparison.html
 ```
 
 流水线步骤：`ingest → fastpath → recall → exact → segment → metadata → ai_detect → report`，每步落盘中间 JSON。常用选项：
@@ -280,3 +284,60 @@ AI_DETECT_K=2
 cd frontend
 npm run build
 ```
+
+---
+
+## 七、批量出报告（run_batch）
+
+给作品清单（`作品.txt`，JSON 数组，含 `队伍编号` / `Fork地址`）里的全部作品批量生成 描述+对比 两份报告：
+
+```bash
+python run_batch.py
+# → data/output/<队伍编号>/<队伍编号>_{description,comparison}.html
+```
+
+- 逐作品串行，两份 HTML 均已存在则跳过（**断点续跑**）；
+- 检测到 API key 欠费/限额自动切换备用 key（并自动完成上面的"三件套"）；
+- 巨型仓库对比超时可调 `BATCH_CMP_TIMEOUT`（秒，默认 3600）。
+
+---
+
+## 八、报告一致性保证
+
+**同一版本代码 + 同一命令，任何人跑出的报告格式与流程完全一致。** 这由以下机制保证：
+
+1. **唯一生成路径**：对比报告只有 `src/report/semantic_compare.py` 一条渲染路径
+   （`python -m src.pipeline` 与 `python -m src.report compare` 走同一个函数）；
+   描述报告只有 `agent.py`（`oskernel_agent` 树状流水线）一条路径。旧的 Markdown
+   报告流程（`src.report.generate` / `src.review` LLM 逐对复核）已删除。
+2. **写盘前强制归一**：档位命名（高度疑似借鉴 / 疑似借鉴（待复核）/ 自研/原创）由
+   `src/report/label_normalize.py` 在 HTML 写盘前统一（`semantic_compare` 内接线，幂等）；
+   描述报告的英文正文/标题、代码摘录型点评由 `pipeline/lang_guard.py` 在渲染前中文化
+   （`tree_builder` 内接线）。
+3. **误报扣除内建**：上游 vendored/ABI 受限（`upstream_baselines.py` + `config/upstream_baselines.yaml`）、
+   机械误报（`false_positives.py`）、复用库（`libraries.py` + `config/libraries.yaml`）
+   都在流水线内自动剔除并在报告附录单列，无需人工后处理。
+4. **review 档自动裁决**：中等相似函数由 LLM 语义复核（`semantic_compare` 内置，模型
+   `LLM_MODEL`，默认 `deepseek-v4-flash`）裁决为"高度疑似借鉴"或"自研/原创"，仅复核
+   失败的残留才显示"待复核"。
+5. **规范命令固定**：对比报告一律 `python -m src.pipeline --repo <..> --baselines`
+   （`run_batch.py` 与前端控制台均已按此调用）。
+
+> 如果你看到某份报告与上述格式不符（旧档位叫法、整章英文、空报告），那是**旧版本代码
+> 或错误分支克隆**的产物，用下面的维护脚本修复或重跑，不要手改 HTML。
+
+### 维护脚本（scripts/）
+
+历史报告追平 / 批量修复用，均幂等可重复执行：
+
+| 脚本 | 用途 |
+|---|---|
+| `scripts/fix_report_labels.py` | 旧对比报告档位标签统一（作用于 `data/output/`） |
+| `scripts/fix_report_language.py` | 旧描述报告英文正文中文化（需 tree.json，重渲染 HTML） |
+| `scripts/fix_report_quotes.py` | 旧描述报告代码摘录型点评改中文（需 tree.json） |
+| `scripts/fix_workid_reports.py` | 交付目录 `reports_by_work_id/` 的 HTML 层批量修复（无 tree.json 也可用；`--scan-only` 预检） |
+| `scripts/verify_workid_english.py` | 检测交付报告中残留的英文整句 |
+| `scripts/force_translate_leftovers.py` | 对被语言检测器跳过的顽固英文片段强制翻译 |
+| `scripts/rerun_empty_reports.py` | 重跑因克隆错分支/错仓库名而空跑的作品报告 |
+| `scripts/rerun_review_tier.py` | 重跑仍带"待复核"档的旧对比报告，经 LLM 复核消解该档 |
+| `scripts/build_reference_db.py` 等 | 历史库构建辅助 |

@@ -49,3 +49,13 @@ session_prompts/
 test/
 analysis
 config.toml
+
+# 报告交付物与批量输入（数据非代码）
+reports_by_work_id/
+reports_by_work_id.zip
+云端报告/
+作品.txt
+作品进展汇报.pptx
+
+# 本地工具二进制
+tools_bin/
