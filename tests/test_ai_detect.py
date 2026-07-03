@@ -13,7 +13,6 @@ from src.ai_detect.extract import extract_blocks
 from src.ai_detect.runner import run_ai_detect
 from src.ai_detect.settings import AIDetectSettings, load_ai_detect_settings
 from src.ai_detect.vendor.ai_code_detector.models import Language
-from src.report.generate import generate_report
 
 
 # ---------- mock provider ----------
@@ -75,7 +74,9 @@ def test_extract_max_functions_limit(mini_repo: Path):
 # ---------- 检测编排 ----------
 
 def test_run_ai_detect_ok_with_mock(mini_repo: Path):
-    st = AIDetectSettings(min_loc=20, suspicious_min_confidence=0.4, git_blame=False)
+    # 阈值显式给定（FakeScorer 契约：0.5→LLM、3.5→Human），不依赖生产校准默认值
+    st = AIDetectSettings(min_loc=20, suspicious_min_confidence=0.4, git_blame=False,
+                          log_rank_llm_threshold=1.5, log_rank_human_threshold=3.0)
     res = run_ai_detect(mini_repo, settings=st, scorer=FakeScorer(),
                         show_progress=False, write=False)
     assert res["status"] == "ok"
@@ -139,48 +140,5 @@ def test_settings_env_override(monkeypatch):
     load_ai_detect_settings.cache_clear()
 
 
-# ---------- 报告章六（唤起会话生成 + 拼装）----------
-
-class _FakeReportLLM:
-    async def complete(self, messages, temperature):
-        sysmsg = messages[0]["content"]
-        if "AI 生成代码检测" in sysmsg:
-            # 一条真实引用（应保留）+ 一条编造引用（应被 scrub 删）
-            ref = messages[1]["content"]
-            real = ref.split("ref: ")[1].split(",")[0] if "ref: " in ref else "x.rs:1-2"
-            return f"整体 AI 疑似偏高，{real} 最可疑。另有 fake.rs:9999 的雷同。"
-        return ""
-
-
-def _ai_report(mini_repo: Path) -> dict:
-    st = AIDetectSettings(min_loc=20, suspicious_min_confidence=0.4, git_blame=False)
-    return run_ai_detect(mini_repo, settings=st, scorer=FakeScorer(),
-                         show_progress=False, write=False)
-
-
-def test_report_section6_template_fallback(mini_repo: Path):
-    ai = _ai_report(mini_repo)
-    md, _ = generate_report({"suspects": []}, {"results": []}, client=None, ai_report=ai)
-    assert "六、AI 生成代码检测" in md
-    assert "DetectCodeGPT" in md                 # 方法学注脚
-    assert "高置信 AI 疑似函数" in md            # 代码生成表格
-    assert "generated_fn" in md                  # 可疑函数进表
-
-
-def test_report_section6_llm_session_and_scrub(mini_repo: Path):
-    ai = _ai_report(mini_repo)
-    md, deleted = generate_report({"suspects": []}, {"results": []},
-                                  client=_FakeReportLLM(), ai_report=ai)
-    assert "六、AI 生成代码检测" in md
-    assert "fake.rs:9999" not in md              # 编造引用被后置校验删除
-    assert deleted >= 1
-
-
-def test_report_section6_missing_and_skipped():
-    # 未提供 ai_report
-    md, _ = generate_report({"suspects": []}, {"results": []}, client=None, ai_report=None)
-    assert "未运行 AI 生成代码检测" in md
-    # skipped 状态透传原因
-    md2, _ = generate_report({"suspects": []}, {"results": []}, client=None,
-                             ai_report={"status": "skipped", "reason": "参考模型不可用（OSError）"})
-    assert "未完成" in md2 and "参考模型不可用" in md2
+# 说明：旧 Markdown 报告（src.report.generate）的「章六」拼装已随旧流程一并移除；
+# AI 检测章节现由 semantic_compare 直接渲染进对比报告 HTML，测试见 test_report.py。
