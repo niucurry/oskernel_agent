@@ -146,7 +146,7 @@ def _plain_len(s: str) -> int:
 _no_thinking_ok = True
 
 
-def _call_llm(chunk: str, retries: int = 3) -> str | None:
+def _call_llm(chunk: str, retries: int = 3, sys_prompt: str | None = None) -> str | None:
     """自带翻译调用：deepseek-v4-flash 是推理模型，lang_guard 的 max_tokens=4000 会被
     思考 token 吃光导致 content 为空。这里关思考、放宽 max_tokens、校验 finish_reason。"""
     import time
@@ -162,7 +162,7 @@ def _call_llm(chunk: str, retries: int = 3) -> str | None:
                 kw["extra_body"] = {"enable_thinking": False}
             r = cli.chat.completions.create(
                 model=MODEL,
-                messages=[{"role": "system", "content": lang_guard._SYS_PROMPT},
+                messages=[{"role": "system", "content": sys_prompt or lang_guard._SYS_PROMPT},
                           {"role": "user", "content": chunk}],
                 temperature=0.2, max_tokens=7000, **kw)
             if r.choices[0].finish_reason != "stop":
@@ -207,13 +207,35 @@ _NODE_TITLE = re.compile(r'<span class="font-semibold text-base [^"]*">([^<]{6,1
 _TOC_TITLE = re.compile(r'<a class="toc-link[^"]*" href="#subsys-[^"]*"[^>]*>([^<]{6,120})</a>')
 
 
+_ALPHA_WORD = re.compile(r"[A-Za-z]{2,}")
+
+
+def _title_is_english(t: str) -> bool:
+    """标题级宽判定：无中文且 ≥2 个非缩写英文词即送翻。
+    比 lang_guard.title_needs_translation 宽——后者的 _strip_noise 会把
+    「词后跟括号」（如 Memory Management (VM)）当函数调用剥掉导致漏检。
+    专有名词由翻译端兜底：模型原样返回/无中文输出 → 保留原文。"""
+    if not isinstance(t, str) or len(t) < 6 or re.search(r"[一-鿿]", t):
+        return False
+    words = [w for w in _ALPHA_WORD.findall(t) if not (w.isupper() and len(w) <= 5)]
+    return len(words) >= 2
+
+
+def _summary_is_english(t: str) -> bool:
+    """摘要级宽判定：摘要字段按构造是散文（subsys 提示词要求 ≤200 字中文摘要），
+    夹再多标识符/:: 也不该被当成代码跳过——无中文且 ≥5 个英文词即送翻。"""
+    if not isinstance(t, str) or re.search(r"[一-鿿]", t):
+        return False
+    return len(_ALPHA_WORD.findall(t)) >= 5
+
+
 def collect_english_titles(html: str) -> set[str]:
     import html as _h
     out: set[str] = set()
     for pat in (_NODE_TITLE, _TOC_TITLE):
         for m in pat.finditer(html):
             t = _h.unescape(m.group(1)).strip()
-            if lang_guard.title_needs_translation(t):
+            if _title_is_english(t):
                 out.add(t)
     return out
 
@@ -224,9 +246,14 @@ def fix_titles(html: str, titles: set[str]) -> tuple[str, int]:
     import html as _h
     if not titles:
         return html, 0
+
+    def _tr(s: str) -> str:
+        # 译文含 '<'（如 Vec<MemArea> 泛型）没关系：回填时统一 _h.escape
+        out = _call_llm(s, sys_prompt=lang_guard._TITLE_SYS)
+        return out if out and re.search(r"[一-鿿]", out) else s
+
     with ThreadPoolExecutor(max_workers=8) as ex:
-        trans = dict(zip(titles, ex.map(
-            lambda s: lang_guard._translate_title(s, MODEL), titles)))
+        trans = dict(zip(titles, ex.map(_tr, titles)))
     n = 0
     for src, dst in trans.items():
         if not dst or dst == src:
@@ -271,8 +298,7 @@ def collect_english_summaries(html: str) -> set[str]:
     for pat in (_SUMMARY_DIV, _ROLE_SPAN):
         for m in pat.finditer(html):
             t = _h.unescape(m.group(2)).strip()
-            if not _cn_dominant(t) and (lang_guard.needs_translation(t)
-                                        or lang_guard.title_needs_translation(t)):
+            if _summary_is_english(t) or _title_is_english(t):
                 out.add(t)
     return out
 
@@ -283,17 +309,21 @@ def fix_summaries(html: str) -> tuple[str, int]:
     jobs = collect_english_summaries(html)
     if not jobs:
         return html, 0
+
+    def _tr(s: str) -> str:
+        out = _call_llm(s)
+        return out if out else s
+
     with ThreadPoolExecutor(max_workers=8) as ex:
-        results = dict(zip(jobs, ex.map(
-            lambda s: lang_guard._translate(s, MODEL), jobs)))
+        results = dict(zip(jobs, ex.map(_tr, jobs)))
     n = 0
 
     def _sub(m: re.Match) -> str:
         nonlocal n
         t = _h.unescape(m.group(2)).strip()
         nv = results.get(t, t)
-        # 安全阀：译文须含中文、不得带标签、不得异常缩水
-        if nv and nv != t and "<" not in nv and re.search(r"[一-鿿]", nv) \
+        # 安全阀：译文须含中文、不得异常缩水（'<' 如 Vec<MemArea> 无害：回填统一转义）
+        if nv and nv != t and re.search(r"[一-鿿]", nv) \
                 and len(nv) >= len(t) * 0.15:
             n += 1
             return m.group(1) + _h.escape(nv) + m.group(3)
