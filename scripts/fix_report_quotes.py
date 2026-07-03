@@ -8,8 +8,8 @@ subsys.md 要求 quote 是「中文一句话点评（不是粘贴源码原文）
 无需重跑 OpenCode 流水线；并发 + 缓存 + 重试；幂等（改成中文后再跑会跳过）。
 
 用法：
-    python fix_report_quotes.py                     # 全部
-    python fix_report_quotes.py T2026100079910437   # 指定队伍
+    python scripts/fix_report_quotes.py                     # 全部
+    python scripts/fix_report_quotes.py T2026100079910437   # 指定队伍
 """
 from __future__ import annotations
 
@@ -17,12 +17,12 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from oskernel_agent.pipeline.lang_guard import normalize_tree_quotes  # noqa: E402
 from oskernel_agent.reports.html_tree import write_tree_html  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "output"
 REPOS = OUT / "_repos"
 
