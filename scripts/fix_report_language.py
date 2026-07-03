@@ -19,7 +19,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from oskernel_agent.pipeline.lang_guard import normalize_tree_language  # noqa: E402
+from oskernel_agent.pipeline.lang_guard import (  # noqa: E402
+    normalize_tree_language, normalize_tree_titles)
 from oskernel_agent.reports.html_tree import write_tree_html  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,9 +44,10 @@ def fix_one(tree_json: Path) -> str:
     team_id = tree_json.parent.name
     tree = json.loads(tree_json.read_text(encoding="utf-8"))
     stats = normalize_tree_language(tree)
-    n = stats.get("translated", 0)
+    tstats = normalize_tree_titles(tree)
+    n = stats.get("translated", 0) + tstats.get("translated", 0)
     if not n:
-        return f"skip  {team_id}（无英文正文）"
+        return f"skip  {team_id}（无英文正文/标题）"
 
     # 回写 tree.json
     tree_json.write_text(json.dumps(tree, ensure_ascii=False, indent=2), encoding="utf-8")

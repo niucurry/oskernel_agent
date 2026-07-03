@@ -674,6 +674,14 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
     except Exception as e:
         print(f"[警告] 语言护栏失败：{e}（继续）", file=sys.stderr)
 
+    # D2. 标题护栏：module 节点英文 name 中文化（渲染在树节点头 + 目录，正文护栏覆盖不到）
+    try:
+        from .lang_guard import normalize_tree_titles
+        print("[tree] 标题护栏：检测并中文化英文模块标题 ...")
+        normalize_tree_titles(result)
+    except Exception as e:
+        print(f"[警告] 标题护栏失败：{e}（继续）", file=sys.stderr)
+
     # E. quote 护栏：把亮点/槽点里粘贴的源码摘录改写成中文一句话点评
     try:
         from .lang_guard import normalize_tree_quotes

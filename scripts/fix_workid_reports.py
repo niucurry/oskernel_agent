@@ -197,6 +197,113 @@ def safe_translate(chunk: str) -> str:
     return chunk                                # 标签增删 → 弃用译文
 
 
+# ------------------------------------------------- 模块标题（树节点头 + 目录 TOC）
+# module 节点的 name 渲染在 node-content 之外（树节点头 span 与 TOC 链接），
+# 正文块翻译覆盖不到——漏翻会造成「正文已中文、目录还是英文」的割裂。
+
+# 树节点头：<span class="font-semibold text-base ...">TITLE</span>
+_NODE_TITLE = re.compile(r'<span class="font-semibold text-base [^"]*">([^<]{6,120})</span>')
+# 目录项：<a class="toc-link ..." href="#subsys-...">TITLE</a>
+_TOC_TITLE = re.compile(r'<a class="toc-link[^"]*" href="#subsys-[^"]*"[^>]*>([^<]{6,120})</a>')
+
+
+def collect_english_titles(html: str) -> set[str]:
+    import html as _h
+    out: set[str] = set()
+    for pat in (_NODE_TITLE, _TOC_TITLE):
+        for m in pat.finditer(html):
+            t = _h.unescape(m.group(1)).strip()
+            if lang_guard.title_needs_translation(t):
+                out.add(t)
+    return out
+
+
+def fix_titles(html: str, titles: set[str]) -> tuple[str, int]:
+    """把英文模块标题翻成中文，同步替换整段出现的同名字符串
+    （`>TITLE<` 与 title="TITLE"，覆盖树节点头 / TOC / 模块清单表格单元）。"""
+    import html as _h
+    if not titles:
+        return html, 0
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        trans = dict(zip(titles, ex.map(
+            lambda s: lang_guard._translate_title(s, MODEL), titles)))
+    n = 0
+    for src, dst in trans.items():
+        if not dst or dst == src:
+            continue
+        esc_src, esc_dst = _h.escape(src), _h.escape(dst)
+        # 只替换「完整成段」出现的位置：标签间全文 与 title 属性，避免误伤正文句子片段
+        new = html.replace(f">{esc_src}<", f">{esc_dst}<").replace(
+            f'title="{esc_src}"', f'title="{esc_dst}"')
+        if new != html:
+            html = new
+            n += 1
+    return html, n
+
+
+# ------------------------------------------- 节点摘要行 / role 角标（正文块之外）
+# module/subsystem 节点的 summary 渲染成独立的一行 div（在标题下、node-content 上方），
+# role 渲染成标题旁的 (角标)。二者都不在 node-content 内——漏翻会出现
+# 「英文摘要行下面接中文正文」的割裂（用户实际反馈的形态）。
+
+# 摘要行：<div class="text-sm text-slate-700 dark:text-slate-300 mt-1 mb-2">纯转义文本</div>
+_SUMMARY_DIV = re.compile(
+    r'(<div class="text-sm text-slate-700 dark:text-slate-300 mt-1 mb-2">)([^<]{20,}?)(</div>)')
+# role 角标：<span class="text-xs text-slate-500">(角标)</span>
+_ROLE_SPAN = re.compile(r'(<span class="text-xs text-slate-500">\()([^<)]{6,160})(\)</span>)')
+
+
+def _cn_dominant(text: str) -> bool:
+    """去噪后中文占优 → 无需翻译（也用于跳过检测器对含英文术语中文块的误报）。"""
+    t = re.sub(r"<code\b[^>]*>.*?</code>", " ", text, flags=re.S)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = re.sub(r"https?://\S+|[\w./\\-]+\.[A-Za-z0-9]+(?::\d+(?:-\d+)?)?", " ", t)
+    t = re.sub(r"[\w-]+/[\w./-]+", " ", t)
+    en = len(re.findall(r"[A-Za-z]", t))
+    cjk = len(re.findall(r"[一-鿿]", t))
+    return cjk >= en * 0.5
+
+
+def collect_english_summaries(html: str) -> set[str]:
+    """找出英文的节点摘要行 / role 角标文本（纯检测，不调 LLM）。"""
+    import html as _h
+    out: set[str] = set()
+    for pat in (_SUMMARY_DIV, _ROLE_SPAN):
+        for m in pat.finditer(html):
+            t = _h.unescape(m.group(2)).strip()
+            if not _cn_dominant(t) and (lang_guard.needs_translation(t)
+                                        or lang_guard.title_needs_translation(t)):
+                out.add(t)
+    return out
+
+
+def fix_summaries(html: str) -> tuple[str, int]:
+    """翻译英文的节点摘要行与 role 角标（纯转义文本，无内嵌标签，按位置替换）。"""
+    import html as _h
+    jobs = collect_english_summaries(html)
+    if not jobs:
+        return html, 0
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = dict(zip(jobs, ex.map(
+            lambda s: lang_guard._translate(s, MODEL), jobs)))
+    n = 0
+
+    def _sub(m: re.Match) -> str:
+        nonlocal n
+        t = _h.unescape(m.group(2)).strip()
+        nv = results.get(t, t)
+        # 安全阀：译文须含中文、不得带标签、不得异常缩水
+        if nv and nv != t and "<" not in nv and re.search(r"[一-鿿]", nv) \
+                and len(nv) >= len(t) * 0.15:
+            n += 1
+            return m.group(1) + _h.escape(nv) + m.group(3)
+        return m.group(0)
+
+    for pat in (_SUMMARY_DIV, _ROLE_SPAN):
+        html = pat.sub(_sub, html)
+    return html, n
+
+
 # ---------------------------------------------------------------- 单文件修复
 
 def fix_comparison(path: Path) -> tuple[bool, str]:
@@ -217,42 +324,52 @@ def fix_description(path: Path, scan_only: bool = False) -> tuple[bool, str]:
     # 收集需要翻译的 (块内偏移无关) 翻译单元
     jobs: list[str] = []
     plan: list[tuple[int, int, list[str]]] = []  # (start, end, chunks)
+    # 待翻块 = 检测器判英文 且 非中文占优。后者过滤检测器对
+    # 「中文块里夹英文 <strong> 术语」的误报——这类块反复送翻只会造成文件无意义微变（不幂等）。
+    def _eligible(c: str) -> bool:
+        return lang_guard.needs_translation(c) and not _cn_dominant(c)
+
     for start, end, inner in blocks:
         chunks = group_chunks(top_level_segments(inner))
         if "".join(chunks) != inner:            # 切块必须无损，否则整块跳过
             continue
-        if any(lang_guard.needs_translation(c) for c in chunks):
+        if any(_eligible(c) for c in chunks):
             plan.append((start, end, chunks))
-            jobs.extend(c for c in chunks if lang_guard.needs_translation(c))
-    if not plan:
+            jobs.extend(c for c in chunks if _eligible(c))
+    titles = collect_english_titles(html)
+    summaries = collect_english_summaries(html)
+    if not plan and not titles and not summaries:
         return False, "无英文块"
     if scan_only:
-        return False, f"{len(plan)} 块 / {len(jobs)} 片待翻译"
+        return False, (f"{len(plan)} 块 / {len(jobs)} 片待翻译，"
+                       f"英文标题 {len(titles)} 个，英文摘要/角标 {len(summaries)} 条")
 
     uniq = list(dict.fromkeys(jobs))
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        trans = dict(zip(uniq, ex.map(safe_translate, uniq)))
+    trans: dict[str, str] = {}
+    if uniq:
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            trans = dict(zip(uniq, ex.map(safe_translate, uniq)))
 
     pieces: list[str] = []
     pos = 0
-    changed = False
     for start, end, chunks in sorted(plan, key=lambda x: x[0]):
         if start < pos:      # 块重叠（理论不应出现）→ 跳过后块保结构
             continue
         pieces.append(html[pos:start])
-        new_inner = "".join(
-            trans.get(c, c) if lang_guard.needs_translation(c) else c for c in chunks
-        )
-        if new_inner != html[start:end]:
-            changed = True
-        pieces.append(new_inner)
+        pieces.append("".join(trans.get(c, c) for c in chunks))
         pos = end
     pieces.append(html[pos:])
-    if not changed:
+    new_html = "".join(pieces)
+
+    # 模块标题（树节点头 / TOC / 模块清单表格）+ 节点摘要行 / role 角标
+    new_html, n_titles = fix_titles(new_html, titles)
+    new_html, n_sum = fix_summaries(new_html)
+
+    if new_html == html:
         return False, f"{len(uniq)} 片翻译均被安全阀拦下或失败"
     _backup(path, html)
-    path.write_text("".join(pieces), encoding="utf-8")
-    return True, f"翻译 {len(uniq)} 片"
+    path.write_text(new_html, encoding="utf-8")
+    return True, f"翻译 {len(uniq)} 片，标题 {n_titles} 个，摘要/角标 {n_sum} 条"
 
 
 def _backup(path: Path, original: str) -> None:
