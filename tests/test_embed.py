@@ -87,9 +87,11 @@ def test_query_top1_hit_on_modified_copy(tmp_path, embedder):
     text = text.replace("ready_queue", "rq").replace("chosen", "picked").replace("threshold", "thr")
     task.write_text(text, encoding="utf-8")
 
-    # 3) 检索
+    # 3) 检索（faiss 路径显式指向不存在的文件：隔离本机可能存在的生产索引
+    #    data/db/faiss_hnsw.index，强制走传入的内存 store，保证任何机器上结果一致）
     recall = query_repo(
-        modified, store, embedder, top_k=20, repos_root=tmp_path, output_dir=tmp_path / "out"
+        modified, store, embedder, top_k=20, repos_root=tmp_path, output_dir=tmp_path / "out",
+        faiss_index_path=tmp_path / "no.index", faiss_ids_path=tmp_path / "no.npy",
     )
     assert recall["query_repo_id"] == "modified"
     assert Path(recall["_output_path"]).exists()
