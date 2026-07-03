@@ -12,9 +12,9 @@
 幂等：重复运行不会二次改写。默认改动前留一个 .bak 备份（--no-backup 关闭）。
 
 用法：
-    python fix_report_labels.py                       # 处理全部对比报告
-    python fix_report_labels.py T2026100019911468 ... # 指定队伍
-    python fix_report_labels.py --no-backup
+    python scripts/fix_report_labels.py                       # 处理全部对比报告
+    python scripts/fix_report_labels.py T2026100019911468 ... # 指定队伍
+    python scripts/fix_report_labels.py --no-backup
 """
 from __future__ import annotations
 
@@ -22,11 +22,11 @@ import glob
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from report.label_normalize import normalize_labels, residual_legacy  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "output"
 
 

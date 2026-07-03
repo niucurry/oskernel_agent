@@ -8,8 +8,8 @@
      （repo_roots 指向 data/output/_repos/<fork名>，保证 file:line 链接仍可用）
 
 用法：
-    python fix_report_language.py                 # 处理全部
-    python fix_report_language.py T2026101269910207 T2026100069910965   # 指定队伍
+    python scripts/fix_report_language.py                 # 处理全部
+    python scripts/fix_report_language.py T2026101269910207 T2026100069910965   # 指定队伍
 """
 from __future__ import annotations
 
@@ -17,12 +17,12 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from oskernel_agent.pipeline.lang_guard import normalize_tree_language  # noqa: E402
 from oskernel_agent.reports.html_tree import write_tree_html  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "output"
 REPOS = OUT / "_repos"
 
