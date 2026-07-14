@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from "vue";
 import {
   Database,
   ExternalLink,
@@ -35,6 +35,7 @@ const errorMessage = ref("");
 const fileInput = ref(null);
 const deletingJobId = ref("");
 const clearingQueue = ref(false);
+const detailPane = ref(null);
 
 const statusLabels = {
   pending: "待生成",
@@ -145,6 +146,10 @@ async function selectRepo(repo) {
   try {
     selected.value = await fetchRepository(repo.id);
     syncActiveReportKind(selected.value.reports || []);
+    await nextTick();
+    if (window.matchMedia("(max-width: 768px)").matches) {
+      detailPane.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   } catch (error) {
     errorMessage.value = error.message;
   }
@@ -234,10 +239,12 @@ function debouncedLoad() {
   searchTimer = setTimeout(loadAll, 220);
 }
 
+let refreshTimer = null;
 onMounted(() => {
   loadAll();
-  setInterval(loadAll, 5000);
+  refreshTimer = setInterval(loadAll, 5000);
 });
+onUnmounted(() => clearInterval(refreshTimer));
 </script>
 
 <template>
@@ -372,7 +379,7 @@ onMounted(() => {
         </div>
       </section>
 
-      <aside class="detail-pane">
+      <aside ref="detailPane" class="detail-pane">
         <template v-if="selected">
           <div class="detail-head">
             <div>

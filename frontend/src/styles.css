@@ -649,3 +649,54 @@ tbody tr.selected {
     min-width: 0;
   }
 }
+
+@media (max-width: 768px) {
+  .app-shell {
+    padding: 10px;
+  }
+
+  .content-grid {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .detail-pane {
+    order: -1;
+    min-height: auto;
+    scroll-margin-top: 10px;
+  }
+
+  .report-frame,
+  .empty-report {
+    height: max(420px, calc(100dvh - 190px));
+    min-height: 420px;
+  }
+
+  .table-wrap {
+    max-height: 62vh;
+  }
+
+  .metrics-band {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .job-row {
+    grid-template-columns: 14px minmax(0, 1fr) 70px 34px;
+  }
+
+  .job-row .job-repo {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .topbar-actions,
+  .toolbar {
+    width: 100%;
+  }
+
+  .topbar-actions > *,
+  .toolbar > * {
+    max-width: 100%;
+  }
+}
