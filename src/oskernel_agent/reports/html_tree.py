@@ -404,6 +404,14 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
     toc_html = _render_toc(verdict_html, similarity_html, toc_subs)
 
     title_safe = _esc(title)
+    language_warning = ""
+    if meta.get("language_incomplete"):
+        language_warning = (
+            '<div role="alert" class="mb-5 rounded-lg border border-amber-300 '
+            'bg-amber-50 px-4 py-3 text-sm text-amber-900">'
+            '<b>中文化未完成：</b>部分内容未能完成中文化，可能仍含英文正文或标题。'
+            '请配置可用的 LLM API 后重跑，并在人工评审前复核。</div>'
+        )
     doc = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -423,6 +431,7 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
         评估时间：{_esc(meta.get('ts',''))} · 源文件：{_esc(meta.get('indexed_files',0))} 个
       </div>
     </header>
+    {language_warning}
     {verdict_html}
     {similarity_html}
     <section id="tree" data-section-id="tree">

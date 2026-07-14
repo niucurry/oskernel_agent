@@ -168,9 +168,10 @@ def _workers() -> int:
 def normalize_tree_language(tree: dict) -> dict:
     """就地遍历 tree，把英文正文字段翻成中文（并发翻译，去重）。返回统计。"""
     if os.environ.get("AGENT_LANG_GUARD", "").strip().lower() in ("0", "false", "no", "off"):
-        return {"enabled": False}
+        return {"enabled": False, "complete": True, "remaining": 0}
     model = os.getenv("LLM_MODEL", "deepseek-v4-flash")
-    stats = {"checked": 0, "translated": 0}
+    stats = {"enabled": True, "checked": 0, "translated": 0,
+             "remaining": 0, "complete": True}
 
     # 1. 收集所有需要翻译的字段引用
     targets: list[tuple[dict, str, str]] = []
@@ -196,6 +197,8 @@ def normalize_tree_language(tree: dict) -> dict:
     uniq = list({v for _, _, v in targets})
     if _get_client() is None:
         print("[lang_guard] 无 API key，跳过中文化（保留英文）", file=sys.stderr)
+        stats["remaining"] = len(targets)
+        stats["complete"] = False
         return stats
 
     from concurrent.futures import ThreadPoolExecutor
@@ -210,6 +213,9 @@ def normalize_tree_language(tree: dict) -> dict:
         if nv != v:
             obj[k] = nv
             stats["translated"] += 1
+
+    stats["remaining"] = sum(1 for obj, k, _ in targets if needs_translation(obj[k]))
+    stats["complete"] = stats["remaining"] == 0
 
     print(f"[lang_guard] 英文正文改中文：{stats['translated']}/{stats['checked']} 个字段"
           f"（去重 {len(uniq)} 次翻译）")
@@ -273,7 +279,7 @@ def _translate_title(s: str, model: str) -> str:
 def normalize_tree_titles(tree: dict) -> dict:
     """就地把 module 节点的英文 name 翻成中文（并发、去重）。返回统计。"""
     if os.environ.get("AGENT_LANG_GUARD", "").strip().lower() in ("0", "false", "no", "off"):
-        return {"enabled": False}
+        return {"enabled": False, "complete": True, "remaining": 0}
     model = os.getenv("LLM_MODEL", "deepseek-v4-flash")
     targets: list[dict] = []
 
@@ -288,8 +294,13 @@ def normalize_tree_titles(tree: dict) -> dict:
                 walk(x)
 
     walk(tree)
-    stats = {"checked": len(targets), "translated": 0}
-    if not targets or _get_client() is None:
+    stats = {"enabled": True, "checked": len(targets), "translated": 0,
+             "remaining": 0, "complete": True}
+    if not targets:
+        return stats
+    if _get_client() is None:
+        stats["remaining"] = len(targets)
+        stats["complete"] = False
         return stats
 
     from concurrent.futures import ThreadPoolExecutor
@@ -301,6 +312,8 @@ def normalize_tree_titles(tree: dict) -> dict:
         if nv != n["name"]:
             n["name"] = nv
             stats["translated"] += 1
+    stats["remaining"] = sum(1 for n in targets if title_needs_translation(n.get("name", "")))
+    stats["complete"] = stats["remaining"] == 0
     if stats["translated"]:
         print(f"[lang_guard] 英文模块标题改中文：{stats['translated']}/{stats['checked']} 个")
     return stats

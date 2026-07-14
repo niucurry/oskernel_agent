@@ -670,17 +670,28 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
     try:
         from .lang_guard import normalize_tree_language
         print("[tree] 语言护栏：检测并中文化英文正文 ...")
-        normalize_tree_language(result)
+        lang_stats = normalize_tree_language(result)
+        result["meta"]["language_guard"] = lang_stats
     except Exception as e:
         print(f"[警告] 语言护栏失败：{e}（继续）", file=sys.stderr)
+        result["meta"]["language_guard"] = {"enabled": True, "complete": False,
+                                                    "remaining": None, "error": str(e)}
 
     # D2. 标题护栏：module 节点英文 name 中文化（渲染在树节点头 + 目录，正文护栏覆盖不到）
     try:
         from .lang_guard import normalize_tree_titles
         print("[tree] 标题护栏：检测并中文化英文模块标题 ...")
-        normalize_tree_titles(result)
+        title_stats = normalize_tree_titles(result)
+        result["meta"]["title_language_guard"] = title_stats
     except Exception as e:
         print(f"[警告] 标题护栏失败：{e}（继续）", file=sys.stderr)
+        result["meta"]["title_language_guard"] = {"enabled": True, "complete": False,
+                                                          "remaining": None, "error": str(e)}
+
+    result["meta"]["language_incomplete"] = not (
+        result["meta"].get("language_guard", {}).get("complete", False)
+        and result["meta"].get("title_language_guard", {}).get("complete", False)
+    )
 
     # E. quote 护栏：把亮点/槽点里粘贴的源码摘录改写成中文一句话点评
     try:
