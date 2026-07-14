@@ -129,6 +129,15 @@ def test_run_ai_detect_skips_when_no_functions(tmp_path: Path):
     assert res["status"] == "skipped" and "rust/c" in res["reason"]
 
 
+def test_write_false_creates_no_output_directory(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "readme.md").write_text("no code here", encoding="utf-8")
+    res = run_ai_detect(tmp_path, settings=AIDetectSettings(), scorer=FakeScorer(),
+                        show_progress=False, write=False)
+    assert res["status"] == "skipped"
+    assert not (tmp_path / "data").exists()
+
+
 # ---------- 配置 ----------
 
 def test_settings_env_override(monkeypatch):

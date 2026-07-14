@@ -91,7 +91,6 @@ def run_ai_detect(
     st = settings or load_ai_detect_settings()
     repo_id = repo_name or repo.resolve().name
     out_dir = Path(output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{repo_id}_ai_detect.json"
 
     def _emit(payload: dict) -> dict:
@@ -99,6 +98,7 @@ def run_ai_detect(
         payload.setdefault("model_id", st.model_id)
         payload.setdefault("config", _config_snapshot(st))
         if write:
+            out_dir.mkdir(parents=True, exist_ok=True)
             out_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
             )
