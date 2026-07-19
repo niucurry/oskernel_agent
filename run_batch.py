@@ -24,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 # 跨平台定位 venv 解释器：优先当前解释器（激活 venv 后即为 venv python），
-# 否则按平台找 Scripts/python.exe(Windows) 或 bin/python(Linux/AutoDL)。
+# 否则按平台找 Scripts/python.exe（Windows）或 bin/python（Linux）。
 def _venv_python() -> str:
     cand = [ROOT / ".venv" / "bin" / "python",
             ROOT / ".venv" / "Scripts" / "python.exe"]
