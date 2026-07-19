@@ -92,6 +92,7 @@ def test_query_top1_hit_on_modified_copy(tmp_path, embedder):
     recall = query_repo(
         modified, store, embedder, top_k=20, repos_root=tmp_path, output_dir=tmp_path / "out",
         faiss_index_path=tmp_path / "no.index", faiss_ids_path=tmp_path / "no.npy",
+        db_path=db,
     )
     assert recall["query_repo_id"] == "modified"
     assert Path(recall["_output_path"]).exists()

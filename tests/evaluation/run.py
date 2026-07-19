@@ -70,21 +70,28 @@ def evaluate(
     qdrant_path: str = "data/db/qdrant_local",
     idf_path: str = "data/db/idf.json",
     index_path: str = "data/db/simhash_index.pkl",
+    code_index_path: str = "data/db/code_simhash_index.pkl",
+    faiss_index_path: str = "data/db/faiss_hnsw.index",
+    faiss_ids_path: str = "data/db/faiss_ids.npy",
     top_k: int = 20,
     manual: list[dict] | None = None,
     with_llm: bool = False,
     llm_sample: int = 20,
 ) -> dict:
     from src.embed.embedder import get_embedder
-    from src.embed.settings import load_settings
-    from src.embed.vector_store import VectorStore
+    from src.embed.faiss_store import FaissVectorStore, load_faiss_index
     from src.simhash.build import SimHashQuery
+    from src.simhash.code_index import CodeSimHashQuery
 
     samples = list(eval_set["samples"]) + (manual or [])
     raw_by_id = _raw_by_id(db_path)
     matcher = ExactMatcher()
-    sq = SimHashQuery(idf_path, index_path)
-    store = VectorStore(load_settings().qdrant.collection, path=qdrant_path)
+    sq = SimHashQuery(idf_path, index_path, db_path=db_path)
+    code_sq = CodeSimHashQuery(code_index_path, db_path=db_path)
+    fi = load_faiss_index(faiss_index_path, faiss_ids_path, db_path=db_path)
+    if fi is None:
+        raise RuntimeError("评测要求与 functions.db 同代的 FAISS 索引，拒绝在过期索引上给出召回率")
+    store = FaissVectorStore(fi[0], fi[1], db_path=db_path)
     embedder = get_embedder(show_progress=False)
 
     timings: dict[str, float] = {}
@@ -93,7 +100,8 @@ def evaluate(
     timings["embed_all"] = round(time.perf_counter() - t0, 2)
 
     # 逐样本判定
-    per = defaultdict(lambda: {"n": 0, "l1": 0, "l2": 0, "casc": 0, "final": 0})
+    per = defaultdict(lambda: {"n": 0, "l1": 0, "l2": 0, "code": 0,
+                               "casc": 0, "final": 0})
     fp = 0
     neg_total = 0
     t1 = time.perf_counter()
@@ -103,24 +111,28 @@ def evaluate(
         tgt_raw = s["target"].get("raw_code") or raw_by_id.get(tgt_id, "")
         var = s["variant"]
 
+        cand_sh = sq.query(var.get("feature_tokens", []))
+        l1 = tgt_id in cand_sh
+        v_ids = {h["id"] for h in store.search(vec, top_k)}
+        l2 = tgt_id in v_ids
+        sh_ids = {h["id"] for h in store.search(
+            vec, top_k, candidate_ids=sorted(cand_sh) or [-1])}
+        code_ids = code_sq.query(var.get("normalized_code", ""))
+        code_hit = tgt_id in code_ids
+        # 结构 SimHash 命中直接进入 exact/segment，不再经过 ANN top-k 二次截断。
+        casc = l2 or (tgt_id in sh_ids) or code_hit
+        ratio = matcher.match(
+            var["raw_code"], tgt_raw, var.get("lang", "rust")).similar_line_ratio
+        final = casc and (ratio >= DETECT_RATIO or code_hit)
+
         if label == 1:
-            cand_sh = sq.query(var.get("feature_tokens", []))
-            l1 = tgt_id in cand_sh
-            v_ids = {h["id"] for h in store.search(vec, top_k)}
-            l2 = tgt_id in v_ids
-            # 级联 = 全局向量 top_k ∪ SimHash 候选池内向量 top_k（并集口径，与 src.embed.query 一致）；
-            # SimHash 不再硬过滤全局召回，故 casc 恒 ≥ l2，改名/重写克隆不再被候选池钳制。
-            sh_ids = {h["id"] for h in store.search(vec, top_k, candidate_ids=sorted(cand_sh) or [-1])}
-            casc = l2 or (tgt_id in sh_ids)
-            ratio = matcher.match(var["raw_code"], tgt_raw, var.get("lang", "rust")).similar_line_ratio
-            final = ratio >= DETECT_RATIO
             p = per[cls]
             p["n"] += 1
-            p["l1"] += l1; p["l2"] += l2; p["casc"] += casc; p["final"] += final
+            p["l1"] += l1; p["l2"] += l2; p["code"] += code_hit
+            p["casc"] += casc; p["final"] += final
         else:
             neg_total += 1
-            ratio = matcher.match(var["raw_code"], tgt_raw, var.get("lang", "rust")).similar_line_ratio
-            if ratio >= DETECT_RATIO:
+            if final:
                 fp += 1
     timings["pipeline"] = round(time.perf_counter() - t1, 2)
 
@@ -134,6 +146,7 @@ def evaluate(
             "n": p["n"],
             "recall_layer1": round(p["l1"] / n, 3),
             "recall_layer2": round(p["l2"] / n, 3),
+            "recall_code_simhash": round(p["code"] / n, 3),
             "recall_cascade": round(p["casc"] / n, 3),
             "recall_final": round(p["final"] / n, 3),
         }
@@ -205,14 +218,15 @@ def _mk_suspect(var, tgt_raw):
 def render_report(result: dict) -> str:
     lines = [f"# 查重系统评测报告（{result['date']}）", "",
              f"样本：{result['counts']}", "",
-             "## 各类召回率（Layer1 SimHash / Layer2 向量 / 级联 / 最终）", "",
-             "| 类别 | 样本数 | L1 召回 | L2 召回 | 级联召回 | 最终召回 |",
-             "| --- | --- | --- | --- | --- | --- |"]
+             "## 各类召回率（特征 SimHash / 向量 / 结构 SimHash / 并集 / 最终）", "",
+             "| 类别 | 样本数 | 特征召回 | 向量召回 | 结构召回 | 并集召回 | 最终召回 |",
+             "| --- | --- | --- | --- | --- | --- | --- |"]
     for cls in ("T1", "T2", "T3", "T4", "MANUAL"):
         c = result["by_class"].get(cls)
         if c:
             lines.append(f"| {cls} | {c['n']} | {c['recall_layer1']} | {c['recall_layer2']} "
-                         f"| {c['recall_cascade']} | {c['recall_final']} |")
+                         f"| {c.get('recall_code_simhash', 'n/a')} | {c['recall_cascade']} "
+                         f"| {c['recall_final']} |")
     o = result["overall"]
     lines += ["", "## 总体", "",
               f"- precision = {o['precision']}（TP={o['tp']} / FP={o['fp']}）",
@@ -241,6 +255,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--manual", default=DEFAULT_MANUAL)
     p.add_argument("--db", default=DEFAULT_DB)
     p.add_argument("--qdrant-path", default="data/db/qdrant_local")
+    p.add_argument("--code-simhash-index", default="data/db/code_simhash_index.pkl")
+    p.add_argument("--faiss-index", default="data/db/faiss_hnsw.index")
+    p.add_argument("--faiss-ids", default="data/db/faiss_ids.npy")
     p.add_argument("--top-k", type=int, default=20)
     p.add_argument("--with-llm", action="store_true")
     p.add_argument("--llm-sample", type=int, default=20)
@@ -255,7 +272,10 @@ def main(argv: list[str] | None = None) -> int:
         if pairs:
             manual = _resolve_manual(args.db, pairs)
 
-    result = evaluate(eval_set, db_path=args.db, qdrant_path=args.qdrant_path, top_k=args.top_k,
+    result = evaluate(eval_set, db_path=args.db, qdrant_path=args.qdrant_path,
+                      code_index_path=args.code_simhash_index,
+                      faiss_index_path=args.faiss_index, faiss_ids_path=args.faiss_ids,
+                      top_k=args.top_k,
                       manual=manual, with_llm=args.with_llm, llm_sample=args.llm_sample)
 
     report = render_report(result)

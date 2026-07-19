@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import subprocess
+
 from src.ingest.cloner import (
     _auth_url,
+    _is_windows_unsafe_path,
     base_url_from_url,
     clone_repo,
     is_cloned,
@@ -48,8 +51,26 @@ def test_auth_url_injects_token():
 
 def test_clone_skips_existing_without_force(tmp_path):
     dest = tmp_path / "repo"
-    (dest / ".git").mkdir(parents=True)
+    dest.mkdir()
+    subprocess.run(["git", "init", "-q", str(dest)], check=True)
+    subprocess.run(["git", "-C", str(dest), "config", "user.email", "t@example.com"], check=True)
+    subprocess.run(["git", "-C", str(dest), "config", "user.name", "tester"], check=True)
+    (dest / "kernel.rs").write_text("fn main() {}\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(dest), "add", "kernel.rs"], check=True)
+    subprocess.run(["git", "-C", str(dest), "commit", "-q", "-m", "init"], check=True)
     assert is_cloned(dest)
     # 已存在且未 --force：直接跳过，不触碰 git
     status = clone_repo("https://gitlab.com/g/p", dest, force=False)
     assert status == "skipped"
+
+
+def test_incomplete_git_directory_is_not_a_clone(tmp_path):
+    dest = tmp_path / "broken"
+    (dest / ".git" / "objects").mkdir(parents=True)
+    assert not is_cloned(dest)
+
+
+def test_windows_reserved_path_detection():
+    assert _is_windows_unsafe_path("os/src/task/aux.rs")
+    assert _is_windows_unsafe_path("drivers/COM1.c")
+    assert not _is_windows_unsafe_path("os/src/task/processor.rs")

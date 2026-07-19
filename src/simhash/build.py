@@ -11,6 +11,7 @@ from pathlib import Path
 from loguru import logger
 
 from src.normalize.store import DEFAULT_DB
+from src.buildlib.coverage import db_mapping_signature
 
 from .index import SegmentedIndex
 from .simhash import SimHasher
@@ -60,6 +61,11 @@ def build_index(
     for fid, tokens in items:
         fp, _ = hasher.compute(sorted(tokens))
         index.add(fid, fp)
+    index.metadata = {
+        "kind": "feature_simhash",
+        "version": 1,
+        "db_signature": db_mapping_signature(db_path),
+    }
     index.save(index_path)
     logger.info("SimHash 索引写入 {}（{} 个指纹）", index_path, len(index))
 
@@ -74,9 +80,14 @@ def load_hasher(idf_path: str | Path = DEFAULT_IDF) -> SimHasher:
 class SimHashQuery:
     """加载 idf + 索引，提供 query(tokens) -> set[func_id]。"""
 
-    def __init__(self, idf_path: str | Path = DEFAULT_IDF, index_path: str | Path = DEFAULT_INDEX, *, relax: bool = True):
+    def __init__(self, idf_path: str | Path = DEFAULT_IDF, index_path: str | Path = DEFAULT_INDEX, *,
+                 relax: bool = True, db_path: str | Path | None = None):
         self.hasher = load_hasher(idf_path)
         self.index = SegmentedIndex.load(index_path)
+        if db_path is not None:
+            expected = self.index.metadata.get("db_signature")
+            if not expected or expected != db_mapping_signature(db_path):
+                raise ValueError("特征 SimHash 索引与 functions.db 不同代，请重建历史库")
         self.relax = relax
 
     def query(self, tokens: list[str]) -> set[int]:

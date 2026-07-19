@@ -12,6 +12,7 @@ from loguru import logger
 
 from src.models import Evidence, FunctionRecord, ModuleTag, SuspectPair
 from src.normalize.store import DEFAULT_DB
+from src.retrieval_contract import require_complete_contract
 
 from .matcher import ExactMatcher, remap_spans
 
@@ -71,10 +72,13 @@ def verify_recall(
     db_path: str | Path = DEFAULT_DB,
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     matcher: ExactMatcher | None = None,
+    require_complete_recall: bool = False,
 ) -> dict:
     """对召回结果逐对精确比对，生成分流后的 SuspectPair 列表并落盘。"""
     recall_path = Path(recall_path)
     recall = json.loads(recall_path.read_text(encoding="utf-8"))
+    if require_complete_recall:
+        require_complete_contract(recall.get("retrieval_contract"), artifact="召回产物")
     matcher = matcher or ExactMatcher()
 
     conn = sqlite3.connect(db_path)
@@ -86,7 +90,11 @@ def verify_recall(
         q = item["query"]
         q_rec = _record_from_query(q)
         for cand in item["candidates"]:
-            if cand["score"] <= VECTOR_SIM_GATE:  # 仅比对向量相似度 > 0.7 的候选
+            fingerprint_match = bool(cand.get("fingerprint_match"))
+            name_match = bool(cand.get("name_match"))
+            structural_match = bool(cand.get("structural_hash_match"))
+            if cand["score"] <= VECTOR_SIM_GATE and not (fingerprint_match or name_match or structural_match):
+                # 指纹通道是确定性结构命中，不受向量门槛影响。
                 continue
             row = conn.execute(_CANDIDATE_SQL, (cand["id"],)).fetchone()
             if row is None:
@@ -95,6 +103,14 @@ def verify_recall(
             n_pairs += 1
             res = matcher.match(q_rec.raw_code, row["raw_code"], lang=q_rec.lang)
             tier = tier_of(res.similar_line_ratio)
+            if tier is None and fingerprint_match:
+                # 归一化器还会泛化数字/字符串，结构指纹相同但逐行覆盖不足时至少进入人工复核，
+                # 不能直接宣称“confirmed”，也绝不能掉回“原创”。
+                tier = "review"
+            if tier is None and structural_match:
+                # 行顺序调整会让 SequenceMatcher 覆盖率显著下降；结构哈希命中先保留为 weak，
+                # 交给下一层分段语义验证，不能在 exact 层提前丢弃。
+                tier = "weak"
             if tier is None:  # < 0.5 丢弃
                 continue
 
@@ -106,10 +122,16 @@ def verify_recall(
                     candidate_func=cand_rec,
                     evidence=Evidence(
                         vector_similarity=cand["score"],
+                        code_simhash_distance=cand.get("code_simhash_distance"),
+                        normalized_fingerprint_match=fingerprint_match,
+                        function_name_recall=name_match,
+                        structural_hash_recall=structural_match,
                         exact_match_lines=res.exact_match_lines,
                         renamed_match_lines=res.renamed_match_lines,
                     ),
-                    final_score=res.similar_line_ratio,
+                    final_score=(max(0.7, res.similar_line_ratio) if fingerprint_match
+                                 else max(0.5, res.similar_line_ratio) if structural_match
+                                 else res.similar_line_ratio),
                     tier=tier,
                     matched_spans=abs_spans,
                     match_type_per_span=res.match_type_per_span,
@@ -124,6 +146,7 @@ def verify_recall(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "compared_pairs": n_pairs,
         "tier_counts": dict(tier_counts),
+        "retrieval_contract": recall.get("retrieval_contract", {}),
         "suspects": [s.model_dump(mode="json") for s in suspects],
     }
 

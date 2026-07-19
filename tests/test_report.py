@@ -8,6 +8,9 @@ from pathlib import Path
 
 from src.pipeline.steps import STEPS, build_local_meta, tier_counts
 from src.report import semantic_compare as SC
+from src.report.audit import audit_reports
+from src.report.label_normalize import normalize_labels
+from src.retrieval_contract import build_retrieval_contract
 
 
 # ---------- 语义对比报告（M2：U1-U8 + 文件级） ----------
@@ -66,20 +69,75 @@ def test_generate_comparison_html_has_m2_elements():
     file_matches = [{"query_file": "os/src/driver/uart.rs", "line_count": 88,
                      "matches": [{"repo_id": "2021/a", "file_path": "drv/uart.rs",
                                   "line_count": 88, "func_count": 4}]}]
+    contract = build_retrieval_contract({
+        "complete": True, "configured": 167, "covered": 167,
+        "missing_repo_ids": [],
+    }, complete=True)
     html = SC.generate_comparison_html(
         "2024/new", suspects, stats, groups, analysis, original_funcs=[],
-        file_matches=file_matches, file_similar=[])
+        file_matches=file_matches, file_similar=[], retrieval_contract=contract)
     assert "报告导读（请先阅读）" in html              # 导读卡（面向老师的语境引导）
     assert "初步体检" in html                          # 体检结论
     assert "疑似借鉴清单（待人工判定）" in html         # 分类清单（措辞与「辅助参考」定位一致）
     assert "候选来源（全部）" in html                  # U6 全候选
     assert 'id="sec-files"' in html                  # 文件级清单
     assert "整文件相同" in html
+    assert "暂未检出相似（函数）" in html
+    assert 'data-retrieval-contract-version="2"' in html
+    assert "历史作品覆盖 167/167" in html
+    assert "自研/原创（函数）" not in html
     assert "各模块疑似借鉴函数数（待人工判定）" in html  # tier 分布图
     # 所有 echarts JSON 必须可解析（前端 JSON.parse 不能炸）
     import re
     for blob in re.findall(r'<script type="application/json">(.*?)</script>', html, re.DOTALL):
         json.loads(blob)
+
+
+def test_legacy_original_section_is_migrated_to_non_claiming_language():
+    old = (
+        '<a class="toc-link" href="#sec-original">原创代码</a>'
+        '<h2 class="x">原创代码</h2>'
+        '<p>共 <b>12</b> 个函数未与历史代码库构成借鉴（完全未命中，'
+        '或虽有中等相似命中但经 AI 模型复核判为疑似 / 非借鉴、即独立实现的通用写法），'
+        '从设计维度看属于该作品的原创 / 自研实现（按规模降序，全部列出）：</p>'
+        '<span>自研/原创（函数）</span>'
+    )
+    new = normalize_labels(old)
+    assert "暂未检出历史相似（不等于原创）" in new
+    assert "不等于原创认定" in new
+    assert "暂未检出相似（函数）" in new
+    assert normalize_labels(new) == new
+
+
+def test_full_legacy_html_is_marked_stale_idempotently():
+    old = "<html><body><h2>原创代码</h2></body></html>"
+    new = normalize_labels(old)
+    assert 'data-retrieval-complete="false"' in new
+    assert "必须按完整召回链重跑" in new
+    assert normalize_labels(new) == new
+
+
+def test_low_level_report_without_contract_is_visibly_stale():
+    html = SC.generate_comparison_html(
+        "2024/new", [], SC.compute_submodule_stats([], None), [], "", [])
+    assert 'data-retrieval-complete="false"' in html
+    assert "已失效，必须重跑" in html
+
+
+def test_report_audit_distinguishes_complete_stale_and_unmarked(tmp_path):
+    for name, body in (
+        ("complete", '<div data-retrieval-contract-version="2" data-retrieval-complete="true"></div>'),
+        ("stale", '<div data-retrieval-contract-version="missing" data-retrieval-complete="false"></div>'),
+        ("unmarked", "<html></html>"),
+    ):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "comparison.html").write_text(body, encoding="utf-8")
+    result = audit_reports(tmp_path)
+    assert result["comparison_reports"] == 3
+    assert result["complete_reports"] == 1
+    assert result["stale_reports"] == 1
+    assert result["unmarked_reports"] == ["unmarked/comparison.html"]
 
 
 # ---------- pipeline 辅助 ----------

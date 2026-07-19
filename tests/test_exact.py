@@ -196,3 +196,60 @@ def test_verify_discards_below_half(tmp_path):
     out = verify_recall(p, db_path=db, output_dir=tmp_path / "out")
     assert out["compared_pairs"] == 1
     assert out["suspects"] == []
+
+
+def test_fingerprint_candidate_bypasses_vector_gate_and_never_becomes_original(tmp_path):
+    db, fid = _make_db_with_candidate(tmp_path)
+    recall = {
+        "query_repo_id": "2024/team_new",
+        "results": [{
+            "query": {
+                "repo_id": "2024/team_new", "file_path": "k.rs",
+                "start_line": 1, "end_line": 4, "func_name": "run_tasks",
+                "module_tag": "sched", "lang": "rust", "raw_code": UNRELATED,
+                "normalized_code": "same-structural-fingerprint",
+            },
+            "candidates": [{"id": fid, "score": 0.1, "fingerprint_match": True, "payload": {}}],
+        }],
+    }
+    p = tmp_path / "fingerprint_recall.json"
+    p.write_text(json.dumps(recall), encoding="utf-8")
+    out = verify_recall(p, db_path=db, output_dir=tmp_path / "out")
+    assert out["compared_pairs"] == 1
+    assert out["suspects"][0]["tier"] == "review"
+    assert out["suspects"][0]["evidence"]["normalized_fingerprint_match"] is True
+
+
+def test_strict_exact_rejects_recall_without_completeness_contract(tmp_path):
+    db, fid = _make_db_with_candidate(tmp_path)
+    recall = _write_recall(tmp_path, fid)
+    import pytest
+    with pytest.raises(RuntimeError, match="完整性契约"):
+        verify_recall(recall, db_path=db, output_dir=tmp_path / "out",
+                      require_complete_recall=True)
+
+
+def test_structural_candidate_survives_low_line_ratio_for_segment_review(tmp_path):
+    db, fid = _make_db_with_candidate(tmp_path)
+    recall = {
+        "query_repo_id": "2024/team_new",
+        "results": [{
+            "query": {
+                "repo_id": "2024/team_new", "file_path": "k.rs",
+                "start_line": 1, "end_line": 4, "func_name": "renamed_and_reordered",
+                "module_tag": "sched", "lang": "rust", "raw_code": UNRELATED,
+                "normalized_code": "",
+            },
+            "candidates": [{
+                "id": fid, "score": 0.05, "structural_hash_match": True,
+                "code_simhash_distance": 13, "payload": {},
+            }],
+        }],
+    }
+    p = tmp_path / "structural_recall.json"
+    p.write_text(json.dumps(recall), encoding="utf-8")
+    out = verify_recall(p, db_path=db, output_dir=tmp_path / "out")
+    assert out["compared_pairs"] == 1
+    assert out["suspects"][0]["tier"] == "weak"
+    assert out["suspects"][0]["evidence"]["structural_hash_recall"] is True
+    assert out["suspects"][0]["evidence"]["code_simhash_distance"] == 13

@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     pq.add_argument("--repos-root", default="data/repos", help="仓库根目录（用于推断 repo_id）")
     pq.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help=f"召回 JSON 输出目录（默认 {DEFAULT_OUTPUT_DIR}）")
     pq.add_argument("--top-k", type=int, default=None, help="每函数召回数（默认取 settings）")
+    pq.add_argument("--db", default=FUNCTIONS_DB, help=f"历史函数库（默认 {FUNCTIONS_DB}）")
     pq.add_argument("--with-simhash", action="store_true", help="先 SimHash 粗筛候选集再做向量检索")
     pq.add_argument("--idf", default=None, help="SimHash IDF 表路径（默认 data/db/idf.json）")
     pq.add_argument("--simhash-index", default=None, help="SimHash 索引路径（默认 data/db/simhash_index.pkl）")
@@ -82,7 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         recall = query_repo(
             repo, store, embedder,
             top_k=top_k, repos_root=args.repos_root, output_dir=args.output_dir,
-            simhash_query=simhash_query,
+            simhash_query=simhash_query, db_path=args.db,
         )
         print_report(recall)
         return 0

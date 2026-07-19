@@ -33,7 +33,8 @@ def main(argv: list[str] | None = None) -> int:
         if not recall.is_file():
             logger.error("召回文件不存在：{}", recall)
             return 1
-        verify_recall(recall, db_path=args.db, output_dir=args.output_dir)
+        verify_recall(recall, db_path=args.db, output_dir=args.output_dir,
+                      require_complete_recall=True)
         return 0
     return 1
 

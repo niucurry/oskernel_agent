@@ -278,11 +278,16 @@ class BatchTask:
     output_path: Path       # LLM 必须 write_report 到这个路径
     cache_dir: Path
     cache_key: str
+    # 描述报告要求每次完整重生成时设为 False：既不读取，也不写入文件缓存。
+    cache_enabled: bool = True
     fallback: dict = field(default_factory=dict)  # 失败兜底返回
     repo_path: Path | None = None
     # 写缓存前对 parsed 做增补（如把 agent 落盘的 HTML 正文读进 parsed），
     # 使正文随 JSON 一起进缓存，缓存命中时也能拿到完整正文。
     enrich: Callable[[dict], dict] | None = None
+    # 缓存准入校验。用于拒绝结构合法但不满足交付约束（如残留英文正文）的结果；
+    # 同时会校验旧缓存，避免一次异常输出被长期复用。
+    cache_validator: Callable[[dict], bool] | None = None
 
 
 _print_lock = threading.Lock()
@@ -520,10 +525,12 @@ def _try_repair_json(task: BatchTask, raw_text: str,
 def run_batch_task(task: BatchTask, schema_hint: str = "",
                    timeout: int = 300) -> dict:
     """单 batch 完整执行：缓存查 → 跑 LLM → 解析 → 失败修复 → 兜底 fallback。"""
-    cached = cache_read(task.cache_dir, task.cache_key)
+    cached = cache_read(task.cache_dir, task.cache_key) if task.cache_enabled else None
     if cached is not None:
-        _log(f"[llm_batch] {task.batch_id} 缓存命中")
-        return cached
+        if task.cache_validator is None or task.cache_validator(cached):
+            _log(f"[llm_batch] {task.batch_id} 缓存命中")
+            return cached
+        _log(f"[llm_batch] {task.batch_id} 缓存未通过交付校验，重新生成")
 
     # 清理可能存在的旧文件
     if task.output_path.exists():
@@ -569,8 +576,13 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
 
     # 只缓存成功结果：带 _error 的兜底**不写缓存**，否则一次瞬时失败（超时/限流/
     # 子进程异常）会被永久冻住，后续每次跑都命中空结果而不再重试。不缓存则下次自愈。
+    cache_valid = task.cache_validator is None or task.cache_validator(parsed)
     if parsed.get("_error"):
         _log(f"[llm_batch] {task.batch_id} 失败结果不入缓存，下次将重试")
+    elif not cache_valid:
+        _log(f"[llm_batch] {task.batch_id} 未通过交付校验，不入缓存")
+    elif not task.cache_enabled:
+        _log(f"[llm_batch] {task.batch_id} 描述报告缓存已关闭")
     else:
         cache_write(task.cache_dir, task.cache_key, parsed)
     return parsed

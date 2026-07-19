@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from loguru import logger
@@ -17,6 +18,7 @@ from .store import DEFAULT_DB, FunctionStore
 
 DEFAULT_REPOS_ROOT = "data/repos"
 DEFAULT_MAX_LINES = 10000
+_WINDOWS_PATH_MAP = ".codex_windows_path_map.json"
 
 
 def derive_repo_id(repo: Path, repos_root: Path) -> str:
@@ -46,6 +48,14 @@ def normalize_repo(
     classifier = classifier or load_classifier()
     keep = keep if keep is not None else load_keep_symbols()
 
+    path_map: dict[str, str] = {}
+    map_path = repo / _WINDOWS_PATH_MAP
+    if map_path.exists():
+        try:
+            path_map = json.loads(map_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("[{}] Windows 路径映射读取失败 {}: {}", repo_id, map_path, exc)
+
     files = discover_files(repo)
     logger.info("[{}] 发现源码文件 {} 个", repo_id, len(files))
 
@@ -53,6 +63,7 @@ def normalize_repo(
     file_records: list[dict] = []
     skipped_big = 0
     for f in files:
+        report_path = path_map.get(f.rel_path.replace("\\", "/"), f.rel_path)
         try:
             text = f.path.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
@@ -68,7 +79,7 @@ def normalize_repo(
             module_tag = classifier.classify(f.rel_path, f.lang, is_macro=fn.is_macro)
             rec = FunctionRecord(
                 repo_id=repo_id,
-                file_path=f.rel_path,
+                file_path=report_path,
                 start_line=fn.start_line,
                 end_line=fn.end_line,
                 func_name=fn.func_name,
@@ -79,7 +90,7 @@ def normalize_repo(
             )
             records.append((rec, fn.strings, fn.feature_tokens))
         file_records.append({
-            "file_path": f.rel_path,
+            "file_path": report_path,
             "lang": f.lang,
             "line_count": text.count("\n") + 1,
             "func_count": len(fns),

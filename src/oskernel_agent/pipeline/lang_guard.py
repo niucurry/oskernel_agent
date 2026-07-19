@@ -42,6 +42,12 @@ _WORD = re.compile(r"[A-Za-z]{2,}")
 _CODE_PUNCT = re.compile(r"->|::|[{};]|\)\s*\{|\)\s*->|==|!=|&&|\|\||#include|\basm\b")
 # 标题 / 表头：即便正文已是中文，英文标题也要单独抓出来
 _HEADING = re.compile(r"<(?:h[1-6]|th|strong)\b[^>]*>(.*?)</(?:h[1-6]|th|strong)>", re.I | re.S)
+# HTML 正文块逐块检查，防止一大段中文掩盖其中某一个全英文章节。
+_TEXT_BLOCK = re.compile(
+    r"<(?:h[1-6]|p|li|th|td|caption|figcaption|blockquote)\b[^>]*>"
+    r"(.*?)</(?:h[1-6]|p|li|th|td|caption|figcaption|blockquote)>",
+    re.I | re.S,
+)
 
 
 def _strip_noise(s: str) -> str:
@@ -72,21 +78,31 @@ def _english_heading(s: str) -> bool:
     return False
 
 
-def needs_translation(s: str) -> bool:
-    if not isinstance(s, str) or len(s) < 12:
-        return False
-    if _english_heading(s):
-        return True
+def _plain_needs_translation(s: str) -> bool:
     prose = _strip_noise(s)
     if _looks_like_code(prose):
         return False
     words = [w for w in _WORD.findall(prose)
              if not (w.isupper() and len(w) <= 5)]  # 排除 VFS/ABI 之类缩写
+    cjk = len(_CJK.findall(prose))
+    # 很短的完整英文句子也要拦截；技术词列表（无句末标点）仍允许保留英文。
+    if cjk == 0 and len(words) >= 3 and re.search(r"[.!?。！？]", prose):
+        return True
     if len(words) < 5:
         return False
-    cjk = len(_CJK.findall(prose))
     # 剩余仍以英文为主（中文字符数不足英文单词数的一半）→ 判为英文正文
     return cjk < len(words) * 0.5
+
+
+def needs_translation(s: str) -> bool:
+    if not isinstance(s, str) or len(s) < 12:
+        return False
+    if _english_heading(s):
+        return True
+    # 对 HTML 逐正文块检查，不能只用整篇中英文比例判断。
+    if any(_plain_needs_translation(block) for block in _TEXT_BLOCK.findall(s)):
+        return True
+    return _plain_needs_translation(s)
 
 
 _SYS_PROMPT = (
@@ -146,10 +162,11 @@ def _translate(s: str, model: str, retries: int = 3) -> str:
             )
             out = (r.choices[0].message.content or "").strip()
             out = _FENCE.sub("", out).strip()
-            if out:
+            # 翻译输出仍含英文正文时不缓存，也不把它当作成功结果。
+            if out and not needs_translation(out):
                 _cache[h] = out
                 return out
-            return s
+            last_err = "模型返回内容仍未通过中文校验"
         except Exception as e:  # noqa: BLE001（限流/超时 → 退避重试）
             last_err = e
             time.sleep(min(3 * i, 15))
@@ -222,6 +239,57 @@ def normalize_tree_language(tree: dict) -> dict:
     return stats
 
 
+def normalize_html_language(fragment: str) -> tuple[str, dict]:
+    """校验单段模型 HTML；仅在发现英文正文时调用现有翻译模型兜底。"""
+    stats = {"enabled": True, "checked": 1, "translated": 0,
+             "remaining": 0, "complete": True}
+    if not needs_translation(fragment):
+        return fragment, stats
+    if os.environ.get("AGENT_LANG_GUARD", "").strip().lower() in ("0", "false", "no", "off"):
+        stats.update(enabled=False, remaining=1, complete=False)
+        return fragment, stats
+    if _get_client() is None:
+        stats.update(remaining=1, complete=False)
+        return fragment, stats
+    normalized = _translate(fragment, os.getenv("LLM_MODEL", "deepseek-v4-flash"))
+    if normalized != fragment:
+        stats["translated"] = 1
+    stats["remaining"] = int(needs_translation(normalized))
+    stats["complete"] = stats["remaining"] == 0
+    return normalized, stats
+
+
+def language_output_complete(data: dict) -> bool:
+    """判断生成结果是否满足中文交付要求，供缓存准入使用。"""
+    complete = True
+
+    def walk(obj, module_record: bool = False):
+        nonlocal complete
+        if not complete:
+            return
+        if isinstance(obj, dict):
+            if (module_record or obj.get("type") == "module") and title_needs_translation(
+                obj.get("name", "")
+            ):
+                complete = False
+                return
+            for key, value in obj.items():
+                if isinstance(value, str) and key in PROSE_KEYS and needs_translation(value):
+                    complete = False
+                    return
+                if key == "modules" and isinstance(value, list):
+                    for item in value:
+                        walk(item, module_record=True)
+                else:
+                    walk(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                walk(item, module_record=module_record)
+
+    walk(data)
+    return complete
+
+
 # ======================================================================
 # 模块标题护栏：把 LLM 漏出的英文模块名（tree 节点 type=="module" 的 name）翻成中文。
 # 该字段渲染在树节点头与目录（TOC）里，不在 PROSE_KEYS 覆盖的正文范围内——
@@ -277,21 +345,27 @@ def _translate_title(s: str, model: str) -> str:
 
 
 def normalize_tree_titles(tree: dict) -> dict:
-    """就地把 module 节点的英文 name 翻成中文（并发、去重）。返回统计。"""
+    """就地把 module 节点或生成阶段 modules[] 的英文 name 翻成中文。"""
     if os.environ.get("AGENT_LANG_GUARD", "").strip().lower() in ("0", "false", "no", "off"):
         return {"enabled": False, "complete": True, "remaining": 0}
     model = os.getenv("LLM_MODEL", "deepseek-v4-flash")
     targets: list[dict] = []
 
-    def walk(obj):
+    def walk(obj, module_record: bool = False):
         if isinstance(obj, dict):
-            if obj.get("type") == "module" and title_needs_translation(obj.get("name", "")):
+            if (module_record or obj.get("type") == "module") and title_needs_translation(
+                obj.get("name", "")
+            ):
                 targets.append(obj)
-            for v in obj.values():
-                walk(v)
+            for key, value in obj.items():
+                if key == "modules" and isinstance(value, list):
+                    for item in value:
+                        walk(item, module_record=True)
+                else:
+                    walk(value)
         elif isinstance(obj, list):
             for x in obj:
-                walk(x)
+                walk(x, module_record=module_record)
 
     walk(tree)
     stats = {"enabled": True, "checked": len(targets), "translated": 0,

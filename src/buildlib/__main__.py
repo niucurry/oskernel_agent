@@ -30,6 +30,9 @@ DEFAULT_REPOS_ROOT = "data/repos"
 DEFAULT_QDRANT = "data/db/qdrant_local"
 DEFAULT_IDF = "data/db/idf.json"
 DEFAULT_INDEX = "data/db/simhash_index.pkl"
+DEFAULT_FAISS_INDEX = "data/db/faiss_hnsw.index"
+DEFAULT_FAISS_IDS = "data/db/faiss_ids.npy"
+DEFAULT_CODE_SIMHASH = "data/db/code_simhash_index.pkl"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,6 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--qdrant-path", default=DEFAULT_QDRANT, help=f"本地向量库目录（默认 {DEFAULT_QDRANT}）")
     p.add_argument("--idf", default=DEFAULT_IDF, help=f"SimHash IDF 表（默认 {DEFAULT_IDF}）")
     p.add_argument("--simhash-index", default=DEFAULT_INDEX, help=f"SimHash 索引（默认 {DEFAULT_INDEX}）")
+    p.add_argument("--faiss-index", default=DEFAULT_FAISS_INDEX,
+                   help=f"FAISS 索引（默认 {DEFAULT_FAISS_INDEX}）")
+    p.add_argument("--faiss-ids", default=DEFAULT_FAISS_IDS,
+                   help=f"FAISS 函数 ID 清单（默认 {DEFAULT_FAISS_IDS}）")
+    p.add_argument("--code-simhash-index", default=DEFAULT_CODE_SIMHASH,
+                   help=f"归一化代码结构 SimHash 索引（默认 {DEFAULT_CODE_SIMHASH}）")
     p.add_argument("--skip-ingest", action="store_true", help="跳过 GitLab 克隆（仓库已在 repos-root）")
     p.add_argument("--force", action="store_true", help="ingest 时强制重新克隆已存在的仓库")
     p.add_argument("--no-commit-stats", action="store_true", help="ingest 跳过逐 commit 增删行抓取（更快）")
@@ -74,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     Path(args.db).parent.mkdir(parents=True, exist_ok=True)
     timings: dict[str, float] = {}
     summary: dict[str, object] = {}
+    normalized_ids: set[str] = set()
 
     def timed(step, fn):
         t0 = time.perf_counter()
@@ -126,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
                             dest, store, repo_id=entry.repo_id, repos_root=repos_root,
                             classifier=classifier, keep=keep)
                         total_funcs += res["functions"]
+                        if res["functions"] > 0:
+                            normalized_ids.add(entry.repo_id)
                         ok += 1
                     except Exception as exc:  # noqa: BLE001 — 记录并继续
                         logger.error("[{}] 失败：{}", entry.repo_id, exc)
@@ -139,6 +151,9 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         logger.info("[reclaim] 完成：成功 {}/{}，共 {} 个函数", ok, len(entries), total_funcs)
         if total_funcs == 0:
             logger.error("没有任何函数入库，终止建库。")
+            return 1
+        if ok != len(entries):
+            logger.error("历史库不完整：逐仓构建仅成功 {}/{}，拒绝生成可查询索引。", ok, len(entries))
             return 1
 
     # ---- 1. ingest：GitLab 克隆 + 元数据 ----
@@ -165,6 +180,11 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         if ok == 0:
             logger.error("没有任何仓库克隆成功，终止建库。")
             return 1
+        if ok != len(res):
+            failed = [r.get("repo_id", "?") for r in res if "error" in r]
+            logger.error("历史作品克隆不完整（失败 {}/{}）：{}。拒绝继续建库。",
+                         len(failed), len(res), failed)
+            return 1
         # 连带克隆基线库到同一 repos_root：后续 normalize_all 会一并归一化，
         # is_baseline 由 repo_id 的 baseline_ 约定自动判定（embed/L0 各层据此扣除）。
         if not args.skip_baselines and Path(args.baselines_config).exists():
@@ -174,6 +194,10 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             ))
             summary["ingest_baselines"] = {"total": len(bres),
                                            "ok": sum(1 for r in bres if "error" not in r)}
+            if any("error" in r for r in bres):
+                failed = [r.get("repo_id", "?") for r in bres if "error" in r]
+                logger.error("基线仓库克隆不完整：{}。拒绝继续建库。", failed)
+                return 1
     else:
         logger.info("[ingest] 已跳过（使用 {} 下既有仓库）", args.repos_root)
         if not any(Path(args.repos_root).glob("*")):
@@ -190,6 +214,23 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         if total_funcs == 0:
             logger.error("归一化未产出任何函数，终止建库。")
             return 1
+
+        normalized_ids = {r["repo_id"] for r in norm if r.get("functions", 0) > 0}
+
+    # 仅数据库里“总函数数>0”不代表查全：必须逐项对齐 repos.yaml，防止某个仓库
+    # clone/checkout 失败却被整体成功数掩盖。reclaim 与普通模式执行同一硬门禁。
+    from src.buildlib.coverage import audit_config, write_manifest
+    audit = audit_config(args.db, args.config)
+    manifest = Path(args.db).with_name("reference_coverage.json")
+    write_manifest(audit, manifest)
+    summary["coverage"] = audit.as_dict()
+    current_missing = [repo_id for repo_id in audit.counts if repo_id not in normalized_ids]
+    if not audit.complete or current_missing:
+        missing = sorted(set(audit.missing_repo_ids) | set(current_missing))
+        logger.error("历史库覆盖率不合格：{}/{} 个作品有函数，缺失 {}。"
+                     "已写 {}，拒绝生成索引。",
+                     audit.covered, audit.configured, missing, manifest)
+        return 1
 
     if args.no_embed:
         total = summary.get("normalize", {}).get("functions", "?")
@@ -215,6 +256,13 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         args.db, store, embedder, recreate=recreate, min_lines=args.embed_min_lines))
     summary["embed"] = vec
 
+    # functions.db 全量重建会重排 func_id，FAISS 必须同代重建；旧实现遗漏该步骤，
+    # 查询可能拿旧向量映射到新函数，造成随机漏召回/错来源。
+    from src.embed.faiss_store import build_faiss_index
+    faiss_res = timed("faiss", lambda: build_faiss_index(
+        store, index_path=args.faiss_index, ids_path=args.faiss_ids, db_path=args.db))
+    summary["faiss"] = {"vectors": int(faiss_res[0].ntotal), "ids": len(faiss_res[1])}
+
     # ---- 4. simhash：IDF + 指纹分段索引 ----
     from src.simhash.build import build_index as build_simhash
 
@@ -222,11 +270,18 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         args.db, idf_path=args.idf, index_path=args.simhash_index))
     summary["simhash"] = sim
 
+    from src.simhash.code_index import build_code_index
+    code_sim = timed("code-simhash", lambda: build_code_index(
+        args.db, index_path=args.code_simhash_index))
+    summary["code_simhash"] = code_sim
+
     logger.info("===== 历史库建成 =====")
     logger.info("  functions.db : {}", args.db)
     logger.info("  qdrant_local : {}", args.qdrant_path)
     logger.info("  simhash idf  : {}", args.idf)
     logger.info("  simhash index: {}", args.simhash_index)
+    logger.info("  code simhash : {}", args.code_simhash_index)
+    logger.info("  faiss index  : {} / {}", args.faiss_index, args.faiss_ids)
     logger.info("===== 耗时 (s) =====  {}", timings)
     print(json.dumps({"summary": summary, "timings": timings}, ensure_ascii=False, indent=2))
     logger.info("现在可直接对比：python -m src.pipeline --repo <新作品路径或URL>")

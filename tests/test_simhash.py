@@ -13,7 +13,10 @@ from src.embed.vector_store import VectorStore
 from src.normalize.extract import extract_functions
 from src.normalize.runner import normalize_repo
 from src.normalize.store import FunctionStore
+from src.models import FunctionRecord, ModuleTag
+from src.normalize.normalizer import normalize_snippet
 from src.simhash.build import SimHashQuery, build_index, compute_idf
+from src.simhash.code_index import CodeSimHashQuery, build_code_index
 from src.simhash.index import SegmentedIndex
 from src.simhash.simhash import SimHasher, hamming
 
@@ -100,6 +103,49 @@ def test_index_save_load_roundtrip(tmp_path):
     loaded = SegmentedIndex.load(p)
     assert 7 in loaded.query(fp, ba)
     assert len(loaded) == 1
+
+
+def test_multiprobe_guarantees_recall_within_15_bits():
+    original = 0x123456789ABCDEF0
+    # 四段分别翻 4/4/4/3 位，总距离 15；必有一段在 3-bit probe 范围内。
+    flips = [0, 1, 2, 3, 16, 17, 18, 19, 32, 33, 34, 35, 48, 49, 50]
+    changed = original
+    for bit in flips:
+        changed ^= 1 << bit
+    idx = SegmentedIndex(); idx.add(42, original)
+    assert 42 in idx.query_multiprobe(changed, bits_per_segment=3)
+
+
+def test_code_simhash_recalls_renamed_function_with_local_additions(tmp_path):
+    old = """fn run_tasks(queue: &mut Vec<Task>) {
+        loop {
+            let task = queue.pop().unwrap();
+            task.switch_to();
+            queue.push(task);
+        }
+    }"""
+    changed = """fn execute_loop(tasks: &mut Vec<Task>) {
+        loop {
+            check_timer();
+            let current = tasks.pop().unwrap();
+            current.switch_to();
+            if current.ready() { tasks.push(current); }
+        }
+    }"""
+    db = tmp_path / "functions.db"
+    normalized = normalize_snippet(old, "rust").code
+    with FunctionStore(db) as store:
+        rec = FunctionRecord(
+            repo_id="2025/history", file_path="processor.rs", start_line=1, end_line=8,
+            func_name="run_tasks", module_tag=ModuleTag.SCHED, lang="rust",
+            raw_code=old, normalized_code=normalized,
+        )
+        fid = store.add_function(rec, []); store.conn.commit()
+    index_path = tmp_path / "code.idx"
+    build_code_index(db, index_path)
+    query = CodeSimHashQuery(index_path, db_path=db)
+    hits = query.query(normalize_snippet(changed, "rust").code)
+    assert fid in hits and hits[fid] <= 15
 
 
 # ---------- 建库 + 查询 ----------
