@@ -133,3 +133,13 @@ def test_apply_review_verdicts_untouched_confirmed_not_in_review():
     up, dn = SC._apply_review_verdicts([s], [])
     assert up == 0 and dn == 0
     assert s["tier"] == "confirmed"
+
+
+def test_apply_review_verdicts_never_drops_uncertain_signal():
+    s = _pair(_q("a.rs", "run_tasks", code="fn run_tasks(){...}", start=10),
+              _q("b.rs", "run_tasks"), tier="weak", score=0.61)
+    groups = [{"query_file": "a.rs", "query_func": "run_tasks", "query_start": 10,
+               "review_verdict": "疑似", "review_reason": "证据不足"}]
+    up, dn = SC._apply_review_verdicts([s], groups)
+    assert up == 0 and dn == 0
+    assert s["tier"] == "weak"

@@ -158,13 +158,29 @@ python -m src.pipeline --repo <新作品路径或 git url> --baselines
 ```bash
 python -m src.pipeline --repo <路径或url> \
     [--resume-from <step>]          # 从指定步骤续跑（前序产物需已存在）
-    [--no-simhash]                  # 召回不启用 SimHash 粗筛
     [--baselines]                   # 启用基线扣除（需 Qdrant 已有基线数据）
     [--skip-ai-detect]              # 跳过 AI 生成代码检测
     [--qdrant-path data/db/qdrant_local]   # 无 docker 时用本地磁盘向量库
 ```
 
 新增历史仓库：把地址追加进 `config/repos.yaml`，重跑 `python -m src.buildlib`（默认全量重建）。
+
+### 查全完整性硬门禁
+
+对比报告只有同时满足以下条件才会生成：`repos.yaml` 中每个历史作品均有函数入库；FAISS、特征
+SimHash、结构 SimHash 与 `functions.db` 为同一代；向量、特征 SimHash、归一化指纹、同名函数和
+归一化代码结构 SimHash 五个召回通道全部开启；确定性/结构候选不做静默截断。任一条件不满足，
+流水线以退出码 2 终止，不允许把“系统没查到”写成“原创”。结构 SimHash 是独立于函数名和 ANN
+top-k 的补充通道，当前保证全局汉明距离不超过 15 的归一化代码结构候选进入后续验证。
+
+报告中的绿色档统一表示“暂未检出相似”，不表示原创认定。报告头会记录历史库覆盖数、召回契约
+版本与通道；缺少这些信息的旧报告会显示红色“已失效、必须重跑”提示。
+
+```bash
+# 全量检查历史库与 reports_by_work_id；退出码 0 才表示全部有效
+python -m src.report audit
+# 详细清单：data/output/recall_completeness_audit.json
+```
 
 ---
 
@@ -310,34 +326,35 @@ python run_batch.py
    （`python -m src.pipeline` 与 `python -m src.report compare` 走同一个函数）；
    描述报告只有 `agent.py`（`oskernel_agent` 树状流水线）一条路径。旧的 Markdown
    报告流程（`src.report.generate` / `src.review` LLM 逐对复核）已删除。
-2. **写盘前强制归一**：档位命名（高度疑似借鉴 / 疑似借鉴（待复核）/ 自研/原创）由
+2. **写盘前强制归一**：档位命名（高度疑似借鉴 / 疑似借鉴（待复核）/ 暂未检出相似）由
    `src/report/label_normalize.py` 在 HTML 写盘前统一（`semantic_compare` 内接线，幂等）；
    描述报告的英文正文/标题、代码摘录型点评由 `pipeline/lang_guard.py` 在渲染前中文化
    （`tree_builder` 内接线）。
 3. **误报扣除内建**：上游 vendored/ABI 受限（`upstream_baselines.py` + `config/upstream_baselines.yaml`）、
    机械误报（`false_positives.py`）、复用库（`libraries.py` + `config/libraries.yaml`）
    都在流水线内自动剔除并在报告附录单列，无需人工后处理。
-4. **review 档自动裁决**：中等相似函数由 LLM 语义复核（`semantic_compare` 内置，模型
-   `LLM_MODEL`，默认 `deepseek-v4-flash`）裁决为"高度疑似借鉴"或"自研/原创"，仅复核
-   失败的残留才显示"待复核"。
+4. **review 档保守复核**：中等相似函数由 LLM 语义复核（`semantic_compare` 内置，模型
+   `LLM_MODEL`，默认 `deepseek-v4-flash`）；判为借鉴时升档，明确非借鉴时排除，结论为
+   “疑似”或复核失败时保留待复核信号，绝不降成“暂未检出”。
 5. **规范命令固定**：对比报告一律 `python -m src.pipeline --repo <..> --baselines`
    （`run_batch.py` 与前端控制台均已按此调用）。
 
-> 如果你看到某份报告与上述格式不符（旧档位叫法、整章英文、空报告），那是**旧版本代码
-> 或错误分支克隆**的产物，用下面的维护脚本修复或重跑，不要手改 HTML。
+> 如果某份报告缺少完整召回契约、仍使用旧档位或内容为空，它就是**失效的旧产物**，必须用
+> 当前流水线重跑；不再允许用 HTML 修改脚本把旧结果包装成新结果。
 
-### 维护脚本（scripts/）
+### 系统审计与维护工具
 
-历史报告追平 / 批量修复用，均幂等可重复执行：
+报告有效性审计已并入正式 CLI：
+
+```bash
+python -m src.report audit
+```
+
+`scripts/` 只保留无法归入日常流水线的离线数据准备和故障恢复工具：
 
 | 脚本 | 用途 |
 |---|---|
-| `scripts/fix_report_labels.py` | 旧对比报告档位标签统一（作用于 `data/output/`） |
-| `scripts/fix_report_language.py` | 旧描述报告英文正文中文化（需 tree.json，重渲染 HTML） |
-| `scripts/fix_report_quotes.py` | 旧描述报告代码摘录型点评改中文（需 tree.json） |
-| `scripts/fix_workid_reports.py` | 交付目录 `reports_by_work_id/` 的 HTML 层批量修复（无 tree.json 也可用；`--scan-only` 预检） |
-| `scripts/verify_workid_english.py` | 检测交付报告中残留的英文整句 |
-| `scripts/force_translate_leftovers.py` | 对被语言检测器跳过的顽固英文片段强制翻译 |
-| `scripts/rerun_empty_reports.py` | 重跑因克隆错分支/错仓库名而空跑的作品报告 |
-| `scripts/rerun_review_tier.py` | 重跑仍带"待复核"档的旧对比报告，经 LLM 复核消解该档 |
-| `scripts/build_reference_db.py` 等 | 历史库构建辅助 |
+| `scripts/build_reference_db.py` | 离线构建参考 OS 指纹库 |
+| `scripts/crawl_oscomp.py` | 从公开竞赛资料采集历史作品元数据 |
+| `scripts/extract_hisrepo_metadata.py` | 从赛事详情页提取历史仓库元数据 |
+| `scripts/stitch_fragments.py` | LLM 分片已完成但总报告中断时，离线恢复 tree.json/HTML |

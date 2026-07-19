@@ -13,12 +13,18 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 from pathlib import Path
 
 from src.models import FunctionRecord
 
 DEFAULT_DB = "data/db/functions.db"
+
+
+def normalized_code_hash(code: str) -> str:
+    """稳定代码指纹；用于不受 ANN top-k 限制的完全归一化召回通道。"""
+    return hashlib.sha256(code.encode("utf-8", "replace")).hexdigest()
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS functions (
@@ -32,6 +38,7 @@ CREATE TABLE IF NOT EXISTS functions (
     lang            TEXT NOT NULL,
     raw_code        TEXT NOT NULL,
     normalized_code TEXT NOT NULL,
+    normalized_hash TEXT NOT NULL DEFAULT '',
     feature_tokens  TEXT NOT NULL DEFAULT '[]'   -- JSON 列表，供 Layer1 SimHash
 );
 CREATE INDEX IF NOT EXISTS idx_functions_repo ON functions(repo_id);
@@ -71,11 +78,27 @@ class FunctionStore:
         self._migrate()
 
     def _migrate(self) -> None:
-        """为旧库补 feature_tokens 列（幂等）。"""
+        """为旧库补召回字段与索引（幂等）。"""
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(functions)")}
         if "feature_tokens" not in cols:
             self.conn.execute("ALTER TABLE functions ADD COLUMN feature_tokens TEXT NOT NULL DEFAULT '[]'")
+        if "normalized_hash" not in cols:
+            self.conn.execute("ALTER TABLE functions ADD COLUMN normalized_hash TEXT NOT NULL DEFAULT ''")
+        while True:
+            missing = self.conn.execute(
+                "SELECT id, normalized_code FROM functions WHERE normalized_hash='' LIMIT 1000"
+            ).fetchall()
+            if not missing:
+                break
+            self.conn.executemany(
+                "UPDATE functions SET normalized_hash=? WHERE id=?",
+                [(normalized_code_hash(code), func_id) for func_id, code in missing],
+            )
             self.conn.commit()
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_functions_norm_hash ON functions(normalized_hash)"
+        )
+        self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
@@ -100,8 +123,9 @@ class FunctionStore:
         """插入一条函数记录及其字符串/特征 token，返回新行 id。"""
         cur = self.conn.execute(
             """INSERT INTO functions
-               (repo_id, file_path, start_line, end_line, func_name, module_tag, lang, raw_code, normalized_code, feature_tokens)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+               (repo_id, file_path, start_line, end_line, func_name, module_tag, lang, raw_code,
+                normalized_code, normalized_hash, feature_tokens)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 rec.repo_id,
                 rec.file_path,
@@ -112,6 +136,7 @@ class FunctionStore:
                 rec.lang,
                 rec.raw_code,
                 rec.normalized_code,
+                normalized_code_hash(rec.normalized_code),
                 json.dumps(feature_tokens or [], ensure_ascii=False),
             ),
         )

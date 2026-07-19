@@ -11,6 +11,7 @@ payload（repo_id/file_path 等）仍从 functions.db 读取（与 qdrant 路径
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -20,6 +21,7 @@ import numpy as np
 from loguru import logger
 
 from src.models import is_baseline_repo
+from src.buildlib.coverage import db_mapping_signature
 
 from .settings import EmbeddingSettings
 from .vector_store import VectorStore
@@ -31,10 +33,15 @@ _HNSW_EF_BUILD   = 200
 _HNSW_EF_SEARCH  = 64
 
 
+def _meta_path(ids_path: str | Path) -> Path:
+    return Path(f"{ids_path}.meta.json")
+
+
 def build_faiss_index(
     store: VectorStore,
     index_path: str | Path = DEFAULT_INDEX,
     ids_path: str | Path = DEFAULT_IDS,
+    db_path: str | Path = "data/db/functions.db",
 ) -> tuple["faiss.Index", np.ndarray]:
     """从 VectorStore 读所有向量，建 HNSW 索引并保存。返回 (index, ids_array)。"""
     logger.info("[faiss] 从 qdrant 读取向量…（首次构建，约 30s）")
@@ -62,6 +69,10 @@ def build_faiss_index(
     idx.add(arr)
     faiss.write_index(idx, str(index_path))
     np.save(str(ids_path), ids_arr)
+    meta = db_mapping_signature(db_path)
+    meta["index_vectors"] = int(idx.ntotal)
+    meta["ids_count"] = len(ids_arr)
+    _meta_path(ids_path).write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("[faiss] 索引保存 → {} / {}", index_path, ids_path)
     return idx, ids_arr
 
@@ -69,14 +80,32 @@ def build_faiss_index(
 def load_faiss_index(
     index_path: str | Path = DEFAULT_INDEX,
     ids_path: str | Path = DEFAULT_IDS,
+    db_path: str | Path | None = None,
 ) -> tuple["faiss.Index", np.ndarray] | None:
     """加载已保存的 HNSW 索引；文件不存在返回 None。"""
     ip, isp = Path(index_path), Path(ids_path)
     if not ip.exists() or not isp.exists():
         return None
+    if db_path is not None:
+        mp = _meta_path(ids_path)
+        if not mp.exists():
+            logger.warning("[faiss] 缺少数据库代际签名 {}，拒绝使用可能过期的索引", mp)
+            return None
+        try:
+            recorded = json.loads(mp.read_text(encoding="utf-8"))
+            current = db_mapping_signature(db_path)
+        except (OSError, sqlite3.Error, json.JSONDecodeError) as exc:
+            logger.warning("[faiss] 索引一致性核验失败：{}", exc)
+            return None
+        if any(recorded.get(k) != current.get(k) for k in current):
+            logger.warning("[faiss] functions.db 已变化，拒绝使用旧索引；请重建历史库")
+            return None
     idx = faiss.read_index(str(ip))
     idx.hnsw.efSearch = _HNSW_EF_SEARCH
     ids_arr = np.load(str(isp))
+    if idx.ntotal != len(ids_arr):
+        logger.warning("[faiss] 索引向量数 {} 与 ID 数 {} 不一致，拒绝加载", idx.ntotal, len(ids_arr))
+        return None
     return idx, ids_arr
 
 

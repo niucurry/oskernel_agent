@@ -32,12 +32,10 @@ from ..parsers.code_parser import (
     find_source_roots,
 )
 from ..engines.llm_batch import (
-    BatchTask, cache_key, opencode_serial_enabled, run_batch_task,
+    BatchTask, opencode_serial_enabled, run_batch_task,
 )
 
 SCHEMA_VERSION = "tree-v3"
-PROMPT_VERSION_SUBSYS  = "subsys-v7"
-PROMPT_VERSION_VERDICT = "verdict-v15"
 
 MAX_MODULES_PER_SUBSYS = 8   # 每个子系统至多 N 个模块槽位
 MAX_FILES_IN_SUBSYS_PROMPT = 80
@@ -234,6 +232,9 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
         "outputs":        outputs,
     }
     return (
+        "【最终交付语言】必须一次性生成完整的简体中文报告。标题、表头、列表项、"
+        "JSON 描述字段和所有自然语言句子都必须是中文；函数名、类型名、路径、代码标识符"
+        "及约定的英文技术术语保持原文。禁止出现整句英文或整节英文。\n\n"
         "你负责分析仓库中的某一个 OS 子系统（如文件系统、内存管理）。"
         "请阅读这些代码，**自己决定该子系统内部的模块拆分**"
         "（典型 2–5 个模块，最多 8 个），然后产出：\n\n"
@@ -265,7 +266,9 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
         '}\n\n'
         "modules[].slot 是 1..8 之间的整数，对应你用 outputs.module_paths[slot-1] "
         "写出的那份 .md（slot 从 1 开始计数）。\n\n"
-        f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```"
+        f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
+        "写入前做最后一次语言自检：若任何标题、段落、表格单元格或 JSON 描述仍是英文，"
+        "先改写成简体中文再调用写入工具；不要输出英文版后等待后续翻译。"
     )
 
 
@@ -282,19 +285,11 @@ def _subsys_fallback(subsys_node: dict) -> dict:
 
 
 def _process_one_subsys(subsys_node: dict, repo_path: Path,
-                         work_dir: Path, cache_dir: Path,
-                         facts: dict | None) -> None:
+                         work_dir: Path, facts: dict | None) -> None:
     """处理一个子系统节点：跑 LLM、读回所有 .md、填充节点与模块子节点。"""
     files     = subsys_node["files"]
     outputs   = _build_subsys_outputs(subsys_node, work_dir)
     out_path  = Path(outputs["json_path"])
-    sub_cache = cache_dir / "subsys"
-    sub_cache.mkdir(parents=True, exist_ok=True)
-
-    # 缓存键：子系统名 + 所有文件 mtime
-    file_keys = [f"{f['path']}:{f['mtime']}" for f in files]
-    ck = cache_key(PROMPT_VERSION_SUBSYS, subsys_node["name"], *file_keys)
-
     module_paths = outputs["module_paths"]
 
     def _enrich(parsed: dict) -> dict:
@@ -304,7 +299,13 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
             slot = int(m.get("slot") or i)
             if 1 <= slot <= MAX_MODULES_PER_SUBSYS:
                 m["content"] = _read_md_if_exists(Path(module_paths[slot - 1]))
+        # 正常情况下提示词已直接生成中文；只有检测出英文正文时才调用翻译兜底。
+        from .lang_guard import normalize_tree_language, normalize_tree_titles
+        normalize_tree_language(parsed)
+        normalize_tree_titles(parsed)
         return parsed
+
+    from .lang_guard import language_output_complete
 
     task = BatchTask(
         batch_id=f"subsys-{_safe_filename_part(subsys_node['name'])}",
@@ -312,11 +313,13 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
         user_request=_build_subsys_request(
             subsys_node, repo_path, outputs, facts),
         output_path=out_path,
-        cache_dir=sub_cache,
-        cache_key=ck,
+        cache_dir=work_dir,  # cache_enabled=False；该路径仅满足 BatchTask 接口
+        cache_key="",
+        cache_enabled=False,
         fallback=_subsys_fallback(subsys_node),
         repo_path=repo_path,
         enrich=_enrich,
+        cache_validator=language_output_complete,
     )
     parsed = run_batch_task(
         task,
@@ -355,8 +358,7 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
 
 
 def run_subsys_stage(tree_root: dict, repo_path: Path,
-                      work_dir: Path, cache_dir: Path,
-                      facts: dict | None) -> None:
+                      work_dir: Path, facts: dict | None) -> None:
     """对每个子系统并发跑一次 SUBSYS agent，原地填子系统与模块节点。"""
     subsys_nodes = [c for c in tree_root.get("children", [])
                     if c.get("type") == "subsystem"]
@@ -377,7 +379,7 @@ def run_subsys_stage(tree_root: dict, repo_path: Path,
     with ThreadPoolExecutor(max_workers=scheduled_workers) as ex:
         futs = {
             ex.submit(_process_one_subsys, n, repo_path,
-                      work_dir, cache_dir, facts): n
+                      work_dir, facts): n
             for n in subsys_nodes
         }
         for fut in as_completed(futs):
@@ -400,6 +402,9 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         "outputs":           outputs,
     }
     return (
+        "【最终交付语言】必须一次性生成完整的简体中文总评。标题、表头、列表项、"
+        "评分理由和所有自然语言句子都必须是中文；函数名、类型名、路径、代码标识符"
+        "及约定的英文技术术语保持原文。禁止出现整句英文或整节英文。\n\n"
         "你是仓库顶层评判会话，综合下面"
         "facts + 各 OS 子系统的总结，产出整体评判结论。\n"
         "**详细正文写成独立 HTML 片段，JSON 只放结构化字段**。\n"
@@ -422,7 +427,9 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         '  "issues":[{"path":"...","severity":"low|medium|high","quote":"..."}],\n'
         '  "one_line":"... ≤40 字"\n'
         '}\n\n'
-        f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```"
+        f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
+        "写入前做最后一次语言自检：若任何标题、段落、表格单元格或 JSON 描述仍是英文，"
+        "先改写成简体中文再调用写入工具；不要输出英文版后等待后续翻译。"
     )
 
 
@@ -531,11 +538,8 @@ def _collect_subsys_summaries(tree_root: dict) -> list[dict]:
 
 
 def run_verdict_stage(tree_root: dict, facts: dict | None,
-                       work_dir: Path, cache_dir: Path,
+                       work_dir: Path,
                        repo_path: Path | None = None) -> dict:
-    verdict_cache = cache_dir / "verdict"
-    verdict_cache.mkdir(parents=True, exist_ok=True)
-
     outputs = {
         "json_path":    str(work_dir / "verdict.json"),
         "content_path": str(work_dir / "verdict.content.md"),
@@ -543,17 +547,15 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
     out_path = Path(outputs["json_path"])
 
     subsys_summaries = _collect_subsys_summaries(tree_root)
-    facts_str = json.dumps(facts or {}, ensure_ascii=False, sort_keys=True)
-    subsys_str = json.dumps(
-        [s["name"] for s in subsys_summaries],
-        ensure_ascii=False, sort_keys=True,
-    )
-    ck = cache_key(PROMPT_VERSION_VERDICT, facts_str[:2048], subsys_str)
-
     def _enrich(parsed: dict) -> dict:
         """把 verdict 详细正文（HTML，含强制图表）读进 parsed，随 JSON 一起进缓存。"""
         parsed["content"] = _read_md_if_exists(Path(outputs["content_path"]))
+        # 正常情况下提示词已直接生成中文；只有检测出英文正文时才调用翻译兜底。
+        from .lang_guard import normalize_tree_language
+        normalize_tree_language(parsed)
         return parsed
+
+    from .lang_guard import language_output_complete
 
     task = BatchTask(
         batch_id="verdict",
@@ -561,11 +563,13 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
         user_request=_build_verdict_request(
             facts, subsys_summaries, outputs, repo_path or Path(".")),
         output_path=out_path,
-        cache_dir=verdict_cache,
-        cache_key=ck,
+        cache_dir=work_dir,  # cache_enabled=False；该路径仅满足 BatchTask 接口
+        cache_key="",
+        cache_enabled=False,
         fallback=_verdict_fallback(),
         repo_path=repo_path or Path("."),
         enrich=_enrich,
+        cache_validator=language_output_complete,
     )
     parsed = run_batch_task(
         task,
@@ -632,10 +636,6 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
         / f"{repo_name}_{ts}_tree"
     )
     out_dir.mkdir(parents=True, exist_ok=True)
-    cache_root = Path(config.data.get("cache_dir", "./data/cache")).resolve()
-    cache_dir  = cache_root / f"{repo_name}_tree"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
     # A. 按子系统枚举
     print(f"\n[tree] 按 OS 子系统归类源文件 ...")
     tree_root, file_count = enumerate_subsystems(repo_path)
@@ -648,11 +648,11 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
         return _empty_tree(repo_name, ts, facts)
 
     # B. SUBSYS 并发分析
-    run_subsys_stage(tree_root, repo_path, out_dir, cache_dir, facts)
+    run_subsys_stage(tree_root, repo_path, out_dir, facts)
 
     # C. VERDICT 综合
     print(f"[tree] VERDICT 阶段 ...")
-    verdict = run_verdict_stage(tree_root, facts, out_dir, cache_dir, repo_path)
+    verdict = run_verdict_stage(tree_root, facts, out_dir, repo_path)
 
     result = {
         "meta": {

@@ -28,6 +28,7 @@ from loguru import logger
 
 from src.fastpath.scan import (WHOLE_FILE_LINE_RATIO, WHOLE_FILE_SIM_RATIO,
                                aggregate_file_similarity)
+from src.retrieval_contract import contract_errors, require_complete_contract
 
 from .false_positives import (FP_REASON_DISP, false_positive_stats,
                               tag_false_positives, tag_internal_arch_dups)
@@ -36,6 +37,7 @@ from .upstream_baselines import (is_excluded_file_path, tag_upstream_baselines,
                                  upstream_baseline_stats)
 
 DEFAULT_OUTPUT_DIR = "data/output"
+_SEMANTIC_PROMPT_VERSION = "semantic-cn-v2"
 
 # 子模块列表及其显示名称
 MODULES = ["sched", "mm", "fs", "trap", "driver", "arch", "other"]
@@ -524,6 +526,9 @@ _ANALYSIS_SYSTEM = """\
 3. 设计差异：新作品相对来源做了哪些改动/取舍（如换数据结构、改并发策略、增删功能）。
 
 写作要求：
+- **最终交付必须一次性使用简体中文**：所有标题、段落、列表项和自然语言说明均用中文；
+  函数名、类型名、算法名、数据结构名、代码标识符和专有名词可保留英文原文。
+- 禁止出现整句英文、整段英文或整节英文。即使输入代码和来源材料是英文，也必须用中文分析。
 - 每个子模块用 2~4 句概述 + 一个 <ul> 列举具体借鉴点。
 - 用函数名、算法名、数据结构名指代具体对象（如「run_tasks 的任务切换」「buddy 分配器」）。
 - **不要写文件路径和行号**：报告表格已逐函数给出 文件:行 与可点击链接，分析正文只讲
@@ -535,6 +540,7 @@ _ANALYSIS_SYSTEM = """\
 - 每个子模块用 <section data-module="模块tag">...</section> 包裹
 - 用 <h3>/<p>/<ul>/<li> 语义标签
 - 不要写 path:line，不要手写 <a> 标签
+- 输出前逐个检查 <h3>/<p>/<li>/<th>/<td>：如仍有英文自然语言句子，先改写成中文再输出。
 """
 
 
@@ -587,6 +593,7 @@ def _build_analysis_message(
     lines += [
         "## 任务",
         "对每个**有相似代码对**的子模块，输出一段语义分析 HTML 片段。",
+        "报告必须一次性完整使用简体中文；仅代码标识符和技术专名保留英文，不要生成英文版等待翻译。",
         "直接输出 HTML，不要输出 Markdown，不要有任何额外说明文字。",
     ]
     return "\n".join(lines)
@@ -616,12 +623,16 @@ def run_semantic_analysis(
           [c["ref_func"] for c in g["candidates"]]) for g in file_pairs],
         ensure_ascii=False, sort_keys=True,
     )
-    ck = _cache_key(query_repo_id, pair_sig)
+    ck = _cache_key(_SEMANTIC_PROMPT_VERSION, query_repo_id, pair_sig)
     html_cache = cache_dir / f"{ck}.html"
 
     if html_cache.exists():
-        logger.info("[semantic] 缓存命中 → {}", html_cache)
-        return html_cache.read_text(encoding="utf-8")
+        cached_html = html_cache.read_text(encoding="utf-8")
+        from src.oskernel_agent.pipeline.lang_guard import needs_translation
+        if not needs_translation(cached_html):
+            logger.info("[semantic] 中文缓存命中 → {}", html_cache)
+            return cached_html
+        logger.warning("[semantic] 缓存含英文正文，忽略并重新生成：{}", html_cache)
 
     # 读取 API 配置
     try:
@@ -651,7 +662,7 @@ def run_semantic_analysis(
                 {"role": "system", "content": _ANALYSIS_SYSTEM},
                 {"role": "user",   "content": user_msg},
             ],
-            temperature=0.3,
+            temperature=0.2,
             max_tokens=8000,
         )
         html_text = (resp.choices[0].message.content or "").strip()
@@ -661,6 +672,18 @@ def run_semantic_analysis(
 
     # 提取 HTML 片段（模型可能在 markdown 代码块里）
     html_content = _extract_html_from_text(html_text) or html_text
+
+    # 首轮直接生成中文；只有确实检测到英文正文时才保留一次翻译兜底。
+    from src.oskernel_agent.pipeline.lang_guard import normalize_html_language
+    html_content, lang_stats = normalize_html_language(html_content)
+    if not lang_stats["complete"]:
+        logger.warning(
+            "[semantic] 中文兜底仍未通过校验，改用确定性的中文规则报告（残留 {} 处）",
+            lang_stats["remaining"],
+        )
+        html_content = _fallback_analysis(file_pairs, submodule_stats)
+    elif lang_stats["translated"]:
+        logger.warning("[semantic] 首轮残留英文，已启用保留的翻译兜底")
 
     output_path.write_text(html_content, encoding="utf-8")
     html_cache.write_text(html_content, encoding="utf-8")
@@ -749,7 +772,7 @@ def _echarts_overview(submodule_stats: dict) -> str:
     copy_vals = [round(submodule_stats[m]["copy_pct"] * 100, 1) for m in mods]
     rev_vals  = [round(submodule_stats[m].get("review_pct", 0.0) * 100, 1) for m in mods]
     orig_vals = [round(submodule_stats[m]["original_pct"] * 100, 1) for m in mods]
-    show_rev = any(v > 0 for v in rev_vals)   # 复核后 review 档恒 0 → 不显示「疑似借鉴」
+    show_rev = any(v > 0 for v in rev_vals)   # 不确定的复核结果会保留 review 档
     series = [{"name": "借鉴", "type": "bar", "stack": "pct", "data": copy_vals[::-1],
                "itemStyle": {"color": "#ef4444"}, "label": {"show": True, "formatter": "{c}%"}}]
     if show_rev:
@@ -814,7 +837,7 @@ def _echarts_overall_donut(copy_pct: float, review_pct: float = 0.0,
     o = round(original_pct if original_pct is not None else max(0.0, 100 - c - rv), 1)
     option = {
         "title": {
-            "text": f"{c}%", "subtext": "疑似借鉴占自研代码",
+            "text": f"{c}%", "subtext": "疑似借鉴占纳入统计函数",
             "left": "center", "top": "38%",
             "textAlign": "center",
             "textStyle": {"fontSize": 26, "fontWeight": "bold", "color": "#ef4444"},
@@ -927,18 +950,44 @@ def _exclusion_totals(suspects: list[dict]) -> dict:
     return out
 
 
+def _retrieval_status(contract: dict | None) -> str:
+    """把召回边界直接写进交付报告，旧产物不得伪装成完整查全结果。"""
+    errors = contract_errors(contract)
+    if errors:
+        detail = "；".join(html.escape(e) for e in errors)
+        return (
+            '<section id="retrieval-stale" data-retrieval-contract-version="missing" '
+            'data-retrieval-complete="false" class="mb-5 p-4 rounded border-2 border-red-500 bg-red-50">'
+            '<div class="font-bold text-red-700">⚠ 本报告缺少完整召回证明，已失效，必须重跑</div>'
+            f'<p class="text-sm text-red-700 mt-1 mb-0">{detail}。旧报告只能用于定位历史问题，'
+            '不得据此认定任何函数原创或未借鉴。</p></section>'
+        )
+    coverage = contract["history_coverage"]
+    channels = "、".join(contract.get("channels") or [])
+    return (
+        '<section id="retrieval-contract" data-retrieval-contract-version="2" '
+        'data-retrieval-complete="true" class="mb-5 p-3 rounded border border-emerald-300 bg-emerald-50">'
+        '<div class="text-sm font-semibold text-emerald-800">召回完整性已核验</div>'
+        f'<p class="text-xs text-emerald-700 mt-1 mb-0">历史作品覆盖 '
+        f'{coverage["covered"]}/{coverage["configured"]}；候选禁止静默截断；'
+        f'启用通道：{html.escape(channels)}。未命中仍只表示“当前系统暂未检出”，不等于原创认定。</p>'
+        '</section>'
+    )
+
+
 def _reading_guide(query_repo_id: str, borrowed_n: int, original_n: int,
-                   overall_copy_pct: float, excl: dict) -> str:
+                   overall_copy_pct: float, excl: dict,
+                   retrieval_contract: dict | None = None) -> str:
     """报告顶部「导读 + 体检结论」卡：用大白话告诉第一次看报告的老师——这是什么、数字怎么读、
     系统做了哪些自动过滤、该如何使用。回应「辅助参考而非最终裁决」的项目定位。"""
     total_kept = borrowed_n + original_n
     # 体检结论（按疑似借鉴占比给一句话定性，中性、不替评审下结论）
     if overall_copy_pct <= 5:
-        verdict, vcolor, vicon = "原创度高", "#16a34a", "✓"
-        vtext = "绝大多数函数为自研实现，仅少量与历史作品高度相似，原创性良好。"
+        verdict, vcolor, vicon = "当前库内相似命中较少", "#16a34a", "✓"
+        vtext = "当前历史库中仅检出少量高度相似函数；未命中不等于已证明原创。"
     elif overall_copy_pct <= 20:
-        verdict, vcolor, vicon = "原创为主，少量相似", "#16a34a", "✓"
-        vtext = "以自研实现为主，有一部分函数与历史作品相似，建议重点核对相似清单。"
+        verdict, vcolor, vicon = "当前库内少量相似", "#16a34a", "✓"
+        vtext = "有一部分函数与历史作品相似；其余仅表示当前未检出，建议结合人工核验。"
     elif overall_copy_pct <= 50:
         verdict, vcolor, vicon = "相似比例偏高，需重点核查", "#d97706", "!"
         vtext = "相当一部分函数与历史作品相似，建议逐一人工核对借鉴清单。"
@@ -956,6 +1005,7 @@ def _reading_guide(query_repo_id: str, borrowed_n: int, original_n: int,
     excl_detail = "、".join(excl_parts) if excl_parts else "无"
 
     return (
+        _retrieval_status(retrieval_contract) +
         '<section id="guide" data-section-id="guide" '
         'class="mb-6 p-5 rounded-lg border-l-4 bg-blue-50/60" style="border-left-color:#3b82f6">'
         '<div class="flex items-start gap-3">'
@@ -966,17 +1016,17 @@ def _reading_guide(query_repo_id: str, borrowed_n: int, original_n: int,
         '本报告由 AI 自动比对该作品与历年参赛作品，标记「与历史代码相似、可能存在借鉴」的函数，'
         '<b>仅作为人工评审的辅助参考，不构成抄袭的最终认定</b>。'
         '系统已自动过滤掉所有团队都会用的「上游框架代码、第三方库、ABI/规范受限写法」等机械重复，'
-        '下方数字仅针对<b>作品自研部分</b>。</p>'
+        '下方数字仅针对<b>排除机械重复后的待评估部分</b>。</p>'
         # 体检结论
         f'<div class="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-md font-semibold text-sm" '
         f'style="background:{vcolor}1a;color:{vcolor}">'
         f'<span class="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs" '
         f'style="background:{vcolor}">{vicon}</span>'
-        f'初步体检：{verdict}（疑似借鉴占自研代码 {overall_copy_pct}%）</div>'
+        f'初步体检：{verdict}（疑似借鉴占纳入统计函数 {overall_copy_pct}%）</div>'
         f'<p class="text-sm text-slate-600 mt-2 mb-0">{vtext}</p>'
         # 透明度：扣除了多少误报
         '<div class="mt-3 text-xs text-slate-500 bg-white/70 rounded px-3 py-2 border border-slate-200">'
-        f'📊 <b>过滤透明度</b>：系统在 <b>{total_kept}</b> 个自研函数中标记出 <b>{borrowed_n}</b> 个疑似借鉴；'
+        f'📊 <b>过滤透明度</b>：系统在 <b>{total_kept}</b> 个纳入统计函数中标记出 <b>{borrowed_n}</b> 个疑似借鉴；'
         f'另已剔除 <b>{excl_total}</b> 个机械重复函数（{excl_detail}），这些不计入上方借鉴统计，'
         '在报告末尾「附：不计入借鉴的代码」分类列出，可点开核对。'
         '</div>'
@@ -993,6 +1043,7 @@ def _summary_card(
     submodule_stats: dict,
     file_match_count: int = 0,
     file_similar_count: int = 0,
+    retrieval_contract: dict | None = None,
 ) -> str:
     # 按**函数**计（与各清单一致）：借鉴/疑似借鉴/原创 来自三类口径的统计
     borrowed_n = sum(st["confirmed"] for st in submodule_stats.values())
@@ -1012,7 +1063,7 @@ def _summary_card(
         '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">'
         + _kpi(f"{borrowed_n}", "疑似借鉴·待人工判定（函数）", "#ef4444")
         + (_kpi(f"{review_n}", "疑似借鉴（函数）", "#d97706") if review_n else "")
-        + _kpi(f"{original_n}", "自研/原创（函数）", "#16a34a")
+        + _kpi(f"{original_n}", "暂未检出相似（函数）", "#16a34a")
         + _kpi(f"{file_match_count}", "整文件相同（文件）", "#e11d48")
         + _kpi(f"{file_similar_count}", "整体相似文件（个）", "#d97706")
         + '</div>'
@@ -1023,7 +1074,7 @@ def _summary_card(
     top_src = _echarts_top_sources(suspects)
     head_charts = (
         '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 items-start">'
-        '<div><div class="text-sm font-semibold text-slate-700">疑似借鉴占比（按自研函数加权）</div>'
+        '<div><div class="text-sm font-semibold text-slate-700">疑似借鉴占比（按纳入统计函数加权）</div>'
         + donut + '</div>'
         + ('<div><div class="text-sm font-semibold text-slate-700">相似来源最多的历史作品（Top 8）</div>'
            + top_src + '</div>' if top_src else '<div></div>')
@@ -1043,7 +1094,8 @@ def _summary_card(
 
     # 顶部导读 + 体检结论卡（老师第一眼看到，建立正确语境）
     guide = _reading_guide(query_repo_id, borrowed_n, original_n,
-                           overall_copy_pct, _exclusion_totals(suspects))
+                           overall_copy_pct, _exclusion_totals(suspects),
+                           retrieval_contract)
 
     return (
         guide +
@@ -1053,7 +1105,7 @@ def _summary_card(
         f'{html.escape(query_repo_id)} '
         '<span class="text-slate-400 font-normal text-base">查重对比分析报告</span>'
         '</h2>'
-        '<p class="text-xs text-slate-500 mt-1 mb-0">下列数字均为<b>自研代码</b>口径（已扣除上游框架/库/规范受限代码）；'
+        '<p class="text-xs text-slate-500 mt-1 mb-0">下列数字为<b>扣除上游框架/库/规范受限代码后的待评估口径</b>；'
         '「疑似借鉴」指与历史作品相似、<b>需人工判定</b>，非系统已认定抄袭。</p>'
         f'{_LEGEND_HTML}{kpis}{head_charts}{tier_chart}{pct_chart}'
         '</section>'
@@ -1254,7 +1306,7 @@ def _module_section(
     original_pct = stats.get("original_pct", 0.0)
 
     # 子模块统计概要行（借鉴/原创，按函数；库复用/公共样板不计入）
-    # 复核后 review 档已解析为 借鉴/原创，「疑似借鉴」恒 0 时不展示（仅复核失败残留才显示）
+    # review 档可能来自不确定或失败的复核，存在时必须继续展示。
     rev_n = stats.get("review", 0)
     review_chip = (f'<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-700">'
                    f'疑似借鉴 {review_pct*100:.0f}%</span>') if rev_n else ""
@@ -1265,9 +1317,9 @@ def _module_section(
         f'借鉴 {copy_pct*100:.0f}%</span>'
         + review_chip +
         f'<span class="px-2 py-0.5 rounded bg-green-50 text-green-700">'
-        f'原创 {original_pct*100:.0f}%</span>'
+        f'暂未检出相似 {original_pct*100:.0f}%</span>'
         f'<span class="text-slate-500">函数总数 {stats.get("total","—")} 个 | '
-        f'借鉴 {stats.get("confirmed",0)}{review_cnt} / 原创 {stats.get("original",0)}</span>'
+        f'借鉴 {stats.get("confirmed",0)}{review_cnt} / 暂未检出 {stats.get("original",0)}</span>'
         f'<span class="text-slate-400">主要来源：{html.escape(stats.get("top_source","—"))}</span>'
         f'</div>'
         + _pct_bar(copy_pct, review_pct, original_pct)
@@ -1517,7 +1569,7 @@ def _original_section(original_funcs: list[dict], linker, query_repo_id: str,
     if llm_innov:
         llm_innov = _linkify_with_gitlab(llm_innov, linker, query_repo_id)
     if not original_funcs:
-        body = ("<p class='text-slate-500 text-sm'>未发现原创函数"
+        body = ("<p class='text-slate-500 text-sm'>没有暂未命中的函数"
                 "（所有函数都与历史代码库有相似命中）。</p>")
     else:
         rows = "".join(
@@ -1533,10 +1585,9 @@ def _original_section(original_funcs: list[dict], linker, query_repo_id: str,
         )
         body = (
             '<p class="text-sm text-slate-600 mb-3">'
-            f'共 <b>{len(original_funcs)}</b> 个函数未与历史代码库构成借鉴'
-            '（完全未命中，或虽有中等相似命中但经 AI 模型复核判为疑似 / 非借鉴、'
-            '即独立实现的通用写法），从设计维度看属于该作品的原创 / 自研实现'
-            '（按规模降序，全部列出）：'
+            f'共 <b>{len(original_funcs)}</b> 个函数在当前历史库中暂未形成有效相似命中。'
+            '<b>这只表示系统暂未检出，不等于原创认定</b>；可能仍受历史库覆盖、召回与阈值影响。'
+            '以下按规模降序全部列出，供继续人工核验：'
             '</p>'
             '<div class="overflow-x-auto">'
             '<table class="w-full text-sm border-collapse">'
@@ -1565,14 +1616,14 @@ def _original_section(original_funcs: list[dict], linker, query_repo_id: str,
         'border-b border-slate-200 bg-slate-50" '
         f"@click=\"open=!open;localStorage.setItem('cmp:{sid}',open?'1':'0')\">"
         '<span class="text-slate-400 w-4 text-center" x-text="open?\'▾\':\'▸\'"></span>'
-        '<h2 class="text-base font-semibold text-slate-800 m-0">原创代码</h2>'
+        '<h2 class="text-base font-semibold text-slate-800 m-0">暂未检出历史相似（不等于原创）</h2>'
         '</div>'
         '<div class="px-6 py-4" x-show="open" x-cloak>'
         + body +
         '</div>'
         '</section>'
     )
-    toc = f'<a class="toc-link" href="#{sid}">原创代码</a>'
+    toc = f'<a class="toc-link" href="#{sid}">暂未检出相似</a>'
     return toc, section
 
 
@@ -2301,12 +2352,12 @@ def run_review_judgment(review_pairs: list[dict], work_dir: Path,
 
 
 def _apply_review_verdicts(suspects: list[dict], groups: list[dict]) -> tuple[int, int]:
-    """据 LLM 复核结论改写 tier，使最终只剩「借鉴 / 原创」两类。
-      - review/weak：借鉴 → confirmed（计入已确认借鉴）；疑似/非借鉴 → dismissed（归原创）
+    """据 LLM 复核结论保守改写 tier，不把“不确定”降成未命中。
+      - review/weak：借鉴 → confirmed；疑似 → 保留；非借鉴 → dismissed
       - confirmed（全量送复核）：**仅** 非借鉴 → dismissed（保守，不丢失信号）；借鉴/疑似保留 confirmed
       - 未复核（复核失败）→ 保持原档不动
     confirmed 用保守口径：文本相似≠借鉴，但只在 LLM 明确判「非借鉴」（ABI/规范/标准算法/不同机制）
-    时才降级；疑似（拿不准）不降，避免误降真实借鉴。返回 (升为借鉴数, 归原创数)。
+    时才降级；疑似（拿不准）不降，避免误降真实借鉴。返回 (升档数, 明确排除数)。
     """
     vmap = {(g["query_file"], g["query_func"], g["query_start"]): g.get("review_verdict")
             for g in groups}
@@ -2329,11 +2380,8 @@ def _apply_review_verdicts(suspects: list[dict], groups: list[dict]) -> tuple[in
             s["dismiss_reason"] = "review_非借鉴"
             dn += 1
         elif v == "疑似":
-            if tier in ("review", "weak"):   # review/weak 疑似 → dismissed
-                s["tier"] = "dismissed"
-                s["dismiss_reason"] = "review_疑似"
-                dn += 1
-            # confirmed 疑似 → 保留（保守，不丢失真实借鉴信号）
+            # 不确定不是阴性证据：所有档位原样保留，交给人工复核。
+            pass
     return up, dn
 
 
@@ -2345,7 +2393,7 @@ def _review_section(review_pairs: list[dict], linker, query_repo_id: str) -> tup
              f'下列 <b>{len(review_pairs)}</b> 个函数与历史作品相似度中等（逐行匹配 70%–95%，'
              '未达「疑似借鉴」的 95% 高相似线），'
              '经 AI 模型逐对复核后<b>判为借鉴或疑似借鉴</b>而保留在此；'
-             '复核判为<b>非借鉴（独立实现的通用写法）的已移入「原创代码」节</b>，不在此列。'
+             '复核判为<b>非借鉴（独立实现的通用写法）的已移入「暂未检出相似」节</b>，不在此列。'
              '下表「复核结论」由 AI 自动初判，仅供人工复核参考。</p>')
 
     # 复核结论汇总
@@ -2475,6 +2523,7 @@ def generate_comparison_html(
     base_funcs: list[dict] | None = None,
     fp_funcs: list[dict] | None = None,
     ub_funcs: list[dict] | None = None,
+    retrieval_contract: dict | None = None,
 ) -> str:
     """组装完整的查重对比 HTML 报告（直接产出，不经 Markdown 转换）。"""
     file_matches = file_matches or []
@@ -2482,7 +2531,8 @@ def generate_comparison_html(
     # 摘要卡
     summary_html = _summary_card(query_repo_id, suspects, submodule_stats,
                                  file_match_count=len(file_matches),
-                                 file_similar_count=len(file_similar))
+                                 file_similar_count=len(file_similar),
+                                 retrieval_contract=retrieval_contract)
 
     toc_items  = ['<a class="toc-link" href="#summary">总览</a>']
     body_parts = [summary_html]
@@ -2570,6 +2620,7 @@ def run_semantic_compare(
     skip_opencode: bool = False,
     filematch_path: str | Path | None = None,
     ai_detect_path: str | Path | None = None,
+    require_complete_recall: bool = True,
 ) -> dict:
     """主入口：suspects.json → LLM 语义分析 → 直接 HTML 报告。
 
@@ -2594,6 +2645,13 @@ def run_semantic_compare(
     recall: dict | None = None
     if recall_path and Path(recall_path).exists():
         recall = json.loads(Path(recall_path).read_text(encoding="utf-8"))
+    if require_complete_recall:
+        if recall is None:
+            raise RuntimeError("生成查重报告必须提供 recall 产物并通过完整性契约校验")
+        require_complete_contract(recall.get("retrieval_contract"), artifact="报告召回产物")
+        require_complete_contract(data.get("retrieval_contract"), artifact="嫌疑对产物")
+        if data.get("retrieval_contract") != recall.get("retrieval_contract"):
+            raise RuntimeError("嫌疑对与召回产物的完整性契约不一致，拒绝混用不同批次产物")
 
     # L0 文件指纹结果（整文件相同）。file_similar 的后聚合放到所有标注 + 复核之后，
     # 以便用「已剔除嫌疑对」的口径计算（vendored 上游 / ABI / 库复用 / 公共样板 不计入
@@ -2608,20 +2666,20 @@ def run_semantic_compare(
     work_dir = out_dir / f"{query_repo_id}_semantic_work"
 
     # 先对 review/weak 档做低端模型复核：判「借鉴」的升为 confirmed（计入已确认借鉴），
-    # 「疑似 / 非借鉴」降为 dismissed（归入原创代码），使最终只剩 借鉴 / 原创 两类。
-    # 必须在统计 / file_pairs / 原创计算之前。
+    # 仅“非借鉴”降为 dismissed；“疑似”保留信号，不能回落到“暂未检出”。
+    # 必须在统计 / file_pairs / 未检出清单计算之前。
     if not skip_opencode:
         review_pairs = collect_file_pairs(suspects, keep_tiers=("review", "weak"))
         # 系统化语义复核：**全部** confirmed 对都送 LLM 复核（不只样板候选）——文本相似不等于
         # 借鉴，ABI/规范/标准算法/不同机制实现的误报只能靠语义判断逐对排除，无法靠枚举模式覆盖。
         # 保守口径：confirmed 仅当 LLM 明确判「非借鉴」才降为 dismissed（借鉴/疑似保留，不丢失信号）；
-        # review/weak 维持原口径（借鉴升 confirmed，疑似/非借鉴降 dismissed）。
+        # review/weak：借鉴升 confirmed，疑似保留，只有非借鉴降 dismissed。
         confirmed_groups = collect_file_pairs(suspects, keep_tiers=("confirmed",))
         review_pairs.extend(confirmed_groups)
         run_review_judgment(review_pairs, work_dir)
         up, dn = _apply_review_verdicts(suspects, review_pairs)
         if up or dn:
-            logger.info("[review] 复核：判借鉴 {} 对升入已确认借鉴，非借鉴 {} 对移入原创"
+            logger.info("[review] 复核：判借鉴 {} 对升档，明确非借鉴 {} 对移出相似清单"
                         "（含 confirmed 全量送复核 {} 个）",
                         up, dn, len(confirmed_groups))
 
@@ -2652,7 +2710,7 @@ def run_semantic_compare(
                 ub_counts["abi_constrained"], sum(fp_counts.values()), dup_n,
                 len(file_matches), len(file_similar))
 
-    # 统计（复核已把 review 档解析为 借鉴/原创，此处口径已是复核后的）
+    # 统计采用复核后的保守档位；不确定结果仍留在 review。
     submodule_stats = compute_submodule_stats(suspects, recall)
     lib_stats       = reused_library_stats(suspects, recall)
     cc_funcs        = common_code_stats(suspects)
@@ -2709,6 +2767,7 @@ def run_semantic_compare(
         base_funcs      = base_funcs,
         fp_funcs        = fp_funcs,
         ub_funcs        = ub_funcs,
+        retrieval_contract = recall.get("retrieval_contract") if recall else None,
     )
 
     # 档位标签统一（高度疑似借鉴 / 疑似借鉴（待复核）/ 自研/原创），避免各处叫法不一

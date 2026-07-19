@@ -80,8 +80,23 @@ class Evidence(BaseModel):
     simhash_distance: int | None = Field(
         default=None, description="Layer1：SimHash 海明距离，越小越相似"
     )
+    code_simhash_distance: int | None = Field(
+        default=None, description="归一化代码 shingle SimHash 海明距离；不经过 ANN top-k"
+    )
     vector_similarity: float | None = Field(
         default=None, description="Layer2：整函数向量余弦相似度 [0,1]"
+    )
+    normalized_fingerprint_match: bool = Field(
+        default=False,
+        description="归一化代码 SHA-256 完全相同；不受 ANN top-k 限制的确定性命中",
+    )
+    function_name_recall: bool = Field(
+        default=False,
+        description="同名函数确定性补召回；仅作候选生成，仍需逐行相似度达到阈值",
+    )
+    structural_hash_recall: bool = Field(
+        default=False,
+        description="归一化代码 shingle SimHash 补召回；候选未经过 ANN top-k",
     )
     segment_hits: SegmentHits | None = Field(
         default=None, description="Layer3：分段向量比对结果（命中段数/覆盖/匹配段对）"

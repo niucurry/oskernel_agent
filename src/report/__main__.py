@@ -21,6 +21,8 @@ from loguru import logger
 
 from .semantic_compare import DEFAULT_OUTPUT_DIR, run_semantic_compare
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m src.report", description="查重对比报告生成。")
@@ -48,6 +50,13 @@ def build_parser() -> argparse.ArgumentParser:
     gh = sub.add_parser("gitlab-heads", help="预取历史仓库 HEAD sha 缓存（报告里文件链接用）")
     gh.add_argument("--repos-yaml", default="config/repos.yaml")
     gh.add_argument("--cache", default="data/db/repo_heads.json")
+
+    audit = sub.add_parser("audit", help="审计历史库覆盖与全部交付比较报告的有效性")
+    audit.add_argument("--db", default=str(PROJECT_ROOT / "data/db/functions.db"))
+    audit.add_argument("--config", default=str(PROJECT_ROOT / "config/repos.yaml"))
+    audit.add_argument("--reports", default=str(PROJECT_ROOT / "reports_by_work_id"))
+    audit.add_argument(
+        "--output", default=str(PROJECT_ROOT / "data/output/recall_completeness_audit.json"))
     return p
 
 
@@ -59,15 +68,19 @@ def main(argv: list[str] | None = None) -> int:
         if not Path(args.suspects).is_file():
             logger.error("suspects 文件不存在：{}", args.suspects)
             return 1
-        result = run_semantic_compare(
-            suspects_path   = args.suspects,
-            query_repo_path = args.query_repo,
-            recall_path     = args.recall,
-            output_dir      = args.output_dir,
-            top_per_module  = args.top_per_module,
-            skip_opencode   = args.skip_opencode,
-            filematch_path  = args.filematch,
-        )
+        try:
+            result = run_semantic_compare(
+                suspects_path   = args.suspects,
+                query_repo_path = args.query_repo,
+                recall_path     = args.recall,
+                output_dir      = args.output_dir,
+                top_per_module  = args.top_per_module,
+                skip_opencode   = args.skip_opencode,
+                filematch_path  = args.filematch,
+            )
+        except RuntimeError as exc:
+            logger.error("拒绝生成报告：{}", exc)
+            return 2
         logger.info("对比报告 → {}", result["html_path"])
         return 0
 
@@ -82,6 +95,28 @@ def main(argv: list[str] | None = None) -> int:
         heads = load_heads(args.cache)
         logger.info("完成：缓存 {}/{} 个仓库 HEAD → {}", len(heads), len(url_map), args.cache)
         return 0
+
+    if args.cmd == "audit":
+        from .audit import run_audit
+        try:
+            result = run_audit(
+                db_path=args.db,
+                config_path=args.config,
+                reports_root=args.reports,
+                output_path=args.output,
+            )
+        except (OSError, ValueError) as exc:
+            logger.error("审计失败：{}", exc)
+            return 2
+        cov = result["history_coverage"]
+        reports = result["reports"]
+        logger.info(
+            "历史库 {}/{}；报告 {} 份，有效 {}，失效 {}，未标记 {}；审计 → {}",
+            cov["covered"], cov["configured"], reports["comparison_reports"],
+            reports["complete_reports"], reports["stale_reports"],
+            len(reports["unmarked_reports"]), result["_output_path"],
+        )
+        return 0 if result["valid"] else 2
     return 1
 
 

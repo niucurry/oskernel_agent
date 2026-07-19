@@ -59,6 +59,8 @@ LAYER_2_CONSTRAINTS = """
 
 〔约束 1：语言规范——中文写作 + 技术术语英文原文〕
 所有产出（JSON 字段、Markdown 正文、注释、说明）一律使用**简体中文**书写。
+这里的“一律”包括标题、表头、列表项、模块名、总结、理由和每一个自然语言句子；
+不得因为输入代码、仓库文档或术语是英文，就切换成英文段落或英文章节。
 但以下类别**必须保留英文原文**，不做翻译：
   - 函数名 / 结构体名 / 变量名 / 文件名 / 路径（如 usertrap、TaskControlBlock）
   - 关键字 / 类型名 / 宏（如 unsafe、static、SYSCALL_FORK）
@@ -72,6 +74,8 @@ LAYER_2_CONSTRAINTS = """
                   把 trait 翻成"特征"、把 scheduler 翻成"调度器"。
 正面示例：本目录实现 syscall 分发（kernel/trap.c:42），ecall 触发后
           通过 scause 路由到对应 handler。
+写入文件前必须逐项自检：除上述技术词、代码标识符、路径和专有名词外，所有自然语言
+叙述均应是完整的简体中文句子；发现英文标题或英文句子时，先自行改写成中文再写出。
 
 〔约束 2：JSON 不嵌长 Markdown〕
 JSON 中所有字符串字段（summary / role / quote / reason / note）≤200 字符。

@@ -1,7 +1,7 @@
 """全流水线总入口：
 
   python -m src.pipeline --repo <新作品路径或 git url> [--top-k 20]
-                         [--resume-from <step>] [--no-simhash] [--baselines]
+                         [--resume-from <step>] [--baselines]
 
 按序执行 ingest → fastpath → recall(含 normalize) → exact → segment → metadata
 → ai_detect → report，每步落盘中间结果，打印每步耗时与漏斗数字。
@@ -26,6 +26,7 @@ DEFAULT_OUTPUT = "data/output"
 DEFAULT_QDRANT = "data/db/qdrant_local"
 DEFAULT_IDF = "data/db/idf.json"
 DEFAULT_INDEX = "data/db/simhash_index.pkl"
+DEFAULT_CODE_SIMHASH = "data/db/code_simhash_index.pkl"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,14 +34,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--repo", required=True, help="新作品本地路径或 git url")
     p.add_argument("--top-k", type=int, default=20)
     p.add_argument("--resume-from", choices=STEPS, default=None, help="从指定步骤续跑（需前序产物存在）")
-    p.add_argument("--no-simhash", action="store_true", help="召回不启用 SimHash 粗筛")
+    p.add_argument("--no-simhash", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--baselines", action="store_true", help="启用基线扣除（需 Qdrant 已有基线数据）")
     p.add_argument("--skip-ai-detect", action="store_true",
                    help="跳过 AI 生成代码检测（无参考模型/GPU 时；report 章六给出未运行说明）")
     p.add_argument("--db", default=DEFAULT_DB)
+    p.add_argument("--history-config", default="config/repos.yaml",
+                   help="历史作品清单；运行前逐仓核验 functions.db 覆盖率")
     p.add_argument("--qdrant-path", default=DEFAULT_QDRANT)
     p.add_argument("--idf", default=DEFAULT_IDF)
     p.add_argument("--simhash-index", default=DEFAULT_INDEX)
+    p.add_argument("--code-simhash-index", default=DEFAULT_CODE_SIMHASH)
     p.add_argument("--repos-root", default="data/repos")
     p.add_argument("--output-dir", default=DEFAULT_OUTPUT)
     return p
@@ -77,6 +81,21 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     from dotenv import load_dotenv
     load_dotenv()
     args = build_parser().parse_args(argv)
+
+    # 查重必须 fail closed：历史库缺仓时继续出报告会把“没查到”误写成原创。
+    from src.buildlib.coverage import audit_config
+    try:
+        coverage = audit_config(args.db, args.history_config)
+    except (OSError, ValueError) as exc:
+        logger.error("历史库覆盖率核验失败：{}", exc)
+        return 2
+    if not coverage.complete:
+        logger.error(
+            "历史库不完整：仅覆盖 {}/{} 个配置作品，缺失 {}。"
+            "请先运行 `python -m src.buildlib` 修复建库；本次拒绝生成可能误导的报告。",
+            coverage.covered, coverage.configured, list(coverage.missing_repo_ids),
+        )
+        return 2
 
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -145,14 +164,38 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
 
         store = get_store()
         simhash_query = None
-        if not args.no_simhash and Path(args.idf).exists() and Path(args.simhash_index).exists():
+        if args.no_simhash:
+            logger.error("完整查全模式不允许关闭 SimHash；如需调试请单独调用底层模块")
+            return 2
+        if not Path(args.idf).exists() or not Path(args.simhash_index).exists():
+            logger.error("缺少特征 SimHash 索引/IDF，拒绝退化运行；请重建历史库")
+            return 2
+        if Path(args.idf).exists() and Path(args.simhash_index).exists():
             from src.simhash.build import SimHashQuery
-            simhash_query = SimHashQuery(args.idf, args.simhash_index)
+            try:
+                simhash_query = SimHashQuery(
+                    args.idf, args.simhash_index, db_path=args.db)
+            except (OSError, ValueError) as exc:
+                logger.error("特征 SimHash 索引不可用：{}", exc)
+                return 2
+        if not Path(args.code_simhash_index).exists():
+            logger.error("缺少结构 SimHash 索引 {}，拒绝退化运行；请重建历史库",
+                         args.code_simhash_index)
+            return 2
+        from src.simhash.code_index import CodeSimHashQuery
+        try:
+            code_simhash_query = CodeSimHashQuery(args.code_simhash_index, db_path=args.db)
+        except (OSError, ValueError) as exc:
+            logger.error("结构 SimHash 索引不可用：{}", exc)
+            return 2
 
         def _recall():
             return query_repo(repo_path, store, get_emb(), top_k=args.top_k,
                               repos_root=args.repos_root, output_dir=out, simhash_query=simhash_query,
-                              skip_files=skip_files)
+                              skip_files=skip_files, db_path=args.db,
+                              code_simhash_query=code_simhash_query,
+                              history_coverage=coverage.as_dict(),
+                              require_signed_faiss=True)
         recall = timed("recall", _recall)
         funnel["recall_query_funcs"] = len(recall["results"])
         funnel["recall_candidates"] = recall["simhash"]["total_recalled"]
@@ -160,7 +203,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     # ---- exact ----
     if _should_run("exact", args.resume_from):
         from src.exact.verify import verify_recall
-        res = timed("exact", lambda: verify_recall(recall_path, db_path=args.db, output_dir=out))
+        res = timed("exact", lambda: verify_recall(
+            recall_path, db_path=args.db, output_dir=out, require_complete_recall=True))
         funnel["exact_compared"] = res["compared_pairs"]
         funnel["after_exact"] = res["tier_counts"]
 

@@ -9,6 +9,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from src.ingest.cloner import clone_repo, is_cloned
+
 # 流水线步骤顺序（normalize 并入 recall：新作品在召回时在线归一化）
 # fastpath：L0 文件指纹层，ingest 后 recall 前检测整文件复制，命中文件在 recall 跳过嵌入
 # ai_detect：AI 生成代码检测，独立于查重漏斗，产出 {repo}_ai_detect.json 供 report 章六并入
@@ -26,15 +28,9 @@ def local_ingest(repo_arg: str, work_root: str | Path) -> Path:
         work_root.mkdir(parents=True, exist_ok=True)
         name = repo_arg.rstrip("/").split("/")[-1].removesuffix(".git")
         dest = work_root / name
-        if not (dest / ".git").exists():
+        if not is_cloned(dest):
             logger.info("克隆新作品 {} → {}", repo_arg, dest)
-            # core.protectNTFS=false：容忍仓库里被误提交的含 ':' 的 Windows
-            # Zone.Identifier 类垃圾文件名，否则在 Windows 上 checkout 会失败。
-            subprocess.run(
-                ["git", "clone", "-c", "core.protectNTFS=false",
-                 "--depth", "200", repo_arg, str(dest)],
-                check=True, capture_output=True, text=True,
-            )
+            clone_repo(repo_arg, dest, depth=200)
         return dest
     return Path(repo_arg)
 
