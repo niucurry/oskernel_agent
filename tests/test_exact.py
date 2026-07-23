@@ -198,6 +198,35 @@ def test_verify_discards_below_half(tmp_path):
     assert out["suspects"] == []
 
 
+def test_verify_never_compares_cross_language_candidate(tmp_path):
+    db = tmp_path / "functions.db"
+    with FunctionStore(db) as store:
+        rec = FunctionRecord(
+            repo_id="2023/c_hist", file_path="kernel/sched.c",
+            start_line=1, end_line=6, func_name="schedule",
+            module_tag="sched", lang="c", raw_code=QUERY_RENAMED, normalized_code="",
+        )
+        fid = store.add_function(rec, [])
+        store.conn.commit()
+    recall = {
+        "query_repo_id": "2024/new",
+        "results": [{
+            "query": {"repo_id": "2024/new", "file_path": "kernel/sched.rs",
+                      "start_line": 1, "end_line": 6, "func_name": "schedule",
+                      "module_tag": "sched", "lang": "rust",
+                      "raw_code": QUERY_RENAMED, "normalized_code": ""},
+            "candidates": [{"id": fid, "score": 1.0, "payload": {}}],
+        }],
+    }
+    path = tmp_path / "cross_lang_recall.json"
+    path.write_text(json.dumps(recall), encoding="utf-8")
+
+    out = verify_recall(path, db_path=db, output_dir=tmp_path / "out")
+
+    assert out["compared_pairs"] == 0
+    assert out["suspects"] == []
+
+
 def test_fingerprint_candidate_bypasses_vector_gate_and_never_becomes_original(tmp_path):
     db, fid = _make_db_with_candidate(tmp_path)
     recall = {

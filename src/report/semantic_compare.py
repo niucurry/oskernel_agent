@@ -19,6 +19,8 @@ import hashlib
 import html
 import json
 import os
+import re
+import sqlite3
 import subprocess
 import uuid
 from collections import Counter, defaultdict
@@ -28,7 +30,8 @@ from loguru import logger
 
 from src.fastpath.scan import (WHOLE_FILE_LINE_RATIO, WHOLE_FILE_SIM_RATIO,
                                aggregate_file_similarity)
-from src.retrieval_contract import contract_errors, require_complete_contract
+from src.retrieval_contract import (CONTRACT_VERSION, contract_errors,
+                                    require_complete_contract)
 
 from .false_positives import (FP_REASON_DISP, false_positive_stats,
                               tag_false_positives, tag_internal_arch_dups)
@@ -38,6 +41,8 @@ from .upstream_baselines import (is_excluded_file_path, tag_upstream_baselines,
 
 DEFAULT_OUTPUT_DIR = "data/output"
 _SEMANTIC_PROMPT_VERSION = "semantic-cn-v2"
+_INNOVATION_PROMPT_VERSION = "innovation-map-cn-v1"
+DEFAULT_FUNCTIONS_DB = Path(__file__).resolve().parents[2] / "data" / "db" / "functions.db"
 
 # 子模块列表及其显示名称
 MODULES = ["sched", "mm", "fs", "trap", "driver", "arch", "other"]
@@ -310,6 +315,321 @@ def _original_functions(recall: dict, suspects: list[dict], top_n: int | None = 
     return out[:top_n] if top_n else out
 
 
+# ─── 1b. 相对参考 repo 的创新实现候选 ──────────────────────────────────────
+
+_BRANCH_RE = re.compile(r"\b(?:if|else\s+if|for|while|loop|match|switch|case|catch)\b|&&|\|\|")
+
+
+def _reference_repo_by_module(suspects: list[dict], recall: dict | None) -> dict[str, str]:
+    """按有效相似命中推断每个模块最主要的参考 repo；无命中时再用召回分数兜底。"""
+    counts: dict[str, Counter] = defaultdict(Counter)
+    global_counts: Counter = Counter()
+    for s in suspects:
+        if s.get("tier") not in ("confirmed", "review", "weak") or _is_excluded_pair(s):
+            continue
+        q = s.get("query_func") or {}
+        c = s.get("candidate_func") or {}
+        repo = str(c.get("repo_id") or "")
+        if not repo:
+            continue
+        mod = q.get("module_tag", "other")
+        mod = mod if mod in MODULES else "other"
+        weight = 3 if s.get("tier") == "confirmed" else 1
+        counts[mod][repo] += weight
+        global_counts[repo] += weight
+
+    # 没有进入嫌疑清单的模块仍可能有低于阈值的最近参考；只给低权重，避免压过有效命中。
+    if recall:
+        for item in recall.get("results", []):
+            q = item.get("query") or {}
+            mod = q.get("module_tag", "other")
+            mod = mod if mod in MODULES else "other"
+            for candidate in (item.get("candidates") or [])[:3]:
+                payload = candidate.get("payload") or candidate
+                repo = str(payload.get("repo_id") or "")
+                if not repo or payload.get("is_baseline") or match_library(payload.get("file_path")):
+                    continue
+                score = float(candidate.get("score") or 0.0)
+                if score > 0:
+                    counts[mod][repo] += score * 0.1
+                    global_counts[repo] += score * 0.02
+
+    global_repo = global_counts.most_common(1)[0][0] if global_counts else ""
+    return {
+        mod: (counts[mod].most_common(1)[0][0] if counts[mod] else global_repo)
+        for mod in MODULES
+    }
+
+
+def _load_functions_by_id(db_path: str | Path | None, ids: set[int]) -> dict[int, dict]:
+    """从 functions.db 补齐召回 payload 未携带的参考源码；数据库不可用时安静降级。"""
+    path = Path(db_path or DEFAULT_FUNCTIONS_DB)
+    if not ids or not path.is_file():
+        return {}
+    rows: dict[int, dict] = {}
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.row_factory = sqlite3.Row
+            ordered = sorted(ids)
+            for offset in range(0, len(ordered), 500):
+                chunk = ordered[offset:offset + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                sql = (
+                    "SELECT id, repo_id, file_path, start_line, end_line, func_name, "
+                    "module_tag, lang, raw_code FROM functions WHERE id IN (" + placeholders + ")"
+                )
+                for row in conn.execute(sql, chunk):
+                    rows[int(row["id"])] = dict(row)
+    except (OSError, sqlite3.Error) as exc:
+        logger.warning("[innovation] 参考函数源码读取失败：{}", exc)
+    return rows
+
+
+def build_innovation_candidates(
+    recall: dict | None,
+    suspects: list[dict],
+    functions_db_path: str | Path | None = None,
+    max_candidates: int = 18,
+) -> list[dict]:
+    """构造“目标未命中函数 ↔ 主要参考 repo 最近实现”的代码比较输入。
+
+    这里不做创新认定，只形成有代码、有来源、有稳定 key 的候选；后续 LLM 归纳和确定性
+    校验都只能引用这些 key，因此项目文档或模型臆造路径无法进入最终报告。
+    """
+    if not recall:
+        return []
+    refs_by_mod = _reference_repo_by_module(suspects, recall)
+    originals = _original_functions(recall, suspects)
+    original_keys = {(f["file"], f["func"]) for f in originals}
+    original_meta = {(f["file"], f["func"]): f for f in originals}
+
+    recall_items = []
+    for item in recall.get("results", []):
+        q = item.get("query") or {}
+        key = (q.get("file_path", ""), q.get("func_name", ""))
+        if key not in original_keys:
+            continue
+        lines = max(0, int(q.get("end_line") or 0) - int(q.get("start_line") or 0) + 1)
+        if lines < 5 or not (q.get("raw_code") or "").strip():
+            continue
+        mod = q.get("module_tag", "other")
+        mod = mod if mod in MODULES else "other"
+        recall_items.append((lines, item, original_meta[key], mod))
+    recall_items.sort(key=lambda x: -x[0])
+    balanced: list[tuple] = []
+    per_module: Counter = Counter()
+    for record in recall_items:
+        mod = record[3]
+        if per_module[mod] >= 4:
+            continue
+        per_module[mod] += 1
+        balanced.append(record)
+        if len(balanced) >= max_candidates:
+            break
+    recall_items = balanced
+
+    all_ref_ids: set[int] = set()
+    for _, item, _, _ in recall_items:
+        for candidate in item.get("candidates") or []:
+            payload = candidate.get("payload") or candidate
+            try:
+                all_ref_ids.add(int(candidate.get("id") or payload.get("id")))
+            except (TypeError, ValueError):
+                continue
+    hydrated = _load_functions_by_id(functions_db_path, all_ref_ids)
+
+    def same_language(query: dict, payload: dict, func_id: int) -> bool:
+        query_lang = str(query.get("lang") or "").lower()
+        ref_lang = str((hydrated.get(func_id) or {}).get("lang")
+                       or payload.get("lang") or "").lower()
+        return bool(query_lang and ref_lang and query_lang == ref_lang)
+
+    selected_refs: dict[int, tuple[dict, dict, str]] = {}
+    for _, item, _, mod in recall_items:
+        q = item.get("query") or {}
+        preferred_repo = refs_by_mod.get(mod, "")
+        candidates = []
+        for candidate in item.get("candidates") or []:
+            payload = candidate.get("payload") or candidate
+            try:
+                func_id = int(candidate.get("id") or payload.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if payload.get("is_baseline") or match_library(payload.get("file_path")):
+                continue
+            if not same_language(q, payload, func_id):
+                continue
+            repo = str(payload.get("repo_id") or "")
+            priority = 1 if preferred_repo and repo == preferred_repo else 0
+            candidates.append((priority, float(candidate.get("score") or 0.0), func_id, candidate, payload))
+        candidates.sort(key=lambda x: (-x[0], -x[1]))
+        for _, _, func_id, candidate, payload in candidates[:1]:
+            selected_refs[func_id] = (candidate, payload, preferred_repo)
+
+    result: list[dict] = []
+    reference_seq = 0
+    for index, (_, item, meta, mod) in enumerate(recall_items, start=1):
+        q = item.get("query") or {}
+        preferred_repo = refs_by_mod.get(mod, "")
+        refs: list[dict] = []
+        candidates = []
+        for candidate in item.get("candidates") or []:
+            payload = candidate.get("payload") or candidate
+            try:
+                func_id = int(candidate.get("id") or payload.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if func_id not in selected_refs:
+                continue
+            if not same_language(q, payload, func_id):
+                continue
+            repo = str(payload.get("repo_id") or "")
+            priority = 1 if preferred_repo and repo == preferred_repo else 0
+            candidates.append((priority, float(candidate.get("score") or 0.0), func_id, candidate, payload))
+        candidates.sort(key=lambda x: (-x[0], -x[1]))
+        for _, score, func_id, _, payload in candidates[:1]:
+            row = hydrated.get(func_id, {})
+            reference_seq += 1
+            refs.append({
+                "key": f"r{reference_seq:04d}",
+                "repo": row.get("repo_id") or payload.get("repo_id", ""),
+                "file": row.get("file_path") or payload.get("file_path", ""),
+                "start": int(row.get("start_line") or payload.get("start_line") or 0),
+                "end": int(row.get("end_line") or payload.get("end_line") or 0),
+                "func": row.get("func_name") or payload.get("func_name", ""),
+                "lang": row.get("lang") or payload.get("lang", ""),
+                "score": round(score, 3),
+                "raw_code": (row.get("raw_code") or "")[:1400],
+            })
+        result.append({
+            "key": f"t{index:04d}",
+            "module": mod,
+            "module_display": _MODULE_DISPLAY.get(mod, mod),
+            "reference_repo": preferred_repo or (refs[0]["repo"] if refs else ""),
+            "file": q.get("file_path", ""),
+            "start": int(q.get("start_line") or 0),
+            "end": int(q.get("end_line") or 0),
+            "func": q.get("func_name", ""),
+            "lang": q.get("lang", ""),
+            "lines": int(meta.get("lines") or 0),
+            "raw_code": (q.get("raw_code") or "")[:1800],
+            "references": refs,
+        })
+    return result
+
+
+def _innovation_complexity(targets: list[dict]) -> dict:
+    files = {t["file"] for t in targets if t.get("file")}
+    code_lines = sum(max(0, int(t.get("lines") or 0)) for t in targets)
+    branches = sum(len(_BRANCH_RE.findall(t.get("raw_code") or "")) for t in targets)
+    symbol_count = len({(t.get("file"), t.get("func")) for t in targets})
+    score = round(
+        min(code_lines, 400) * 0.14
+        + min(branches, 40) * 0.9
+        + min(symbol_count, 10) * 3
+        + min(len(files), 6) * 4
+    )
+    score = max(0, min(100, score))
+    return {
+        "level": "高" if score >= 60 else ("中" if score >= 30 else "低"),
+        "score": score,
+        "code_lines": code_lines,
+        "file_count": len(files),
+        "symbol_count": symbol_count,
+        "branch_points": branches,
+    }
+
+
+def _fallback_innovation_points(candidates: list[dict]) -> list[dict]:
+    """LLM 不可用时保守展示代码差异候选，不把“未命中”冒充已证实创新。"""
+    by_module: dict[str, list[dict]] = defaultdict(list)
+    for candidate in candidates:
+        by_module[candidate["module"]].append(candidate)
+    points: list[dict] = []
+    for mod in MODULES:
+        targets = by_module.get(mod, [])[:3]
+        if not targets:
+            continue
+        refs = [ref for target in targets for ref in target.get("references", [])[:1]]
+        reference_repo = targets[0].get("reference_repo") or (refs[0]["repo"] if refs else "")
+        funcs = "、".join(t["func"] for t in targets)
+        points.append({
+            "title": f'{_MODULE_DISPLAY.get(mod, mod)}代码差异候选：{funcs}',
+            "kind": "待核验候选",
+            "confidence": "low",
+            "reference_repo": reference_repo,
+            "baseline": (
+                f"以 {reference_repo} 中的最近邻函数为比较基线；当前未启用语义模型，"
+                "无法自动确认二者是否承担同一机制。"
+            ),
+            "delta": "这些目标函数未形成有效历史相似命中，只能说明实现存在代码差异，不能据此直接认定创新。",
+            "why_it_matters": "建议点击目标与参考实现，人工核对数据结构、控制流和跨函数协作。",
+            "targets": targets,
+            "references": refs,
+            "complexity": _innovation_complexity(targets),
+        })
+        if len(points) >= 5:
+            break
+    return points
+
+
+def _normalize_innovation_points(raw: object, candidates: list[dict]) -> list[dict]:
+    target_map = {c["key"]: c for c in candidates}
+    ref_map = {r["key"]: r for c in candidates for r in c.get("references", [])}
+    items = raw.get("innovations", []) if isinstance(raw, dict) else []
+    normalized: list[dict] = []
+    used_target_keys: set[str] = set()
+    for item in items[:8] if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        raw_target_keys = item.get("target_keys", [])
+        raw_target_keys = raw_target_keys if isinstance(raw_target_keys, list) else []
+        target_keys = list(dict.fromkeys(raw_target_keys))
+        target_keys = [k for k in target_keys if k in target_map and k not in used_target_keys]
+        targets = [target_map[k] for k in target_keys]
+        raw_reference_keys = item.get("reference_keys", [])
+        raw_reference_keys = raw_reference_keys if isinstance(raw_reference_keys, list) else []
+        refs = [ref_map[k] for k in dict.fromkeys(raw_reference_keys) if k in ref_map]
+        title = str(item.get("title") or "").strip()
+        baseline = str(item.get("baseline") or "").strip()
+        delta = str(item.get("delta") or "").strip()
+        if not targets or not title or not baseline or not delta:
+            continue
+        # 只能引用与这些目标函数真实关联的 reference key，防止模型跨卡拼错来源。
+        allowed_refs = {r["key"] for target in targets for r in target.get("references", [])}
+        refs = [r for r in refs if r["key"] in allowed_refs]
+        repo_counts = Counter(r["repo"] for r in refs if r.get("repo"))
+        if not repo_counts:
+            repo_counts.update(t.get("reference_repo", "") for t in targets if t.get("reference_repo"))
+        confidence = str(item.get("confidence") or "medium").lower()
+        if confidence not in ("high", "medium", "low"):
+            confidence = "medium"
+        if not refs and confidence == "high":
+            confidence = "medium"
+        if refs and not any((r.get("raw_code") or "").strip() for r in refs):
+            confidence = "low"
+            baseline = (
+                f"已定位到 {repo_counts.most_common(1)[0][0] if repo_counts else '参考 repo'} 的最近函数，"
+                "但 functions.db 未提供参考源码，无法自动核验其机制基线。"
+            )
+            delta = "目标代码未形成有效相似命中；在缺少参考源码时只能列为待人工核验的差异候选。"
+        normalized.append({
+            "title": title[:120],
+            "kind": str(item.get("kind") or "工程改良")[:40],
+            "confidence": confidence,
+            "reference_repo": repo_counts.most_common(1)[0][0] if repo_counts else "未识别",
+            "baseline": baseline[:400],
+            "delta": delta[:400],
+            "why_it_matters": str(item.get("why_it_matters") or "")[:400],
+            "targets": targets,
+            "references": refs,
+            "complexity": _innovation_complexity(targets),
+        })
+        used_target_keys.update(target_keys)
+    return normalized or _fallback_innovation_points(candidates)
+
+
+
 # ─── 2. 收集代码对（按 query 函数聚合全部候选） ──────────────────────────────
 
 _TIER_RANK = {"confirmed": 3, "review": 2, "weak": 1}
@@ -421,6 +741,23 @@ def _limit_per_module(groups: list[dict], n: int) -> list[dict]:
         gs = sorted(by_mod.get(mod, []), key=lambda x: -x["overall_sim"])
         out.extend(gs[:n])
     return out
+
+
+def _exclude_confirmed_review_groups(review_groups: list[dict],
+                                     confirmed_groups: list[dict]) -> list[dict]:
+    """按 (文件, 函数名) 去重；已进入 confirmed 时不再在模型存疑清单重复出现。"""
+    confirmed_keys = {
+        (g.get("query_file", ""), g.get("query_func", "")) for g in confirmed_groups
+    }
+    result = []
+    seen = set()
+    for g in review_groups:
+        key = (g.get("query_file", ""), g.get("query_func", ""))
+        if key in confirmed_keys or key in seen:
+            continue
+        seen.add(key)
+        result.append(g)
+    return result
 
 
 # ─── 3. 上下文文件 + opencode 短消息 ─────────────────────────────────────────
@@ -691,6 +1028,142 @@ def run_semantic_analysis(
     return html_content
 
 
+_INNOVATION_SYSTEM = """你是 OS 内核代码差异分析助手。你的任务不是复述 README，也不是把
+“未检出相似”直接改名为“创新”，而是仅根据给出的目标函数源码与参考 repo 最近实现，归纳
+相对参考实现有实质意义的机制变化。
+
+判断顺序：
+1. 先确认目标与参考是否属于可比较的同一职责；职责不同的最近邻不能作为创新基线。
+2. 比较数据结构、控制流、同步/并发、状态机、错误处理和跨函数协作；变量改名、代码增量、
+   多几个 wrapper、调用成熟第三方库不算创新。
+3. 可以把同一机制的多个 target key 合成一个创新点，但不能把无关函数硬凑成“大创新”。
+4. 每个结论必须引用输入中真实存在的 target_keys；reference_keys 也只能引用输入 key。
+5. 输入不含项目文档，禁止根据项目自述下结论。证据不足时省略，或用 kind="存疑"、
+   confidence="low" 明确标注。
+
+只输出合法 JSON，不要 Markdown。格式：
+{"innovations":[{
+  "title":"简洁机制名",
+  "kind":"架构扩展|机制改良|工程增强|存疑",
+  "baseline":"参考 repo 的对应机制如何实现",
+  "delta":"目标 repo 在代码层具体改变了什么",
+  "why_it_matters":"带来的能力、性能、安全性或代价",
+  "confidence":"high|medium|low",
+  "target_keys":["t0001"],
+  "reference_keys":["r0001"]
+}]}
+
+输出 2–6 个最有实质性的条目；确实不足 2 个时可以更少，不能凑数。所有自然语言字段使用简体中文。
+"""
+
+
+def _innovation_message(query_repo_id: str, candidates: list[dict]) -> str:
+    compact = []
+    for candidate in candidates:
+        compact.append({
+            "key": candidate["key"],
+            "module": candidate["module_display"],
+            "reference_repo": candidate.get("reference_repo", ""),
+            "target": {
+                "file": candidate["file"], "start": candidate["start"], "end": candidate["end"],
+                "func": candidate["func"], "raw_code": candidate["raw_code"],
+            },
+            "references": candidate.get("references", []),
+        })
+    return (
+        f"目标仓库：{query_repo_id}\n"
+        "下面每个条目都是‘暂未形成有效历史相似命中’的代码差异候选，并非已认定创新。"
+        "请严格比较代码后再归纳：\n"
+        + json.dumps(compact, ensure_ascii=False, indent=2)
+    )
+
+
+def _parse_json_object(text: str) -> dict | None:
+    cleaned = (text or "").strip()
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", cleaned, re.DOTALL | re.IGNORECASE)
+    if fenced:
+        cleaned = fenced.group(1).strip()
+    try:
+        parsed = json.loads(cleaned)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                parsed = json.loads(cleaned[start:end + 1])
+                return parsed if isinstance(parsed, dict) else None
+            except json.JSONDecodeError:
+                pass
+    return None
+
+
+def run_innovation_analysis(
+    query_repo_id: str,
+    candidates: list[dict],
+    work_dir: Path,
+    skip_llm: bool = False,
+    timeout: int = 120,
+) -> list[dict]:
+    """代码对比归纳创新点；返回值已绑定真实 key 并补充确定性复杂度。"""
+    if not candidates:
+        return []
+    if skip_llm:
+        return _fallback_innovation_points(candidates)
+
+    signature = json.dumps(
+        [(c["key"], c["file"], c["func"], c.get("reference_repo"),
+          [(r["key"], r["repo"], r["func"], r["score"]) for r in c.get("references", [])])
+         for c in candidates],
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    cache_dir = work_dir.resolve() / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{_cache_key(_INNOVATION_PROMPT_VERSION, query_repo_id, signature)}.innovation.json"
+    if cache_path.is_file():
+        try:
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
+            return _normalize_innovation_points(cached, candidates)
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    try:
+        from oskernel_agent import config as _cfg
+        api_key = _cfg.api.get("key", "").strip()
+        base_url = _cfg.api.get("base_url", "https://api.deepseek.com/v1").strip()
+    except Exception:
+        api_key = base_url = ""
+    if not api_key:
+        logger.warning("[innovation] 未找到 API key，使用保守代码差异候选")
+        return _fallback_innovation_points(candidates)
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+        response = client.chat.completions.create(
+            model=os.getenv("LLM_MODEL", "deepseek-v4-flash"),
+            messages=[
+                {"role": "system", "content": _INNOVATION_SYSTEM},
+                {"role": "user", "content": _innovation_message(query_repo_id, candidates)},
+            ],
+            temperature=0.15,
+            max_tokens=5000,
+        )
+        parsed = _parse_json_object(response.choices[0].message.content or "")
+    except Exception as exc:
+        logger.warning("[innovation] 代码差异归纳失败：{}，使用保守候选", exc)
+        parsed = None
+    if parsed is None:
+        return _fallback_innovation_points(candidates)
+    try:
+        cache_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    points = _normalize_innovation_points(parsed, candidates)
+    logger.info("[innovation] 生成 {} 个创新实现映射", len(points))
+    return points
+
+
 def _extract_html_from_text(text: str) -> str:
     """从 opencode stdout 中提取 HTML 片段（agent 有时直接输出而非写文件）。"""
     import re
@@ -747,19 +1220,19 @@ def _fallback_analysis(file_pairs: list[dict], submodule_stats: dict) -> str:
 # ─── 5. 生成完整 HTML 报告 ────────────────────────────────────────────────────
 
 def _pct_bar(copy_pct: float, review_pct: float = 0.0, original_pct: float | None = None) -> str:
-    """借鉴/疑似借鉴/原创 三色进度条（借鉴 红 + 疑似借鉴 琥珀 + 原创 绿）。"""
+    """高度疑似/模型仍存疑/暂未检出 三色进度条。"""
     c = round(copy_pct * 100)
     rv = round(review_pct * 100)
     o = max(0, 100 - c - rv)
     seg = ""
     if c:
-        seg += f'<div class="pct-copy" style="width:{c}%">{c}%&nbsp;借鉴</div>'
+        seg += f'<div class="pct-copy" style="width:{c}%">{c}%&nbsp;高度疑似借鉴</div>'
     if rv:
-        seg += f'<div class="pct-review" style="width:{rv}%">{rv}%&nbsp;疑似借鉴</div>'
+        seg += f'<div class="pct-review" style="width:{rv}%">{rv}%&nbsp;模型复核后仍存疑</div>'
     if o:
-        seg += f'<div class="pct-orig" style="width:{o}%">{o}%&nbsp;原创</div>'
-    title = (f"借鉴 {c}% / 疑似借鉴 {rv}% / 原创 {o}%" if rv
-             else f"借鉴 {c}% / 原创 {o}%")
+        seg += f'<div class="pct-orig" style="width:{o}%">{o}%&nbsp;暂未检出相似</div>'
+    title = (f"高度疑似借鉴 {c}% / 模型复核后仍存疑 {rv}% / 暂未检出相似 {o}%" if rv
+             else f"高度疑似借鉴 {c}% / 暂未检出相似 {o}%")
     return f'<div class="pct-bar" title="{title}">{seg}</div>'
 
 
@@ -773,16 +1246,16 @@ def _echarts_overview(submodule_stats: dict) -> str:
     rev_vals  = [round(submodule_stats[m].get("review_pct", 0.0) * 100, 1) for m in mods]
     orig_vals = [round(submodule_stats[m]["original_pct"] * 100, 1) for m in mods]
     show_rev = any(v > 0 for v in rev_vals)   # 不确定的复核结果会保留 review 档
-    series = [{"name": "借鉴", "type": "bar", "stack": "pct", "data": copy_vals[::-1],
+    series = [{"name": "高度疑似借鉴", "type": "bar", "stack": "pct", "data": copy_vals[::-1],
                "itemStyle": {"color": "#ef4444"}, "label": {"show": True, "formatter": "{c}%"}}]
     if show_rev:
-        series.append({"name": "疑似借鉴", "type": "bar", "stack": "pct", "data": rev_vals[::-1],
+        series.append({"name": "模型复核后仍存疑", "type": "bar", "stack": "pct", "data": rev_vals[::-1],
                        "itemStyle": {"color": "#f59e0b"}, "label": {"show": True, "formatter": "{c}%"}})
-    series.append({"name": "原创", "type": "bar", "stack": "pct", "data": orig_vals[::-1],
+    series.append({"name": "暂未检出相似", "type": "bar", "stack": "pct", "data": orig_vals[::-1],
                    "itemStyle": {"color": "#22c55e"}, "label": {"show": True, "formatter": "{c}%"}})
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
-        "legend": {"data": ["借鉴"] + (["疑似借鉴"] if show_rev else []) + ["原创"]},
+        "legend": {"data": ["高度疑似借鉴"] + (["模型复核后仍存疑"] if show_rev else []) + ["暂未检出相似"]},
         "grid": {"left": "25%", "right": "12%", "top": "8%", "bottom": "6%"},
         "xAxis": {"type": "value", "max": 100,
                   "axisLabel": {"formatter": "{value}%"}},
@@ -806,7 +1279,7 @@ def _echarts_tier_distribution(submodule_stats: dict) -> str:
     labels = [_MODULE_DISPLAY.get(m, m) for m in mods]
     conf = [submodule_stats[m]["confirmed"] for m in mods]
     series = [
-        ("疑似借鉴", conf, "#ef4444"),
+        ("高度疑似借鉴", conf, "#ef4444"),
     ]
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
@@ -831,27 +1304,27 @@ def _echarts_tier_distribution(submodule_stats: dict) -> str:
 
 def _echarts_overall_donut(copy_pct: float, review_pct: float = 0.0,
                            original_pct: float | None = None) -> str:
-    """整体 借鉴/疑似借鉴/原创 环形图（按函数加权），中心标注借鉴百分比。"""
+    """整体 高度疑似/模型仍存疑/暂未检出 环形图（按函数加权）。"""
     c = round(copy_pct, 1)
     rv = round(review_pct, 1)
     o = round(original_pct if original_pct is not None else max(0.0, 100 - c - rv), 1)
     option = {
         "title": {
-            "text": f"{c}%", "subtext": "疑似借鉴占纳入统计函数",
+            "text": f"{c}%", "subtext": "高度疑似占纳入统计函数",
             "left": "center", "top": "38%",
             "textAlign": "center",
             "textStyle": {"fontSize": 26, "fontWeight": "bold", "color": "#ef4444"},
             "subtextStyle": {"fontSize": 11, "color": "#64748b"},
         },
         "tooltip": {"trigger": "item", "formatter": "{b}: {c}%"},
-        "legend": {"bottom": 0, "data": ["疑似借鉴"] + (["待复核"] if rv else []) + ["自研/原创"]},
+        "legend": {"bottom": 0, "data": ["高度疑似借鉴"] + (["模型复核后仍存疑"] if rv else []) + ["暂未检出相似"]},
         "series": [{
             "name": "占比", "type": "pie", "radius": ["54%", "78%"],
             "center": ["50%", "44%"], "avoidLabelOverlap": False,
             "label": {"show": False}, "labelLine": {"show": False},
-            "data": [{"value": c, "name": "疑似借鉴", "itemStyle": {"color": "#ef4444"}}]
-                    + ([{"value": rv, "name": "待复核", "itemStyle": {"color": "#f59e0b"}}] if rv else [])
-                    + [{"value": o, "name": "自研/原创", "itemStyle": {"color": "#22c55e"}}],
+            "data": [{"value": c, "name": "高度疑似借鉴", "itemStyle": {"color": "#ef4444"}}]
+                    + ([{"value": rv, "name": "模型复核后仍存疑", "itemStyle": {"color": "#f59e0b"}}] if rv else [])
+                    + [{"value": o, "name": "暂未检出相似", "itemStyle": {"color": "#22c55e"}}],
         }],
     }
     return (
@@ -875,7 +1348,7 @@ def _echarts_top_sources(suspects: list[dict], top: int = 8) -> str:
     labels = [k for k, _ in order][::-1]
     conf = [v["confirmed"] for _, v in order][::-1]
     series = [
-        ("疑似借鉴", conf, "#ef4444"),
+        ("高度疑似借鉴", conf, "#ef4444"),
     ]
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
@@ -902,7 +1375,9 @@ def _echarts_top_sources(suspects: list[dict], top: int = 8) -> str:
 _LEGEND_HTML = (
     '<div class="legend">'
     '<span><b>档位：</b></span>'
-    '<span><span class="dot" style="background:#ef4444"></span>疑似借鉴（与历史代码逐行高度相似，待人工判定）</span>'
+    '<span><span class="dot" style="background:#ef4444"></span>高度疑似借鉴</span>'
+    '<span><span class="dot" style="background:#f59e0b"></span>模型复核后仍存疑</span>'
+    '<span><span class="dot" style="background:#22c55e"></span>暂未检出相似</span>'
     '<span style="margin-left:.6rem"><b>相似程度：</b></span>'
     '<span>完全相同（逐行逐字一致）</span>'
     '<span>近乎相同（仅零星行不同，≤15%）</span>'
@@ -965,22 +1440,23 @@ def _retrieval_status(contract: dict | None) -> str:
     coverage = contract["history_coverage"]
     channels = "、".join(contract.get("channels") or [])
     return (
-        '<section id="retrieval-contract" data-retrieval-contract-version="2" '
+        f'<section id="retrieval-contract" data-retrieval-contract-version="{CONTRACT_VERSION}" '
         'data-retrieval-complete="true" class="mb-5 p-3 rounded border border-emerald-300 bg-emerald-50">'
         '<div class="text-sm font-semibold text-emerald-800">召回完整性已核验</div>'
         f'<p class="text-xs text-emerald-700 mt-1 mb-0">历史作品覆盖 '
         f'{coverage["covered"]}/{coverage["configured"]}；候选禁止静默截断；'
-        f'启用通道：{html.escape(channels)}。未命中仍只表示“当前系统暂未检出”，不等于原创认定。</p>'
+        f'仅比较同一编程语言；启用通道：{html.escape(channels)}。'
+        '未命中仍只表示“当前系统暂未检出”，不等于原创认定。</p>'
         '</section>'
     )
 
 
-def _reading_guide(query_repo_id: str, borrowed_n: int, original_n: int,
+def _reading_guide(query_repo_id: str, borrowed_n: int, review_n: int, original_n: int,
                    overall_copy_pct: float, excl: dict,
                    retrieval_contract: dict | None = None) -> str:
     """报告顶部「导读 + 体检结论」卡：用大白话告诉第一次看报告的老师——这是什么、数字怎么读、
     系统做了哪些自动过滤、该如何使用。回应「辅助参考而非最终裁决」的项目定位。"""
-    total_kept = borrowed_n + original_n
+    total_kept = borrowed_n + review_n + original_n
     # 体检结论（按疑似借鉴占比给一句话定性，中性、不替评审下结论）
     if overall_copy_pct <= 5:
         verdict, vcolor, vicon = "当前库内相似命中较少", "#16a34a", "✓"
@@ -1001,7 +1477,7 @@ def _reading_guide(query_repo_id: str, borrowed_n: int, original_n: int,
     if excl.get("baseline"):  excl_parts.append(f"上游基线衍生 {excl['baseline']}")
     if excl.get("library"):   excl_parts.append(f"第三方库 {excl['library']}")
     if excl.get("common"):    excl_parts.append(f"公共样板 {excl['common']}")
-    if excl.get("false_positive"): excl_parts.append(f"跨架构/跨语言误报 {excl['false_positive']}")
+    if excl.get("false_positive"): excl_parts.append(f"跨架构/样板误报 {excl['false_positive']}")
     excl_detail = "、".join(excl_parts) if excl_parts else "无"
 
     return (
@@ -1022,17 +1498,18 @@ def _reading_guide(query_repo_id: str, borrowed_n: int, original_n: int,
         f'style="background:{vcolor}1a;color:{vcolor}">'
         f'<span class="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs" '
         f'style="background:{vcolor}">{vicon}</span>'
-        f'初步体检：{verdict}（疑似借鉴占纳入统计函数 {overall_copy_pct}%）</div>'
+        f'初步体检：{verdict}（高度疑似借鉴占纳入统计函数 {overall_copy_pct}%）</div>'
         f'<p class="text-sm text-slate-600 mt-2 mb-0">{vtext}</p>'
         # 透明度：扣除了多少误报
         '<div class="mt-3 text-xs text-slate-500 bg-white/70 rounded px-3 py-2 border border-slate-200">'
-        f'📊 <b>过滤透明度</b>：系统在 <b>{total_kept}</b> 个纳入统计函数中标记出 <b>{borrowed_n}</b> 个疑似借鉴；'
+        f'📊 <b>过滤透明度</b>：系统纳入统计 <b>{total_kept}</b> 个函数，其中 '
+        f'<b>{borrowed_n}</b> 个高度疑似、<b>{review_n}</b> 个模型复核后仍存疑；'
         f'另已剔除 <b>{excl_total}</b> 个机械重复函数（{excl_detail}），这些不计入上方借鉴统计，'
         '在报告末尾「附：不计入借鉴的代码」分类列出，可点开核对。'
         '</div>'
         '<p class="text-xs text-slate-400 mt-2 mb-0">'
-        '建议用法：①看本卡体检结论 → ②翻各模块「疑似借鉴清单」逐条核对代码证据与来源链接 → '
-        '③对存疑项点开代码并排对照，结合「语义级分析」判断是真借鉴还是通用写法。</p>'
+        '建议用法：①看总体结果 → ②先核对「高度疑似借鉴」的代码证据 → '
+        '③再查看「模型复核后仍存疑」清单 → ④结合创新实现地图与排除项完成判断。</p>'
         '</div></div></section>'
     )
 
@@ -1057,12 +1534,11 @@ def _summary_card(
     overall_original_pct = round(original_n / all_total * 100, 1)
 
     # KPI 卡片（按函数；库复用 / 公共样板已剔除，单列各自小节）
-    # 「已确认借鉴」改称「疑似借鉴（待人工判定）」——与「辅助参考非最终裁决」定位一致，
-    # 避免老师误读为系统已定性抄袭。
+    # 高度疑似与模型仍存疑明确分栏，避免把“已经过模型但模型拿不准”误读成尚未审核。
     kpis = (
         '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">'
-        + _kpi(f"{borrowed_n}", "疑似借鉴·待人工判定（函数）", "#ef4444")
-        + (_kpi(f"{review_n}", "疑似借鉴（函数）", "#d97706") if review_n else "")
+        + _kpi(f"{borrowed_n}", "高度疑似借鉴（函数）", "#ef4444")
+        + (_kpi(f"{review_n}", "模型复核后仍存疑（函数）", "#d97706") if review_n else "")
         + _kpi(f"{original_n}", "暂未检出相似（函数）", "#16a34a")
         + _kpi(f"{file_match_count}", "整文件相同（文件）", "#e11d48")
         + _kpi(f"{file_similar_count}", "整体相似文件（个）", "#d97706")
@@ -1074,39 +1550,39 @@ def _summary_card(
     top_src = _echarts_top_sources(suspects)
     head_charts = (
         '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 items-start">'
-        '<div><div class="text-sm font-semibold text-slate-700">疑似借鉴占比（按纳入统计函数加权）</div>'
+        '<div><div class="chart-title">整体结果分布（按纳入统计函数）</div>'
         + donut + '</div>'
-        + ('<div><div class="text-sm font-semibold text-slate-700">相似来源最多的历史作品（Top 8）</div>'
+        + ('<div><div class="chart-title">高度疑似来源最多的历史作品（Top 8）</div>'
            + top_src + '</div>' if top_src else '<div></div>')
         + '</div>'
     )
 
     tier_chart = (
-        '<div class="mt-4 text-sm font-semibold text-slate-700">各模块疑似借鉴函数数（待人工判定）</div>'
+        '<div class="chart-title mt-4">各模块高度疑似借鉴函数数</div>'
         + _echarts_tier_distribution(submodule_stats)
     )
-    pct_title = ('各模块 借鉴 / 疑似借鉴 / 原创 占比' if review_n
-                 else '各模块 借鉴 / 原创 占比')
+    pct_title = ('各模块：高度疑似 / 模型仍存疑 / 暂未检出 占比' if review_n
+                 else '各模块：高度疑似 / 暂未检出 占比')
     pct_chart = (
-        f'<div class="mt-4 text-sm font-semibold text-slate-700">{pct_title}</div>'
+        f'<div class="chart-title mt-4">{pct_title}</div>'
         + _echarts_overview(submodule_stats)
     )
 
     # 顶部导读 + 体检结论卡（老师第一眼看到，建立正确语境）
-    guide = _reading_guide(query_repo_id, borrowed_n, original_n,
+    guide = _reading_guide(query_repo_id, borrowed_n, review_n, original_n,
                            overall_copy_pct, _exclusion_totals(suspects),
                            retrieval_contract)
 
     return (
         guide +
         '<section id="summary" data-section-id="summary" '
-        'class="mb-8 p-6 rounded-lg border border-slate-300 bg-white shadow-sm">'
-        '<h2 class="text-lg font-bold text-slate-800 m-0">'
-        f'{html.escape(query_repo_id)} '
-        '<span class="text-slate-400 font-normal text-base">查重对比分析报告</span>'
-        '</h2>'
+        'class="summary-card">'
+        '<div class="summary-heading"><div><span class="summary-eyebrow">REPORT OVERVIEW</span>'
+        '<h2>总体结果</h2></div><span class="summary-repo">'
+        f'{html.escape(query_repo_id)}</span></div>'
         '<p class="text-xs text-slate-500 mt-1 mb-0">下列数字为<b>扣除上游框架/库/规范受限代码后的待评估口径</b>；'
-        '「疑似借鉴」指与历史作品相似、<b>需人工判定</b>，非系统已认定抄袭。</p>'
+        '「高度疑似借鉴」和「模型复核后仍存疑」均为辅助筛查结果，'
+        '<b>需结合代码证据人工判断</b>，不代表系统已经认定抄袭。</p>'
         f'{_LEGEND_HTML}{kpis}{head_charts}{tier_chart}{pct_chart}'
         '</section>'
     )
@@ -1181,7 +1657,7 @@ def _diff_cols(left_code: str, right_code: str) -> tuple[str, str]:
     return fmt(left), fmt(right)
 
 
-def _code_evidence(group: dict) -> tuple[str, str]:
+def _code_evidence(group: dict, colspan: int = 6) -> tuple[str, str]:
     """返回 (toggle_html, panel_row_html)：可折叠的「新作品 vs 最强候选来源」并排代码。
 
     数据已在 collect_file_pairs 收集（query_code/各候选 ref_code），此前只送给 LLM、
@@ -1199,7 +1675,7 @@ def _code_evidence(group: dict) -> tuple[str, str]:
     )
     src_label = html.escape(f'{best.get("ref_repo","")}/{best.get("ref_file","")}:{best.get("ref_start","")}')
     panel = (
-        '<tr x-show="o" x-cloak><td colspan="6" class="p-0">'
+        f'<tr x-show="o" x-cloak><td colspan="{colspan}" class="p-0">'
         '<div class="code-pair">'
         '<div class="code-col"><div class="code-h">新作品（差异行标黄）</div>'
         f'<div class="code-body">{left_html}</div></div>'
@@ -1212,9 +1688,9 @@ def _code_evidence(group: dict) -> tuple[str, str]:
 
 _REVIEW_VERDICT_STYLE = {
     "借鉴":   ("bg-red-50 text-red-700", "借鉴"),
-    "疑似":   ("bg-amber-50 text-amber-700", "疑似借鉴"),
+    "疑似":   ("bg-amber-50 text-amber-700", "模型仍存疑"),
     "非借鉴": ("bg-green-50 text-green-700", "非借鉴"),
-    "未复核": ("bg-slate-100 text-slate-500", "未复核"),
+    "未复核": ("bg-slate-100 text-slate-500", "复核未完成"),
 }
 
 
@@ -1237,7 +1713,7 @@ def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, ac
         return ""
     bodies = []
     for g in groups:
-        toggle, panel = _code_evidence(g)
+        toggle, panel = _code_evidence(g, 7 if show_verdict else 6)
         main = (
             '<tr>'
             '<td class="font-mono text-xs align-top">'
@@ -1282,6 +1758,67 @@ def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, ac
     )
 
 
+def _toc_link(sid: str, label: str, badge: str = "", badge_tone: str = "default") -> str:
+    """生成高度和对齐方式一致的目录项。长标题最多显示两行，数字徽标固定靠右。"""
+    badge_html = ""
+    if badge:
+        badge_html = (
+            f'<span class="toc-badge {html.escape(badge_tone)}">'
+            f'{html.escape(str(badge))}</span>'
+        )
+    return (
+        f'<a class="toc-link" href="#{html.escape(sid)}">'
+        f'<span class="toc-link-label">{html.escape(label)}</span>{badge_html}</a>'
+    )
+
+
+def _toc_group(title: str, items: list[str]) -> str:
+    if not items:
+        return ""
+    return (
+        '<div class="toc-group">'
+        f'<div class="toc-group-title">{html.escape(title)}</div>'
+        + "".join(items) + '</div>'
+    )
+
+
+def _collapsible_html(sid: str, title: str, body: str, *, default_open: bool = True,
+                      tone: str = "default", subtitle: str = "") -> str:
+    """对比报告所有正文卡片共用的结构，避免各节边距、标题和折叠按钮各写一套。"""
+    opened = "true" if default_open else "false"
+    subtitle_html = (
+        f'<span class="section-subtitle">{html.escape(subtitle)}</span>' if subtitle else ""
+    )
+    return (
+        f'<section id="{html.escape(sid)}" data-section-id="{html.escape(sid)}" '
+        f'class="report-section" data-tone="{html.escape(tone)}" '
+        f'x-data="{{open: {opened}}}" '
+        f'x-init="(function(){{const s=localStorage.getItem(\'cmp:{sid}\');'
+        f'if(s!==null)open=(s===\'1\');}})()">'
+        '<button type="button" class="section-toggle" '
+        f'@click="open=!open;localStorage.setItem(\'cmp:{sid}\',open?\'1\':\'0\')" '
+        ':aria-expanded="open.toString()">'
+        '<span class="section-chevron" aria-hidden="true" x-text="open?\'▾\':\'▸\'"></span>'
+        '<span class="section-heading">'
+        f'<span class="section-title">{html.escape(title)}</span>{subtitle_html}</span>'
+        '</button>'
+        f'<div class="section-body" x-show="open" x-cloak>{body}</div>'
+        '</section>'
+    )
+
+
+def _chapter_heading(index: str, title: str, description: str) -> str:
+    """正文一级分组标题；不加入滚动监听，目录仍精确定位到实际内容卡片。"""
+    return (
+        '<div class="chapter-heading">'
+        f'<span class="chapter-index">{html.escape(index)}</span>'
+        '<div>'
+        f'<h2>{html.escape(title)}</h2>'
+        f'<p>{html.escape(description)}</p>'
+        '</div></div>'
+    )
+
+
 def _module_section(
     mod: str,
     submodule_stats: dict,
@@ -1308,26 +1845,26 @@ def _module_section(
     # 子模块统计概要行（借鉴/原创，按函数；库复用/公共样板不计入）
     # review 档可能来自不确定或失败的复核，存在时必须继续展示。
     rev_n = stats.get("review", 0)
-    review_chip = (f'<span class="px-2 py-0.5 rounded bg-amber-50 text-amber-700">'
-                   f'疑似借鉴 {review_pct*100:.0f}%</span>') if rev_n else ""
-    review_cnt = f' / 疑似借鉴 {rev_n}' if rev_n else ""
+    review_chip = (f'<span class="status-chip status-review">'
+                   f'模型复核后仍存疑 {review_pct*100:.0f}%</span>') if rev_n else ""
+    review_cnt = f' / 模型复核后仍存疑 {rev_n}' if rev_n else ""
     stat_row = (
-        f'<div class="flex flex-wrap gap-3 text-sm mb-3">'
-        f'<span class="px-2 py-0.5 rounded bg-red-50 text-red-700">'
-        f'借鉴 {copy_pct*100:.0f}%</span>'
+        f'<div class="module-summary">'
+        f'<span class="status-chip status-confirmed">'
+        f'高度疑似借鉴 {copy_pct*100:.0f}%</span>'
         + review_chip +
-        f'<span class="px-2 py-0.5 rounded bg-green-50 text-green-700">'
+        f'<span class="status-chip status-original">'
         f'暂未检出相似 {original_pct*100:.0f}%</span>'
-        f'<span class="text-slate-500">函数总数 {stats.get("total","—")} 个 | '
-        f'借鉴 {stats.get("confirmed",0)}{review_cnt} / 暂未检出 {stats.get("original",0)}</span>'
-        f'<span class="text-slate-400">主要来源：{html.escape(stats.get("top_source","—"))}</span>'
+        f'<span class="module-summary-text">函数总数 {stats.get("total","—")} 个 · '
+        f'高度疑似 {stats.get("confirmed",0)}{review_cnt} · 暂未检出 {stats.get("original",0)}</span>'
+        f'<span class="module-summary-source">主要来源：{html.escape(stats.get("top_source","—"))}</span>'
         f'</div>'
         + _pct_bar(copy_pct, review_pct, original_pct)
     )
 
     # 只展示「已确认借鉴」清单（U6：每函数列出全部候选）
     confirmed = [g for g in pairs if g["overall_tier"] == "confirmed"]
-    table = _groups_table("疑似借鉴清单（待人工判定）", confirmed, linker, query_repo_id, "text-red-700")
+    table = _groups_table("高度疑似借鉴清单", confirmed, linker, query_repo_id, "text-red-700")
 
     # 语义分析片段（从 LLM 输出中抠取当前模块的部分）。
     # 表格已逐函数给出 文件:行 与链接，分析正文只讲语义、不再列地址，故不做链接化；
@@ -1339,32 +1876,18 @@ def _module_section(
     body = stat_row + table
     if mod_analysis:
         body += (
-            '<div class="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-100">'
-            '<h4 class="text-sm font-semibold text-blue-800 mb-2">语义级功能借鉴分析</h4>'
+            '<div class="analysis-panel">'
+            '<h4>语义级功能相似分析</h4>'
             + mod_analysis +
             '</div>'
         )
 
-    section = (
-        f'<section id="{sid}" data-section-id="{sid}" '
-        'class="mb-6 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden" '
-        f'x-data="{{open: true}}" '
-        f"x-init=\"(function(){{const s=localStorage.getItem('cmp:{sid}');if(s!==null)open=(s==='1');}})()\">"
-        f'<div class="px-6 py-3 flex items-center gap-2 cursor-pointer select-none '
-        'border-b border-slate-200 bg-slate-50" '
-        f"@click=\"open=!open;localStorage.setItem('cmp:{sid}',open?'1':'0')\">"
-        '<span class="text-slate-400 w-4 text-center" x-text="open?\'▾\':\'▸\'"></span>'
-        f'<h2 class="text-base font-semibold text-slate-800 m-0">{html.escape(label)}</h2>'
-        '</div>'
-        '<div class="px-6 py-4" x-show="open" x-cloak>'
-        + body +
-        '</div>'
-        '</section>'
+    section = _collapsible_html(
+        sid, label, body, tone="evidence",
+        subtitle="按函数聚合全部同语言候选，可展开查看并排代码证据",
     )
     n_conf = stats.get("confirmed", 0)
-    badge_cls = "toc-badge" if n_conf else "toc-badge zero"
-    badge = f'<span class="{badge_cls}" title="疑似借鉴 {n_conf} 个函数（待人工判定）">{n_conf}</span>'
-    toc = f'<a class="toc-link" href="#{sid}"><span>{html.escape(label)}</span>{badge}</a>'
+    toc = _toc_link(sid, label, str(n_conf), "confirmed" if n_conf else "zero")
     return toc, section
 
 
@@ -1434,7 +1957,10 @@ def _make_gitlab_anchor(linker, repo_id: str, file_path: str, start: int,
                          end: int = 0, css_class: str = "file-jump") -> str:
     """生成 <a href="gitlab_url">file:line</a>，无 URL 时退化为纯文本。"""
     url = _gitlab_url(linker, repo_id, file_path, start, end)
-    label = f"{html.escape(file_path)}:{start}" if start else html.escape(file_path)
+    if start and end and end > start:
+        label = f"{html.escape(file_path)}:{start}-{end}"
+    else:
+        label = f"{html.escape(file_path)}:{start}" if start else html.escape(file_path)
     if url:
         return f'<a class="{css_class}" href="{html.escape(url)}" target="_blank">{label}</a>'
     return label
@@ -1558,16 +2084,106 @@ def _extract_module_analysis(analysis_html: str, mod: str) -> str:
     return ""
 
 
-def _original_section(original_funcs: list[dict], linker, query_repo_id: str,
-                      analysis_html: str = "") -> tuple[str, str]:
-    """创新点分析章节（U8）：以设计维度（所属子系统 + 规模 + 定位）为主描述原创实现，
-    列出全部原创函数（不再展示相似度列——向量相似度有领域地板、不参与判定，易误读）。
-    若 LLM 产出了创新点片段（data-module="innovation"）则优先展示。
-    """
+def _innovation_section(points: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
+    """创新点 → 参考基线 → 目标实现 → 复杂度的独立证据地图。"""
+    if not points:
+        body = (
+            '<div class="p-3 rounded bg-slate-50 border border-slate-200 text-sm text-slate-600">'
+            '当前数据中没有形成可核验的相对创新点。可能原因是没有暂未命中的函数、'
+            '未识别到稳定参考 repo，或代码证据不足。<b>不输出不代表项目没有创新</b>。</div>'
+        )
+        return _collapsible("sec-innovation", "相对参考 repo 的创新实现地图", body)
+
+    cards: list[str] = []
+    confidence_labels = {"high": "高", "medium": "中", "low": "低"}
+    for index, point in enumerate(points, start=1):
+        complexity = point.get("complexity") or {}
+        level = str(complexity.get("level") or "未知")
+        level_cls = {
+            "高": "bg-red-50 text-red-700 border-red-200",
+            "中": "bg-amber-50 text-amber-700 border-amber-200",
+            "低": "bg-green-50 text-green-700 border-green-200",
+        }.get(level, "bg-slate-50 text-slate-600 border-slate-200")
+        confidence = confidence_labels.get(str(point.get("confidence") or "").lower(), "中")
+
+        target_items = []
+        for target in point.get("targets") or []:
+            anchor = _make_gitlab_anchor(
+                linker, query_repo_id, target.get("file", ""),
+                int(target.get("start") or 0), int(target.get("end") or 0),
+            )
+            target_items.append(
+                f'<li>{anchor} · <code>{html.escape(str(target.get("func") or ""))}</code>'
+                f' · {int(target.get("lines") or 0)} 行</li>'
+            )
+
+        reference_items = []
+        for reference in point.get("references") or []:
+            anchor = _make_gitlab_anchor(
+                linker, reference.get("repo", ""), reference.get("file", ""),
+                int(reference.get("start") or 0), int(reference.get("end") or 0),
+            )
+            reference_items.append(
+                f'<li>{anchor} · <code>{html.escape(str(reference.get("func") or ""))}</code>'
+                f' · 最近邻相似度 {float(reference.get("score") or 0.0):.3f}</li>'
+            )
+
+        target_html = "".join(target_items) or '<li class="text-slate-400">无有效目标代码证据</li>'
+        reference_html = "".join(reference_items) or (
+            '<li class="text-slate-400">参考 repo 中未绑定到可比较的具体函数；该项把握度已降低</li>'
+        )
+        why = html.escape(str(point.get("why_it_matters") or ""))
+        why_html = f'<p class="text-sm mt-2"><b>作用与代价：</b>{why}</p>' if why else ""
+        metric_text = (
+            f'{int(complexity.get("file_count") or 0)} 个文件 · '
+            f'{int(complexity.get("symbol_count") or 0)} 个函数 · '
+            f'{int(complexity.get("code_lines") or 0)} 行实现 · '
+            f'{int(complexity.get("branch_points") or 0)} 个控制流分支'
+        )
+        cards.append(f"""
+<article class="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/30 overflow-hidden">
+  <div class="px-4 py-3 border-b border-emerald-100 bg-emerald-50 flex flex-wrap items-center gap-2">
+    <span class="text-xs font-mono text-emerald-700">#{index:02d}</span>
+    <h3 class="font-semibold text-slate-800 mr-auto">{html.escape(str(point.get('title') or '创新点'))}</h3>
+    <span class="px-2 py-0.5 rounded bg-white border border-emerald-200 text-xs text-emerald-700">{html.escape(str(point.get('kind') or '工程改良'))}</span>
+    <span class="text-xs text-slate-500">证据把握度：{confidence}</span>
+  </div>
+  <div class="p-4">
+    <div class="grid grid-cols-1 md:grid-cols-[9rem_1fr] gap-x-3 gap-y-2 text-sm">
+      <div class="font-semibold text-slate-500">参考 repo</div><div>{html.escape(str(point.get('reference_repo') or '未识别'))}</div>
+      <div class="font-semibold text-slate-500">参考实现基线</div><div>{html.escape(str(point.get('baseline') or ''))}</div>
+      <div class="font-semibold text-emerald-700">本作品代码变化</div><div>{html.escape(str(point.get('delta') or ''))}</div>
+    </div>
+    {why_html}
+    <div class="mt-3 p-3 rounded bg-white border border-slate-200">
+      <div class="flex flex-wrap items-center gap-2 mb-2 text-xs">
+        <b>实现复杂度（静态估算）</b>
+        <span class="px-2 py-0.5 rounded border {level_cls}">{html.escape(level)}</span>
+        <span class="text-slate-500">{html.escape(metric_text)}</span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+        <div><div class="font-semibold text-emerald-700 mb-1">本作品实现（点击查看代码）</div><ul class="list-disc pl-5 space-y-1">{target_html}</ul></div>
+        <div><div class="font-semibold text-slate-600 mb-1">参考实现（点击对照）</div><ul class="list-disc pl-5 space-y-1">{reference_html}</ul></div>
+      </div>
+    </div>
+  </div>
+</article>
+""")
+
+    intro = (
+        '<div class="mb-4 p-3 rounded bg-blue-50 border border-blue-200 text-xs text-blue-800">'
+        '本节从“暂未形成有效相似命中”的函数出发，再与各模块主要参考 repo 的最近实现做代码级比较。'
+        '<b>项目 README / 设计文档不作为独立创新证据</b>；“未命中”本身也不等于创新。'
+        '复杂度只反映代码阅读与实现规模，不是质量评分或算法时间复杂度。</div>'
+    )
+    return _collapsible(
+        "sec-innovation", "相对参考 repo 的创新实现地图", intro + "".join(cards)
+    )
+
+
+def _original_section(original_funcs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
+    """列出全部暂未命中函数；不把“未命中”直接表述为原创。"""
     sid = "sec-original"
-    llm_innov = _extract_module_analysis(analysis_html, "innovation") if analysis_html else ""
-    if llm_innov:
-        llm_innov = _linkify_with_gitlab(llm_innov, linker, query_repo_id)
     if not original_funcs:
         body = ("<p class='text-slate-500 text-sm'>没有暂未命中的函数"
                 "（所有函数都与历史代码库有相似命中）。</p>")
@@ -1600,30 +2216,11 @@ def _original_section(original_funcs: list[dict], linker, query_repo_id: str,
             f'<tbody>{rows}</tbody>'
             '</table></div>'
         )
-    if llm_innov:
-        body += (
-            '<div class="mt-4 p-4 bg-emerald-50 rounded-lg border border-emerald-100">'
-            '<h4 class="text-sm font-semibold text-emerald-800 mb-2">设计层面创新点分析</h4>'
-            + llm_innov +
-            '</div>'
-        )
-    section = (
-        f'<section id="{sid}" data-section-id="{sid}" '
-        'class="mb-6 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden" '
-        f'x-data="{{open: true}}" '
-        f"x-init=\"(function(){{const s=localStorage.getItem('cmp:{sid}');if(s!==null)open=(s==='1');}})()\">"
-        '<div class="px-6 py-3 flex items-center gap-2 cursor-pointer select-none '
-        'border-b border-slate-200 bg-slate-50" '
-        f"@click=\"open=!open;localStorage.setItem('cmp:{sid}',open?'1':'0')\">"
-        '<span class="text-slate-400 w-4 text-center" x-text="open?\'▾\':\'▸\'"></span>'
-        '<h2 class="text-base font-semibold text-slate-800 m-0">暂未检出历史相似（不等于原创）</h2>'
-        '</div>'
-        '<div class="px-6 py-4" x-show="open" x-cloak>'
-        + body +
-        '</div>'
-        '</section>'
+    section = _collapsible_html(
+        sid, "暂未检出历史相似（不等于原创）", body,
+        tone="original", subtitle="完整列出当前历史库未形成有效相似命中的函数",
     )
-    toc = f'<a class="toc-link" href="#{sid}">暂未检出相似</a>'
+    toc = _toc_link(sid, "暂未检出相似", str(len(original_funcs)), "original")
     return toc, section
 
 
@@ -1635,46 +2232,104 @@ _CDN_HEAD = """
 
 _STYLES = """
 <style>
+:root{--bg:#f3f6fa;--card:#fff;--line:#dbe3ec;--line-soft:#e9eef4;--text:#172033;
+  --muted:#64748b;--blue:#2563eb;--blue-soft:#eff6ff;--red:#dc2626;--amber:#d97706;
+  --green:#16803c;--shadow:0 10px 30px rgba(15,23,42,.06)}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:1.25rem}
 [x-cloak]{display:none!important}
-body{background:#f6f8fa}
-.layout{display:flex;gap:1.5rem;max-width:1360px;margin:0 auto;padding:1.5rem}
-.toc{position:sticky;top:1.5rem;align-self:flex-start;width:230px;flex-shrink:0;font-size:.85rem}
-.toc .toc-link{display:flex;align-items:center;justify-content:space-between;gap:.4rem;
-  padding:.3rem .5rem;border-left:2px solid transparent;
-  color:#475569;text-decoration:none;border-radius:0 .3rem .3rem 0}
-.toc .toc-link:hover{background:#eef2f7}
-.toc .toc-active{border-left-color:#4a90d9;color:#1a66d4;font-weight:600;background:#eef2fb}
-.toc-badge{font-size:.65rem;line-height:1;padding:.15rem .4rem;border-radius:999px;
-  background:#fee2e2;color:#b91c1c;font-weight:600;flex-shrink:0}
-.toc-badge.zero{background:#e2e8f0;color:#64748b}
-.main{flex:1;min-width:0}
-.file-jump,.repo-link{color:#1a66d4;text-decoration:underline dotted}
-.file-jump:hover,.repo-link:hover{text-decoration:underline solid}
-.pct-bar{display:flex;height:20px;border-radius:4px;overflow:hidden;margin:6px 0}
-.pct-copy{background:#ef4444;color:#fff;font-size:11px;
-  display:flex;align-items:center;padding:0 6px;min-width:0;white-space:nowrap}
-.pct-review{background:#f59e0b;color:#fff;font-size:11px;
-  display:flex;align-items:center;padding:0 6px;min-width:0;white-space:nowrap}
-.pct-orig{background:#22c55e;color:#fff;font-size:11px;
-  display:flex;align-items:center;padding:0 6px;min-width:0;white-space:nowrap}
-.pct-bar div:only-child{border-radius:4px}
-table{border-collapse:collapse}
-td,th{padding:.4rem .6rem;border-bottom:1px solid #e2e8f0;vertical-align:top}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+.layout{display:flex;align-items:flex-start;gap:1.5rem;max-width:1540px;margin:0 auto;padding:1.5rem 1.75rem 4rem}
+.main{flex:1;min-width:0;max-width:1210px}
+/* 页面标题 */
+.report-header{margin:0 0 1rem;padding:.35rem .15rem 1.1rem;border-bottom:1px solid #cbd5e1}
+.report-kicker,.toc-kicker,.summary-eyebrow{display:block;font-size:.65rem;line-height:1.2;letter-spacing:.14em;
+  font-weight:800;color:#3b82f6;text-transform:uppercase}
+.report-header h1{margin:.35rem 0 .2rem;font-size:1.72rem;line-height:1.25;font-weight:760;color:#0f172a}
+.report-header p{margin:0;color:var(--muted);font-size:.82rem}
+/* 左侧目录：固定宽度、分组、等高行和固定徽标列 */
+.toc{position:sticky;top:1.25rem;align-self:flex-start;width:278px;flex:0 0 278px;font-size:.82rem}
+.toc-card{overflow:hidden;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.96);
+  box-shadow:0 8px 24px rgba(15,23,42,.06)}
+.toc-header{padding:1rem 1rem .85rem;border-bottom:1px solid var(--line-soft);background:linear-gradient(145deg,#fff,#f8fbff)}
+.toc-header strong{display:block;margin-top:.28rem;font-size:1rem;color:#0f172a}
+.toc-repo{display:block;margin-top:.3rem;color:#64748b;font:500 .7rem/1.35 ui-monospace,SFMono-Regular,Consolas,monospace;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toc-scroll{max-height:calc(100vh - 4rem);overflow-y:auto;padding:.55rem .55rem .8rem;scrollbar-width:thin}
+.toc-group+.toc-group{margin-top:.5rem;padding-top:.45rem;border-top:1px solid #edf1f5}
+.toc-group-title{padding:.35rem .55rem .28rem;color:#94a3b8;font-size:.64rem;font-weight:800;letter-spacing:.12em}
+.toc .toc-link{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:.55rem;
+  height:42px;margin:2px 0;padding:.4rem .55rem .4rem .7rem;border-radius:8px;color:#475569;text-decoration:none;overflow:hidden}
+.toc .toc-link:before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:3px;background:transparent}
+.toc-link-label{min-width:0;line-height:1.25;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.toc .toc-link:hover{background:#f1f5f9;color:#1e3a5f}
+.toc .toc-active{background:#eaf2ff;color:#1d4ed8;font-weight:700}
+.toc .toc-active:before{background:#3b82f6}
+.toc-badge{min-width:1.45rem;padding:.2rem .38rem;border-radius:999px;text-align:center;font-size:.64rem;line-height:1;
+  font-weight:800;background:#e2e8f0;color:#64748b}
+.toc-badge.confirmed{background:#fee2e2;color:#b91c1c}.toc-badge.review{background:#fef3c7;color:#a16207}
+.toc-badge.original{background:#dcfce7;color:#16713a}.toc-badge.excluded{background:#e2e8f0;color:#475569}
+.toc-badge.zero{background:#f1f5f9;color:#94a3b8}
+/* 顶部状态与总览 */
+#retrieval-contract{margin-bottom:1rem!important;padding:.8rem 1rem!important;border-radius:10px!important}
+#guide{margin-bottom:1rem!important;padding:1.15rem 1.25rem!important;border:1px solid #bfdbfe!important;
+  border-left:4px solid #3b82f6!important;border-radius:12px!important;background:#f5f9ff!important}
+.summary-card{margin:0 0 1.75rem;padding:1.35rem;border:1px solid var(--line);border-radius:14px;background:var(--card);box-shadow:var(--shadow)}
+.summary-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding-bottom:.85rem;border-bottom:1px solid var(--line-soft)}
+.summary-heading h2{margin:.18rem 0 0;font-size:1.2rem;color:#0f172a}.summary-repo{max-width:48%;color:#64748b;
+  font:500 .72rem/1.35 ui-monospace,SFMono-Regular,Consolas,monospace;text-align:right;overflow-wrap:anywhere}
+.chart-title{font-size:.82rem;font-weight:700;color:#334155}
+/* 正文层级 */
+.chapter-heading,.excluded-heading{display:flex;align-items:flex-start;gap:.85rem;margin:2.25rem 0 .85rem;padding:.1rem .15rem .75rem;
+  border-bottom:1px solid #cbd5e1}
+.chapter-index{display:inline-flex;align-items:center;justify-content:center;width:2rem;height:2rem;flex:0 0 2rem;border-radius:8px;
+  background:#e7effb;color:#2563eb;font-size:.7rem;font-weight:800}
+.chapter-heading h2,.excluded-heading h2{margin:0;font-size:1.12rem;line-height:1.35;color:#172033;font-weight:760}
+.chapter-heading p,.excluded-heading p{margin:.2rem 0 0;color:#64748b;font-size:.76rem;line-height:1.55}
+.excluded-heading{margin-top:2.5rem}.excluded-heading .chapter-index{background:#e2e8f0;color:#475569}
+.report-section{margin:0 0 1rem;overflow:hidden;border:1px solid var(--line);border-radius:12px;background:var(--card);box-shadow:0 4px 16px rgba(15,23,42,.035)}
+.report-section[data-tone="review"]{border-color:#f2d38c}.report-section[data-tone="original"]{border-color:#b9dfc5}
+.report-section[data-tone="excluded"]{border-color:#d8dee7}
+.section-toggle{display:flex;align-items:flex-start;width:100%;gap:.65rem;padding:.9rem 1.05rem;border:0;border-bottom:1px solid var(--line-soft);
+  background:#f8fafc;color:inherit;text-align:left;cursor:pointer}
+.section-toggle:hover{background:#f3f7fb}.report-section[data-tone="review"] .section-toggle{background:#fffbeb}
+.report-section[data-tone="original"] .section-toggle{background:#f3fbf5}.report-section[data-tone="excluded"] .section-toggle{background:#f8fafc}
+.section-chevron{display:inline-flex;align-items:center;justify-content:center;width:1.2rem;height:1.3rem;color:#64748b;font-size:.82rem;flex:0 0 1.2rem}
+.section-heading{display:block;min-width:0}.section-title{display:block;font-size:.95rem;line-height:1.35;font-weight:750;color:#1e293b}
+.section-subtitle{display:block;margin:.16rem 0 0;color:#7b8ba1;font-size:.69rem;line-height:1.4;font-weight:400}
+.section-body{padding:1rem 1.1rem 1.15rem}.section-body>p:first-child{margin-top:0}.section-body>p:last-child{margin-bottom:0}
+.analysis-panel{margin-top:1rem;padding:1rem;border:1px solid #cfe0f6;border-radius:10px;background:#f6faff;color:#334155}
+.analysis-panel h4{margin:0 0 .55rem;font-size:.82rem;font-weight:750;color:#1d4f91}
+.review-note{margin-bottom:.85rem;padding:.75rem .85rem;border:1px solid #f1d28a;border-radius:9px;background:#fff9e8;color:#8a5a05;font-size:.75rem}
+.module-summary{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem .55rem;margin-bottom:.75rem}
+.status-chip{display:inline-flex;padding:.28rem .55rem;border-radius:999px;font-size:.7rem;font-weight:700}
+.status-confirmed{background:#fee2e2;color:#b91c1c}.status-review{background:#fef3c7;color:#a16207}.status-original{background:#dcfce7;color:#16713a}
+.module-summary-text,.module-summary-source{font-size:.72rem;color:#64748b}.module-summary-source{margin-left:auto;color:#94a3b8}
+/* 链接、进度条和表格 */
+.file-jump,.repo-link{color:#1d5fbf;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px;overflow-wrap:anywhere}
+.file-jump:hover,.repo-link:hover{color:#174a91;text-decoration-style:solid}
+.pct-bar{display:flex;height:18px;border-radius:6px;overflow:hidden;margin:.4rem 0 .15rem;background:#eef2f7}
+.pct-copy,.pct-review,.pct-orig{display:flex;align-items:center;min-width:0;padding:0 6px;color:#fff;font-size:10px;white-space:nowrap;overflow:hidden}
+.pct-copy{background:#ef4444}.pct-review{background:#f59e0b}.pct-orig{background:#22c55e}.pct-bar div:only-child{border-radius:6px}
+.section-body .overflow-x-auto{border:1px solid var(--line-soft);border-radius:9px}
+.main table{width:100%;border-collapse:separate;border-spacing:0;background:#fff}
+.main th,.main td{padding:.58rem .68rem;border-bottom:1px solid var(--line-soft);vertical-align:top}
+.main th{background:#f7f9fc!important;color:#536277!important;font-size:.7rem;font-weight:750;white-space:nowrap}
+.main tbody:last-child tr:last-child td,.main tbody>tr:last-child td{border-bottom:0}
+.main tbody>tr:hover>td{background:#fafcff}
 /* KPI 卡片 */
-.kpi{display:flex;flex-direction:column;gap:.15rem;padding:.7rem .9rem;border-radius:.6rem;
-  background:#fff;border:1px solid #e2e8f0}
-.kpi .v{font-size:1.6rem;font-weight:700;line-height:1.1}
-.kpi .l{font-size:.72rem;color:#64748b}
+.kpi{display:flex;flex-direction:column;gap:.2rem;min-height:82px;padding:.8rem .9rem;border-radius:10px;background:#f9fbfd;border:1px solid var(--line-soft)}
+.kpi .v{font-size:1.55rem;font-weight:780;line-height:1.1}.kpi .l{font-size:.69rem;line-height:1.35;color:#64748b}
 /* 档位/类型图例 */
-.legend{display:flex;flex-wrap:wrap;gap:.4rem .9rem;font-size:.72rem;color:#475569;margin-top:.5rem}
-.legend .dot{display:inline-block;width:.7rem;height:.7rem;border-radius:2px;margin-right:.3rem;vertical-align:-1px}
+.legend{display:flex;flex-wrap:wrap;gap:.4rem .8rem;margin-top:.7rem;padding:.6rem .7rem;border-radius:8px;background:#f8fafc;
+  font-size:.69rem;color:#526175}.legend .dot{display:inline-block;width:.62rem;height:.62rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
 /* 代码证据并排 */
 .code-toggle{cursor:pointer;background:none;border:none;padding:0}
-.code-pair{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid #e2e8f0}
-.code-col{min-width:0;border-left:1px solid #e2e8f0}
+.code-pair{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--line)}
+.code-col{min-width:0;border-left:1px solid var(--line)}
 .code-col:first-child{border-left:none}
 .code-h{font-size:.7rem;font-weight:600;color:#475569;padding:.35rem .6rem;
-  background:#f1f5f9;border-bottom:1px solid #e2e8f0;position:sticky;top:0}
+  background:#f1f5f9;border-bottom:1px solid var(--line);position:sticky;top:0}
 .code-body{margin:0;max-height:360px;overflow:auto;font-size:.72rem;line-height:1.45;
   font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .cl{white-space:pre;padding:0 .6rem}
@@ -1682,16 +2337,22 @@ td,th{padding:.4rem .6rem;border-bottom:1px solid #e2e8f0;vertical-align:top}
 .code-col:first-child .cl.df{background:#fef9c3}
 @media(max-width:720px){.code-pair{grid-template-columns:1fr}.code-col{border-left:none;border-top:1px solid #e2e8f0}}
 /* 回到顶部 */
-.to-top{position:fixed;right:1.1rem;bottom:1.1rem;width:2.4rem;height:2.4rem;border-radius:999px;
-  background:#1a66d4;color:#fff;display:flex;align-items:center;justify-content:center;
-  text-decoration:none;box-shadow:0 2px 8px rgba(0,0,0,.2);font-size:1.1rem;opacity:.85}
+.to-top{position:fixed;right:1.1rem;bottom:1.1rem;width:2.4rem;height:2.4rem;border-radius:999px;background:#2563eb;color:#fff;
+  display:flex;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 4px 14px rgba(37,99,235,.28);font-size:1.1rem;opacity:.9}
 .to-top:hover{opacity:1}
-@media(max-width:860px){.layout{flex-direction:column}.toc{position:static;width:auto}}
+@media(max-width:1060px){.layout{gap:1rem;padding:1rem}.toc{width:242px;flex-basis:242px}}
+@media(max-width:860px){
+  .layout{display:block;padding:.8rem}.toc{position:static;width:auto;margin-bottom:1rem}.toc-scroll{max-height:none}
+  .toc-header{padding:.8rem 1rem}.toc-scroll{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.35rem .75rem}
+  .toc-group+.toc-group{margin:0;padding:0;border:0}.main{max-width:none}.report-header h1{font-size:1.35rem}
+  .module-summary-source{width:100%;margin-left:0}
+}
+@media(max-width:620px){.toc-scroll{grid-template-columns:1fr}.summary-heading{display:block}.summary-repo{display:block;max-width:none;text-align:left;margin-top:.4rem}}
 @media print{
   .toc,.to-top{display:none!important}
   body{background:#fff}
   .layout{display:block;max-width:none;padding:0}
-  section{break-inside:avoid;box-shadow:none!important}
+  .report-header{margin-bottom:.6rem}.report-section,.summary-card{break-inside:avoid;box-shadow:none!important}
   [x-cloak]{display:revert!important}
   .code-body{max-height:none}
 }
@@ -1821,21 +2482,12 @@ def _file_level_section(file_matches: list[dict], file_similar: list[dict],
                '</p>' if line_based else '')
         )
     body = "".join(parts)
-    section = (
-        f'<section id="{sid}" data-section-id="{sid}" '
-        'class="mb-6 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden" '
-        f'x-data="{{open: true}}" '
-        f"x-init=\"(function(){{const s=localStorage.getItem('cmp:{sid}');if(s!==null)open=(s==='1');}})()\">"
-        '<div class="px-6 py-3 flex items-center gap-2 cursor-pointer select-none '
-        'border-b border-slate-200 bg-slate-50" '
-        f"@click=\"open=!open;localStorage.setItem('cmp:{sid}',open?'1':'0')\">"
-        '<span class="text-slate-400 w-4 text-center" x-text="open?\'▾\':\'▸\'"></span>'
-        '<h2 class="text-base font-semibold text-slate-800 m-0">文件级整体相同 / 相似</h2>'
-        '</div>'
-        '<div class="px-6 py-4" x-show="open" x-cloak>' + body + '</div>'
-        '</section>'
+    section = _collapsible_html(
+        sid, "文件级整体相同 / 相似", body, tone="evidence",
+        subtitle="整文件哈希与函数覆盖率两个口径，均可直达来源文件",
     )
-    toc = f'<a class="toc-link" href="#{sid}">文件级整体相同/相似</a>'
+    toc = _toc_link(sid, "文件级整体相同 / 相似",
+                    str(len(file_matches) + len(file_similar)), "confirmed")
     return toc, section
 
 
@@ -1880,21 +2532,11 @@ def _reused_libraries_section(lib_stats: list[dict], query_repo_id: str) -> tupl
         '</tr></thead>'
         f'<tbody>{rows}</tbody></table></div>'
     )
-    section = (
-        f'<section id="{sid}" data-section-id="{sid}" '
-        'class="mb-6 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden" '
-        f'x-data="{{open: true}}" '
-        f"x-init=\"(function(){{const s=localStorage.getItem('cmp:{sid}');if(s!==null)open=(s==='1');}})()\">"
-        '<div class="px-6 py-3 flex items-center gap-2 cursor-pointer select-none '
-        'border-b border-slate-200 bg-slate-50" '
-        f"@click=\"open=!open;localStorage.setItem('cmp:{sid}',open?'1':'0')\">"
-        '<span class="text-slate-400 w-4 text-center" x-text="open?\'▾\':\'▸\'"></span>'
-        '<h2 class="text-base font-semibold text-slate-800 m-0">复用库统计（不计入借鉴）</h2>'
-        '</div>'
-        '<div class="px-6 py-4" x-show="open" x-cloak>' + body + '</div>'
-        '</section>'
+    section = _collapsible_html(
+        sid, "复用库统计（不计入借鉴）", body,
+        default_open=False, tone="excluded",
     )
-    toc = f'<a class="toc-link" href="#{sid}">复用库统计</a>'
+    toc = _toc_link(sid, "复用库统计", str(len(lib_stats)), "excluded")
     return toc, section
 
 
@@ -1930,21 +2572,11 @@ def _common_code_section(cc_funcs: list[dict], linker, query_repo_id: str) -> tu
         '</tr></thead>'
         f'<tbody>{rows}</tbody></table></div>'
     )
-    section = (
-        f'<section id="{sid}" data-section-id="{sid}" '
-        'class="mb-6 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden" '
-        f'x-data="{{open: true}}" '
-        f"x-init=\"(function(){{const s=localStorage.getItem('cmp:{sid}');if(s!==null)open=(s==='1');}})()\">"
-        '<div class="px-6 py-3 flex items-center gap-2 cursor-pointer select-none '
-        'border-b border-slate-200 bg-slate-50" '
-        f"@click=\"open=!open;localStorage.setItem('cmp:{sid}',open?'1':'0')\">"
-        '<span class="text-slate-400 w-4 text-center" x-text="open?\'▾\':\'▸\'"></span>'
-        '<h2 class="text-base font-semibold text-slate-800 m-0">公共/样板代码（不计入借鉴）</h2>'
-        '</div>'
-        '<div class="px-6 py-4" x-show="open" x-cloak>' + body + '</div>'
-        '</section>'
+    section = _collapsible_html(
+        sid, "公共 / 样板代码（不计入借鉴）", body,
+        default_open=False, tone="excluded",
     )
-    toc = f'<a class="toc-link" href="#{sid}">公共/样板代码</a>'
+    toc = _toc_link(sid, "公共 / 样板代码", str(len(cc_funcs)), "excluded")
     return toc, section
 
 
@@ -1982,30 +2614,22 @@ def _baseline_section(base_funcs: list[dict], linker, query_repo_id: str) -> tup
         '</tr></thead>'
         f'<tbody>{rows}</tbody></table></div>'
     )
-    section = (
-        f'<section id="{sid}" data-section-id="{sid}" '
-        'class="mb-6 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden" '
-        f'x-data="{{open: false}}" '
-        f"x-init=\"(function(){{const s=localStorage.getItem('cmp:{sid}');if(s!==null)open=(s==='1');}})()\">"
-        '<div class="px-6 py-3 flex items-center gap-2 cursor-pointer select-none '
-        'border-b border-slate-200 bg-slate-50" '
-        f"@click=\"open=!open;localStorage.setItem('cmp:{sid}',open?'1':'0')\">"
-        '<span class="text-slate-400 w-4 text-center" x-text="open?\'▾\':\'▸\'"></span>'
-        '<h2 class="text-base font-semibold text-slate-800 m-0">基线衍生（不计入借鉴）</h2>'
-        '</div>'
-        '<div class="px-6 py-4" x-show="open" x-cloak>' + body + '</div>'
-        '</section>'
+    section = _collapsible_html(
+        sid, "基线衍生（不计入借鉴）", body,
+        default_open=False, tone="excluded",
     )
-    toc = f'<a class="toc-link" href="#{sid}">基线衍生</a>'
+    toc = _toc_link(sid, "基线衍生", str(len(base_funcs)), "excluded")
     return toc, section
 
 
 def _false_positive_section(fp_funcs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
-    """疑似误报小节：跨架构 / 跨语言 / 行业样板汇编 / 内部跨架构复用（已从借鉴剔除，需人工确认）。
+    """疑似误报小节：跨架构 / 行业样板汇编 / 内部跨架构复用（已从借鉴剔除，需人工确认）。
 
     这些对在「掩码逐行匹配」口径下达到高相似，但属机械误报（详见 false_positives 模块），
     不计入值得关注的借鉴；此处按成因分组单列，保留来源链接，供人工核对（不直接丢弃）。
     """
+    # 跨编程语言 pair 在召回/metadata 已被硬过滤，不属于报告展示范围；对旧数据也不展示。
+    fp_funcs = [f for f in fp_funcs if f.get("reason") != "cross_lang"]
     if not fp_funcs:
         return "", ""
     sid = "sec-false-positive"
@@ -2020,7 +2644,7 @@ def _false_positive_section(fp_funcs: list[dict], linker, query_repo_id: str) ->
         for r, items in by_reason.items()
     )
     blocks = []
-    for reason in ("boilerplate_asm", "cross_arch", "cross_lang", "internal_dup"):
+    for reason in ("boilerplate_asm", "cross_arch", "internal_dup"):
         items = by_reason.get(reason)
         if not items:
             continue
@@ -2068,7 +2692,6 @@ def _false_positive_section(fp_funcs: list[dict], linker, query_repo_id: str) ->
         '<code>asm!("…")</code> 字符串里、被归一化掩码成占位符，只剩内联汇编外壳相同——面向不同 CPU，'
         '不可能逐字借鉴。</li>'
         '<li><b>行业样板汇编</b>：<code>__switch</code> 等任务切换的寄存器存取序列，各队写法固定雷同。</li>'
-        '<li><b>跨编程语言</b>：safe Rust 切片遍历 vs unsafe C 裸指针等，语言与安全范式不同。</li>'
         '<li><b>内部跨架构复用</b>：作品自身 <code>src/</code> 与 <code>src-la/</code> 硬拷贝同名函数，'
         '同一次外部借鉴只记一次、其余记为内部复用。</li>'
         '</ul>'
@@ -2166,38 +2789,26 @@ def _excluded_divider() -> tuple[str, str]:
     """「不计入借鉴的代码」分隔横幅 + TOC 锚（其后跟 库复用/公共样板/基线衍生 各小节）。"""
     sid = "sec-excluded"
     section = (
-        f'<section id="{sid}" data-section-id="{sid}" class="mt-10 mb-3">'
-        '<h2 class="text-base font-bold text-slate-500 border-t-2 border-dashed border-slate-300 pt-4 m-0">'
-        '附：不计入借鉴的代码（已从上方统计中剔除，供老师核对系统是否扣得合理）</h2>'
-        '<p class="text-xs text-slate-400 mt-1">为避免误判，系统把「所有团队都会用、并非该团队原创」的代码自动剔除，不计入借鉴。'
+        f'<section id="{sid}" data-section-id="{sid}" class="excluded-heading">'
+        '<span class="chapter-index">04</span><div>'
+        '<h2>排除项与统计口径</h2>'
+        '<p>以下代码已从上方统计中剔除，用于核对系统的排除是否合理。为避免误判，系统把'
+        '「所有团队都会用、并非该团队原创」的代码自动剔除，不计入借鉴。'
         '主要包括：<b>①上游框架自带代码</b>（如 ArceOS/Starry 框架的 axfs/axhal 等模块）；'
         '<b>②第三方开源库</b>（lwext4、fatfs 等整库签入）；'
         '<b>③标准规范受限写法</b>（POSIX 系统调用、文件系统魔数、Linux ABI 转换等只有唯一正确写法的代码）；'
         '<b>④多团队通用样板</b>（print 宏、panic 处理等）；'
-        '<b>⑤教学/模板衍生代码</b>。下方按类别列出，可逐项点开核对扣除是否合理。</p>'
+        '<b>⑤教学/模板衍生代码</b>。下方按类别列出，可逐项点开核对扣除是否合理。</p></div>'
         '</section>'
     )
-    toc = f'<a class="toc-link" href="#{sid}">— 不计入借鉴的代码 —</a>'
+    toc = _toc_link(sid, "排除项说明")
     return toc, section
 
 
 def _collapsible(sid: str, title: str, body: str) -> tuple[str, str]:
     """统一的可折叠 section 外壳。返回 (toc_entry, section_html)。"""
-    section = (
-        f'<section id="{sid}" data-section-id="{sid}" '
-        'class="mb-6 rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden" '
-        f'x-data="{{open: true}}" '
-        f"x-init=\"(function(){{const s=localStorage.getItem('cmp:{sid}');if(s!==null)open=(s==='1');}})()\">"
-        '<div class="px-6 py-3 flex items-center gap-2 cursor-pointer select-none '
-        'border-b border-slate-200 bg-slate-50" '
-        f"@click=\"open=!open;localStorage.setItem('cmp:{sid}',open?'1':'0')\">"
-        '<span class="text-slate-400 w-4 text-center" x-text="open?\'▾\':\'▸\'"></span>'
-        f'<h2 class="text-base font-semibold text-slate-800 m-0">{html.escape(title)}</h2>'
-        '</div>'
-        f'<div class="px-6 py-4" x-show="open" x-cloak>{body}</div>'
-        '</section>'
-    )
-    toc = f'<a class="toc-link" href="#{sid}">{html.escape(title)}</a>'
+    section = _collapsible_html(sid, title, body)
+    toc = _toc_link(sid, title)
     return toc, section
 
 
@@ -2386,34 +2997,41 @@ def _apply_review_verdicts(suspects: list[dict], groups: list[dict]) -> tuple[in
 
 
 def _review_section(review_pairs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
-    """疑似借鉴清单：相似度中等、经低端模型复核判为借鉴/疑似的函数对（非借鉴已移入原创）。"""
+    """模型复核后仍存疑清单：保留模型不确定或复核未完成的同语言函数组。"""
     if not review_pairs:
         return "", ""
+    # 与 KPI、模块统计和清单标题统一按 (文件, 函数名) 计数；不同起始行的内部证据组仍完整展示。
+    unique_review = {}
+    for g in review_pairs:
+        unique_review.setdefault((g.get("query_file", ""), g.get("query_func", "")), g)
+    n_funcs = len(unique_review)
     intro = ('<p class="text-sm text-slate-600 mb-3">'
-             f'下列 <b>{len(review_pairs)}</b> 个函数与历史作品相似度中等（逐行匹配 70%–95%，'
-             '未达「疑似借鉴」的 95% 高相似线），'
-             '经 AI 模型逐对复核后<b>判为借鉴或疑似借鉴</b>而保留在此；'
-             '复核判为<b>非借鉴（独立实现的通用写法）的已移入「暂未检出相似」节</b>，不在此列。'
-             '下表「复核结论」由 AI 自动初判，仅供人工复核参考。</p>')
+             f'下列 <b>{n_funcs}</b> 个函数已完成同语言候选筛选，并进入模型复核。'
+             '它们通常来自逐行相似度 70%–95%、归一化指纹一致、特有字符串命中或分段语义高相似，'
+             '但模型仍返回“疑似”，或本次复核未形成有效结论，因此没有自动升为高度疑似，也没有排除。'
+             '模型明确判为非借鉴的项目已移入「暂未检出相似」，不在本节重复展示。</p>')
 
     # 复核结论汇总
     summary = ""
     if any(g.get("review_verdict") for g in review_pairs):
         from collections import Counter as _C
-        cnt = _C(g.get("review_verdict", "未复核") for g in review_pairs)
+        cnt = _C(g.get("review_verdict", "未复核") for g in unique_review.values())
         chips = []
         for v in ("借鉴", "疑似", "未复核"):
             if cnt.get(v):
                 cls, lbl = _REVIEW_VERDICT_STYLE.get(v, _REVIEW_VERDICT_STYLE["未复核"])
                 chips.append(f'<span class="px-2 py-0.5 rounded {cls}">{lbl} {cnt[v]}</span>')
-        summary = ('<div class="mb-3 p-2.5 rounded bg-amber-50 border border-amber-200 text-xs '
-                   'text-amber-800">⚠️ <b>复核结论仅供参考</b>：由 AI 模型自动初判，'
-                   '不作为最终定性依据，请以人工复核为准。'
+        summary = ('<div class="review-note">⚠️ <b>模型复核仍未形成明确结论</b>：'
+                   '本节保留灰区证据，不作为最终定性依据；请展开并排代码完成必要的人工判断。'
                    '<div class="flex flex-wrap gap-2 mt-2 text-sm">' + "".join(chips) + '</div></div>')
 
-    table = _groups_table("疑似借鉴函数对", review_pairs,
+    table = _groups_table("模型复核后仍存疑函数", review_pairs,
                           linker, query_repo_id, "text-amber-700", show_verdict=True)
-    return _collapsible("sec-review", "疑似借鉴", intro + summary + table)
+    section = _collapsible_html(
+        "sec-review", "模型复核后仍存疑", intro + summary + table,
+        tone="review", subtitle="模型无法明确升档或排除的同语言函数，可展开查看代码证据",
+    )
+    return _toc_link("sec-review", "模型复核后仍存疑", str(n_funcs), "review"), section
 
 
 _AI_STAGE_DISP = {
@@ -2512,6 +3130,7 @@ def generate_comparison_html(
     file_pairs: list[dict],
     analysis_html: str,
     original_funcs: list[dict],
+    innovation_points: list[dict] | None = None,
     review_pairs: list[dict] | None = None,
     ai_detect_data: dict | None = None,
     query_repo_path: Path | None = None,
@@ -2534,14 +3153,21 @@ def generate_comparison_html(
                                  file_similar_count=len(file_similar),
                                  retrieval_contract=retrieval_contract)
 
-    toc_items  = ['<a class="toc-link" href="#summary">总览</a>']
-    body_parts = [summary_html]
+    overview_toc = [_toc_link("summary", "总体结果")]
+    evidence_toc: list[str] = []
+    evidence_sections: list[str] = []
+    implementation_toc: list[str] = []
+    implementation_sections: list[str] = []
+    auxiliary_toc: list[str] = []
+    auxiliary_sections: list[str] = []
+    excluded_toc: list[str] = []
+    excluded_sections: list[str] = []
 
     # 文件级整体相同/相似清单（L0 结果，紧随总览）
     toc_files, sec_files = _file_level_section(file_matches, file_similar, linker, query_repo_id)
     if toc_files:
-        toc_items.append(toc_files)
-        body_parts.append(sec_files)
+        evidence_toc.append(toc_files)
+        evidence_sections.append(sec_files)
 
     # 各子模块章节
     for idx, mod in enumerate(MODULES):
@@ -2549,19 +3175,31 @@ def generate_comparison_html(
             mod, submodule_stats, file_pairs, analysis_html,
             linker, query_repo_id, idx)
         if toc_entry:
-            toc_items.append(toc_entry)
-            body_parts.append(section)
+            evidence_toc.append(toc_entry)
+            evidence_sections.append(section)
 
-    # 创新点分析章节
-    toc_orig, sec_orig = _original_section(original_funcs, linker, query_repo_id, analysis_html)
-    toc_items.append(toc_orig)
-    body_parts.append(sec_orig)
+    # 模型复核后仍存疑：与红色高相似清单分开展示，避免“尚未审核”的误解。
+    toc_review, sec_review = _review_section(review_pairs or [], linker, query_repo_id)
+    if toc_review:
+        evidence_toc.append(toc_review)
+        evidence_sections.append(sec_review)
+
+    # 相对参考 repo 的创新实现地图（代码比较证据）
+    toc_innovation, sec_innovation = _innovation_section(
+        innovation_points or [], linker, query_repo_id)
+    implementation_toc.append(toc_innovation)
+    implementation_sections.append(sec_innovation)
+
+    # 暂未检出相似函数原始清单（与创新判断分开，避免“未命中=原创”）
+    toc_orig, sec_orig = _original_section(original_funcs, linker, query_repo_id)
+    implementation_toc.append(toc_orig)
+    implementation_sections.append(sec_orig)
 
     # AI 生成代码检测（独立链路，并入对比报告）
     toc_ai, sec_ai = _ai_detect_section(ai_detect_data, linker, query_repo_id)
     if toc_ai:
-        toc_items.append(toc_ai)
-        body_parts.append(sec_ai)
+        auxiliary_toc.append(toc_ai)
+        auxiliary_sections.append(sec_ai)
 
     # ── 报告最下方：不计入借鉴的代码（库复用 / 公共样板 / 基线衍生），分类单列 ──
     bottom = [
@@ -2576,12 +3214,41 @@ def generate_comparison_html(
     if any(toc for toc, _ in bottom[1:]):
         for toc, sec in bottom:
             if toc:
-                toc_items.append(toc)
-                body_parts.append(sec)
+                excluded_toc.append(toc)
+                excluded_sections.append(sec)
 
-    toc_html  = "\n".join(toc_items)
+    toc_html = (
+        '<div class="toc-card">'
+        '<div class="toc-header"><span class="toc-kicker">COMPARISON REPORT</span>'
+        '<strong>报告目录</strong>'
+        f'<span class="toc-repo" title="{html.escape(query_repo_id)}">{html.escape(query_repo_id)}</span>'
+        '</div><div class="toc-scroll">'
+        + _toc_group("报告概览", overview_toc)
+        + _toc_group("相似性证据", evidence_toc)
+        + _toc_group("实现差异", implementation_toc)
+        + _toc_group("辅助分析", auxiliary_toc)
+        + _toc_group("排除项", excluded_toc)
+        + '</div></div>'
+    )
+
+    body_parts = [summary_html]
+    if evidence_sections:
+        body_parts.append(_chapter_heading(
+            "01", "相似性证据", "先看文件级结果，再按子系统核对高相似函数与模型仍存疑项。"))
+        body_parts.extend(evidence_sections)
+    if implementation_sections:
+        body_parts.append(_chapter_heading(
+            "02", "实现差异", "创新点与参考实现逐项绑定；未命中清单独立展示，不等同于原创认定。"))
+        body_parts.extend(implementation_sections)
+    if auxiliary_sections:
+        body_parts.append(_chapter_heading(
+            "03", "辅助分析", "独立检测信号只作补充，不改变上方代码相似性结论。"))
+        body_parts.extend(auxiliary_sections)
+    if excluded_sections:
+        body_parts.extend(excluded_sections)
+
     main_html = "\n".join(body_parts)
-    title     = f"{html.escape(query_repo_id)} 查重对比分析报告"
+    title = f"{html.escape(query_repo_id)} 查重对比分析报告"
 
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -2596,9 +3263,11 @@ def generate_comparison_html(
 <div class="layout">
   <nav class="toc">{toc_html}</nav>
   <main class="main">
-    <h1 class="text-2xl font-bold text-slate-800 mb-6 border-b-2 border-blue-400 pb-2">
-      {title}
-    </h1>
+    <header class="report-header">
+      <span class="report-kicker">CODE SIMILARITY · SAME-LANGUAGE ONLY</span>
+      <h1>{title}</h1>
+      <p>同语言代码相似性、模型复核、参考实现差异与排除口径的一体化审阅视图</p>
+    </header>
     {main_html}
   </main>
 </div>
@@ -2620,6 +3289,7 @@ def run_semantic_compare(
     skip_opencode: bool = False,
     filematch_path: str | Path | None = None,
     ai_detect_path: str | Path | None = None,
+    functions_db_path: str | Path | None = None,
     require_complete_recall: bool = True,
 ) -> dict:
     """主入口：suspects.json → LLM 语义分析 → 直接 HTML 报告。
@@ -2633,6 +3303,7 @@ def run_semantic_compare(
                          模块借鉴对 <20 时即全部做语义分析，仅超量时截断以控 token）
         skip_opencode:   True 时跳过 LLM，仅用规则生成报告（调试用）
         filematch_path:  fastpath（L0 文件指纹层）产出的 *_filematch.json（整文件复制清单）
+        functions_db_path: 历史函数库路径，用于读取参考 repo 的函数源码并生成创新实现地图
     """
     suspects_path = Path(suspects_path)
     data          = json.loads(suspects_path.read_text(encoding="utf-8"))
@@ -2668,16 +3339,17 @@ def run_semantic_compare(
     # 先对 review/weak 档做低端模型复核：判「借鉴」的升为 confirmed（计入已确认借鉴），
     # 仅“非借鉴”降为 dismissed；“疑似”保留信号，不能回落到“暂未检出”。
     # 必须在统计 / file_pairs / 未检出清单计算之前。
+    review_judgments: list[dict] = []
     if not skip_opencode:
-        review_pairs = collect_file_pairs(suspects, keep_tiers=("review", "weak"))
+        review_judgments = collect_file_pairs(suspects, keep_tiers=("review", "weak"))
         # 系统化语义复核：**全部** confirmed 对都送 LLM 复核（不只样板候选）——文本相似不等于
         # 借鉴，ABI/规范/标准算法/不同机制实现的误报只能靠语义判断逐对排除，无法靠枚举模式覆盖。
         # 保守口径：confirmed 仅当 LLM 明确判「非借鉴」才降为 dismissed（借鉴/疑似保留，不丢失信号）；
         # review/weak：借鉴升 confirmed，疑似保留，只有非借鉴降 dismissed。
         confirmed_groups = collect_file_pairs(suspects, keep_tiers=("confirmed",))
-        review_pairs.extend(confirmed_groups)
-        run_review_judgment(review_pairs, work_dir)
-        up, dn = _apply_review_verdicts(suspects, review_pairs)
+        review_judgments.extend(confirmed_groups)
+        run_review_judgment(review_judgments, work_dir)
+        up, dn = _apply_review_verdicts(suspects, review_judgments)
         if up or dn:
             logger.info("[review] 复核：判借鉴 {} 对升档，明确非借鉴 {} 对移出相似清单"
                         "（含 confirmed 全量送复核 {} 个）",
@@ -2719,6 +3391,24 @@ def run_semantic_compare(
     base_funcs      = baseline_stats(suspects)
     # 表格展示：confirmed 全量；送 LLM 做语义分析：每模块取 sim 最高的 top_per_module 个
     file_pairs = collect_file_pairs(suspects)
+    final_review_pairs = collect_file_pairs(suspects, keep_tiers=("review", "weak"))
+    # 统计口径把同一文件中的同名函数视为一个评审单元并取最高档；若某个起始行已经有
+    # confirmed 证据，就不要让同名的另一起始行再次出现在“模型仍存疑”中。
+    final_review_pairs = _exclude_confirmed_review_groups(final_review_pairs, file_pairs)
+    # collect_file_pairs 会按最终档位重聚合，补回复核阶段写在 group 上的模型结论和理由，
+    # 让“模型复核后仍存疑”不只出现在 KPI，还能在正文逐条查看证据。
+    verdict_map = {
+        (g.get("query_file", ""), g.get("query_func", ""), g.get("query_start", 0)):
+        (g.get("review_verdict", "未复核"), g.get("review_reason", ""))
+        for g in review_judgments
+    }
+    for g in final_review_pairs:
+        verdict, reason = verdict_map.get(
+            (g.get("query_file", ""), g.get("query_func", ""), g.get("query_start", 0)),
+            ("未复核", "本次未获得有效模型结论"),
+        )
+        g["review_verdict"] = verdict
+        g["review_reason"] = reason
     llm_pairs  = _limit_per_module(file_pairs, top_per_module)
 
     # AI 生成代码检测结果（独立链路产物，可选并入报告）
@@ -2729,8 +3419,15 @@ def run_semantic_compare(
         except (OSError, json.JSONDecodeError) as e:
             logger.warning("[compare] 读取 ai_detect 结果失败：{}", e)
 
-    # 原创候选函数（含复核判「非借鉴」而降级的函数）
+    # 暂未命中函数（含复核判「非借鉴」而降级的函数）
     original_funcs  = _original_functions(recall, suspects) if recall else []
+
+    # 独立创新实现地图：从暂未命中函数出发，绑定各模块主要参考 repo 的最近实现后再做
+    # 代码级归纳。文档不进入该输入，“未命中”也不会直接升级为创新结论。
+    innovation_candidates = build_innovation_candidates(
+        recall, suspects, functions_db_path=functions_db_path)
+    innovation_points = run_innovation_analysis(
+        query_repo_id, innovation_candidates, work_dir, skip_llm=skip_opencode)
 
     if skip_opencode or not llm_pairs:
         analysis_html = _fallback_analysis(llm_pairs, submodule_stats)
@@ -2743,6 +3440,10 @@ def run_semantic_compare(
     # 构建 GitLab linker（取各参考仓库的在线 URL + HEAD sha）
     ref_repos = {c["ref_repo"] for g in file_pairs for c in g["candidates"]}
     ref_repos |= {m["repo_id"] for fm in file_matches for m in fm.get("matches", [])}
+    ref_repos |= {
+        r.get("repo", "") for point in innovation_points
+        for r in point.get("references", []) if r.get("repo")
+    }
     linker = _build_gitlab_linker(
         Path(query_repo_path).resolve() if query_repo_path else None,
         query_repo_id,
@@ -2757,6 +3458,8 @@ def run_semantic_compare(
         file_pairs      = file_pairs,
         analysis_html   = analysis_html,
         original_funcs  = original_funcs,
+        innovation_points = innovation_points,
+        review_pairs    = final_review_pairs,
         ai_detect_data  = ai_detect_data,
         query_repo_path = Path(query_repo_path).resolve() if query_repo_path else None,
         linker          = linker,
@@ -2770,7 +3473,7 @@ def run_semantic_compare(
         retrieval_contract = recall.get("retrieval_contract") if recall else None,
     )
 
-    # 档位标签统一（高度疑似借鉴 / 疑似借鉴（待复核）/ 自研/原创），避免各处叫法不一
+    # 档位标签统一（高度疑似借鉴 / 模型复核后仍存疑 / 暂未检出相似），避免各处叫法不一
     from .label_normalize import normalize_labels
     html_text = normalize_labels(html_text)
 
@@ -2785,6 +3488,7 @@ def run_semantic_compare(
         "total_suspects":   len(suspects),
         "submodule_stats":  submodule_stats,
         "original_funcs":   len(original_funcs),
+        "innovation_points": len(innovation_points),
         "file_matches":     len(file_matches),
         "file_similar":     len(file_similar),
         "library_reuse_pairs": reuse_n,

@@ -52,6 +52,8 @@ def test_retrieval_contract_requires_all_channels_and_exact_history_counts():
         "missing_repo_ids": [],
     }, complete=True)
     bad["channels"].remove("normalized_code_simhash")
+    bad["same_language_only"] = False
     errors = contract_errors(bad)
     assert any("结构" not in e and "normalized_code_simhash" in e for e in errors)
     assert any("1/2" in e for e in errors)
+    assert any("同一编程语言" in e for e in errors)

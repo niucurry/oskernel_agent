@@ -12,7 +12,8 @@ from src.metadata.commits import (
     parse_blame,
 )
 from src.metadata.config import MetadataSettings
-from src.metadata.runner import channel_baseline, channel_common_code, channel_unique_strings
+from src.metadata.runner import (channel_baseline, channel_common_code,
+                                 channel_unique_strings, process_metadata)
 from src.metadata.strings import build_reverse_index, string_hits_for_func
 from src.models import FunctionRecord
 from src.normalize.store import FunctionStore
@@ -84,6 +85,38 @@ def test_channel_creates_new_pair_via_string(tmp_path):
     assert sp["candidate_func"]["repo_id"] == "2021/hist"
     assert sp["evidence"]["unique_string_matches"] == 1
     assert sp["tier"] == "review"
+
+
+def test_metadata_string_channel_and_existing_pairs_are_same_language_only(tmp_path):
+    db = tmp_path / "functions.db"
+    with FunctionStore(db) as store:
+        c_rec = FunctionRecord(
+            repo_id="2021/c-hist", file_path="src/x.c", start_line=1, end_line=3,
+            func_name="init", module_tag="other", lang="c",
+            raw_code="int init(void){return 0;}", normalized_code="",
+        )
+        store.add_function(c_rec, [UNIQUE_STR], [])
+        store.conn.commit()
+    qf = {
+        "repo_id": "2024/new", "file_path": "k.rs", "start_line": 10, "end_line": 12,
+        "func_name": "init", "module_tag": "other", "lang": "rust",
+        "raw_code": f'fn init() {{ log!("{UNIQUE_STR}"); }}', "normalized_code": "",
+    }
+    data = {"suspects": [{
+        "tier": "review", "final_score": 0.7, "query_func": qf,
+        "candidate_func": {
+            "repo_id": "2021/c-hist", "file_path": "src/x.c", "start_line": 1,
+            "end_line": 3, "func_name": "init", "module_tag": "other", "lang": "c",
+            "raw_code": "int init(void){return 0;}", "normalized_code": "",
+        },
+        "evidence": {}, "matched_spans": [], "match_type_per_span": [],
+    }]}
+
+    result = process_metadata(data, db, settings=SETTINGS)
+
+    assert result["suspects"] == []
+    assert result["metadata_summary"]["cross_language_filtered"] == 1
+    assert result["metadata_summary"]["string_new_pairs"] == 0
 
 
 # ---------- D1：字符串通道新建对计算真实 final_score（不再硬编码 0） ----------
