@@ -21,7 +21,7 @@ from .embedder import BaseEmbedder
 from .vector_store import VectorStore
 
 _SELECT = (
-    "SELECT id, repo_id, file_path, start_line, end_line, func_name, module_tag, normalized_code "
+    "SELECT id, repo_id, file_path, start_line, end_line, func_name, module_tag, lang, normalized_code "
     "FROM functions"
 )
 
@@ -40,6 +40,7 @@ def _payload(row: sqlite3.Row) -> dict:
         "end_line": row["end_line"],
         "func_name": row["func_name"],
         "module_tag": row["module_tag"],
+        "lang": row["lang"],
         "is_baseline": is_baseline_repo(row["repo_id"]),
     }
 

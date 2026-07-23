@@ -116,6 +116,8 @@ class FaissVectorStore:
     payload 从 functions.db 读取。
     """
 
+    supports_language_filter = True
+
     def __init__(self, index: "faiss.Index", ids_arr: np.ndarray,
                  db_path: str | Path = "data/db/functions.db") -> None:
         self._idx = index
@@ -131,7 +133,7 @@ class FaissVectorStore:
             conn = sqlite3.connect(self._db_path)
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                f"SELECT id, repo_id, file_path, start_line, end_line, func_name, module_tag "
+                f"SELECT id, repo_id, file_path, start_line, end_line, func_name, module_tag, lang "
                 f"FROM functions WHERE id IN ({placeholders})",
                 missing,
             ).fetchall()
@@ -149,44 +151,66 @@ class FaissVectorStore:
         module_tag: str | None = None,
         candidate_ids: list[int] | None = None,
         baseline_only: bool = False,
+        lang: str | None = None,
     ) -> list[dict]:
-        """ANN 检索 top_k，返回含 score+payload 的 dict 列表（与 VectorStore.search 等价）。"""
+        """ANN 检索 top_k；lang 给定时只返回同一编程语言的函数。"""
         q = vector.reshape(1, -1).astype("float32")
         faiss.normalize_L2(q)
+
+        def eligible(payload: dict) -> bool:
+            if exclude_repo_id and payload["repo_id"] == exclude_repo_id:
+                return False
+            if module_tag and payload["module_tag"] != module_tag:
+                return False
+            if lang and (payload.get("lang") or "").lower() != lang.lower():
+                return False
+            if baseline_only and not is_baseline_repo(payload["repo_id"]):
+                return False
+            return True
 
         if candidate_ids is not None:
             # candidate_ids 限定时：用 IndexFlatIP 在子集上暴力搜（子集通常很小）
             if not candidate_ids:
                 return []
             row_func_ids = [int(fid) for fid in candidate_ids if fid in self._id_to_row]
+            payloads = self._fetch_payload(row_func_ids)
+            row_func_ids = [fid for fid in row_func_ids
+                            if fid in payloads and eligible(payloads[fid])]
             rows = np.array([self._id_to_row[fid] for fid in row_func_ids], dtype="int64")
             if len(rows) == 0:
                 return []
             sub_vecs = self._idx.reconstruct_batch(rows)  # type: ignore[attr-defined]
             flat = faiss.IndexFlatIP(q.shape[1])
             flat.add(sub_vecs)
-            k = min(top_k + 1, len(rows))
+            k = min(top_k, len(rows))
             D, I = flat.search(q, k)
-            func_ids_found = [row_func_ids[int(i)] for i in I[0] if i >= 0]
-            scores = list(D[0])
+            found = [
+                (row_func_ids[int(i)], float(D[0][pos]))
+                for pos, i in enumerate(I[0]) if i >= 0
+            ]
         else:
-            # 全局 HNSW 检索
-            k = min(top_k + 10, self._idx.ntotal)
-            D, I = self._idx.search(q, k)
-            func_ids_found = [int(self._ids[i]) for i in I[0] if i >= 0]
-            scores = list(D[0])
+            # 全局 HNSW 检索。过滤条件可能使首批结果不足 top_k，逐步扩大搜索窗，
+            # 确保“同语言 top_k”不会被排名靠前的其他语言候选挤掉。
+            search_k = min(max(top_k + 10, 64), self._idx.ntotal)
+            found = []
+            while search_k > 0:
+                D, I = self._idx.search(q, search_k)
+                pairs = [
+                    (int(self._ids[i]), float(D[0][pos]))
+                    for pos, i in enumerate(I[0]) if i >= 0
+                ]
+                payloads = self._fetch_payload([fid for fid, _ in pairs])
+                found = [(fid, score) for fid, score in pairs
+                         if fid in payloads and eligible(payloads[fid])]
+                if len(found) >= top_k or search_k >= self._idx.ntotal:
+                    break
+                search_k = min(self._idx.ntotal, search_k * 2)
 
-        payloads = self._fetch_payload(func_ids_found)
+        payloads = self._fetch_payload([fid for fid, _ in found])
         results = []
-        for fid, score in zip(func_ids_found, scores):
+        for fid, score in found:
             p = payloads.get(fid)
-            if p is None:
-                continue
-            if exclude_repo_id and p["repo_id"] == exclude_repo_id:
-                continue
-            if module_tag and p["module_tag"] != module_tag:
-                continue
-            if baseline_only and not is_baseline_repo(p["repo_id"]):
+            if p is None or not eligible(p):
                 continue
             results.append({
                 "id": fid,
@@ -199,6 +223,7 @@ class FaissVectorStore:
                     "end_line": p["end_line"],
                     "func_name": p["func_name"],
                     "module_tag": p["module_tag"],
+                    "lang": p["lang"],
                     "is_baseline": is_baseline_repo(p["repo_id"]),
                 },
             })

@@ -94,6 +94,25 @@ def test_fastpath_no_false_match_for_different_file(tmp_path):
     assert res["matched_files"] == []
 
 
+def test_fastpath_does_not_match_same_text_across_languages(tmp_path):
+    repos_root = tmp_path / "repos"
+    hist = repos_root / "2021" / "hist"
+    (hist / "src").mkdir(parents=True)
+    (hist / "src" / "compute.rs").write_text(FILE_A, encoding="utf-8")
+    db = tmp_path / "functions.db"
+    with FunctionStore(db) as store:
+        normalize_repo(hist, store, repo_id="2021/hist", repos_root=repos_root)
+
+    newrepo = tmp_path / "new"
+    (newrepo / "src").mkdir(parents=True)
+    (newrepo / "src" / "compute.c").write_text(FILE_A, encoding="utf-8")
+
+    res = scan_repo(newrepo, repo_id="2024/new", db_path=db, output_dir=tmp_path / "out")
+
+    assert res["matched_files"] == []
+    assert res["skip_files"] == []
+
+
 def test_aggregate_file_similarity_marks_whole_file():
     # 同一文件 2 个函数全部 confirmed，recall 报告该文件共 2 个函数 → 整体相似
     def sp(fn):

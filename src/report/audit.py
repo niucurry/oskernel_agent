@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.buildlib.coverage import audit_config
+from src.retrieval_contract import CONTRACT_VERSION
 
 from .label_normalize import residual_legacy
 
@@ -27,7 +28,7 @@ def audit_reports(reports_root: str | Path) -> dict:
     for path in files:
         text = path.read_text(encoding="utf-8", errors="replace")
         rel = path.relative_to(root).as_posix()
-        if ('data-retrieval-contract-version="2"' in text
+        if (f'data-retrieval-contract-version="{CONTRACT_VERSION}"' in text
                 and 'data-retrieval-complete="true"' in text):
             complete.append(rel)
         elif 'data-retrieval-complete="false"' in text:

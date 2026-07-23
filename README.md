@@ -153,6 +153,13 @@ python -m src.pipeline --repo <新作品路径或 git url> --baselines
 # → data/output/<作品名>/<作品名>_comparison.html
 ```
 
+对比报告包含独立的“相对参考 repo 的创新实现地图”：系统先按模块识别主要历史来源，再把暂未形成
+有效相似命中的目标函数与该来源的最近实现做代码级比较，归纳参考基线、实际改动及其作用。每个
+创新点都映射到目标/参考两侧的可点击源码范围，并给出涉及文件、函数、代码行和控制流分支形成的
+实现复杂度估算；README / 设计文档只能作为旁证，“未命中”本身不会被直接认定为创新。
+所有文件级、函数级和创新实现比较均限定为同一编程语言；跨语言候选在召回阶段直接过滤，
+不会进入相似度分层、误报清单或创新实现地图。
+
 流水线步骤：`ingest → fastpath → recall → exact → segment → metadata → ai_detect → report`，每步落盘中间 JSON。常用选项：
 
 ```bash
@@ -172,6 +179,7 @@ SimHash、结构 SimHash 与 `functions.db` 为同一代；向量、特征 SimHa
 归一化代码结构 SimHash 五个召回通道全部开启；确定性/结构候选不做静默截断。任一条件不满足，
 流水线以退出码 2 终止，不允许把“系统没查到”写成“原创”。结构 SimHash 是独立于函数名和 ANN
 top-k 的补充通道，当前保证全局汉明距离不超过 15 的归一化代码结构候选进入后续验证。
+召回契约同时要求 `same_language_only=true`，旧的跨语言召回产物不能续跑生成新报告。
 
 报告中的绿色档统一表示“暂未检出相似”，不表示原创认定。报告头会记录历史库覆盖数、召回契约
 版本与通道；缺少这些信息的旧报告会显示红色“已失效、必须重跑”提示。
@@ -326,7 +334,7 @@ python run_batch.py
    （`python -m src.pipeline` 与 `python -m src.report compare` 走同一个函数）；
    描述报告只有 `agent.py`（`oskernel_agent` 树状流水线）一条路径。旧的 Markdown
    报告流程（`src.report.generate` / `src.review` LLM 逐对复核）已删除。
-2. **写盘前强制归一**：档位命名（高度疑似借鉴 / 疑似借鉴（待复核）/ 暂未检出相似）由
+2. **写盘前强制归一**：档位命名（高度疑似借鉴 / 模型复核后仍存疑 / 暂未检出相似）由
    `src/report/label_normalize.py` 在 HTML 写盘前统一（`semantic_compare` 内接线，幂等）；
    描述报告的英文正文/标题、代码摘录型点评由 `pipeline/lang_guard.py` 在渲染前中文化
    （`tree_builder` 内接线）。
@@ -335,7 +343,7 @@ python run_batch.py
    都在流水线内自动剔除并在报告附录单列，无需人工后处理。
 4. **review 档保守复核**：中等相似函数由 LLM 语义复核（`semantic_compare` 内置，模型
    `LLM_MODEL`，默认 `deepseek-v4-flash`）；判为借鉴时升档，明确非借鉴时排除，结论为
-   “疑似”或复核失败时保留待复核信号，绝不降成“暂未检出”。
+   “疑似”或复核失败时保留“模型复核后仍存疑”信号，绝不降成“暂未检出”。
 5. **规范命令固定**：对比报告一律 `python -m src.pipeline --repo <..> --baselines`
    （`run_batch.py` 与前端控制台均已按此调用）。
 

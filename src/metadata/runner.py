@@ -29,6 +29,19 @@ def _suspect_key(s: dict) -> tuple:
 _EXACT_MATCHER = ExactMatcher()
 
 
+def drop_cross_language_pairs(data: dict) -> int:
+    """移除旧产物或旁路通道遗留的跨语言 pair，返回移除数。"""
+    suspects = data.get("suspects") or []
+    kept = [
+        s for s in suspects
+        if ((s.get("query_func") or {}).get("lang") or "").lower()
+        == ((s.get("candidate_func") or {}).get("lang") or "").lower()
+    ]
+    removed = len(suspects) - len(kept)
+    data["suspects"] = kept
+    return removed
+
+
 def _new_suspect(qf: dict, hf: dict, count: int) -> dict:
     """字符串通道新建的嫌疑对（独立召回路径）。
 
@@ -80,6 +93,8 @@ def channel_unique_strings(data: dict, db_path: str | Path, settings: MetadataSe
         ).items():
             hf = fetch_function(db_path, hist_fid)
             if not hf:
+                continue
+            if (hf.get("lang") or "").lower() != (qf.get("lang") or "").lower():
                 continue
             key = (qf["file_path"], qf["start_line"], hf["repo_id"], hf["file_path"], hf["start_line"])
             if key in existing:
@@ -219,7 +234,8 @@ def process_metadata(
 ) -> dict:
     """按需运行三通道（通道1 总是运行；2/3 视后端可用性）。"""
     settings = settings or load_metadata_settings()
-    summary = {"string_new_pairs": channel_unique_strings(data, db_path, settings)}
+    summary = {"cross_language_filtered": drop_cross_language_pairs(data)}
+    summary["string_new_pairs"] = channel_unique_strings(data, db_path, settings)
     summary["common_code_pairs"] = channel_common_code(data, settings)
     if baseline_matcher is not None:
         summary["baseline_derived"] = channel_baseline(data, baseline_matcher, settings)

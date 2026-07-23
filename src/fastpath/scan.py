@@ -70,7 +70,10 @@ def scan_repo(
             if len(normalized_file_lines(text, f.lang)) < min_file_lines:
                 continue
             nh = normalized_file_hash(text, f.lang)
-            hist = store.find_files_by_norm_hash(nh, exclude_repo_id=repo_id)
+            hist = [
+                h for h in store.find_files_by_norm_hash(nh, exclude_repo_id=repo_id)
+                if (h.get("lang") or "").lower() == f.lang.lower()
+            ]
             if not hist:
                 continue
             repo_ids = {h["repo_id"] for h in hist}

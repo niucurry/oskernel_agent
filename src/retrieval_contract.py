@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-CONTRACT_VERSION = 2
+CONTRACT_VERSION = 3
 REQUIRED_CHANNELS = frozenset({
     "vector",
     "feature_simhash",
@@ -17,6 +17,7 @@ def build_retrieval_contract(history_coverage: dict | None, *, complete: bool) -
         "version": CONTRACT_VERSION,
         "complete": bool(complete),
         "no_silent_candidate_truncation": True,
+        "same_language_only": True,
         "channels": sorted(REQUIRED_CHANNELS),
         "history_coverage": history_coverage or {},
     }
@@ -32,6 +33,8 @@ def contract_errors(contract: dict | None) -> list[str]:
         errors.append("召回未声明 complete=true")
     if c.get("no_silent_candidate_truncation") is not True:
         errors.append("未承诺禁止静默截断候选")
+    if c.get("same_language_only") is not True:
+        errors.append("未承诺仅比较同一编程语言")
     missing_channels = REQUIRED_CHANNELS - set(c.get("channels") or [])
     if missing_channels:
         errors.append("缺少召回通道：" + ", ".join(sorted(missing_channels)))

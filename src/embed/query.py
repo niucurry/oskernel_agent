@@ -39,7 +39,7 @@ def _normalize_query_repo(repo_path: Path, repos_root: Path) -> tuple[str, list]
 
 def _vector_search(
     store: VectorStore, vec, top_k: int, *, exclude_repo_id: str,
-    candidate_ids: list[int] | None = None,
+    candidate_ids: list[int] | None = None, lang: str | None = None,
 ) -> list[dict]:
     """全模块向量检索（取全局 top_k）。
 
@@ -51,11 +51,40 @@ def _vector_search(
     candidate_ids 给定时把检索限定在该 id 集合内（用于在 SimHash 候选池内取向量 top_k，
     作为全局召回的并集补充——而非对全局召回做前置过滤）。
     """
-    return store.search(vec, top_k, exclude_repo_id=exclude_repo_id, module_tag=None, candidate_ids=candidate_ids)
+    if getattr(store, "supports_language_filter", False):
+        return store.search(
+            vec, top_k, exclude_repo_id=exclude_repo_id, module_tag=None,
+            candidate_ids=candidate_ids, lang=lang,
+        )
+    # 旧 Qdrant payload 可能没有 lang；先扩大候选窗，随后用 functions.db 做权威过滤。
+    return store.search(
+        vec, top_k * 4, exclude_repo_id=exclude_repo_id,
+        module_tag=None, candidate_ids=candidate_ids,
+    )
+
+
+def _same_language_candidates(
+    conn: sqlite3.Connection, candidates: list[dict], lang: str, *, limit: int | None = None,
+) -> list[dict]:
+    """按 functions.db 的 lang 字段过滤候选；保持原排名并可截取同语言 top-k。"""
+    ids = list(dict.fromkeys(int(c["id"]) for c in candidates if c.get("id") is not None))
+    if not ids:
+        return []
+    allowed: set[int] = set()
+    for start in range(0, len(ids), 900):
+        chunk = ids[start:start + 900]
+        placeholders = ",".join("?" for _ in chunk)
+        rows = conn.execute(
+            f"SELECT id FROM functions WHERE id IN ({placeholders}) AND lower(lang)=lower(?)",
+            [*chunk, lang],
+        ).fetchall()
+        allowed.update(int(row[0]) for row in rows)
+    result = [c for c in candidates if int(c["id"]) in allowed]
+    return result[:limit] if limit is not None else result
 
 
 def _fingerprint_candidates(conn: sqlite3.Connection, normalized_code: str,
-                            exclude_repo_id: str) -> list[dict]:
+                            exclude_repo_id: str, lang: str | None = None) -> list[dict]:
     """召回归一化代码完全相同的全部历史来源，每仓保留一个代表函数。
 
     该通道直接走 SQLite 指纹索引，不受 ANN top-k、向量阈值或同类候选拥挤影响。
@@ -65,11 +94,11 @@ def _fingerprint_candidates(conn: sqlite3.Connection, normalized_code: str,
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """SELECT id, repo_id, file_path, start_line, end_line, func_name, module_tag,
-                  normalized_code
+                  lang, normalized_code
            FROM functions
-           WHERE normalized_hash=? AND repo_id<>?
+           WHERE normalized_hash=? AND repo_id<>? AND (? IS NULL OR lower(lang)=lower(?))
            ORDER BY repo_id, id""",
-        (normalized_code_hash(normalized_code), exclude_repo_id),
+        (normalized_code_hash(normalized_code), exclude_repo_id, lang, lang),
     ).fetchall()
     out: list[dict] = []
     seen_repos: set[str] = set()
@@ -92,6 +121,7 @@ def _fingerprint_candidates(conn: sqlite3.Connection, normalized_code: str,
                 "end_line": r["end_line"],
                 "func_name": r["func_name"],
                 "module_tag": r["module_tag"],
+                "lang": r["lang"],
                 "is_baseline": is_baseline_repo(r["repo_id"]),
             },
         })
@@ -99,15 +129,16 @@ def _fingerprint_candidates(conn: sqlite3.Connection, normalized_code: str,
 
 
 def _name_candidates(conn: sqlite3.Connection, func_name: str,
-                     exclude_repo_id: str) -> list[dict]:
+                     exclude_repo_id: str, lang: str | None = None) -> list[dict]:
     """同名方法确定性补召回；取全库结果后每仓留一个，不做数量截断。"""
     if len(func_name) < 5:
         return []
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        """SELECT id, repo_id, file_path, start_line, end_line, func_name, module_tag
-           FROM functions WHERE func_name=? AND repo_id<>? ORDER BY repo_id, id""",
-        (func_name, exclude_repo_id),
+        """SELECT id, repo_id, file_path, start_line, end_line, func_name, module_tag, lang
+           FROM functions WHERE func_name=? AND repo_id<>?
+           AND (? IS NULL OR lower(lang)=lower(?)) ORDER BY repo_id, id""",
+        (func_name, exclude_repo_id, lang, lang),
     ).fetchall()
     if not rows:
         return []
@@ -127,6 +158,7 @@ def _name_candidates(conn: sqlite3.Connection, func_name: str,
                 "file_path": r["file_path"], "start_line": r["start_line"],
                 "end_line": r["end_line"], "func_name": r["func_name"],
                 "module_tag": r["module_tag"],
+                "lang": r["lang"],
                 "is_baseline": is_baseline_repo(r["repo_id"]),
             },
         })
@@ -134,7 +166,7 @@ def _name_candidates(conn: sqlite3.Connection, func_name: str,
 
 
 def _structural_candidates(conn: sqlite3.Connection, matches: dict[int, int],
-                           exclude_repo_id: str) -> list[dict]:
+                           exclude_repo_id: str, lang: str | None = None) -> list[dict]:
     """把结构 SimHash 命中直接转成 exact 候选，不再经过向量 top-k。"""
     if len(matches) > MAX_STRUCTURAL_CANDIDATES:
         raise RuntimeError(
@@ -148,9 +180,10 @@ def _structural_candidates(conn: sqlite3.Connection, matches: dict[int, int],
         chunk = ids[start:start + 900]
         placeholders = ",".join("?" for _ in chunk)
         rows.extend(conn.execute(
-            f"""SELECT id, repo_id, file_path, start_line, end_line, func_name, module_tag
-                 FROM functions WHERE id IN ({placeholders}) AND repo_id<>?""",
-            [*chunk, exclude_repo_id],
+            f"""SELECT id, repo_id, file_path, start_line, end_line, func_name, module_tag, lang
+                 FROM functions WHERE id IN ({placeholders}) AND repo_id<>?
+                 AND (? IS NULL OR lower(lang)=lower(?))""",
+            [*chunk, exclude_repo_id, lang, lang],
         ).fetchall())
     out = []
     for r in rows:
@@ -166,6 +199,7 @@ def _structural_candidates(conn: sqlite3.Connection, matches: dict[int, int],
                 "file_path": r["file_path"], "start_line": r["start_line"],
                 "end_line": r["end_line"], "func_name": r["func_name"],
                 "module_tag": r["module_tag"],
+                "lang": r["lang"],
                 "is_baseline": is_baseline_repo(r["repo_id"]),
             },
         })
@@ -249,10 +283,16 @@ def query_repo(
     n_fingerprint_added = 0
     n_name_added = 0
     n_structural_added = 0
+    n_cross_language_filtered = 0
     t0 = time.perf_counter()
     for row, vec in zip(rows, vecs):
         # 主通道：全局向量 top_k（不受 SimHash 候选池限制）
-        cands = _vector_search(_search_store, vec, top_k, exclude_repo_id=repo_id)
+        cands = _vector_search(
+            _search_store, vec, top_k, exclude_repo_id=repo_id, lang=row["lang"])
+        if fp_conn is not None:
+            before = len(cands)
+            cands = _same_language_candidates(fp_conn, cands, row["lang"], limit=top_k)
+            n_cross_language_filtered += before - len(cands)
         for c in cands:
             c["recall_source"] = "vector"
         n_vector += len(cands)
@@ -265,9 +305,14 @@ def query_repo(
                 seen = {c["id"] for c in cands}
                 extra = [
                     c for c in _vector_search(
-                        _search_store, vec, top_k, exclude_repo_id=repo_id, candidate_ids=sh_ids)
+                        _search_store, vec, top_k, exclude_repo_id=repo_id,
+                        candidate_ids=sh_ids, lang=row["lang"])
                     if c["id"] not in seen
                 ]
+                if fp_conn is not None:
+                    before = len(extra)
+                    extra = _same_language_candidates(fp_conn, extra, row["lang"], limit=top_k)
+                    n_cross_language_filtered += before - len(extra)
                 for c in extra:
                     c["recall_source"] = "simhash"
                 cands += extra
@@ -276,7 +321,8 @@ def query_repo(
         # 硬召回通道：完全归一化指纹相同的历史来源全部并入，不被 top-k 挤掉。
         if fp_conn is not None:
             seen = {c["id"] for c in cands}
-            exact = _fingerprint_candidates(fp_conn, row["normalized_code"], repo_id)
+            exact = _fingerprint_candidates(
+                fp_conn, row["normalized_code"], repo_id, row["lang"])
             exact_ids = {x["id"] for x in exact}
             for c in cands:
                 if c["id"] in exact_ids:
@@ -286,7 +332,7 @@ def query_repo(
             n_fingerprint_added += len(added)
 
             seen = {c["id"] for c in cands}
-            named = _name_candidates(fp_conn, row["func_name"], repo_id)
+            named = _name_candidates(fp_conn, row["func_name"], repo_id, row["lang"])
             named_ids = {x["id"] for x in named}
             for c in cands:
                 if c["id"] in named_ids:
@@ -298,7 +344,8 @@ def query_repo(
             if code_simhash_query is not None:
                 seen = {c["id"] for c in cands}
                 structural = _structural_candidates(
-                    fp_conn, code_simhash_query.query(row["normalized_code"]), repo_id)
+                    fp_conn, code_simhash_query.query(row["normalized_code"]),
+                    repo_id, row["lang"])
                 structural_ids = {x["id"] for x in structural}
                 by_id = {x["id"]: x for x in structural}
                 for c in cands:
@@ -308,6 +355,12 @@ def query_repo(
                 added = [c for c in structural if c["id"] not in seen]
                 cands += added
                 n_structural_added += len(added)
+
+            # 末端硬过滤兼容旧向量 payload 与未来新增召回通道：任何跨语言候选都不得
+            # 写入 recall.json，更不会进入后续精确核验或创新实现地图。
+            before = len(cands)
+            cands = _same_language_candidates(fp_conn, cands, row["lang"])
+            n_cross_language_filtered += before - len(cands)
 
         results.append(
             {
@@ -339,19 +392,21 @@ def query_repo(
                            "fingerprint_added": n_fingerprint_added,
                            "function_name_added": n_name_added,
                            "code_simhash_added": n_structural_added},
+        "cross_language_filtered": n_cross_language_filtered,
     }
     if simhash_query is not None:
         simhash_stats["avg_candidate_pool"] = round(sum(cand_sizes) / len(cand_sizes), 1) if cand_sizes else 0
     logger.info(
-        "[{}] 检索耗时 {:.2f}s，召回候选 {} 条（向量 {} ∪ 特征SimHash补 {} ∪ 指纹补 {} ∪ 同名补 {} ∪ 结构SimHash补 {}）{}",
+        "[{}] 检索耗时 {:.2f}s，召回候选 {} 条（仅同语言；向量 {} ∪ 特征SimHash补 {} ∪ 指纹补 {} ∪ 同名补 {} ∪ 结构SimHash补 {}；过滤跨语言 {}）{}",
         repo_id, search_elapsed, total_recalled, n_vector, n_simhash_added,
-        n_fingerprint_added, n_name_added, n_structural_added,
+        n_fingerprint_added, n_name_added, n_structural_added, n_cross_language_filtered,
         f"，SimHash 候选池均值 {simhash_stats['avg_candidate_pool']}" if simhash_query else "",
     )
 
     recall = {
         "query_repo_id": repo_id,
         "top_k": top_k,
+        "comparison_scope": {"same_language_only": True},
         "retrieval_contract": build_retrieval_contract(
             history_coverage,
             complete=bool(db_path is not None and simhash_query is not None

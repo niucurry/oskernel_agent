@@ -100,6 +100,10 @@ def verify_recall(
             if row is None:
                 logger.warning("候选 func_id={} 不在 {}，跳过", cand["id"], db_path)
                 continue
+            # 对比报告只允许同一编程语言的代码进入精确核验。该防线同时兼容旧 recall
+            # 产物，避免跨语言候选在 resume 场景重新流入报告。
+            if (row["lang"] or "").lower() != (q_rec.lang or "").lower():
+                continue
             n_pairs += 1
             res = matcher.match(q_rec.raw_code, row["raw_code"], lang=q_rec.lang)
             tier = tier_of(res.similar_line_ratio)

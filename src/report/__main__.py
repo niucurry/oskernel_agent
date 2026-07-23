@@ -40,6 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="embed 阶段产出的 *_recall.json（用于计算函数总数 / 原创函数）")
     pc.add_argument("--filematch", default=None,
                     help="fastpath 产出的 *_filematch.json（L0 整文件复制清单）")
+    pc.add_argument("--db", default=str(PROJECT_ROOT / "data/db/functions.db"),
+                    help="历史 functions.db（用于读取参考 repo 的函数源码）")
     pc.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR,
                     help=f"HTML 输出目录（默认 {DEFAULT_OUTPUT_DIR}）")
     pc.add_argument("--top-per-module", type=int, default=20,
@@ -77,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
                 top_per_module  = args.top_per_module,
                 skip_opencode   = args.skip_opencode,
                 filematch_path  = args.filematch,
+                functions_db_path = args.db,
             )
         except RuntimeError as exc:
             logger.error("拒绝生成报告：{}", exc)

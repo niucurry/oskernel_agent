@@ -265,6 +265,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             output_dir      = out,
             filematch_path  = filematch_path,
             ai_detect_path  = ai_detect_path,
+            functions_db_path = args.db,
         ))
 
         # 清理流水线衍生中间产物（fastpath/recall/exact/segment/metadata/ai_detect 的
