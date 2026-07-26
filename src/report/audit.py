@@ -19,7 +19,14 @@ DEFAULT_AUDIT_OUTPUT = PROJECT_ROOT / "data/output/recall_completeness_audit.jso
 
 def audit_reports(reports_root: str | Path) -> dict:
     root = Path(reports_root)
-    files = sorted(root.glob("*/comparison.html"))
+    # 同时覆盖批量归档名 ``comparison.html`` 与流水线正式产物 ``<repo>_comparison.html``；
+    # reports_root 既可指向输出根，也可直接指向某个作品目录。
+    files = sorted({
+        *root.glob("*/comparison.html"),
+        *root.glob("*/*_comparison.html"),
+        *root.glob("comparison.html"),
+        *root.glob("*_comparison.html"),
+    })
     complete: list[str] = []
     stale: list[str] = []
     unmarked: list[str] = []

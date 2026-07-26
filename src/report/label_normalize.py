@@ -1,14 +1,15 @@
 """对比报告档位标签统一（单一真相源）。
 
-历史原因导致同一个「借鉴」置信档位在报告各处叫法不一：
-  confirmed 档：已确认借鉴 / 借鉴 / 疑似借鉴 / 疑似借鉴·待人工判定
+历史原因导致同一个「同源代码」置信档位在报告各处叫法不一：
+  confirmed 档：高置信同源代码（并兼容旧称：已确认借鉴 / 疑似借鉴等）
   review   档：needReview / needReview（疑似借鉴）/ 疑似借鉴 / 待复核 / 待人工判定
   weak         → 并入 review
 再加上 confirmed 的「疑似借鉴」和 review 的「疑似借鉴」在不同图里撞名，老师读起来很乱。
 
-本模块把最终 HTML 里的这些叫法统一为**两档 + 未检出**：
-  confirmed → 高度疑似借鉴   （红 #ef4444）
+本模块把最终 HTML 里的这些叫法统一为**两类结论 + 独立流程状态 + 未检出**：
+  confirmed → 高置信同源代码   （红 #ef4444）
   review    → 模型复核后仍存疑   （琥珀 #f59e0b）
+  failure   → 复核失败/未完成     （灰；不计为存疑）
   original  → 暂未检出相似     （绿；不等于原创认定）
 
 图表里靠**颜色**判档（名字可能是「借鉴」也可能是「疑似借鉴」，但颜色恒定），故用颜色锚定改名。
@@ -21,7 +22,7 @@ from __future__ import annotations
 
 import re
 
-CONFIRMED = "高度疑似借鉴"
+CONFIRMED = "高置信同源代码"
 REVIEW = "模型复核后仍存疑"
 ORIGINAL = "暂未检出相似"
 
@@ -65,11 +66,13 @@ _RULES: list[tuple[str, str, bool]] = [
     ("疑似借鉴（与历史代码逐行高度相似，待人工判定）", f"{CONFIRMED}（与历史代码逐行高度相似）", False),
     ("疑似借鉴·待人工判定", CONFIRMED, False),
     ("已确认借鉴", CONFIRMED, False),
+    ("高度疑似借鉴", CONFIRMED, False),
+    ("高度疑似", "高置信同源", False),
     ("needReview（疑似借鉴）", REVIEW, False),
     ("needReview", REVIEW, False),
     ("弱相似", REVIEW, False),
     ("疑似借鉴（待复核）", REVIEW, False),
-    # review 档 KPI（此时 confirmed KPI 已是「高度疑似借鉴（函数）」；负向后顾 (?<!度) 避免
+    # review 档 KPI（此时 confirmed KPI 已统一；负向后顾 (?<!度) 避免
     # 命中 confirmed 的「…度疑似借鉴（函数）」，只改独立的 review KPI）
     (r"(?<!度)疑似借鉴（函数）", f"{REVIEW}（函数）", True),
     # ---- B. 悬挂限定词统一 ----
@@ -115,7 +118,7 @@ def normalize_labels(html: str) -> str:
 
 # 用于校验：统一后不应再出现的旧叫法
 LEGACY_TERMS = [
-    "已确认借鉴", "needReview", "疑似借鉴·待人工判定", "待人工判定", "待复核", "弱相似",
+    "已确认借鉴", "高度疑似借鉴", "高度疑似", "needReview", "疑似借鉴·待人工判定", "待人工判定", "待复核", "弱相似",
     "&nbsp;借鉴</div>", "&nbsp;疑似借鉴</div>",
 ]
 

@@ -32,6 +32,12 @@ from pathlib import Path
 def _find_opencode() -> str:
     import shutil
 
+    def _safe_exists(path: Path) -> bool:
+        try:
+            return path.exists()
+        except OSError:
+            return False
+
     def _prefer_real_exe(path: Path) -> Path:
         # npm 全局 shim（opencode.cmd/.ps1/无扩展名）经 subprocess 调用时会走 cmd.exe，
         # 导致 prompt 里的 shell 元字符（如 severity "low|medium|high" 的 `|`）被 cmd
@@ -40,7 +46,7 @@ def _find_opencode() -> str:
         if path.suffix.lower() == ".exe":
             return path
         exe = path.parent / "node_modules" / "opencode-ai" / "bin" / "opencode.exe"
-        return exe if exe.exists() else path
+        return exe if _safe_exists(exe) else path
 
     for c in [
         Path.home() / "AppData" / "Roaming" / "npm" / "node_modules" / "opencode-ai" / "bin" / "opencode.exe",
@@ -48,7 +54,7 @@ def _find_opencode() -> str:
         Path.home() / "AppData" / "Roaming" / "npm" / "opencode",
         Path.home() / "AppData" / "Roaming" / "npm" / "opencode.cmd",
     ]:
-        if c.exists():
+        if _safe_exists(c):
             return str(_prefer_real_exe(c))
     found = shutil.which("opencode")
     if found:

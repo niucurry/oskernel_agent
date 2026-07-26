@@ -113,17 +113,13 @@ repos:
   year: 2025
   team_name: 塔特林设计局
   award_level: ''
-- repo_url: https://gitlab.eduxiji.net/educg-group-36002-2710490/T202510486995158-3041
+- repo_url: https://gitlab.eduxiji.net/T202510486995158/OSKernel2025-rustoswhu
   year: 2025
   team_name: 武大前锋
   award_level: ''
 - repo_url: https://gitlab.eduxiji.net/educg-group-36002-2710490/T202510699995276-827
   year: 2025
   team_name: 西北工业大学一二三队
-  award_level: ''
-- repo_url: https://gitlab.eduxiji.net/educg-group-36002-2710490/T202510126995169-3027
-  year: 2025
-  team_name: 再来一次
   award_level: ''
 - repo_url: https://gitlab.eduxiji.net/T202519145995201/bakaos
   year: 2025
@@ -181,7 +177,7 @@ repos:
   year: 2024
   team_name: Pantheon
   award_level: 一等奖
-- repo_url: https://gitlab.eduxiji.net/educg-group-26010-2376550/T202418123993075-2940
+- repo_url: https://gitlab.eduxiji.net/educg-group-22024-2210153/T202418123993075-3283
   year: 2024
   team_name: Phoenix
   award_level: 一等奖
@@ -261,10 +257,6 @@ repos:
   year: 2023
   team_name: AA5555AA
   award_level: ''
-- repo_url: https://gitlab.eduxiji.net/202310007101563/Alien
-  year: 2023
-  team_name: Alien
-  award_level: 一等奖
 - repo_url: https://gitlab.eduxiji.net/202310487101114/oskernel2023-avx
   year: 2023
   team_name: AVX
@@ -385,7 +377,7 @@ repos:
   year: 2022
   team_name: 图漏图森破
   award_level: 一等奖
-- repo_url: https://gitlab.eduxiji.net/retrhelo/xv6-k210
+- repo_url: https://gitlab.eduxiji.net/os-contest-2021-kernel-final-stage2/retrhelo-xv6-k210
   year: 2021
   team_name: 3Los
   award_level: 一等奖
@@ -443,7 +435,7 @@ repos:
   year: 2021
   team_name: "TeamNameNotFound"
   award_level: ''
-- repo_url: https://gitlab.eduxiji.net/hzc1998/oskernel2021-xbook2
+- repo_url: https://gitlab.eduxiji.net/os-contest-2021-kernel-final-stage2/hzc1998-oskernel2021-xbook2
   year: 2021
   team_name: "小骨头"
   award_level: ''
@@ -467,11 +459,11 @@ repos:
   year: 2021
   team_name: "pagefault"
   award_level: ''
-- repo_url: https://gitlab.eduxiji.net/potato-kernal/cy-os
+- repo_url: https://gitlab.eduxiji.net/os-contest-2021-kernel-final-scene/potato-kernal-cy-os
   year: 2021
   team_name: "文火土豆丝"
   award_level: ''
-- repo_url: https://gitlab.eduxiji.net/c-core1/2022os-c-core
+- repo_url: https://gitlab.eduxiji.net/educg-group-14239-914332/2022os-c-core
   year: 2022
   team_name: "C-core"
   award_level: ''
@@ -495,7 +487,7 @@ repos:
   year: 2022
   team_name: "你说对就队"
   award_level: ''
-- repo_url: https://gitlab.eduxiji.net/dh2zz/oskernel2022
+- repo_url: https://gitlab.eduxiji.net/educg-group-14157-894146/oskernel2022
   year: 2022
   team_name: "健康向上好青年"
   award_level: ''
@@ -506,10 +498,6 @@ repos:
 - repo_url: https://gitlab.eduxiji.net/yhwu_is/oskernel2022-caporustos
   year: 2022
   team_name: "caporustos"
-  award_level: ''
-- repo_url: https://gitlab.eduxiji.net/853476998/run
-  year: 2022
-  team_name: "能run就行"
   award_level: ''
 - repo_url: https://gitlab.eduxiji.net/hlw2014/ucore-smp
   year: 2022
@@ -523,10 +511,6 @@ repos:
   year: 2022
   team_name: "我永远喜欢少名针妙丸"
   award_level: ''
-- repo_url: https://gitlab.eduxiji.net/910191774/oskernel2022
-  year: 2022
-  team_name: "Enforce Core"
-  award_level: ''
 - repo_url: https://gitlab.eduxiji.net/piper/oskernel2022-ovo
   year: 2022
   team_name: "Three Easy Pieces"
@@ -534,10 +518,6 @@ repos:
 - repo_url: https://gitlab.eduxiji.net/Gxm/yd_os
   year: 2022
   team_name: "hart"
-  award_level: ''
-- repo_url: https://gitlab.eduxiji.net/wsy/oskernel2022-whw
-  year: 2022
-  team_name: "WHW"
   award_level: ''
 - repo_url: https://gitlab.eduxiji.net/maoxianjia/oskernal2022-youdaoliteam
   year: 2022
@@ -558,10 +538,6 @@ repos:
 - repo_url: https://gitlab.eduxiji.net/eulerfan/tcore
   year: 2022
   team_name: "代码掐架队"
-  award_level: ''
-- repo_url: https://gitlab.eduxiji.net/yyz/oskernel-1
-  year: 2022
-  team_name: "hfut.happy"
   award_level: ''
 - repo_url: https://gitlab.eduxiji.net/jarvis/toyos
   year: 2022
@@ -594,10 +570,6 @@ repos:
 - repo_url: https://gitlab.eduxiji.net/educg-group-26011-2376549/T202410213992605-85
   year: 2024
   team_name: "Refill"
-  award_level: ''
-- repo_url: https://gitlab.eduxiji.net/educg-group-26011-2376549/hyperos
-  year: 2024
-  team_name: "我芯澎湃"
   award_level: ''
 - repo_url: https://gitlab.eduxiji.net/educg-group-38066-3006609/T202510699997579-3142
   year: 2025
