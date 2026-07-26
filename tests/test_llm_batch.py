@@ -1,6 +1,18 @@
 import json
+import shutil
+from pathlib import Path
 
 from src.oskernel_agent.engines import llm_batch
+
+
+def test_find_opencode_ignores_inaccessible_candidates(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+
+    def denied(_path):
+        raise PermissionError("restricted user directory")
+
+    monkeypatch.setattr(Path, "exists", denied)
+    assert llm_batch._find_opencode() == "opencode"
 
 
 def test_cache_disabled_task_always_regenerates_and_does_not_write_cache(

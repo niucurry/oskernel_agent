@@ -1,0 +1,46 @@
+# 不参与历史库覆盖率与建库的仓库留档。
+# 这些条目要么当前没有可读取的 Git HEAD，要么克隆后没有可解析源码；
+# 若后续找到有效地址，可移回 config/repos.yaml。
+unavailable_repos:
+  - repo_url: https://gitlab.eduxiji.net/educg-group-36002-2710490/T202510126995169-3027
+    year: 2025
+    team_name: 再来一次
+    award_level: ''
+    status: no_supported_source
+    reason: 2026-06-25 建库扫描到 0 个源码文件、0 个函数
+  - repo_url: https://gitlab.eduxiji.net/202310007101563/Alien
+    year: 2023
+    team_name: Alien
+    award_level: 一等奖
+    status: git_unreachable
+    reason: 项目页仍存在，但 2026-07-25 使用当前凭据读取 Git HEAD 仍返回 128
+  - repo_url: https://gitlab.eduxiji.net/853476998/run
+    year: 2022
+    team_name: 能run就行
+    award_level: ''
+    status: git_unreachable
+    reason: 原地址克隆失败，未找到可核验的迁移或归档地址
+  - repo_url: https://gitlab.eduxiji.net/910191774/oskernel2022
+    year: 2022
+    team_name: Enforce Core
+    award_level: ''
+    status: git_unreachable
+    reason: 原地址克隆失败，未找到可核验的迁移或归档地址
+  - repo_url: https://gitlab.eduxiji.net/wsy/oskernel2022-whw
+    year: 2022
+    team_name: WHW
+    award_level: ''
+    status: git_unreachable
+    reason: 原地址克隆失败，未确认可直接克隆的迁移或归档地址
+  - repo_url: https://gitlab.eduxiji.net/yyz/oskernel-1
+    year: 2022
+    team_name: hfut.happy
+    award_level: ''
+    status: git_unreachable
+    reason: 原地址克隆失败，未找到可核验的迁移或归档地址
+  - repo_url: https://gitlab.eduxiji.net/educg-group-26011-2376549/hyperos
+    year: 2024
+    team_name: 我芯澎湃
+    award_level: ''
+    status: no_supported_source
+    reason: 2026-06-25 建库扫描到 0 个源码文件、0 个函数
