@@ -10,10 +10,12 @@ from loguru import logger
 
 from src.exact.matcher import ExactMatcher, remap_spans
 from src.exact.verify import tier_of
+from src.models import is_baseline_repo
 from src.normalize.normalizer import normalize_snippet
 from src.normalize.store import DEFAULT_DB
 
-from .baseline import BaselineMatcher, is_baseline_derived
+from .baseline import (BaselineMatcher, has_incremental_history_evidence,
+                       is_baseline_derived, pair_line_evidence)
 from .commits import analyze_function
 from .config import MetadataSettings, load_metadata_settings
 from .strings import build_reverse_index, fetch_function, string_hits_for_func
@@ -46,11 +48,12 @@ def _new_suspect(qf: dict, hf: dict, count: int) -> dict:
     """字符串通道新建的嫌疑对（独立召回路径）。
 
     旁路通道不再硬编码 ``final_score=0``：对新对实跑行级精确比对，用 similar_line_ratio
-    填 final_score、tier_of 定档（行级相同的对从此显示真实相似度，回应 D1）。独特字符串
-    命中本身即 review 级信号，故 tier 不低于 review（ratio<0.5 时 tier_of 返回 None 也兜底为 review）。
+    填 final_score、tier_of 定档（行级相同的对从此显示真实相似度）。独特字符串命中可以
+    绕过普通相似度召回门槛，但不应伪装成中等逐行相似；ratio<0.5 时仅保留为 weak，交由
+    后续“职责 + 共同代码锚点”逐对复核。
     """
     res = _EXACT_MATCHER.match(qf.get("raw_code", ""), hf.get("raw_code", ""), qf.get("lang", "rust"))
-    tier = tier_of(res.similar_line_ratio) or "review"
+    tier = tier_of(res.similar_line_ratio) or "weak"
     abs_spans = remap_spans(res.matched_spans, qf.get("start_line", 1), hf.get("start_line", 1))
     return {
         "tier": tier,
@@ -65,6 +68,7 @@ def _new_suspect(qf: dict, hf: dict, count: int) -> dict:
         },
         "evidence": {
             "vector_similarity": None,
+            "line_similarity": res.similar_line_ratio,
             "exact_match_lines": res.exact_match_lines,
             "renamed_match_lines": res.renamed_match_lines,
             "unique_string_matches": count,
@@ -147,30 +151,86 @@ def channel_baseline(data: dict, matcher: BaselineMatcher, settings: MetadataSet
         c_nc = (s.get("candidate_func") or {}).get("normalized_code", "") or " "
         q_match = q_cache.get(q_nc, (None, 0.0))
         c_match = c_cache.get(c_nc, (None, 0.0))
-        derived, basis = is_baseline_derived(
-            q_match, c_match,
-            threshold=settings.baseline_sim_threshold,
-            bilateral_threshold=settings.baseline_bilateral_threshold)
+        candidate_repo = str((s.get("candidate_func") or {}).get("repo_id") or "")
+        if is_baseline_repo(candidate_repo):
+            # 候选记录本身来自显式基线库，这是比“再次向量命中基线”更直接的来源证据。
+            # 不能因为向量分低于阈值就把基线仓库当成普通历史团队。
+            derived, basis = True, "候选函数直接来自显式公共基线仓库"
+            query_scope = False
+        else:
+            derived, basis = is_baseline_derived(
+                q_match, c_match,
+                threshold=settings.baseline_sim_threshold,
+                bilateral_threshold=settings.baseline_bilateral_threshold)
+            query_scope = derived
         if derived:
             ev = s.setdefault("evidence", {})
             ev["baseline_flag"] = True
+            ev["baseline_query_scope"] = query_scope
             s["tier"] = "baseline_derived"
             s["baseline_note"] = (
                 f"{basis} (qid={q_match[0]}, q={q_match[1]:.3f}; cid={c_match[0]}, c={c_match[1]:.3f})"
             )
             n += 1
+
+    # 基线来源是目标函数级属性，而不是某一条候选 pair 的属性。若同一目标函数已有一条
+    # pair 建立了公共基线来源，其余历史候选在没有“扣除基线后残差相似”证据的情况下也
+    # 不能继续被归因为某个团队；否则同一函数会同时出现在借鉴/存疑与基线排除两节。
+    baseline_by_query: dict[tuple, list[dict]] = defaultdict(list)
+    for s in suspects:
+        if s.get("tier") == "baseline_derived":
+            baseline_by_query[_query_key(s)].append(s)
+    for s in suspects:
+        baselines = baseline_by_query.get(_query_key(s), [])
+        if not baselines or s.get("tier") == "baseline_derived":
+            continue
+        query_scope = any(
+            bool((item.get("evidence") or {}).get("baseline_query_scope"))
+            for item in baselines
+        )
+        explicit_baselines = [
+            item for item in baselines
+            if is_baseline_repo(str((item.get("candidate_func") or {}).get("repo_id") or ""))
+        ]
+        if (not query_scope
+                and has_incremental_history_evidence(s, explicit_baselines)):
+            ev = s.setdefault("evidence", {})
+            ev["baseline_overlap"] = True
+            ev["baseline_incremental_evidence"] = True
+            candidate_sim, candidate_lines = pair_line_evidence(s)
+            strongest_sim = max(pair_line_evidence(item)[0] for item in explicit_baselines)
+            most_lines = max(pair_line_evidence(item)[1] for item in explicit_baselines)
+            s["baseline_note"] = (
+                "目标函数也命中公共基线，但当前历史候选提供了基线之外的增量同源证据"
+                f"（逐行 {candidate_sim:.3f}/{candidate_lines} 行；"
+                f"最强基线 {strongest_sim:.3f}/{most_lines} 行）"
+            )
+            continue
+        ev = s.setdefault("evidence", {})
+        ev["baseline_flag"] = True
+        s["tier"] = "baseline_derived"
+        s["baseline_note"] = (
+            "目标函数已有候选证明来自公共基线；当前候选未提供扣除基线后的增量同源证据"
+        )
+        n += 1
     logger.info("通道2 基线扣除：{} 个降为 baseline_derived（批量编码 query {} / candidate {} 个唯一函数）",
                 n, len(q_uniq), len(c_uniq))
     return n
 
 
+def _query_key(s: dict) -> tuple:
+    """稳定标识目标函数；起始行用于区分同文件内同名方法/实现。"""
+    q = s.get("query_func") or {}
+    return (q.get("file_path", ""), int(q.get("start_line") or 0), q.get("func_name", ""))
+
+
 def channel_common_code(data: dict, settings: MetadataSettings) -> int:
-    """通道 4：公共/框架代码广度过滤。
+    """通道 4：广泛共享提示（不单独判定公共代码）。
 
     一个 query 函数若以高相似度（vector >= common_code_sim_threshold，或已判 confirmed）命中
-    >= common_code_repo_threshold 个**不同历史仓库**，则它几乎必然是教学OS/框架公共代码
-    （多队合法复用），而非从某一个队抄袭。把该函数的全部嫌疑对降级 common_code（不计抄袭）。
-    与“字符串出现在 >N 仓即视为通用”同一思路，无需注册基线即可生效。返回降级的嫌疑对数。
+    >= common_code_repo_threshold 个**不同历史仓库**，只记录“广泛共享”背景。仓库数无法区分
+    公共上游、fork 链和多次传播，因此不能单独把 confirmed/review 降为 common_code；真正排除仍
+    需要 baseline、vendored 路径或其他公共来源证明。返回被标注的嫌疑对数。
     """
     suspects = data["suspects"]
     by_query: dict[tuple, list[dict]] = defaultdict(list)
@@ -187,27 +247,14 @@ def channel_common_code(data: dict, settings: MetadataSettings) -> int:
                 strong_repos.add(s["candidate_func"]["repo_id"])
         if len(strong_repos) >= settings.common_code_repo_threshold:
             for s in group:
-                if s.get("tier") == "baseline_derived":  # 更具体的基线信号优先
-                    continue
-                s.setdefault("evidence", {})["common_code_repos"] = len(strong_repos)
-                # confirmed（精确/重命名级完全相同）命中 >=阈值 个不同仓库：多队共享同一份代码，
-                # 几乎必然是公共/框架代码（fork-chain 在 >=5 队时概率极低）→ 降为 common_code，
-                # 与报告层 _is_common_code 据 note 排除的口径一致（此前仅加 note、tier 仍写 confirmed，
-                # 导致 JSON 与显示不一致）。通道 2 随后会把其中双侧命中基线的进一步归为 baseline_derived。
-                if s.get("tier") == "confirmed":
-                    s["tier"] = "common_code"
-                    s["common_code_note"] = (
-                        f"该函数精确命中 {len(strong_repos)} 个不同历史仓库，"
-                        f"判为公共/框架代码（不计入借鉴/复制）"
-                    )
-                    n += 1
-                    continue
-                s["tier"] = "common_code"
-                s["common_code_note"] = (
-                    f"该函数高相似命中 {len(strong_repos)} 个不同历史仓库，判为公共/框架代码（不计入借鉴/复制）"
+                ev = s.setdefault("evidence", {})
+                ev["widespread_match_repos"] = len(strong_repos)
+                s["widespread_match_note"] = (
+                    f"该函数高相似命中 {len(strong_repos)} 个不同历史仓库；"
+                    "这只能证明广泛传播，不能单独证明属于公共/框架代码"
                 )
                 n += 1
-    logger.info("通道4 公共代码广度过滤：{} 个嫌疑对降为 common_code", n)
+    logger.info("通道4 广泛共享提示：{} 个嫌疑对已标注（不改变 tier）", n)
     return n
 
 
@@ -236,7 +283,7 @@ def process_metadata(
     settings = settings or load_metadata_settings()
     summary = {"cross_language_filtered": drop_cross_language_pairs(data)}
     summary["string_new_pairs"] = channel_unique_strings(data, db_path, settings)
-    summary["common_code_pairs"] = channel_common_code(data, settings)
+    summary["widespread_match_pairs"] = channel_common_code(data, settings)
     if baseline_matcher is not None:
         summary["baseline_derived"] = channel_baseline(data, baseline_matcher, settings)
     if query_repo is not None and meta_commits is not None:

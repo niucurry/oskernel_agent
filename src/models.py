@@ -17,10 +17,16 @@ BASELINE_PREFIX = "baseline_"
 
 
 def is_baseline_repo(repo_id: str) -> bool:
-    """repo_id（``{year}/{team}``）是否为基线仓库——按 team 段 ``baseline_`` 前缀约定。"""
+    """repo_id 是否指向显式基线仓库。
+
+    正常值是 ``{year}/baseline_xxx``，但旧数据库或外部导入产物可能保留
+    ``data/repos/...`` 前缀或 Windows 分隔符。只检查规范化后的最后一个路径段，
+    既兼容这些表示形式，也不会把普通仓库路径中偶然出现的 ``baseline`` 字样误判。
+    """
     if not repo_id:
         return False
-    return repo_id.rsplit("/", 1)[-1].startswith(BASELINE_PREFIX)
+    normalized = str(repo_id).strip().replace("\\", "/").rstrip("/")
+    return bool(normalized) and normalized.rsplit("/", 1)[-1].startswith(BASELINE_PREFIX)
 
 
 class ModuleTag(str, Enum):
@@ -86,6 +92,10 @@ class Evidence(BaseModel):
     vector_similarity: float | None = Field(
         default=None, description="Layer2：整函数向量余弦相似度 [0,1]"
     )
+    line_similarity: float | None = Field(
+        default=None,
+        description="Layer4：逐行匹配得到的原始相似度 [0,1]；不包含召回保底或分段重打分",
+    )
     normalized_fingerprint_match: bool = Field(
         default=False,
         description="归一化代码 SHA-256 完全相同；不受 ANN top-k 限制的确定性命中",
@@ -97,6 +107,23 @@ class Evidence(BaseModel):
     structural_hash_recall: bool = Field(
         default=False,
         description="归一化代码 shingle SimHash 补召回；候选未经过 ANN top-k",
+    )
+    function_identity_score: float | None = Field(
+        default=None,
+        description="函数名、签名、行为 token 与控制流构成的具体函数身份兼容分 [0,1]",
+    )
+    function_identity_recall: bool = Field(
+        default=False,
+        description="候选由已命中文件内的函数身份邻域补召回",
+    )
+    function_name_exact: bool = Field(
+        default=False, description="双方函数名是否完全一致；仅用于具体函数配对，不证明借鉴"
+    )
+    function_identity_relation: str | None = Field(
+        default=None,
+        description=("具体函数关系：exact_counterpart / same_name_code_clone / "
+                     "same_name_only / compatible_renamed / code_clone_renamed / "
+                     "family_neighbor / nonsemantic_stub"),
     )
     segment_hits: SegmentHits | None = Field(
         default=None, description="Layer3：分段向量比对结果（命中段数/覆盖/匹配段对）"

@@ -81,6 +81,7 @@ def load_faiss_index(
     index_path: str | Path = DEFAULT_INDEX,
     ids_path: str | Path = DEFAULT_IDS,
     db_path: str | Path | None = None,
+    db_signature: dict | None = None,
 ) -> tuple["faiss.Index", np.ndarray] | None:
     """加载已保存的 HNSW 索引；文件不存在返回 None。"""
     ip, isp = Path(index_path), Path(ids_path)
@@ -93,7 +94,7 @@ def load_faiss_index(
             return None
         try:
             recorded = json.loads(mp.read_text(encoding="utf-8"))
-            current = db_mapping_signature(db_path)
+            current = db_signature if db_signature is not None else db_mapping_signature(db_path)
         except (OSError, sqlite3.Error, json.JSONDecodeError) as exc:
             logger.warning("[faiss] 索引一致性核验失败：{}", exc)
             return None

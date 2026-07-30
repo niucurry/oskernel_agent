@@ -28,10 +28,14 @@ _DEFAULT_LIBRARIES: dict[str, list[str]] = {
     "riscv": ["riscv"],
 }
 _DEFAULT_VENDOR_DIRS = ("vendor", "third_party", "3rdparty", "thirdparty", "extern", "external")
+_DEFAULT_CONTEXT_REQUIRED_SEGMENTS = frozenset({"riscv", "fatfs"})
+_DEPENDENCY_CONTAINERS = frozenset({"crates", "libs", "deps", "dependencies", "packages"})
 
 
 @lru_cache(maxsize=4)
-def load_library_registry(path: str | None = None) -> tuple[tuple[tuple[str, str], ...], frozenset[str]]:
+def load_library_registry(
+    path: str | None = None,
+) -> tuple[tuple[tuple[str, str, bool], ...], frozenset[str]]:
     """加载库注册表，返回 (seg_to_name 项, vendor_dirs)。
 
     seg_to_name 以元组对形式返回（可哈希、可缓存）；调用方用 ``dict(...)`` 取用。
@@ -46,11 +50,30 @@ def load_library_registry(path: str | None = None) -> tuple[tuple[tuple[str, str
             libraries = {entry["name"]: (entry.get("segments") or [entry["name"]]) for entry in libs}
         if data.get("vendor_dirs"):
             vendor_dirs = set(data["vendor_dirs"])
-    seg_to_name: dict[str, str] = {}
+    seg_to_entry: dict[str, tuple[str, bool]] = {}
     for name, segs in libraries.items():
+        required = set(_DEFAULT_CONTEXT_REQUIRED_SEGMENTS)
+        if p.exists():
+            entry = next(
+                (item for item in (data.get("libraries") or []) if item.get("name") == name),
+                {},
+            )
+            required = {str(x).lower() for x in entry.get("context_required_segments", ())}
         for seg in segs:
-            seg_to_name[seg.lower()] = name
-    return tuple(seg_to_name.items()), frozenset(d.lower() for d in vendor_dirs)
+            low = seg.lower()
+            seg_to_entry[low] = (name, low in required)
+    return (
+        tuple((seg, name, required) for seg, (name, required) in seg_to_entry.items()),
+        frozenset(d.lower() for d in vendor_dirs),
+    )
+
+
+def _has_dependency_context(parts: list[str], index: int, vendor_dirs: frozenset[str]) -> bool:
+    """歧义目录名是否处于可验证的依赖包布局，而不是 ``src/arch/riscv`` 等业务目录。"""
+    if any(part in vendor_dirs or part in _DEPENDENCY_CONTAINERS for part in parts[:index]):
+        return True
+    # 仓库根目录本身就是 crate：riscv/src/...、fatfs/src/...。
+    return index == 0 and index + 1 < len(parts) and parts[index + 1] == "src"
 
 
 def match_library(file_path: str | None, *, path: str | None = None) -> str | None:
@@ -66,10 +89,13 @@ def match_library(file_path: str | None, *, path: str | None = None) -> str | No
     for i, seg in enumerate(parts):
         if seg in vendor_dirs and i + 1 < len(parts):
             return parts[i + 1]
-    seg_to_name = dict(seg_items)
-    for seg in parts:
-        name = seg_to_name.get(seg)
-        if name:
+    seg_to_entry = {seg: (name, required) for seg, name, required in seg_items}
+    for index, seg in enumerate(parts):
+        entry = seg_to_entry.get(seg)
+        if entry:
+            name, context_required = entry
+            if context_required and not _has_dependency_context(parts, index, vendor_dirs):
+                continue
             return name
     return None
 

@@ -15,7 +15,7 @@ from src.metadata.config import MetadataSettings
 from src.metadata.runner import (channel_baseline, channel_common_code,
                                  channel_unique_strings, process_metadata)
 from src.metadata.strings import build_reverse_index, string_hits_for_func
-from src.models import FunctionRecord
+from src.models import FunctionRecord, is_baseline_repo
 from src.normalize.store import FunctionStore
 
 SETTINGS = MetadataSettings()
@@ -84,7 +84,8 @@ def test_channel_creates_new_pair_via_string(tmp_path):
     sp = created[0]
     assert sp["candidate_func"]["repo_id"] == "2021/hist"
     assert sp["evidence"]["unique_string_matches"] == 1
-    assert sp["tier"] == "review"
+    assert sp["tier"] == "weak"
+    assert sp["evidence"]["line_similarity"] == sp["final_score"]
 
 
 def test_metadata_string_channel_and_existing_pairs_are_same_language_only(tmp_path):
@@ -196,6 +197,78 @@ def test_channel_baseline_downgrades_both_sides_and_vendored():
     assert s_one["tier"] == "baseline_derived"
 
 
+def test_explicit_baseline_candidate_is_direct_evidence_and_propagates_per_query():
+    query = {"file_path": "src/mm.rs", "start_line": 20, "func_name": "map",
+             "normalized_code": "Q"}
+    direct = {
+        "tier": "review", "query_func": query,
+        "candidate_func": {
+            "repo_id": r"data\repos\0\baseline_kernel", "normalized_code": "B",
+        },
+        "evidence": {},
+    }
+    historical = {
+        "tier": "confirmed", "query_func": dict(query),
+        "candidate_func": {"repo_id": "2025/team", "normalized_code": "H"},
+        "evidence": {},
+    }
+    same_name_different_function = {
+        "tier": "confirmed",
+        "query_func": {**query, "start_line": 80},
+        "candidate_func": {"repo_id": "2025/team", "normalized_code": "H2"},
+        "evidence": {},
+    }
+
+    n = channel_baseline(
+        {"suspects": [direct, historical, same_name_different_function]},
+        _FakeMatcher({}), SETTINGS,
+    )
+
+    assert is_baseline_repo(r"data\repos\0\baseline_kernel") is True
+    assert n == 2
+    assert direct["tier"] == "baseline_derived"
+    assert historical["tier"] == "baseline_derived"
+    assert "增量同源证据" in historical["baseline_note"]
+    assert same_name_different_function["tier"] == "confirmed"
+
+
+def test_weak_explicit_baseline_does_not_hide_stronger_history_evidence():
+    query = {
+        "file_path": "src/task.rs", "start_line": 90, "end_line": 131,
+        "func_name": "run_tasks", "normalized_code": "Q",
+    }
+    direct = {
+        "tier": "weak", "query_func": query,
+        "candidate_func": {
+            "repo_id": "data/repos/0/baseline_kernel", "normalized_code": "B",
+        },
+        "evidence": {
+            "line_similarity": 0.1951,
+            "exact_match_lines": 5,
+            "renamed_match_lines": 3,
+        },
+    }
+    historical = {
+        "tier": "weak", "query_func": dict(query),
+        "candidate_func": {"repo_id": "2025/team", "normalized_code": "H"},
+        "evidence": {
+            "line_similarity": 0.4146,
+            "exact_match_lines": 9,
+            "renamed_match_lines": 8,
+        },
+    }
+
+    n = channel_baseline(
+        {"suspects": [direct, historical]}, _FakeMatcher({}), SETTINGS,
+    )
+
+    assert n == 1
+    assert direct["tier"] == "baseline_derived"
+    assert historical["tier"] == "weak"
+    assert historical["evidence"]["baseline_incremental_evidence"] is True
+    assert "增量同源证据" in historical["baseline_note"]
+
+
 # ---------- 通道 4：公共/框架代码广度过滤 ----------
 
 def _sp(qfp, qsl, crepo, tier, vec):
@@ -203,13 +276,10 @@ def _sp(qfp, qsl, crepo, tier, vec):
             "candidate_func": {"repo_id": crepo}, "evidence": {"vector_similarity": vec}}
 
 
-def test_common_code_downgrades_broad_match():
-    # 公共函数 A（confirmed）：高相似命中 6 个不同仓库。confirmed 多队共享几乎必然是公共/框架代码
-    # （fork-chain 在 ≥5 队时概率极低），现**降为 common_code**（与报告层 _is_common_code 据 note
-    # 排除的口径一致；此前仅加 note、tier 仍写 confirmed 导致 JSON 与显示不一致）。通道 2 随后会把
-    # 其中双侧命中基线的进一步归为 baseline_derived。
+def test_common_code_breadth_only_annotates_without_downgrading():
+    # 命中多个仓库只能证明广泛传播，无法排除 fork 链或多次复制，因此不单独降级。
     common = [_sp("a.rs", 1, f"2025/team{i}", "confirmed", 0.99) for i in range(6)]
-    # 公共函数 D（review 档）：高相似命中 6 仓 → 降级 common_code
+    # review 档同样只标注广度。
     reviewmany = [_sp("d.rs", 1, f"2025/r{i}", "review", 0.95) for i in range(6)]
     # 独有函数 B：只命中 1 个仓库 → 保持 confirmed
     uniq = [_sp("b.rs", 1, "2025/teamX", "confirmed", 1.0)]
@@ -217,11 +287,11 @@ def test_common_code_downgrades_broad_match():
     weakmany = [_sp("c.rs", 1, f"2025/w{i}", "weak", 0.6) for i in range(6)]
     data = {"suspects": common + reviewmany + uniq + weakmany}
     n = channel_common_code(data, SETTINGS)
-    assert n == 12                                           # confirmed 6 + review 6 均降级
-    assert all(s["tier"] == "common_code" for s in common)  # confirmed 现也降级
-    assert all("common_code_note" in s for s in common)     # 且带命中多库标注
-    assert common[0]["evidence"]["common_code_repos"] == 6
-    assert all(s["tier"] == "common_code" for s in reviewmany)  # review 档降级
+    assert n == 12
+    assert all(s["tier"] == "confirmed" for s in common)
+    assert all("widespread_match_note" in s for s in common)
+    assert common[0]["evidence"]["widespread_match_repos"] == 6
+    assert all(s["tier"] == "review" for s in reviewmany)
     assert uniq[0]["tier"] == "confirmed"                   # 单仓库不降
     assert all(s["tier"] == "weak" for s in weakmany)       # 低相似不计入广度
 

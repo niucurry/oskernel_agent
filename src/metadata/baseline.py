@@ -9,6 +9,67 @@ from __future__ import annotations
 from typing import Protocol
 
 
+# A historical candidate is allowed to survive query-level baseline propagation
+# only when it contains a meaningful amount of code not explained by the best
+# explicit baseline candidate.  Requiring both dimensions prevents a long
+# function with a tiny ratio gain, or a short function with only one extra line,
+# from being treated as independent history evidence.
+MIN_INCREMENTAL_LINE_SIM_DELTA = 0.10
+MIN_INCREMENTAL_MATCH_LINES = 3
+
+
+def pair_line_evidence(suspect: dict) -> tuple[float, int]:
+    """Return comparable (line similarity, matched lines) for a suspect pair.
+
+    New artifacts provide ``line_similarity`` directly.  The fallback exists so
+    report-boundary checks remain safe for older/external artifacts; it uses only
+    line evidence and deliberately does not substitute vector similarity.
+    """
+    evidence = suspect.get("evidence") or {}
+    matched = int(evidence.get("exact_match_lines") or 0) + int(
+        evidence.get("renamed_match_lines") or 0
+    )
+    value = evidence.get("line_similarity")
+    if value is not None:
+        try:
+            return max(0.0, min(1.0, float(value))), matched
+        except (TypeError, ValueError):
+            pass
+
+    if matched:
+        query_code = ((suspect.get("query_func") or {}).get("raw_code") or "")
+        candidate_code = ((suspect.get("candidate_func") or {}).get("raw_code") or "")
+        query_lines = sum(1 for line in query_code.splitlines() if line.strip())
+        candidate_lines = sum(1 for line in candidate_code.splitlines() if line.strip())
+        denominator = max(query_lines, candidate_lines, 1)
+        return min(1.0, matched / denominator), matched
+    return 0.0, 0
+
+
+def has_incremental_history_evidence(
+    candidate: dict,
+    explicit_baselines: list[dict],
+    *,
+    min_similarity_delta: float = MIN_INCREMENTAL_LINE_SIM_DELTA,
+    min_extra_lines: int = MIN_INCREMENTAL_MATCH_LINES,
+) -> bool:
+    """Whether history evidence materially exceeds every explicit baseline hit.
+
+    This is intentionally repository-agnostic: the decision is based on actual
+    matched coverage, not repository, path, language, or function-name rules.
+    """
+    if not explicit_baselines:
+        return False
+    candidate_similarity, candidate_lines = pair_line_evidence(candidate)
+    baseline_evidence = [pair_line_evidence(item) for item in explicit_baselines]
+    strongest_similarity = max(item[0] for item in baseline_evidence)
+    most_lines = max(item[1] for item in baseline_evidence)
+    return (
+        candidate_similarity >= strongest_similarity + min_similarity_delta
+        and candidate_lines >= most_lines + min_extra_lines
+    )
+
+
 class BaselineMatcher(Protocol):
     def match(self, normalized_code: str) -> tuple[int | None, float]:
         """返回 (最相似基线函数 id, 相似度)；无基线命中返回 (None, 0.0)。"""

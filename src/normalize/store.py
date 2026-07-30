@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS functions (
 );
 CREATE INDEX IF NOT EXISTS idx_functions_repo ON functions(repo_id);
 CREATE INDEX IF NOT EXISTS idx_functions_module ON functions(module_tag);
+CREATE INDEX IF NOT EXISTS idx_functions_name_lang_repo
+    ON functions(func_name, lang, repo_id);
+CREATE INDEX IF NOT EXISTS idx_functions_repo_file_lang_line
+    ON functions(repo_id, file_path, lang, start_line);
 
 CREATE TABLE IF NOT EXISTS unique_strings (
     repo_id      TEXT NOT NULL,
@@ -97,6 +101,20 @@ class FunctionStore:
             self.conn.commit()
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_functions_norm_hash ON functions(normalized_hash)"
+        )
+        # 召回阶段会为每个目标函数执行同名查找，并在命中候选的文件内扩展身份邻域。
+        # 缺少以下复合索引时，SQLite 会按仓库或全表重复扫描，耗时随历史库线性恶化。
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_functions_name_lang_repo "
+            "ON functions(func_name, lang, repo_id)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_functions_repo_file_lang_line "
+            "ON functions(repo_id, file_path, lang, start_line)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_functions_norm_hash_lang_repo "
+            "ON functions(normalized_hash, lang, repo_id)"
         )
         self.conn.commit()
 

@@ -60,7 +60,8 @@ def test_upstream_vendored_suffix_does_not_false_positive():
 
 def test_abi_robust_futex_name_patterns():
     for fn in ["exit_robust_list", "handle_futex_death", "get_robust_list"]:
-        s = _pair(_q("api/src/task.rs", fn), _q("2025/o/api/src/task.rs", fn))
+        code = f"fn {fn}(ptr: usize) -> isize {{ copy_abi_value(ptr as *const usize) }}"
+        s = _pair(_q("api/src/task.rs", fn, code=code), _q("2025/o/api/src/task.rs", fn))
         assert UB.is_abi_constrained(s) is True, f"{fn} 应被判 ABI 受限"
 
 
@@ -72,33 +73,29 @@ def test_abi_path_glob_no_leading_slash_bug():
 
 
 def test_abi_syscall_shim_path():
-    s = _pair(_q("api/src/syscall/mm/mmap.rs", "sys_mmap"),
+    code = "fn sys_mmap(addr: usize) -> isize { mmap_adapter(addr as *mut u8) }"
+    s = _pair(_q("api/src/syscall/mm/mmap.rs", "sys_mmap", code=code),
               _q("2025/o/api/src/syscall/mm/mmap.rs", "sys_mmap"))
     assert UB.is_abi_constrained(s) is True
 
 
-# ── confirmed 样板候选复核 ────────────────────────────────────────────────────
+# ── confirmed 全量逐对复核（不依赖函数名白名单或代码长度） ─────────────────────
 
-def test_boilerplate_candidate_generic_name():
-    # from/fmt/new 等通用 trait 方法名 → 候选
-    g = {"query_func": "from", "query_code": "fn from(x: u8) -> Self { Self(x as u16) }"}
-    assert SC._is_boilerplate_candidate(g) is True
-    g2 = {"query_func": "fmt", "query_code": "fn fmt(...) {...}"}
-    assert SC._is_boilerplate_candidate(g2) is True
+def test_collect_review_pairs_does_not_depend_on_name_or_function_length():
+    short = _pair(
+        _q("src/a.rs", "convert", code="fn convert(x:u8)->u8{x}"),
+        _q("src/b.rs", "convert", code="fn convert(x:u8)->u8{x}"),
+    )
+    long_code = "\n".join(f"let value_{i} = compute({i});" for i in range(40))
+    long = _pair(
+        _q("src/c.rs", "domain_specific_operation", start=50, code=long_code),
+        _q("src/d.rs", "renamed_operation", start=70, code=long_code),
+    )
 
+    groups = SC.collect_review_pairs([short, long], keep_tiers=("confirmed",))
 
-def test_boilerplate_candidate_short_body():
-    # 非 trait 名但函数体 ≤12 非空行 → 候选
-    code = "fn f() {\n    let x = 1;\n    x + 1\n}\n"
-    g = {"query_func": "custom_func", "query_code": code}
-    assert SC._is_boilerplate_candidate(g) is True
-
-
-def test_boilerplate_candidate_not_long_real_logic():
-    # 真实长逻辑函数 → 不是候选（不送复核，保留为 confirmed 借鉴信号）
-    code = "\n".join(f"    let v{i} = do_something({i});" for i in range(20))
-    g = {"query_func": "complex_scheduler", "query_code": code}
-    assert SC._is_boilerplate_candidate(g) is False
+    assert len(groups) == 2
+    assert all(len(group["candidates"]) == 1 for group in groups)
 
 
 def test_apply_review_verdicts_downgrades_confirmed_boilerplate():
@@ -106,8 +103,8 @@ def test_apply_review_verdicts_downgrades_confirmed_boilerplate():
     s = _pair(_q("core/src/task/stat.rs", "fmt", code="fn fmt(){}", start=103),
               _q("2025/o/core/src/task/stat.rs", "fmt", code="fn fmt(){}", start=103),
               tier="confirmed", score=1.0)
-    groups = [{"query_file": "core/src/task/stat.rs", "query_func": "fmt",
-               "query_start": 103, "review_verdict": "非借鉴", "review_reason": "ABI 字段拼接"}]
+    groups = SC.collect_review_pairs([s], keep_tiers=("confirmed",))
+    groups[0].update({"review_verdict": "非借鉴", "review_reason": "接口约束字段拼接"})
     up, dn = SC._apply_review_verdicts([s], groups)
     assert up == 0 and dn == 1
     assert s["tier"] == "dismissed"
@@ -119,8 +116,8 @@ def test_apply_review_verdicts_keeps_confirmed_when_llm_says_borrow():
     s = _pair(_q("a.rs", "from", code="fn from(x:u8)->Self{Self(x)}", start=10),
               _q("b.rs", "from", code="fn from(x:u8)->Self{Self(x)}", start=10),
               tier="confirmed", score=1.0)
-    groups = [{"query_file": "a.rs", "query_func": "from", "query_start": 10,
-               "review_verdict": "借鉴", "review_reason": "逐字相同"}]
+    groups = SC.collect_review_pairs([s], keep_tiers=("confirmed",))
+    groups[0].update({"review_verdict": "借鉴", "review_reason": "逐字相同"})
     up, dn = SC._apply_review_verdicts([s], groups)
     assert up == 0 and dn == 0
     assert s["tier"] == "confirmed"
@@ -136,10 +133,49 @@ def test_apply_review_verdicts_untouched_confirmed_not_in_review():
 
 
 def test_apply_review_verdicts_never_drops_uncertain_signal():
-    s = _pair(_q("a.rs", "run_tasks", code="fn run_tasks(){...}", start=10),
-              _q("b.rs", "run_tasks"), tier="weak", score=0.61)
-    groups = [{"query_file": "a.rs", "query_func": "run_tasks", "query_start": 10,
-               "review_verdict": "疑似", "review_reason": "证据不足"}]
+    code = "\n".join(f"step_{i}();" for i in range(10))
+    s = _pair(_q("a.rs", "run_tasks", code=code, start=10),
+              _q("b.rs", "run_tasks", code=code), tier="weak", score=0.61)
+    s["evidence"].update({
+        "line_similarity": .61, "exact_match_lines": 8,
+        "function_identity_score": .8,
+    })
+    groups = SC.collect_review_pairs([s], keep_tiers=("weak",))
+    groups[0].update({"review_verdict": "疑似", "review_reason": "证据不足"})
     up, dn = SC._apply_review_verdicts([s], groups)
     assert up == 0 and dn == 0
     assert s["tier"] == "weak"
+
+
+def test_apply_review_verdict_is_scoped_to_exact_candidate_pair():
+    query_code = "\n".join(f"target_step_{i}();" for i in range(10))
+    query = _q("src/target.rs", "operation", start=30, module="other", code=query_code)
+    unrelated = _pair(
+        query,
+        _q("history/unrelated.rs", "different_operation", start=11, module="other",
+           code="\n".join(f"unrelated_step_{i}();" for i in range(10))),
+        tier="review", score=0.81,
+    )
+    plausible = _pair(
+        query,
+        _q("history/plausible.rs", "operation_variant", start=71, module="other",
+           code="\n".join(f"plausible_step_{i}();" for i in range(10))),
+        tier="review", score=0.79,
+    )
+    for item, line in ((unrelated, .81), (plausible, .79)):
+        item["evidence"].update({
+            "line_similarity": line, "exact_match_lines": 8,
+            "function_identity_score": .8,
+        })
+    groups = SC.collect_review_pairs([unrelated, plausible], keep_tiers=("review",))
+    for group in groups:
+        ref_file = group["candidates"][0]["ref_file"]
+        group["review_verdict"] = "非借鉴" if "unrelated" in ref_file else "疑似"
+        group["review_reason"] = "逐对测试"
+
+    up, dn = SC._apply_review_verdicts([unrelated, plausible], groups)
+
+    assert up == 0 and dn == 1
+    assert unrelated["tier"] == "dismissed"
+    assert plausible["tier"] == "review"
+    assert plausible["review_verdict"] == "疑似"

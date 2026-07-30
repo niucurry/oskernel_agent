@@ -124,13 +124,28 @@ def test_tag_false_positives_counts_and_excludes():
               _q("hist/switch.S", "__switch", _RV_SWITCH, "asm")),
     ]
     counts = FP.tag_false_positives(suspects)
-    assert counts["cross_arch"] == 1 and counts["cross_lang"] == 1 and counts["boilerplate_asm"] == 1
-    assert all(SC._is_excluded_pair(s) for s in suspects)      # 全部排除出借鉴
+    assert counts == {"boilerplate_asm": 0, "cross_arch": 1, "cross_lang": 0}
+    assert SC._is_excluded_pair(suspects[0])
+    assert not SC._is_excluded_pair(suspects[1])
+    assert not SC._is_excluded_pair(suspects[2])
+    assert suspects[1]["cross_lang_signal"] is True
+    assert suspects[2]["boilerplate_asm_signal"] is True
     # 幂等：重复调用计数一致、不重复堆标
     assert FP.tag_false_positives(suspects) == counts
 
-    # 排除后这些对不进「已确认借鉴」清单
-    assert SC.collect_file_pairs(suspects) == []
+    # 只有已证明是短内联汇编掩码伪相似的具体 pair 被排除；移植/样板提示继续复核。
+    groups = SC.collect_file_pairs(suspects)
+    assert {g["query_func"] for g in groups} == {"find_nul", "__switch"}
+
+
+def test_cross_arch_substantive_port_is_not_automatically_excluded():
+    qcode = _WRITE_CSR_LA + "\nfn migrate_state() { for page in pages() { copy(page); } }"
+    ccode = _EXCHANGE_TRAP_RV + "\nfn migrate_state() { for page in pages() { copy(page); } }"
+    s = _pair(_q("src-la/mm.rs", "migrate_state", qcode, "rust"),
+              _q("src-rv/mm.rs", "migrate_state", ccode, "rust"))
+    FP.tag_false_positives([s])
+    assert s["cross_arch_signal"] is True
+    assert not s.get("false_positive")
 
 
 def test_tag_false_positives_idempotent_clears_stale():
@@ -189,6 +204,5 @@ def test_false_positive_stats_grouping():
     stats = FP.false_positive_stats(suspects)
     reasons = {x["name"]: x["reason"] for x in stats}
     assert reasons["write_csr"] == "cross_arch"
-    assert reasons["__switch"] == "boilerplate_asm"
-    # 样板优先级最高，排在跨架构前
-    assert stats[0]["reason"] == "boilerplate_asm"
+    assert "__switch" not in reasons
+    assert suspects[1]["boilerplate_asm_signal"] is True

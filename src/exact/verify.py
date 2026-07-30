@@ -14,6 +14,8 @@ from src.models import Evidence, FunctionRecord, ModuleTag, SuspectPair
 from src.normalize.store import DEFAULT_DB
 from src.retrieval_contract import require_complete_contract
 
+from .identity import (function_identity, identity_can_rescue, identity_relation,
+                       is_trivial_constant_stub)
 from .matcher import ExactMatcher, remap_spans
 
 DEFAULT_OUTPUT_DIR = "data/output"
@@ -93,7 +95,10 @@ def verify_recall(
             fingerprint_match = bool(cand.get("fingerprint_match"))
             name_match = bool(cand.get("name_match"))
             structural_match = bool(cand.get("structural_hash_match"))
-            if cand["score"] <= VECTOR_SIM_GATE and not (fingerprint_match or name_match or structural_match):
+            identity_recall = bool(cand.get("identity_expansion"))
+            if cand["score"] <= VECTOR_SIM_GATE and not (
+                fingerprint_match or name_match or structural_match or identity_recall
+            ):
                 # 指纹通道是确定性结构命中，不受向量门槛影响。
                 continue
             row = conn.execute(_CANDIDATE_SQL, (cand["id"],)).fetchone()
@@ -106,6 +111,21 @@ def verify_recall(
                 continue
             n_pairs += 1
             res = matcher.match(q_rec.raw_code, row["raw_code"], lang=q_rec.lang)
+            identity = function_identity(
+                q_rec.func_name, q_rec.raw_code, row["func_name"], row["raw_code"] or "",
+            )
+            identity_score = max(
+                float(cand.get("identity_score") or 0.0), float(identity["score"]),
+            )
+            relation = identity_relation(
+                bool(identity["exact_name"]), identity_score, res.similar_line_ratio,
+            )
+            if (not identity["exact_name"]
+                    and is_trivial_constant_stub(q_rec.raw_code)
+                    and is_trivial_constant_stub(row["raw_code"] or "")):
+                # 不同名字的常量占位函数没有行为身份可供配对。多行签名造成的高覆盖
+                # 不能把两个完全不同的接口包装成“高行相似改名候选”。
+                relation = "nonsemantic_stub"
             tier = tier_of(res.similar_line_ratio)
             if tier is None and fingerprint_match:
                 # 归一化器还会泛化数字/字符串，结构指纹相同但逐行覆盖不足时至少进入人工复核，
@@ -114,6 +134,14 @@ def verify_recall(
             if tier is None and structural_match:
                 # 行顺序调整会让 SequenceMatcher 覆盖率显著下降；结构哈希命中先保留为 weak，
                 # 交给下一层分段语义验证，不能在 exact 层提前丢弃。
+                tier = "weak"
+            if tier is None and identity_can_rescue(
+                res.similar_line_ratio,
+                res.exact_match_lines + res.renamed_match_lines,
+                identity_score,
+            ):
+                # 同一候选文件内的具体函数身份能够修复“邻近模板函数配错”，但身份相同
+                # 本身不是借鉴证据，因此只保留为 weak，继续交给分段/语义复核。
                 tier = "weak"
             if tier is None:  # < 0.5 丢弃
                 continue
@@ -126,16 +154,22 @@ def verify_recall(
                     candidate_func=cand_rec,
                     evidence=Evidence(
                         vector_similarity=cand["score"],
+                        line_similarity=res.similar_line_ratio,
                         code_simhash_distance=cand.get("code_simhash_distance"),
                         normalized_fingerprint_match=fingerprint_match,
                         function_name_recall=name_match,
                         structural_hash_recall=structural_match,
+                        function_identity_score=identity_score,
+                        function_identity_recall=identity_recall,
+                        function_name_exact=bool(identity["exact_name"]),
+                        function_identity_relation=relation,
                         exact_match_lines=res.exact_match_lines,
                         renamed_match_lines=res.renamed_match_lines,
                     ),
-                    final_score=(max(0.7, res.similar_line_ratio) if fingerprint_match
-                                 else max(0.5, res.similar_line_ratio) if structural_match
-                                 else res.similar_line_ratio),
+                    # final_score 在分段验证前就是原始逐行相似度。指纹/结构命中只改变
+                    # 召回档位，不伪造 0.7/0.5 的相似度下限；否则下游无法区分
+                    # “强召回信号”与“实际代码覆盖率”。
+                    final_score=res.similar_line_ratio,
                     tier=tier,
                     matched_spans=abs_spans,
                     match_type_per_span=res.match_type_per_span,

@@ -36,12 +36,68 @@ def test_framework_path_catches_renamed_candidate():
     assert UB.is_upstream_framework_path("api/src/vfs/tmp.rs") is False
 
 
+def test_framework_modules_are_isolated_by_corresponding_baseline(tmp_path):
+    arceos = tmp_path / "baseline_arceos" / "modules" / "axfs"
+    virtio = tmp_path / "baseline_virtio_drivers" / "crates" / "transport"
+    arceos.mkdir(parents=True)
+    virtio.mkdir(parents=True)
+    glob_path = str(tmp_path / "baseline_*")
+
+    assert UB.is_upstream_framework_path(
+        "arceos/modules/axfs/src/disk.rs", baseline_glob=glob_path,
+    ) is True
+    assert UB.is_upstream_framework_path(
+        "arceos/modules/transport/src/queue.rs", baseline_glob=glob_path,
+    ) is False
+
+
+def test_framework_layout_uses_longest_root_without_version_cross_contamination(tmp_path):
+    (tmp_path / "baseline_rcore_v3" / "crates" / "v3only").mkdir(parents=True)
+    (tmp_path / "baseline_rcore_v1" / "crates" / "v1only").mkdir(parents=True)
+    glob_path = str(tmp_path / "baseline_*")
+    roots = ("rcore", "rcore-v3")
+
+    assert UB.is_upstream_framework_path(
+        "rcore-v3/crates/v3only/src/lib.rs", roots=roots,
+        baseline_glob=glob_path,
+    ) is True
+    assert UB.is_upstream_framework_path(
+        "rcore/crates/v3only/src/lib.rs", roots=roots,
+        baseline_glob=glob_path,
+    ) is False
+    assert UB.is_upstream_framework_path(
+        "rcore/crates/v1only/src/lib.rs", roots=roots,
+        baseline_glob=glob_path,
+    ) is True
+
+
+def test_framework_root_normalization_is_consistent_for_case_and_separators(tmp_path):
+    (tmp_path / "baseline_ArceOS" / "modules" / "mixed").mkdir(parents=True)
+    (tmp_path / "baseline_xv6_riscv" / "src" / "kernel").mkdir(parents=True)
+    glob_path = str(tmp_path / "baseline_*")
+
+    assert UB.is_upstream_framework_path(
+        "ARCEOS/modules/mixed/src/lib.rs", roots=("ArceOS",),
+        baseline_glob=glob_path,
+    ) is True
+    assert UB.is_upstream_framework_path(
+        "xv6-riscv/src/kernel/trap.c", roots=("xv6_riscv",),
+        baseline_glob=glob_path,
+    ) is True
+
+
 def test_tag_upstream_baselines_catches_framework_path():
-    # 候选改名 axfs-ng（双侧路径不等），但 query 在 arceos/modules/axfs/ → 框架路径判 upstream
+    # 候选改名 axfs-ng（双侧路径不等）；框架路径还必须有独立代码证据才可判 upstream。
     s = _pair(_q("arceos/modules/axfs/src/disk.rs", "new"),
               _q("2025/team/arceos/modules/axfs-ng/src/disk.rs", "new"))
+    s["evidence"] = {"line_similarity": 0.9, "exact_match_lines": 8}
     UB.tag_upstream_baselines([s])
     assert s.get("upstream_vendored")  # 被标为上游基线
+    # 只有路径提示、没有 pair 代码证据时不能把任意候选归入共同上游。
+    noise = _pair(_q("arceos/modules/axfs/src/disk.rs", "new"),
+                  _q("2025/team/unrelated/net.rs", "parse"), score=0.38)
+    UB.tag_upstream_baselines([noise])
+    assert not noise.get("upstream_vendored")
     # 自研 asynctask 不被框架路径误标
     s2 = _pair(_q("arceos/modules/asynctask/src/task.rs", "from"),
                _q("2024/x/crates/taskctx/src/task.rs", "from"))
@@ -72,6 +128,12 @@ def test_upstream_vendored_different_rel_path_not_hit():
     assert UB.is_upstream_vendored_pair(s) is None
 
 
+def test_upstream_vendored_requires_same_recognized_root():
+    s = _pair(_q("arceos/modules/common/x.rs", "f"),
+              _q("2025/o/rcore/modules/common/x.rs", "g"))
+    assert UB.is_upstream_vendored_pair(s) is None
+
+
 def test_upstream_vendored_backslash_paths():
     # 真实数据用反斜杠
     s = _pair(_q("arceos\\modules\\axhal\\x.rs", "f"),
@@ -88,9 +150,27 @@ def test_abi_name_pattern_kstat():
 
 
 def test_abi_name_pattern_sys_shim():
-    s = _pair(_q("api/src/mm.rs", "sys_shmctl"),
+    thin = "pub fn sys_shmctl(id: usize) -> isize { convert_shmctl(id as i32) }"
+    s = _pair({**_q("api/src/mm.rs", "sys_shmctl"), "raw_code": thin},
               _q("2025/o/api/src/mm.rs", "sys_shmctl"))
     assert UB.is_abi_constrained(s) is True
+
+
+def test_abi_generic_sys_name_does_not_exclude_complex_implementation():
+    code = """pub fn sys_fchdir(fd: usize) -> isize {
+        let file = match current_task().fd_table().get_file(fd) {
+            Some(file) => file,
+            None => return -9,
+        };
+        if !file.can_lookup() { return -20; }
+        for group in current_task().groups() {
+            if group.can_execute(&file) { current_task().set_pwd(file.path()); return 0; }
+        }
+        -13
+    }"""
+    s = _pair({**_q("api/src/syscall/fs.rs", "sys_fchdir"), "raw_code": code},
+              _q("2025/o/api/src/syscall/fs.rs", "sys_fchdir"))
+    assert UB.is_abi_constrained(s) is False
 
 
 def test_abi_path_glob_ctypes():
@@ -166,6 +246,70 @@ def test_upstream_baseline_stats_grouping():
     assert reasons["metadata_to_kstat"] == "abi_constrained"
     # upstream_vendored 排前
     assert stats[0]["reason"] == "upstream_vendored"
+
+
+def test_abi_stats_never_uses_unrelated_first_candidate_as_source():
+    q = _q("api/src/file/fs.rs", "metadata_to_kstat")
+    noise = _pair(q, _q("thirdparty/syn/src/expr.rs", "parse_expr"), score=0.38)
+    valid = _pair(q, _q("2025/o/api/src/file/fs.rs", "metadata_to_kstat"), score=0.82)
+    valid["evidence"] = {
+        "line_similarity": 0.76,
+        "exact_match_lines": 9,
+        "function_identity_score": 1.0,
+    }
+    UB.tag_upstream_baselines([noise, valid])
+    stats = UB.upstream_baseline_stats([noise, valid])
+    assert len(stats) == 1
+    assert stats[0]["source"]["func"] == "metadata_to_kstat"
+    assert stats[0]["source"]["sim"] == 0.76
+
+
+def test_abi_stats_has_no_source_when_all_candidates_are_retrieval_noise():
+    s = _pair(
+        _q("api/src/file/fs.rs", "metadata_to_kstat"),
+        _q("thirdparty/smoltcp/src/socket.rs", "poll"),
+        score=0.38,
+    )
+    UB.tag_upstream_baselines([s])
+    stats = UB.upstream_baseline_stats([s])
+    assert len(stats) == 1
+    assert stats[0]["source"] is None
+
+
+def test_single_standard_constant_does_not_exempt_complex_logic():
+    code = """fn mount_and_recover(dev: Device) -> Result<Fs> {
+        if dev.magic() != 0xef53 { return Err(BadFs); }
+        for block in dev.journal_blocks() {
+            match block.state() {
+                Dirty => replay(block)?,
+                Clean => verify(block)?,
+            }
+        }
+        rebuild_free_space(&dev)?;
+        Ok(Fs::new(dev))
+    }"""
+    s = _pair({**_q("core/src/fs.rs", "mount_and_recover"), "raw_code": code},
+              _q("2025/o/fs.rs", "mount_and_recover"))
+    assert UB.is_abi_constrained(s) is False
+
+
+def test_unrelated_error_and_permission_numbers_are_not_signal_mapping():
+    code = """fn check_access(mode: usize) -> isize {
+        const ERRORS: [isize; 4] = [1, 3, 6, 9];
+        if mode & 13 == 0 { return -20; }
+        for error in ERRORS { audit(error); }
+        -13
+    }"""
+    s = _pair({**_q("os/src/syscall/fs.rs", "check_access"), "raw_code": code},
+              _q("2025/o/fs.rs", "check_access"))
+    assert UB.is_abi_constrained(s) is False
+
+
+def test_unimplemented_syscall_stub_is_not_mistaken_for_adapter():
+    code = "fn sys_splice(_fd: usize, _len: usize) -> isize { -38 }"
+    s = _pair({**_q("api/src/syscall/fs.rs", "sys_splice"), "raw_code": code},
+              _q("2025/o/fs.rs", "sys_splice"))
+    assert UB.is_abi_constrained(s) is False
 
 
 # ── 硬编码标准常数（POSIX 信号号 / 文件系统魔数） ──────────────────────────────

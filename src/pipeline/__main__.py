@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
@@ -56,21 +58,104 @@ def _should_run(step: str, resume_from: str | None) -> bool:
     return STEPS.index(step) >= STEPS.index(resume_from)
 
 
-def _finalize_comparison_output(out: Path, repo_name: str, html_path: Path,
-                                query_repo_id: str, *intermediate_paths: Path) -> Path:
-    """删除查重流水线落盘的衍生 JSON + semantic_compare 工作目录，只保留最终
-    对比报告 HTML，归档到以仓库名命名的子目录（与描述报告共用同一输出根目录约定）。
+def _resolve_git_revision(repo_path: Path) -> str:
+    """不依赖仓库所有权配置，直接解析 HEAD，供报告记录实际被分析版本。"""
+    git_path = repo_path / ".git"
+    if git_path.is_file():
+        try:
+            pointer = git_path.read_text(encoding="utf-8").strip()
+            if pointer.startswith("gitdir:"):
+                raw = pointer.split(":", 1)[1].strip()
+                git_path = (repo_path / raw).resolve()
+        except OSError:
+            return ""
+    try:
+        head = (git_path / "HEAD").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    if not head.startswith("ref:"):
+        return head if re.fullmatch(r"[0-9a-fA-F]{7,64}", head) else ""
+    ref = head.split(":", 1)[1].strip()
+    try:
+        return (git_path / ref).read_text(encoding="utf-8").strip()
+    except OSError:
+        try:
+            for line in (git_path / "packed-refs").read_text(encoding="utf-8").splitlines():
+                if line and not line.startswith(("#", "^")):
+                    sha, name = line.split(" ", 1)
+                    if name == ref:
+                        return sha
+        except (OSError, ValueError):
+            pass
+    return ""
+
+
+def _restore_semantic_cache(out: Path, repo_name: str, query_repo_id: str) -> int:
+    """把上次成功报告的内容寻址模型缓存恢复到本次工作目录。
+
+    缓存键包含 prompt 版本、模型、函数名和双方完整源码；源码或规则改变时会自然 miss，
+    因而可以跨重复测试复用而不会把旧结论套到新代码。当前失败续跑缓存优先于归档缓存。
     """
     import shutil
+
+    archive_dir = out / repo_name / ".semantic_cache"
+    if not archive_dir.is_dir():
+        return 0
+    work_dir = out / f"{query_repo_id}_semantic_work"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    restored = 0
+    for source in archive_dir.rglob("*"):
+        if not source.is_file():
+            continue
+        destination = work_dir / source.relative_to(archive_dir)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if source.name.startswith("review_judgment_") and source.suffix == ".json":
+                archived = json.loads(source.read_text(encoding="utf-8"))
+                current = (json.loads(destination.read_text(encoding="utf-8"))
+                           if destination.exists() else {})
+                if not isinstance(archived, dict) or not isinstance(current, dict):
+                    continue
+                merged = {**archived, **current}
+                destination.write_text(
+                    json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+                restored += len(archived)
+            elif not destination.exists():
+                shutil.copy2(source, destination)
+                restored += 1
+        except (OSError, json.JSONDecodeError):
+            logger.warning("[report] 忽略损坏的历史模型缓存 {}", source)
+    if restored:
+        logger.info("[report] 恢复 {} 条历史模型缓存；代码或 prompt 变化的条目会自动重算", restored)
+    return restored
+
+
+def _finalize_comparison_output(out: Path, repo_name: str, html_path: Path,
+                                query_repo_id: str, *intermediate_paths: Path) -> Path:
+    """删除大体积中间产物，保留最终 HTML 与小型内容寻址复核缓存。
+
+    缓存不包含被比较源码，只保存哈希键和模型结构化结论，供相同代码重复测试复用。
+    """
+    import shutil
+
+    final_dir = out / repo_name
+    final_dir.mkdir(parents=True, exist_ok=True)
+    work_dir = out / f"{query_repo_id}_semantic_work"
+    cache_dir = final_dir / ".semantic_cache"
+    review_caches = list(work_dir.glob("review_judgment_*.json")) if work_dir.is_dir() else []
+    if review_caches:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        for cache_file in review_caches:
+            shutil.copy2(cache_file, cache_dir / cache_file.name)
+    content_cache = work_dir / "cache"
+    if content_cache.is_dir():
+        shutil.copytree(content_cache, cache_dir / "cache", dirs_exist_ok=True)
 
     for p in intermediate_paths:
         Path(p).unlink(missing_ok=True)
 
-    work_dir = out / f"{query_repo_id}_semantic_work"
     shutil.rmtree(work_dir, ignore_errors=True)
 
-    final_dir = out / repo_name
-    final_dir.mkdir(parents=True, exist_ok=True)
     final_html = final_dir / html_path.name
     if html_path.resolve() != final_html.resolve():
         html_path.replace(final_html)
@@ -80,6 +165,8 @@ def _finalize_comparison_output(out: Path, repo_name: str, html_path: Path,
 def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     from dotenv import load_dotenv
     load_dotenv()
+    pipeline_perf_started = time.perf_counter()
+    pipeline_started_at = datetime.now().astimezone()
     args = build_parser().parse_args(argv)
 
     # 查重必须 fail closed：历史库缺仓时继续出报告会把“没查到”误写成原创。
@@ -170,11 +257,14 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         if not Path(args.idf).exists() or not Path(args.simhash_index).exists():
             logger.error("缺少特征 SimHash 索引/IDF，拒绝退化运行；请重建历史库")
             return 2
+        from src.buildlib.coverage import db_mapping_signature
+        current_db_signature = db_mapping_signature(args.db)
         if Path(args.idf).exists() and Path(args.simhash_index).exists():
             from src.simhash.build import SimHashQuery
             try:
                 simhash_query = SimHashQuery(
-                    args.idf, args.simhash_index, db_path=args.db)
+                    args.idf, args.simhash_index, db_path=args.db,
+                    db_signature=current_db_signature)
             except (OSError, ValueError) as exc:
                 logger.error("特征 SimHash 索引不可用：{}", exc)
                 return 2
@@ -184,7 +274,10 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             return 2
         from src.simhash.code_index import CodeSimHashQuery
         try:
-            code_simhash_query = CodeSimHashQuery(args.code_simhash_index, db_path=args.db)
+            code_simhash_query = CodeSimHashQuery(
+                args.code_simhash_index, db_path=args.db,
+                db_signature=current_db_signature,
+            )
         except (OSError, ValueError) as exc:
             logger.error("结构 SimHash 索引不可用：{}", exc)
             return 2
@@ -195,7 +288,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
                               skip_files=skip_files, db_path=args.db,
                               code_simhash_query=code_simhash_query,
                               history_coverage=coverage.as_dict(),
-                              require_signed_faiss=True)
+                              require_signed_faiss=True,
+                              db_signature=current_db_signature)
         recall = timed("recall", _recall)
         funnel["recall_query_funcs"] = len(recall["results"])
         funnel["recall_candidates"] = recall["simhash"]["total_recalled"]
@@ -258,6 +352,12 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     # ---- report（语义级对比报告，直接产出 HTML + GitLab 在线链接）----
     if _should_run("report", args.resume_from):
         from src.report.semantic_compare import run_semantic_compare
+        try:
+            report_input = json.loads(final_path.read_text(encoding="utf-8"))
+            report_query_repo_id = str(report_input.get("query_repo_id") or repo_name)
+        except (OSError, json.JSONDecodeError):
+            report_query_repo_id = repo_name
+        _restore_semantic_cache(out, repo_name, report_query_repo_id)
         res = timed("report", lambda: run_semantic_compare(
             suspects_path   = final_path,
             query_repo_path = str(repo_path),
@@ -268,12 +368,37 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             functions_db_path = args.db,
         ))
 
-        # 清理流水线衍生中间产物（fastpath/recall/exact/segment/metadata/ai_detect 的
-        # JSON 落盘 + semantic_compare 的工作目录均只用于生成本次 HTML），只保留最终
-        # 报告，归档到以仓库名命名的子目录。
+        # 清理大体积流水线中间产物；保留最终报告与内容寻址模型缓存，使相同代码的
+        # 重复测试无需再次请求模型。源码或 prompt 改变时缓存键会自动失效。
         final_html = _finalize_comparison_output(
             out, repo_name, Path(res["html_path"]), res["query_repo_id"],
             filematch_path, recall_path, suspects_path, v2_path, final_path, ai_detect_path,
+        )
+        pipeline_finished_at = datetime.now().astimezone()
+        total_elapsed = time.perf_counter() - pipeline_perf_started
+        timings["total"] = round(total_elapsed, 2)
+        measured_stage_elapsed = sum(
+            float(value) for step, value in timings.items() if step != "total"
+        )
+        orchestration_overhead = max(0.0, total_elapsed - measured_stage_elapsed)
+        from src.report.semantic_compare import stamp_generation_metadata
+        stamped = stamp_generation_metadata(
+            final_html.read_text(encoding="utf-8"),
+            {
+                "started_at": pipeline_started_at.isoformat(timespec="seconds"),
+                "generated_at": pipeline_finished_at.isoformat(timespec="seconds"),
+                "total_elapsed_sec": total_elapsed,
+                "report_elapsed_sec": timings.get("report"),
+                "orchestration_overhead_sec": orchestration_overhead,
+                "target_revision": _resolve_git_revision(repo_path),
+                "stage_timings": timings,
+            },
+        )
+        final_html.write_text(stamped, encoding="utf-8")
+        logger.info(
+            "[report] 完成时间 {}，完整流水线总耗时 {:.2f}s，目标版本 {}",
+            pipeline_finished_at.isoformat(timespec="seconds"), total_elapsed,
+            _resolve_git_revision(repo_path) or "未知",
         )
         funnel["report"] = str(final_html)
         funnel["report_html"] = str(final_html)

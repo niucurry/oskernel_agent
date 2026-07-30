@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-CONTRACT_VERSION = 3
+CONTRACT_VERSION = 4
 REQUIRED_CHANNELS = frozenset({
     "vector",
     "feature_simhash",
     "normalized_fingerprint",
     "function_name",
     "normalized_code_simhash",
+    "function_identity_neighbor",
 })
 
 
