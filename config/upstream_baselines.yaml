@@ -24,10 +24,8 @@
 upstream_roots: [arceos, rcore, rcore-v3, xv6-riscv, ucore, os_kernel_lab]
 
 abi_constrained:
-  # 路径 glob（任一命中即判）：归一为正斜杠 + 小写后做**段全等连续匹配**（_glob_in_path）。
-  # 这是「非内核业务逻辑」文件类别的**穷举清单**（构建/示例/测试/工具/脚本/基准 bench/C 库/ABI shim），
-  # 不是逐案打补丁——凡属这些类别的文件，无论相似度多高都不计借鉴（队伍没写这些）。
-  path_globs:
+  # 无条件路径类别：这些目录本身就是构建、测试、第三方兼容层，而非内核业务实现。
+  unconditional_path_globs:
     # 构建脚本与工具链
     - build.rs
     - /scripts/
@@ -45,10 +43,7 @@ abi_constrained:
     - /glibc/
     - /axlibc/c/            # ArceOS axlibc 的 C 源码（printf.c/string.c/math.c/stdlib.c…）
     - /vdso/
-    # POSIX stat/fs/syscall 结构转换层（ABI 受限）
-    - api/src/file/
-    - api/src/syscall/
-  # 函数名正则（归一化后小写匹配）：明显的 ABI 转换/shim/标准算法名
+  # 明确的 ABI 机械转换名称可以直接命中；不包括泛化的 sys_* 系统调用实现。
   name_patterns:
     - "_to_kstat$"
     - "from_kstat$"
@@ -56,11 +51,16 @@ abi_constrained:
     - "from_stat$"
     - "^dummy_stat_"
     - "^metadata_to_"
-    - "^sys_"
     - "_to_errno$"
     - "errno_to_"
     - "_syscall$"
-    # Linux robust futex 机制（exit_robust_list / handle_futex_death）——按 Linux 内核规范
-    # 的死锁清理固定流程，字段/流程由 ABI 规定，多队必然雷同。
+
+  # 下列路径/名称仅提供“可能是 ABI 适配器”的上下文；必须再通过短函数、低控制流、
+  # 以参数转换/转发为主体的函数体形态检查。复杂系统调用不会只因目录或名称被排除。
+  adapter_context_path_globs:
+    - api/src/file/
+    - api/src/syscall/
+  adapter_name_patterns:
+    - "^sys_"
     - "robust"
     - "futex"

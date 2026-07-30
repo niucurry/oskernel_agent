@@ -53,6 +53,28 @@ def _rescore(q_cov: float, c_cov: float, exact_ratio: float, vec_sim: float) -> 
     return round(min(1.0, max(0.0, score)), 4)
 
 
+def _raw_line_similarity(suspect: dict) -> float:
+    """读取原始逐行相似度，并兼容未包含该字段的旧产物。"""
+    evidence = suspect.get("evidence") or {}
+    value = evidence.get("line_similarity")
+    if value is not None:
+        return min(1.0, max(0.0, float(value)))
+
+    matched = int(evidence.get("exact_match_lines") or 0) + int(
+        evidence.get("renamed_match_lines") or 0
+    )
+    if matched:
+        query_code = ((suspect.get("query_func") or {}).get("raw_code") or "")
+        candidate_code = ((suspect.get("candidate_func") or {}).get("raw_code") or "")
+        query_lines = sum(1 for line in query_code.splitlines() if line.strip())
+        candidate_lines = sum(1 for line in candidate_code.splitlines() if line.strip())
+        denominator = max(query_lines, candidate_lines, 1)
+        return min(1.0, matched / denominator)
+
+    # 旧产物没有原始字段和匹配行数时只能使用旧 final_score；新产物不会走到这里。
+    return min(1.0, max(0.0, float(suspect.get("final_score") or 0.0)))
+
+
 def _retier(tier: str, final_score: float, q_cov: float, c_cov: float, exact_ratio: float) -> tuple[str, str]:
     """返回 (新 tier, 变更原因)。"""
     if tier == "weak" and final_score > 0.75:
@@ -65,6 +87,22 @@ def _retier(tier: str, final_score: float, q_cov: float, c_cov: float, exact_rat
     return tier, ""
 
 
+def _segment_cache_key(func: dict) -> tuple[str, str]:
+    """函数分段只由语言和源码决定；仓库、路径及绝对行号不影响切分结果。"""
+    return str(func.get("lang") or "rust").lower(), str(func.get("raw_code") or "")
+
+
+def _segments_at_start(segments: list[Segment], start_line: int) -> list[Segment]:
+    """把从第 1 行切出的缓存段平移到函数的真实绝对行号。"""
+    offset = int(start_line) - 1
+    if offset == 0:
+        return segments
+    return [
+        Segment(seg.start_line + offset, seg.end_line + offset, seg.normalized_text)
+        for seg in segments
+    ]
+
+
 def verify_segments(data: dict, embedder, *, sim_threshold: float = SIM_THRESHOLD) -> dict:
     """对 data["suspects"] 中 review/weak 档原地做分段验证、重打分、升降级。"""
     suspects = data.get("suspects", [])
@@ -73,31 +111,50 @@ def verify_segments(data: dict, embedder, *, sim_threshold: float = SIM_THRESHOL
     if not targets:
         return data
 
-    # 分段 + 收集所有段文本一次性 batch 嵌入
+    # 同一份代码经常被多个历史仓库重复收录。先按“语言+源码”缓存相对分段，再按段文本
+    # 去重嵌入；这只消除重复计算，不改变候选、阈值、向量或匹配规则。
+    segment_cache: dict[tuple[str, str], list[Segment]] = {}
     seg_pairs: list[tuple[list[Segment], list[Segment]]] = []
-    all_texts: list[str] = []
+    unique_texts: dict[str, None] = {}
+    segment_instances = 0
     for s in targets:
         q, c = s["query_func"], s["candidate_func"]
-        qs = segment_function(q.get("raw_code", ""), q.get("lang", "rust"), q["start_line"])
-        cs = segment_function(c.get("raw_code", ""), c.get("lang", "rust"), c["start_line"])
+        q_key = _segment_cache_key(q)
+        c_key = _segment_cache_key(c)
+        if q_key not in segment_cache:
+            segment_cache[q_key] = segment_function(q_key[1], q_key[0], 1)
+        if c_key not in segment_cache:
+            segment_cache[c_key] = segment_function(c_key[1], c_key[0], 1)
+        qs = _segments_at_start(segment_cache[q_key], int(q.get("start_line") or 1))
+        cs = _segments_at_start(segment_cache[c_key], int(c.get("start_line") or 1))
         seg_pairs.append((qs, cs))
-        all_texts.extend(seg.normalized_text for seg in qs)
-        all_texts.extend(seg.normalized_text for seg in cs)
+        for seg in (*qs, *cs):
+            unique_texts.setdefault(seg.normalized_text, None)
+            segment_instances += 1
 
-    vecs = embedder.encode_batch(all_texts) if all_texts else np.zeros((0, getattr(embedder, "dim", 256)))
+    texts = list(unique_texts)
+    vecs = (embedder.encode_batch(texts) if texts
+            else np.zeros((0, getattr(embedder, "dim", 256))))
+    vectors_by_text = {text: vecs[i] for i, text in enumerate(texts)}
+    logger.info(
+        "分段去重：{} 个函数实例 → {} 份唯一源码；{} 个段实例 → {} 个唯一段文本",
+        len(targets) * 2, len(segment_cache), segment_instances, len(texts),
+    )
 
-    idx = 0
     tier_changes = {"upgraded": 0, "downgraded": 0}
     for s, (qs, cs) in zip(targets, seg_pairs):
-        qv = vecs[idx : idx + len(qs)]; idx += len(qs)
-        cv = vecs[idx : idx + len(cs)]; idx += len(cs)
+        qv = (np.stack([vectors_by_text[seg.normalized_text] for seg in qs])
+              if qs else np.zeros((0, getattr(embedder, "dim", 256))))
+        cv = (np.stack([vectors_by_text[seg.normalized_text] for seg in cs])
+              if cs else np.zeros((0, getattr(embedder, "dim", 256))))
 
         sh = _match_segments(qv, cv, qs, cs, sim_threshold)
         q_cov = sh["hits"] / sh["q_total"] if sh["q_total"] else 0.0
         c_cov = sh["hits"] / sh["c_total"] if sh["c_total"] else 0.0
 
         ev = s.setdefault("evidence", {})
-        exact_ratio = float(s.get("final_score") or 0.0)  # Layer4 的 similar_line_ratio
+        exact_ratio = _raw_line_similarity(s)
+        ev["line_similarity"] = exact_ratio
         vec_sim = float(ev.get("vector_similarity") or 0.0)
         ev["segment_hits"] = sh
 

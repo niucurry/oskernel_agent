@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
+import numpy as np
 import pytest
 
+import src.segment.verify as segment_verify
 from src.normalize.segmenter import segment_function
-from src.segment.verify import _rescore, _retier, run_segment, verify_segments
+from src.segment.verify import (_raw_line_similarity, _rescore, _retier,
+                                run_segment, verify_segments)
 
 # 优先级扫描调度器（~18 行）
 PRIO = """pub fn schedule(&mut self, queue: &mut Vec<Task>) -> Option<usize> {
@@ -76,7 +80,8 @@ def _suspect(qcode, ccode, tier="review", final=0.5, vec=0.8):
         "candidate_func": {"repo_id": "2021/h", "file_path": "b.rs", "start_line": 200,
                            "end_line": 200 + ccode.count("\n"), "func_name": "schedule",
                            "module_tag": "sched", "lang": "rust", "raw_code": ccode, "normalized_code": ""},
-        "evidence": {"vector_similarity": vec, "exact_match_lines": 3},
+        "evidence": {"vector_similarity": vec, "line_similarity": final,
+                     "exact_match_lines": 3},
         "matched_spans": [], "match_type_per_span": [],
     }
 
@@ -113,6 +118,12 @@ def test_rescore_formula():
     assert _rescore(0, 0, 0, 0) == 0.0
 
 
+def test_raw_line_similarity_is_not_replaced_by_composite_score():
+    suspect = _suspect(PRIO, RR, final=0.86)
+    suspect["evidence"]["line_similarity"] = 0.14
+    assert _raw_line_similarity(suspect) == pytest.approx(0.14)
+
+
 def test_retier_weak_upgrade():
     assert _retier("weak", 0.8, 0.9, 0.9, 0.9)[0] == "review"
     assert _retier("weak", 0.5, 0.9, 0.9, 0.9)[0] == "weak"  # 不到 0.75 不升
@@ -140,6 +151,45 @@ def test_clone_coverage_higher_than_theme_similar(embedder):
     assert min_cov(clone) > min_cov(theme)        # 真克隆覆盖更高
     assert min_cov(clone) >= 0.5                  # 克隆段大量命中
     assert min_cov(theme) < min_cov(clone) - 0.2  # 主题相似明显更低
+
+
+def test_segment_verification_deduplicates_source_and_embedding_work(monkeypatch):
+    first = _suspect(PRIO, RR)
+    second = deepcopy(first)
+    second["query_func"].update({"repo_id": "2025/other", "start_line": 300})
+    second["candidate_func"].update({"repo_id": "2020/mirror", "start_line": 400})
+    calls = []
+    real_segment = segment_verify.segment_function
+
+    def counted_segment(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_segment(*args, **kwargs)
+
+    class RecordingEmbedder:
+        dim = 2
+
+        def __init__(self):
+            self.texts = []
+
+        def encode_batch(self, texts):
+            self.texts = list(texts)
+            return np.asarray([[1.0, 0.0] for _ in texts], dtype=np.float32)
+
+    monkeypatch.setattr(segment_verify, "segment_function", counted_segment)
+    recorder = RecordingEmbedder()
+    data = {"suspects": [first, second]}
+
+    verify_segments(data, recorder)
+
+    assert len(calls) == 2  # 两个唯一源码，而不是 4 个函数实例
+    assert len(recorder.texts) == len(set(recorder.texts))
+    raw_segment_instances = 2 * (
+        len(real_segment(PRIO, "rust", 1)) + len(real_segment(RR, "rust", 1))
+    )
+    assert len(recorder.texts) < raw_segment_instances
+    second_hits = second["evidence"]["segment_hits"]["matched_segment_pairs"]
+    assert second_hits and min(pair["q_lines"][0] for pair in second_hits) >= 300
+    assert min(pair["c_lines"][0] for pair in second_hits) >= 400
 
 
 def test_run_segment_writes_v2_and_keeps_original(embedder, tmp_path):

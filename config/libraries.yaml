@@ -7,8 +7,9 @@
 # 识别规则（见 src/report/libraries.py · match_library）：把文件路径分隔符与大小写归一后，
 #   1) 若任一目录段 ∈ vendor_dirs（vendor/third_party/…），取其下一段为库名（结构兜底，
 #      自动覆盖 cargo vendor 出来的全部 crate）；
-#   2) 否则若任一目录段 == 某库的 segments 之一，则判为该库（按目录段全等匹配，避免把
-#      学生自写的 os/src/drivers/virtio/ 误判为 virtio-drivers 库）。
+#   2) 否则若任一目录段 == 某库的 segments 之一，则判为该库。可能同时表示业务模块的短名称
+#      可放入 context_required_segments；它们只有位于 crates/libs/deps 等依赖布局，或自身就是
+#      <crate>/src/... 根布局时才命中，避免把 src/arch/riscv 等自研代码当第三方库。
 # 新库在此补充 segments 即可，无需改代码。
 #
 # 种子来自 config/baselines.yaml 已登记的 vendored 库（lwext4/rust-fatfs/virtio-drivers）
@@ -20,6 +21,7 @@ libraries:
     segments: [smoltcp]
   - name: fatfs
     segments: [fatfs, rust-fatfs, rust_fatfs]
+    context_required_segments: [fatfs]
   - name: virtio-drivers
     # virtio-drivers-la 是该库的 LoongArch 移植分支（crate name "virtio-drivers-la"），
     # 各队 vendored 时目录名常被改，故一并登记，避免被当成跨队抄袭。
@@ -29,10 +31,9 @@ libraries:
   - name: slab_allocator
     segments: [slab_allocator]
   # rust-embedded 的 riscv 寄存器抽象 crate（github.com/rust-embedded/riscv），多队整库
-  # vendored（常见目录名 riscv / riscv-0.x.y）。注意：段名匹配是全等任意路径段，若某仓库把
-  # 学生自写的架构代码也放在名为 riscv 的目录下（如 os/src/arch/riscv/），会被一并按库剔除；
-  # 本赛道语料里学生架构代码通常不在恰好名为 riscv 的目录段，故风险可控。
+  # vendored（常见目录名 riscv）。riscv 同时是常见架构目录名，故必须具备依赖包上下文。
   - name: riscv
     segments: [riscv]
+    context_required_segments: [riscv]
 
 vendor_dirs: [vendor, third_party, 3rdparty, thirdparty, extern, external]

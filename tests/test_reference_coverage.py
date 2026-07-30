@@ -46,6 +46,7 @@ def test_retrieval_contract_requires_all_channels_and_exact_history_counts():
         "missing_repo_ids": [],
     }, complete=True)
     assert contract_errors(good) == []
+    assert "function_identity_neighbor" in good["channels"]
 
     bad = build_retrieval_contract({
         "complete": True, "configured": 2, "covered": 1,

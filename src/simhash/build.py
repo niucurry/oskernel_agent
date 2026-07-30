@@ -81,12 +81,14 @@ class SimHashQuery:
     """加载 idf + 索引，提供 query(tokens) -> set[func_id]。"""
 
     def __init__(self, idf_path: str | Path = DEFAULT_IDF, index_path: str | Path = DEFAULT_INDEX, *,
-                 relax: bool = True, db_path: str | Path | None = None):
+                 relax: bool = True, db_path: str | Path | None = None,
+                 db_signature: dict | None = None):
         self.hasher = load_hasher(idf_path)
         self.index = SegmentedIndex.load(index_path)
         if db_path is not None:
             expected = self.index.metadata.get("db_signature")
-            if not expected or expected != db_mapping_signature(db_path):
+            current = db_signature if db_signature is not None else db_mapping_signature(db_path)
+            if not expected or expected != current:
                 raise ValueError("特征 SimHash 索引与 functions.db 不同代，请重建历史库")
         self.relax = relax
 

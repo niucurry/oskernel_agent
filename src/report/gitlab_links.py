@@ -17,7 +17,7 @@ import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from loguru import logger
 
@@ -26,18 +26,29 @@ _LS_REMOTE_TIMEOUT = 15  # 单仓 ls-remote 超时秒数
 _FETCH_WORKERS = 8
 
 
-def build_repo_url_map(repos_yaml: str | Path = "config/repos.yaml") -> dict[str, str]:
-    """repo_id ("year/team_name") → repo_url。从 repos.yaml 读。"""
+def build_repo_url_map(
+    repos_yaml: str | Path = "config/repos.yaml",
+    baselines_yaml: str | Path | None = "config/baselines.yaml",
+) -> dict[str, str]:
+    """repo_id → repo_url；同时覆盖历史作品与显式公共基线。"""
     from src.ingest.config import load_repos
 
     m: dict[str, str] = {}
-    try:
-        for e in load_repos(repos_yaml):
-            key = f"{e.year}/{e.team_name}"
-            if e.repo_url:
-                m[key] = e.repo_url
-    except Exception as e:  # noqa: BLE001
-        logger.warning("读取 {} 建 repo_url 映射失败：{}", repos_yaml, e)
+    paths = [Path(repos_yaml)]
+    if baselines_yaml:
+        baseline_path = Path(baselines_yaml)
+        if baseline_path not in paths:
+            paths.append(baseline_path)
+    for path in paths:
+        if not path.exists():
+            continue
+        try:
+            for e in load_repos(path):
+                key = f"{e.year}/{e.team_name}"
+                if e.repo_url:
+                    m[key] = e.repo_url
+        except Exception as e:  # noqa: BLE001
+            logger.warning("读取 {} 建 repo_url 映射失败：{}", path, e)
     return m
 
 
@@ -51,15 +62,33 @@ def _canonical_repo_url(url: str) -> str:
 
 def _parse_repo_url(url: str) -> tuple[str, str] | None:
     """repo_url → (host, namespace/project)。"""
-    p = urlsplit(url)
-    if not p.scheme or not p.netloc:
-        return None
-    path = p.path.strip("/")
+    raw = (url or "").strip()
+    # git@host:group/project.git 形式是 Git remote 的常见输出，转换为只读网页地址。
+    scp_like = re.fullmatch(r"(?:[^@/]+@)?([^:/]+):(.+)", raw)
+    if scp_like and "://" not in raw:
+        host, path = scp_like.group(1), scp_like.group(2).strip("/")
+    else:
+        p = urlsplit(raw)
+        if not p.scheme or not p.hostname:
+            return None
+        host = p.hostname
+        if p.port:
+            host = f"{host}:{p.port}"
+        path = p.path.strip("/")
     if path.endswith(".git"):
         path = path[:-4]
     if not path:
         return None
-    return p.netloc, path
+    return host, path
+
+
+def repo_web_url(repo_url: str) -> str | None:
+    """把 HTTPS/SSH/scp-like Git remote 统一转换为无凭据的仓库网页地址。"""
+    parsed = _parse_repo_url(repo_url)
+    if not parsed:
+        return None
+    host, path = parsed
+    return f"https://{host}/{path}"
 
 
 def fetch_head(repo_url: str) -> str | None:
@@ -137,10 +166,15 @@ def gitlab_blob_url(
     if not parsed:
         return None
     host, nsp = parsed
-    # 归一化文件路径（Windows 反斜杠 → 正斜杠，去前导 ./）
-    fp = (file_path or "").replace("\\", "/").lstrip("./")
+    # 归一化文件路径（Windows 反斜杠 → 正斜杠，仅移除确切的前导 ``./``）。
+    # ``str.lstrip('./')`` 会误删 ``.cargo``/``.github`` 等合法隐藏路径。
+    fp = (file_path or "").replace("\\", "/")
+    while fp.startswith("./"):
+        fp = fp[2:]
+    fp = fp.lstrip("/")
     if not fp:
         return None
+    encoded_fp = quote(fp, safe="/")
     ref = sha or "HEAD"
     # 行锚：单行 #L5，多行 #L5-10
     if start and end and end > start:
@@ -149,19 +183,22 @@ def gitlab_blob_url(
         anchor = f"#L{start}"
     else:
         anchor = ""
-    return f"https://{host}/{nsp}/-/blob/{ref}/{fp}{anchor}"
+    if host.lower().split(":", 1)[0] in {"github.com", "www.github.com"}:
+        return f"https://{host}/{nsp}/blob/{ref}/{encoded_fp}{anchor}"
+    return f"https://{host}/{nsp}/-/blob/{ref}/{encoded_fp}{anchor}"
 
 
 def query_repo_info(local_path: str | Path) -> tuple[str | None, str | None]:
     """从本地 git 克隆取 (remote_url, HEAD sha)。非 git 目录返回 (None, None)。"""
-    path = Path(local_path)
+    path = Path(local_path).resolve()
     if not path.exists():
         return None, None
 
     def _git(*args: str) -> str | None:
         try:
             r = subprocess.run(
-                ["git", "-C", str(path), *args],
+                # 只对本次只读命令信任用户明确传入的目标仓库，不写全局 safe.directory。
+                ["git", "-c", f"safe.directory={path}", "-C", str(path), *args],
                 capture_output=True, timeout=10,
             )
             return r.stdout.decode("utf-8", errors="replace").strip() if r.returncode == 0 else None

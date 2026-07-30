@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.exact.matcher import ExactMatcher, remap_spans
+from src.exact.matcher import ExactMatcher, ExactMatchResult, remap_spans
 from src.exact.verify import tier_of, verify_recall
 from src.models import FunctionRecord
 from src.normalize.store import FunctionStore
@@ -247,6 +247,9 @@ def test_fingerprint_candidate_bypasses_vector_gate_and_never_becomes_original(t
     assert out["compared_pairs"] == 1
     assert out["suspects"][0]["tier"] == "review"
     assert out["suspects"][0]["evidence"]["normalized_fingerprint_match"] is True
+    assert out["suspects"][0]["final_score"] < 0.5
+    assert (out["suspects"][0]["evidence"]["line_similarity"]
+            == out["suspects"][0]["final_score"])
 
 
 def test_strict_exact_rejects_recall_without_completeness_contract(tmp_path):
@@ -282,3 +285,87 @@ def test_structural_candidate_survives_low_line_ratio_for_segment_review(tmp_pat
     assert out["suspects"][0]["tier"] == "weak"
     assert out["suspects"][0]["evidence"]["structural_hash_recall"] is True
     assert out["suspects"][0]["evidence"]["code_simhash_distance"] == 13
+    assert out["suspects"][0]["final_score"] < 0.5
+
+
+def test_identity_neighbor_with_shared_code_survives_for_specific_pair_review(tmp_path):
+    db, fid = _make_db_with_candidate(tmp_path)
+    recall = {
+        "query_repo_id": "2024/team_new",
+        "results": [{
+            "query": {
+                "repo_id": "2024/team_new", "file_path": "k.rs",
+                "start_line": 1, "end_line": 6, "func_name": "schedule",
+                "module_tag": "sched", "lang": "rust", "raw_code": QUERY_RENAMED,
+                "normalized_code": "",
+            },
+            "candidates": [{
+                "id": fid, "score": 0.0, "identity_expansion": True,
+                "identity_score": 0.9, "payload": {},
+            }],
+        }],
+    }
+    path = tmp_path / "identity_recall.json"
+    path.write_text(json.dumps(recall), encoding="utf-8")
+
+    class LowPartialMatcher:
+        def match(self, *_args, **_kwargs):
+            return ExactMatchResult(
+                similar_line_ratio=0.3,
+                matched_spans=[(1, 3, 1, 3)],
+                match_type_per_span=["exact"],
+                exact_match_lines=3,
+                renamed_match_lines=0,
+            )
+
+    out = verify_recall(
+        path, db_path=db, output_dir=tmp_path / "out", matcher=LowPartialMatcher())
+
+    suspect = out["suspects"][0]
+    assert suspect["tier"] == "weak"
+    assert suspect["evidence"]["function_identity_recall"] is True
+    assert suspect["evidence"]["function_identity_score"] >= 0.9
+    assert suspect["evidence"]["function_name_exact"] is True
+    assert suspect["evidence"]["function_identity_relation"] == "exact_counterpart"
+
+
+def test_same_name_recall_with_substantial_partial_match_cannot_fall_back_to_original(tmp_path):
+    """同名函数被大幅扩写后即使覆盖率不足 0.5，也应进入弱相似复核而非消失。"""
+    db, fid = _make_db_with_candidate(tmp_path)
+    recall = {
+        "query_repo_id": "2026/team_new",
+        "results": [{
+            "query": {
+                "repo_id": "2026/team_new", "file_path": "kernel/sched.rs",
+                "start_line": 200, "end_line": 205, "func_name": "schedule",
+                "module_tag": "sched", "lang": "rust", "raw_code": QUERY_RENAMED,
+                "normalized_code": "",
+            },
+            "candidates": [{
+                "id": fid, "score": 0.0, "name_match": True, "payload": {},
+            }],
+        }],
+    }
+    path = tmp_path / "same_name_recall.json"
+    path.write_text(json.dumps(recall), encoding="utf-8")
+
+    class ExpandedImplementationMatcher:
+        def match(self, *_args, **_kwargs):
+            return ExactMatchResult(
+                similar_line_ratio=0.4,
+                matched_spans=[(1, 3, 1, 3)],
+                match_type_per_span=["renamed"],
+                exact_match_lines=0,
+                renamed_match_lines=3,
+            )
+
+    out = verify_recall(
+        path, db_path=db, output_dir=tmp_path / "out",
+        matcher=ExpandedImplementationMatcher(),
+    )
+
+    assert out["compared_pairs"] == 1
+    assert len(out["suspects"]) == 1
+    assert out["suspects"][0]["tier"] == "weak"
+    assert out["suspects"][0]["evidence"]["function_name_recall"] is True
+    assert out["suspects"][0]["evidence"]["function_identity_relation"] == "exact_counterpart"

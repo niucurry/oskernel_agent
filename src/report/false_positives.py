@@ -3,20 +3,16 @@
 查重主链路按「掩码后逐行匹配比例」分流 confirmed（src/exact），这会在四类场景产生
 假阳性（均为评审实测暴露）：
 
-1. 行业样板汇编（boilerplate_asm）：__switch 等任务切换的寄存器存取序列，RISC-V/龙芯
-   下写法本就固定，掩码后近 100% 命中却非借鉴。
-2. 跨指令集架构（cross_arch）：龙芯 csrwr 与 RISC-V csrrw 同被 core::arch::asm!("…")
-   外壳包裹，指令本体在字符串字面量里被掩码成 STR，只剩外壳相同 → 误判高相似。两者面向
-   不同 CPU，逻辑上不可能是逐字借鉴。
-3. 跨编程语言（cross_lang）：safe Rust 切片遍历 vs unsafe C 裸指针，语言/安全范式不同，
-   仅因短小循环骨架掩码后相近而误判。
+1. 行业样板汇编提示（boilerplate_asm）：__switch 等任务切换序列形态受 ISA 约束，但仍可能
+   被直接复制；只加复核提示，不凭名称/形态自动排除。
+2. 跨指令集架构（cross_arch）：跨架构仍可能是移植借鉴；仅当具体 pair 都是短小 ``asm!``
+   包装器、相似度由被掩码的不同指令字符串制造时，才作为机械误报排除。
+3. 跨编程语言（cross_lang）：跨语言仍可能是翻译借鉴，只作边界提示，不自动判非借鉴。
 4. 内部跨架构复用（internal_dup）：作品自身 src/（RISC-V）与 src-la/（LoongArch）硬拷贝
    同名函数，同一次外部借鉴被两个目录各记一次，虚高外部重复率。
 
-本模块只「降级 / 归类」不「丢弃」：命中项打标签、从「已确认借鉴」KPI 与清单剔除，另在报告
-「疑似误报（需人工确认）」小节单列，人工仍可核。安全口径：仅在证据明确（双侧 ISA 都能确定
-且不同 / 语言确定不同 / 寄存器搬运占绝对多数 / 函数体近乎逐字相同）时才标记，存疑不动——
-宁可漏标一个误报，也不误降一个真借鉴。
+本模块对类别信号只作提示；只有具体函数对的掩码伪相似或作品内部硬拷贝证据明确时才降级，
+并在报告「疑似误报（需人工确认）」小节单列供人工复核。
 
 注意：真实数据 file_path 用反斜杠，匹配前统一归一为正斜杠 + 小写（见 [[libraries]]）。
 """
@@ -151,16 +147,50 @@ def is_boilerplate_asm(func: dict) -> bool:
 # false_positive 主因优先级（数字越小越优先展示）。
 _FP_ORDER = {"boilerplate_asm": 0, "cross_arch": 1, "cross_lang": 2, "internal_dup": 3}
 
-_FP_KEYS = ("fp_cross_arch", "fp_cross_lang", "fp_boilerplate", "false_positive")
+_FP_KEYS = (
+    "fp_cross_arch", "fp_cross_lang", "fp_boilerplate", "false_positive",
+    "cross_arch_signal", "cross_lang_signal", "boilerplate_asm_signal",
+)
+
+
+def _nonblank_count(code: str) -> int:
+    return sum(1 for line in (code or "").splitlines() if line.strip())
+
+
+def is_masked_inline_asm_artifact(s: dict) -> bool:
+    """跨架构 pair 是否只是短小内联汇编外壳在掩码后相似。
+
+    “跨架构”本身不排除移植借鉴。仅当两侧都是很短的 ``asm!`` 包装器，或证据明确显示
+    改名/掩码命中压倒逐字命中时，才把该具体 pair 作为机械误报排除。
+    """
+    if not is_cross_arch(s):
+        return False
+    qcode = ((s.get("query_func") or {}).get("raw_code") or "")
+    ccode = ((s.get("candidate_func") or {}).get("raw_code") or "")
+    if "asm!" not in qcode or "asm!" not in ccode:
+        return False
+    ev = s.get("evidence") or {}
+    exact = int(ev.get("exact_match_lines") or 0)
+    renamed = int(ev.get("renamed_match_lines") or 0)
+    mask_dominated = renamed >= 3 and renamed >= 3 * max(exact, 1)
+    substantive_control = re.search(
+        r"\b(for|while|loop|match|switch)\b", qcode + "\n" + ccode,
+    )
+    short_wrappers = (
+        _nonblank_count(qcode) <= 10 and _nonblank_count(ccode) <= 10
+        and not substantive_control
+    )
+    return bool((mask_dominated or short_wrappers) and not substantive_control)
 
 
 def tag_false_positives(suspects: list[dict]) -> dict[str, int]:
-    """就地给跨架构 / 跨语言 / 样板汇编的嫌疑对打标签，返回各类计数。幂等。
+    """标注类别提示，并只把已证实的掩码汇编伪相似写入 false_positive。幂等。
 
-    库复用对（reuse_library）已单列，不重复打标。每对记主因（样板 > 跨架构 > 跨语言）到
-    ``false_positive``，并保留细分布尔标，供来源核对。
+    库复用对（reuse_library）已单列，不重复打标。跨语言/样板/一般跨架构只写 signal；
+    ``false_positive`` 仅用于可以安全从借鉴 KPI 排除的具体 pair。
     """
     counts = {"boilerplate_asm": 0, "cross_arch": 0, "cross_lang": 0}
+    counted: dict[str, set[tuple]] = {key: set() for key in counts}
     for s in suspects:
         for k in _FP_KEYS:                       # 清旧标（重算幂等）
             s.pop(k, None)
@@ -168,19 +198,24 @@ def tag_false_positives(suspects: list[dict]) -> dict[str, int]:
             continue
         reasons: list[str] = []
         if is_boilerplate_asm(s.get("query_func") or {}):
-            s["fp_boilerplate"] = True
-            reasons.append("boilerplate_asm")
-            counts["boilerplate_asm"] += 1
+            # 标准化汇编只是人工复核提示；没有共同上游/基线证明时不能据此排除直接复制。
+            s["boilerplate_asm_signal"] = True
         if is_cross_arch(s):
-            s["fp_cross_arch"] = True
-            reasons.append("cross_arch")
-            counts["cross_arch"] += 1
+            s["cross_arch_signal"] = True
+            if is_masked_inline_asm_artifact(s):
+                s["fp_cross_arch"] = True
+                reasons.append("cross_arch")
         if is_cross_lang(s):
-            s["fp_cross_lang"] = True
-            reasons.append("cross_lang")
-            counts["cross_lang"] += 1
+            # 跨语言可能是翻译/移植，不能只凭语言不同断言非借鉴。主链路当前声明为同语言边界。
+            s["cross_lang_signal"] = True
         if reasons:
-            s["false_positive"] = min(reasons, key=lambda r: _FP_ORDER[r])
+            reason = min(reasons, key=lambda r: _FP_ORDER[r])
+            s["false_positive"] = reason
+            q = s.get("query_func") or {}
+            key = (q.get("file_path", ""), q.get("func_name", ""), q.get("start_line", 0))
+            counted[reason].add(key)
+    for reason in counts:
+        counts[reason] = len(counted[reason])
     return counts
 
 
@@ -300,14 +335,14 @@ def tag_internal_arch_dups(suspects: list[dict]) -> int:
 # ── 报告小节数据 ─────────────────────────────────────────────────────────────
 FP_REASON_DISP = {
     "boilerplate_asm": "行业样板汇编（任务切换/寄存器存取，各队写法雷同）",
-    "cross_arch":      "跨指令集架构（面向不同 CPU，指令本体不同、仅内联汇编外壳相似）",
+    "cross_arch":      "跨架构短内联汇编的掩码外壳伪相似",
     "cross_lang":      "跨编程语言（语言/安全范式不同，仅短小骨架相近）",
     "internal_dup":    "作品内部跨架构复用（自身 src/ 与 src-la/ 等硬拷贝，属内部复用而非外部借鉴）",
 }
 
 
 def false_positive_stats(suspects: list[dict]) -> list[dict]:
-    """疑似误报清单（按 query 函数去重）：跨架构/跨语言/样板/内部复用，含一个代表性来源。
+    """机械误报清单（按 query 函数去重）：掩码汇编伪相似/内部复用，含具体比较对象。
 
     返回 [{name, file, start, module, lang, reason, source:{repo,file,func,start,sim},
            canonical}, ...]，按 reason 优先级、模块、函数名排序。
@@ -324,10 +359,17 @@ def false_positive_stats(suspects: list[dict]) -> list[dict]:
         q = s.get("query_func") or {}
         c = s.get("candidate_func") or {}
         key = (q.get("file_path", ""), q.get("func_name", ""), q.get("start_line", 0))
+        ev = s.get("evidence") or {}
+        line_sim = ev.get("line_similarity")
+        if line_sim is None:
+            matched = int(ev.get("exact_match_lines") or 0) + int(ev.get("renamed_match_lines") or 0)
+            q_lines = _nonblank_count(q.get("raw_code") or "")
+            c_lines = _nonblank_count(c.get("raw_code") or "")
+            line_sim = matched / max(q_lines, c_lines, 1) if matched else 0.0
         cand = {
             "repo":  c.get("repo_id", ""), "file": c.get("file_path", ""),
             "func":  c.get("func_name", ""), "start": c.get("start_line", 0),
-            "sim":   round(float(s.get("final_score") or 0.0), 3),
+            "sim":   round(float(line_sim or 0.0), 3),
         }
         rec = seen.get(key)
         if rec is None:
@@ -339,8 +381,11 @@ def false_positive_stats(suspects: list[dict]) -> list[dict]:
             }
         elif _FP_ORDER.get(reason, 9) < _FP_ORDER.get(rec["reason"], 9):
             rec["reason"] = reason
+            rec["source"] = cand
             if reason == "internal_dup":
                 rec["canonical"] = s.get("internal_arch_dup", "")
+        elif reason == rec["reason"] and cand["sim"] > (rec.get("source") or {}).get("sim", 0.0):
+            rec["source"] = cand
     out = list(seen.values())
     out.sort(key=lambda x: (_FP_ORDER.get(x["reason"], 9), x["module"], x["name"]))
     return out

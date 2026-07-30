@@ -68,13 +68,16 @@ def build_code_index(db_path: str | Path, index_path: str | Path = DEFAULT_CODE_
 class CodeSimHashQuery:
     def __init__(self, index_path: str | Path = DEFAULT_CODE_INDEX, *,
                  db_path: str | Path | None = None,
+                 db_signature: dict | None = None,
                  max_hamming: int = MAX_HAMMING, probe_bits: int = PROBE_BITS):
         self.index = SegmentedIndex.load(index_path)
         meta = self.index.metadata
         if meta.get("kind") != "normalized_code_simhash" or meta.get("version") != INDEX_VERSION:
             raise ValueError(f"结构 SimHash 索引格式不兼容：{index_path}")
-        if db_path is not None and meta.get("db_signature") != db_mapping_signature(db_path):
-            raise ValueError("结构 SimHash 索引与 functions.db 不同代，请重建历史库")
+        if db_path is not None:
+            current = db_signature if db_signature is not None else db_mapping_signature(db_path)
+            if meta.get("db_signature") != current:
+                raise ValueError("结构 SimHash 索引与 functions.db 不同代，请重建历史库")
         self.token_counts: dict[int, int] = meta.get("token_counts", {})
         self.max_hamming = max_hamming
         self.probe_bits = probe_bits
