@@ -125,7 +125,12 @@ def _get_client():
         return _client
     _client_ready = True
     try:
-        from oskernel_agent import config as _cfg
+        try:
+            # 源码流水线入口（python -m src.pipeline）。
+            from src.oskernel_agent import config as _cfg
+        except ModuleNotFoundError:
+            # 安装后的 ``oskernel-agent`` 控制台入口。
+            from oskernel_agent import config as _cfg
         from openai import OpenAI
         key = (_cfg.api.get("key", "") or "").strip()
         base = (_cfg.api.get("base_url", "") or "").strip() or "https://api.deepseek.com/v1"
