@@ -47,7 +47,7 @@ session_prompts/
 .opencode.json
 
 test/
-analysis
+/analysis/
 config.toml
 
 # 报告交付物与批量输入（数据非代码）

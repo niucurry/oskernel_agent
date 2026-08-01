@@ -126,7 +126,7 @@ def _rel_under_root(file_path: str, roots: tuple[str, ...]) -> str | None:
 
 
 # 上游框架的「固有子目录」段名——这些目录段下的代码属上游框架自带（不是队伍原创）。
-# 从已 ingest 的 baseline 仓库自动派生（见 _load_upstream_module_segs），派生不到时用兜底。
+# 从已 ingest 的 baseline 仓库自动派生，派生不到时用兜底。
 _DEFAULT_FRAMEWORK_SEGS = (
     # ArceOS：modules/ 下的 ax* 模块 + ulib + api（上游固有，队伍自研模块名不在此列）
     "axalloc", "axconfig", "axdisplay", "axdma", "axdriver", "axhal", "axipi",
@@ -134,32 +134,6 @@ _DEFAULT_FRAMEWORK_SEGS = (
     "arceos_api", "arceos_posix_api", "axlibc", "axstd", "axfeat",
 )
 _BASELINE_REPOS_GLOB = "data/repos/0/baseline_*"
-
-
-@lru_cache(maxsize=2)
-def _load_upstream_module_segs(baseline_glob: str = _BASELINE_REPOS_GLOB) -> frozenset[str]:
-    """从已 ingest 的 baseline 仓库**自动派生**上游框架固有子目录段名。
-
-    扫 baseline 仓库的 `modules/*`、`crates/*`、`ulib/*`、`api/*` 一级子目录名——这些是上游
-    框架自带模块（如 ArceOS 的 axfs/axhal/...）。队伍在 `arceos/modules/<seg>/` 下的代码，
-    若 seg 属上游固有模块 → 框架代码（不计借鉴）；队伍自研模块（如 asynctask）名不在派生集中，
-    自动保留。派生不到（baseline 未 ingest）时用 _DEFAULT_FRAMEWORK_SEGS 兜底。
-    """
-    segs: set[str] = set()
-    try:
-        from glob import glob
-        for repo in glob(baseline_glob):
-            rp = Path(repo)
-            for container in ("modules", "crates", "ulib", "api", "src"):
-                cdir = rp / container
-                if cdir.is_dir():
-                    for sub in cdir.iterdir():
-                        if sub.is_dir() and not sub.name.startswith("."):
-                            segs.add(sub.name.lower())
-    except OSError:
-        pass
-    return frozenset(segs) if segs else frozenset(_DEFAULT_FRAMEWORK_SEGS)
-
 
 def _baseline_root_key(repo_name: str, roots: tuple[str, ...]) -> str | None:
     """Associate a baseline directory with the longest unique root token prefix."""
@@ -339,7 +313,9 @@ def _is_mechanical_adapter(code: str) -> bool:
     且至少存在一次调用、转换或结构构造。这样不会把复杂 VFS、调度、网络逻辑当成 ABI 样板。
     """
     lines = _nonblank_lines(code)
-    if not lines or len(lines) > 18:
+    # 多参数 ABI 封装常把签名和参数数组逐项换行，物理行数可轻易超过 18；
+    # 仍以“没有实质控制流 + 只有极少语句”为准，避免把排版误当成复杂实现。
+    if not lines or len(lines) > 32:
         return False
     low = "\n".join(lines).lower()
     if re.search(r"\b(for|while|loop|match|switch|case|await|yield)\b", low):
@@ -349,6 +325,8 @@ def _is_mechanical_adapter(code: str) -> bool:
     open_brace = low.find("{")
     close_brace = low.rfind("}")
     body = low[open_brace + 1:close_brace] if 0 <= open_brace < close_brace else ""
+    if body.count(";") > 4:
+        return False
     calls = re.findall(r"\b[a-zA-Z_]\w*\s*\(", body)
     calls = [call for call in calls if not re.match(r"(?:if|while|for|match)\s*\(", call)]
     has_conversion = bool(re.search(r"\bas\s+[a-zA-Z_]|\b(?:into|from|try_from)\s*\(", body))
@@ -441,10 +419,20 @@ def _raw_line_similarity(s: dict) -> float:
 def _pair_has_source_evidence(s: dict) -> bool:
     """候选是否足以作为具体来源展示；向量分和名称/路径提示本身不算代码证据。"""
     ev = s.get("evidence") or {}
-    if ev.get("normalized_fingerprint_match"):
-        return True
+    relation = str(ev.get("function_identity_relation") or "")
+    exact_name = bool(ev.get("function_name_exact"))
+    identity_compatible = relation in {
+        "exact_counterpart", "same_name_code_clone", "compatible_renamed",
+        "code_clone_renamed",
+    }
     matched = int(ev.get("exact_match_lines") or 0) + int(ev.get("renamed_match_lines") or 0)
     line_sim = _raw_line_similarity(s)
+    # ABI/上游分类是目标函数属性，但“具体来源”必须先证明两侧确为对应函数。仅路径相近、
+    # 向量相似或落在同一大文件中，不能把邻近的无关函数展示成来源。
+    if not identity_compatible and not (exact_name and matched >= 5 and line_sim >= 0.5):
+        return False
+    if ev.get("normalized_fingerprint_match"):
+        return True
     if matched >= 5 and line_sim >= 0.35:
         return True
     if matched >= 3 and int(ev.get("unique_string_matches") or 0) > 0:
@@ -507,7 +495,14 @@ def tag_upstream_baselines(suspects: list[dict], *, path: str | None = None) -> 
         if basis:
             s["abi_constrained"] = True
             s["abi_basis"] = basis
-            s["upstream_source_valid"] = _pair_has_source_evidence(s)
+            # ABI 机械封装的外壳会让不同系统调用获得很高逐行相似度。它能解释目标
+            # 代码为何相似，却不能把 sys_sendto→sys_mmap 之类不同职责函数展示成
+            # “具体来源”；ABI 来源只有同名具体函数且有直接代码证据时才显示。
+            q_name = str((s.get("query_func") or {}).get("func_name") or "")
+            c_name = str((s.get("candidate_func") or {}).get("func_name") or "")
+            s["upstream_source_valid"] = bool(
+                q_name and q_name == c_name and _pair_has_source_evidence(s)
+            )
             abi_keys.add(_query_key(s))
     return {"upstream_vendored": len(uv_keys), "abi_constrained": len(abi_keys)}
 

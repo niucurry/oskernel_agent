@@ -21,6 +21,7 @@ import hashlib
 import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
+from functools import lru_cache
 
 # 语言关键字（掩码时保留，不替换为 ID）
 _RUST_KW = {
@@ -117,6 +118,24 @@ def _numbered_nonblank(code: str) -> tuple[list[int], list[str]]:
     return nos, texts
 
 
+@lru_cache(maxsize=32_768)
+def _prepared_lines(code: str, lang: str) -> tuple[tuple[int, ...], tuple[str, ...], tuple[str, ...]]:
+    """缓存函数的非空行与轻量掩码。
+
+    同一目标函数会与多个历史候选比较，镜像仓库也会重复出现相同源码。
+    掩码是纯函数，按（语言，源码）复用不改变任何匹配结果，只避免逐 pair
+    重复执行正则分词。
+    """
+    numbers, texts = _numbered_nonblank(code)
+    masked = tuple(_mask_line(text, lang) for text in texts)
+    return tuple(numbers), tuple(texts), masked
+
+
+def clear_prepared_line_cache() -> None:
+    """释放精确匹配阶段的热点预处理缓存，避免长流水线后续阶段换页。"""
+    _prepared_lines.cache_clear()
+
+
 def _equal_blocks(seq_a: list[str], seq_b: list[str]):
     """difflib 的相等块 (i, j, n)，过滤哨兵零块。"""
     sm = SequenceMatcher(a=seq_a, b=seq_b, autojunk=False)
@@ -125,8 +144,8 @@ def _equal_blocks(seq_a: list[str], seq_b: list[str]):
 
 class ExactMatcher:
     def match(self, code_a: str, code_b: str, lang: str = "rust") -> ExactMatchResult:
-        a_no, a_text = _numbered_nonblank(code_a)
-        b_no, b_text = _numbered_nonblank(code_b)
+        a_no, a_text, masked_a = _prepared_lines(code_a, lang)
+        b_no, b_text, masked_b = _prepared_lines(code_b, lang)
         if not a_text or not b_text:
             return ExactMatchResult(similar_line_ratio=0.0)
 
@@ -138,8 +157,6 @@ class ExactMatcher:
             exact_a.update(a_no[i : i + n])
 
         # 2) renamed 通道：逐行掩码后比对
-        masked_a = [_mask_line(t, lang) for t in a_text]
-        masked_b = [_mask_line(t, lang) for t in b_text]
         renamed_spans: list[tuple[int, int, int, int]] = []
         matched_a: set[int] = set(exact_a)
         for i, j, n in _equal_blocks(masked_a, masked_b):

@@ -14,6 +14,10 @@ from src.normalize.segmenter import Segment, segment_function
 DEFAULT_OUTPUT_DIR = "data/output"
 SIM_THRESHOLD = 0.85
 TARGET_TIERS = ("review", "weak")
+# 分段向量只用于精确逐行证据之后的次级验证。同一目标函数可能因同名
+# 多实现、镜像仓库和身份邻域产生大量候选；仅对便宜证据排名最高的若干个
+# 不同候选内容执行昂贵的分段嵌入。其余 pair 保留原始逐行档位，不会被写成原创。
+MAX_SEGMENT_CONTENTS_PER_QUERY = 2
 
 
 def _normalize_rows(mat: np.ndarray) -> np.ndarray:
@@ -103,11 +107,75 @@ def _segments_at_start(segments: list[Segment], start_line: int) -> list[Segment
     ]
 
 
+def _segment_query_key(suspect: dict) -> tuple:
+    query = suspect.get("query_func") or {}
+    return (
+        str(query.get("repo_id") or ""), str(query.get("file_path") or ""),
+        int(query.get("start_line") or 0), str(query.get("func_name") or ""),
+    )
+
+
+def _segment_candidate_content_key(suspect: dict) -> tuple[str, str]:
+    return _segment_cache_key(suspect.get("candidate_func") or {})
+
+
+def _segment_selection_rank(suspect: dict) -> tuple:
+    """便宜、确定性的候选排名；仅用于决定先算哪些分段，不改变证据档位。"""
+    evidence = suspect.get("evidence") or {}
+    matched = int(evidence.get("exact_match_lines") or 0) + int(
+        evidence.get("renamed_match_lines") or 0
+    )
+    return (
+        bool(evidence.get("normalized_fingerprint_match")),
+        _raw_line_similarity(suspect),
+        matched,
+        float(evidence.get("function_identity_score") or 0.0),
+        float(evidence.get("vector_similarity") or 0.0),
+    )
+
+
+def _select_segment_targets(
+    suspects: list[dict], *, max_contents_per_query: int = MAX_SEGMENT_CONTENTS_PER_QUERY,
+) -> tuple[list[dict], int, int]:
+    """每个目标函数只选最有证据的 N 个不同候选内容；镜像来源共享选择。"""
+    eligible = [s for s in suspects if s.get("tier") in TARGET_TIERS]
+    by_query: dict[tuple, dict[tuple[str, str], list[dict]]] = {}
+    for suspect in eligible:
+        content_groups = by_query.setdefault(_segment_query_key(suspect), {})
+        content_groups.setdefault(
+            _segment_candidate_content_key(suspect), [],
+        ).append(suspect)
+
+    selected: list[dict] = []
+    selected_contents = 0
+    for content_groups in by_query.values():
+        ranked = sorted(
+            content_groups.values(),
+            key=lambda group: max(_segment_selection_rank(item) for item in group),
+            reverse=True,
+        )
+        chosen = ranked[:max_contents_per_query]
+        selected_contents += len(chosen)
+        for group in chosen:
+            selected.extend(group)
+            for suspect in group:
+                suspect.setdefault("evidence", {})["segment_selection"] = "selected"
+        for group in ranked[max_contents_per_query:]:
+            for suspect in group:
+                suspect.setdefault("evidence", {})["segment_selection"] = "deferred_secondary"
+    return selected, len(eligible), selected_contents
+
+
 def verify_segments(data: dict, embedder, *, sim_threshold: float = SIM_THRESHOLD) -> dict:
     """对 data["suspects"] 中 review/weak 档原地做分段验证、重打分、升降级。"""
     suspects = data.get("suspects", [])
-    targets = [s for s in suspects if s.get("tier") in TARGET_TIERS]
-    logger.info("待分段验证（review/weak）{} 个", len(targets))
+    targets, eligible_count, selected_content_count = _select_segment_targets(suspects)
+    logger.info(
+        "待分段验证（review/weak）{} 个 pair / {} 个不同候选内容；"
+        "原始候选 {} 个，每目标最多 {} 个内容",
+        len(targets), selected_content_count, eligible_count,
+        MAX_SEGMENT_CONTENTS_PER_QUERY,
+    )
     if not targets:
         return data
 
@@ -183,6 +251,9 @@ def verify_segments(data: dict, embedder, *, sim_threshold: float = SIM_THRESHOL
 
     data["segment_summary"] = {
         "verified": len(targets),
+        "eligible": eligible_count,
+        "selected_content_pairs": selected_content_count,
+        "deferred": eligible_count - len(targets),
         "upgraded_weak_to_review": tier_changes["upgraded"],
         "downgraded_to_dismissed": tier_changes["downgraded"],
     }
@@ -199,7 +270,10 @@ def run_segment(suspects_path: str | Path, embedder, *, output_dir: str | Path =
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{suspects_path.stem}_v2.json"
-    out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
     logger.info("写入 {}（原 {} 保留）", out_path, suspects_path.name)
     data["_output_path"] = str(out_path)
     return data

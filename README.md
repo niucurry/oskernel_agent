@@ -153,30 +153,33 @@ python -m src.pipeline --repo <新作品路径或 git url> --baselines
 # → data/output/<作品名>/<作品名>_comparison.html
 ```
 
-对比报告固定采用九段式评审结构：评审结论摘要、共同上游判断、高置信同源功能簇、
+对比报告采用面向评委的九段式结构：评审结论摘要、共同上游判断、高置信同源功能簇、
 模型复核与待处理队列、文件级和非函数代码证据、相对参考实现的候选创新、合法复用与许可证合规、
-AI 生成代码检测附录、暂未检出及完整技术证据附录。来源排名按唯一目标函数、有效相似行、涉及文件
+AI 使用披露提示、暂未检出及运行信息附录。来源排名按唯一目标函数、有效相似行、涉及文件
 和子系统统计，不以候选 pair 数放大；函数证据会按来源、子系统和功能域聚合为同源事件。
 
 模型复核先判断两个函数的职责是否一致，职责一致或部分一致时才继续做代码同源判断。模型必须返回
 非空职责依据、非空复核理由，以及能在输入代码中逐字定位的证据锚点；JSON 格式错误、空理由、无效
 锚点或调用异常统一显示为“复核失败”，单独统计且不算作“模型复核后仍存疑”。报告中的
 “匹配片段完全相同”只描述已命中的局部片段，并同时展示匹配行占整个目标函数的比例。
+全局语义摘要和创新归纳默认使用确定性规则，避免把模型推测当成证据并减少耗时；
+仅 `python -m src.report compare --global-semantic-analysis ...` 会显式启用该可选研究能力。
 
 “相对参考实现的候选创新”会把暂未形成有效相似命中的目标函数与主要历史来源的最近实现做代码级
-比较。每个候选都映射到目标/参考两侧源码，并补充调用或引用入口、影响范围、测试 / benchmark
-证据、限制与反证、实现复杂度和“待人工确认”状态；README / 设计文档只能作为旁证，“未命中”
+比较。每个候选都映射到目标/参考两侧源码，并补充调用或引用入口、影响范围、
+限制与反证、实现复杂度和“待人工确认”状态；README / 设计文档只能作为旁证，“未命中”
 本身不会被直接认定为创新。
 所有文件级、函数级和创新实现比较均限定为同一编程语言；跨语言候选在召回阶段直接过滤，
 不会进入相似度分层、误报清单或创新实现地图。
 
-流水线步骤：`ingest → fastpath → recall → exact → segment → metadata → ai_detect → report`，每步落盘中间 JSON。常用选项：
+流水线步骤：`ingest → fastpath → recall → exact → segment → metadata → report`；可选的 `ai_detect`
+仅在显式传入 `--ai-detect` 时运行。每步落盘中间 JSON。常用选项：
 
 ```bash
 python -m src.pipeline --repo <路径或url> \
     [--resume-from <step>]          # 从指定步骤续跑（前序产物需已存在）
     [--baselines]                   # 启用基线扣除（需 Qdrant 已有基线数据）
-    [--skip-ai-detect]              # 跳过 AI 生成代码检测
+    [--ai-detect]                   # 可选概率统计；默认不运行
     [--qdrant-path data/db/qdrant_local]   # 无 docker 时用本地磁盘向量库
 ```
 
@@ -191,8 +194,8 @@ SimHash、结构 SimHash 与 `functions.db` 为同一代；向量、特征 SimHa
 top-k 的补充通道，当前保证全局汉明距离不超过 15 的归一化代码结构候选进入后续验证。
 召回契约同时要求 `same_language_only=true`，旧的跨语言召回产物不能续跑生成新报告。
 
-报告中的绿色档统一表示“暂未检出相似”，不表示原创认定。报告头会记录历史库覆盖数、召回契约
-版本与通道；缺少这些信息的旧报告会显示红色“已失效、必须重跑”提示。
+报告中的绿色档统一表示“暂未检出相似”，不表示原创认定。召回契约仍在生成入口
+强制校验，但不再把这一内部核验过程写进面向评委的报告正文。
 
 ```bash
 # 全量检查历史库与 reports_by_work_id；退出码 0 才表示全部有效
@@ -204,16 +207,20 @@ python -m src.report audit
 
 ## 五、AI 生成代码检测（基本命令）
 
-免训练的两阶段信号检测（log-rank + NPR），打分模型 `bigcode/starcoder2-3b`（RTX 4060 bf16）。作为查重流水线的 `ai_detect` 步自动并入对比报告，也可独立运行：
+免训练的两阶段信号检测（log-rank + NPR），打分模型 `bigcode/starcoder2-3b`（RTX 4060 bf16）。
+该信号误判风险高且不能判断队伍是否披露、是否掌握代码，因此不纳入默认评委报告，
+仅在研究需要时显式运行：
 
 ```bash
 # 首次需下打分模型权重（之后离线加载）
 HF_ENDPOINT=https://hf-mirror.com huggingface-cli download bigcode/starcoder2-3b
 
 python -m src.ai_detect --repo <新作品路径>
+# 或与查重流水线一起运行
+python -m src.pipeline --repo <新作品路径> --baselines --ai-detect
 ```
 
-模型、阈值等见 [config/settings.yaml](config/settings.yaml) 的 `ai_detect` 段。无 GPU/模型时该步骤优雅跳过，报告章节给出说明。
+模型、阈值等见 [config/settings.yaml](config/settings.yaml) 的 `ai_detect` 段。合规审查仍以队伍披露材料和现场解释为准。
 
 ---
 
@@ -277,7 +284,7 @@ PYTHON_BIN=../.venv/Scripts/python.exe   # Windows 可选；不填会自动找�
 
 前端当前支持两类报告：
 
-- `comparison`：查重对比报告，调用 `python -m src.pipeline --baselines`。**AI 生成代码检测已并入本报告第六章**（由流水线内部的 `ai_detect` 步产出，只针对非借鉴代码；无 GPU/模型时该章自动省略），不再单独出报告。
+- `comparison`：查重对比报告，调用 `python -m src.pipeline --baselines`。默认只给出 AI 使用披露提示，不运行概率式 AI 代码判定。
 - `description`：项目描述报告，调用 `agent.py --repo-path ... --output ...`，依赖 OpenCode 和 `oskernel_agent` MCP。
 
 页面可以对单个作品选择报告类型生成，也可以批量生成缺失报告。生成过程中可在任务列表查看日志；报告完成后从作品详情页直接打开。
@@ -287,7 +294,7 @@ PYTHON_BIN=../.venv/Scripts/python.exe   # Windows 可选；不填会自动找�
 - `frontend/data/app.sqlite`：前端本地数据库。
 - `frontend/reports/<repo_id>/`：每个作品的报告目录。
 - `frontend/reports/<repo_id>/_repos/`：前端流水线克隆的新作品仓库。
-- `frontend/reports/<repo_id>/comparison.html`：查重报告入口（含 AI 生成代码检测章节）。
+- `frontend/reports/<repo_id>/comparison.html`：查重报告入口。
 - `frontend/reports/<repo_id>/description.html`：描述报告入口。
 
 这些产物默认不提交到 Git。需要迁移或备份时，直接拷贝 `frontend/data/` 和 `frontend/reports/` 即可。
@@ -325,13 +332,22 @@ npm run build
 
 给作品清单（`作品.txt`，JSON 数组，含 `队伍编号` / `Fork地址`）里的全部作品批量生成 描述+对比 两份报告：
 
+先在本地 `.env` 配置批处理凭据（真实值禁止提交）：
+
+```dotenv
+BATCH_PRIMARY_LLM_API_KEY=<主凭据>
+BATCH_FALLBACK_LLM_API_KEY=<备用凭据>
+```
+
+批处理启动时会把当前槽位同步为 `LLM_API_KEY`；缺少当前槽位、或主备值相同都会给出不包含凭据值的配置错误。
+
 ```bash
 python run_batch.py
 # → data/output/<队伍编号>/<队伍编号>_{description,comparison}.html
 ```
 
 - 逐作品串行，两份 HTML 均已存在则跳过（**断点续跑**）；
-- 检测到 API key 欠费/限额自动切换备用 key（并自动完成上面的"三件套"）；
+- 检测到 API key 欠费/限额时，自动切换已配置且不同于主凭据的备用 key（并自动完成上面的"三件套"）；
 - 巨型仓库对比超时可调 `BATCH_CMP_TIMEOUT`（秒，默认 3600）。
 
 ---
@@ -352,8 +368,8 @@ python run_batch.py
    机械误报（`false_positives.py`）、复用库（`libraries.py` + `config/libraries.yaml`）
    都在流水线内自动剔除并在报告附录单列，无需人工后处理。
 4. **review 档严格复核**：中等相似函数先由 LLM 判断职责是否一致，再做代码同源复核
-   （`semantic_compare` 内置，模型 `LLM_MODEL`，默认 `deepseek-v4-flash`）；判为借鉴时升档，
-   明确非借鉴时排除，只有格式有效、理由非空且证据锚点可定位的“疑似”才计为模型仍存疑；
+   （`semantic_compare` 内置，模型 `LLM_MODEL`）；模型认为借鉴只提高人工核查优先级，不升为确定性高置信。
+   模型阴性若与具体函数身份和强直接代码证据冲突，保留供评委人工复核；
    格式或调用异常单列为复核失败，未调用则单列为复核未完成。
 5. **规范命令固定**：对比报告一律 `python -m src.pipeline --repo <..> --baselines`
    （`run_batch.py` 与前端控制台均已按此调用）。

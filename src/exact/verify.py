@@ -16,7 +16,7 @@ from src.retrieval_contract import require_complete_contract
 
 from .identity import (function_identity, identity_can_rescue, identity_relation,
                        is_trivial_constant_stub)
-from .matcher import ExactMatcher, remap_spans
+from .matcher import ExactMatcher, clear_prepared_line_cache, remap_spans
 
 DEFAULT_OUTPUT_DIR = "data/output"
 
@@ -176,6 +176,9 @@ def verify_recall(
                 )
             )
     conn.close()
+    # 后续分段/元数据仍在同一长运行进程中；候选侧预处理缓存已无用，
+    # 立即释放以降低峰值工作集和换页风险。
+    clear_prepared_line_cache()
 
     tier_counts = Counter(s.tier for s in suspects)
     suspects.sort(key=lambda s: s.final_score, reverse=True)
@@ -192,7 +195,10 @@ def verify_recall(
     out_dir.mkdir(parents=True, exist_ok=True)
     out_name = recall_path.name.replace("_recall.json", "") + "_suspects.json"
     out_path = out_dir / out_name
-    out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(out, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
     logger.info(
         "精确比对完成：比对 {} 对，输出 {} 个嫌疑对（{}）→ {}",
         n_pairs, len(suspects), dict(tier_counts), out_path,

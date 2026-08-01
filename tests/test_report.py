@@ -144,6 +144,14 @@ def test_review_payload_requires_role_reason_review_reason_and_real_code_anchor(
     assert parsed["evidence_anchors"] == ["bitmap", "alloc_block"]
 
 
+def test_review_text_truncation_is_marked_instead_of_leaving_half_sentence():
+    value = "证据" * 100
+    bounded = SC._bounded_review_text(value, 120)
+    assert len(bounded) == 120
+    assert bounded.endswith("…")
+    assert SC._legacy_review_text_for_display("字" * 120, 120).endswith("…")
+
+
 def test_review_payload_format_or_unverifiable_reason_fails_instead_of_becoming_suspect():
     base = {
         "responsibility": "一致",
@@ -419,7 +427,7 @@ def test_review_section_distinguishes_same_name_functions_at_different_lines():
 
     _toc, section = SC._review_section(groups, None, "2024/new")
 
-    assert '有效返回“疑似” <b>2</b> 个' in section
+    assert '返回“疑似” <b>2</b> 个' in section
 
 
 def test_review_section_summarizes_model_cleared_pairs_without_expanding_irrelevant_code():
@@ -589,6 +597,31 @@ def test_review_evidence_gate_keeps_substantive_partial_copy_below_half_ratio():
     assert suspect["review_evidence_basis"] == "supported_substantive_partial_match"
 
 
+def test_review_evidence_gate_keeps_large_identity_supported_partial_copy_without_segments():
+    suspect = _sc_suspect(
+        "src/expanded.rs", "operation", "history/base", "src/base.rs", "operation",
+        "weak", 0.4146, exact=9, renamed=8,
+    )
+    suspect["query_func"]["raw_code"] = "\n".join(
+        f"query_step_{index}();" for index in range(41)
+    )
+    suspect["candidate_func"]["raw_code"] = "\n".join(
+        f"candidate_step_{index}();" for index in range(38)
+    )
+    suspect["evidence"].update({
+        "line_similarity": 0.4146,
+        "function_name_exact": True,
+        "function_identity_score": 0.842,
+        "function_identity_relation": "exact_counterpart",
+    })
+
+    removed = SC._apply_review_evidence_gate([suspect])
+
+    assert removed == 0
+    assert suspect["review_evidence_basis"] == "identity_supported_large_partial_match"
+    assert SC._model_negative_requires_human_review(suspect, "一致") is True
+
+
 def test_source_metrics_deduplicate_candidate_pairs_and_use_effective_loc():
     a = _sc_suspect("os/fs.rs", "read", "2023/ref", "a.rs", "read", "confirmed", .98,
                     exact=10)
@@ -668,7 +701,8 @@ def test_report_boundary_keeps_history_that_materially_exceeds_weak_baseline():
     assert changed == 1
     assert baseline["tier"] == "baseline_derived"
     assert history["tier"] == "weak"
-    assert history["evidence"]["baseline_incremental_evidence"] is True
+    assert baseline["evidence"]["baseline_source_substantive"] is False
+    assert "baseline_incremental_evidence" not in history["evidence"]
 
 
 def test_model_review_selection_skips_confirmed_and_defers_weaker_secondary():
@@ -777,6 +811,8 @@ def test_model_review_budget_does_not_change_evidence_tiers_or_originality():
         item["evidence"].update({
             "line_similarity": similarity,
             "function_identity_score": .8,
+            "function_name_exact": True,
+            "function_identity_relation": "exact_counterpart",
             "segment_hits": {"hits": 2, "q_total": 4, "c_total": 4},
         })
         base.append(item)
@@ -802,7 +838,7 @@ def test_model_review_budget_does_not_change_evidence_tiers_or_originality():
     assert SC._original_functions(recall, all_candidates) == []
 
 
-def test_model_negative_for_best_candidate_keeps_deferred_independent_source():
+def test_strong_direct_evidence_survives_model_negative_and_keeps_secondary_source():
     candidates = []
     for idx, similarity in enumerate((.80, .70), start=1):
         item = _sc_suspect(
@@ -822,6 +858,8 @@ def test_model_negative_for_best_candidate_keeps_deferred_independent_source():
         item["evidence"].update({
             "line_similarity": similarity,
             "function_identity_score": .8,
+            "function_name_exact": True,
+            "function_identity_relation": "exact_counterpart",
             "segment_hits": {"hits": 2, "q_total": 4, "c_total": 4},
         })
         candidates.append(item)
@@ -839,13 +877,17 @@ def test_model_negative_for_best_candidate_keeps_deferred_independent_source():
 
     _up, down = SC._apply_review_verdicts(candidates, selected)
 
-    assert down == 1
-    assert candidates[0]["tier"] == "dismissed"
+    assert down == 0
+    assert candidates[0]["tier"] == "review"
+    assert candidates[0]["review_verdict"] == "规则保留"
+    assert candidates[0]["review_raw_verdict"] == "非借鉴"
     assert candidates[1]["tier"] == "review"
     assert candidates[1]["model_review_selection"] == "deferred_secondary"
     groups = SC.collect_file_pairs(candidates, keep_tiers=("review", "weak"))
     assert len(groups) == 1
-    assert groups[0]["candidates"][0]["ref_repo"] == "2022/team"
+    assert {item["ref_repo"] for item in groups[0]["candidates"]} == {
+        "2021/team", "2022/team",
+    }
     recall = {"results": [{
         "query": deepcopy(candidates[0]["query_func"]), "candidates": [],
     }]}
@@ -966,7 +1008,10 @@ def test_generate_comparison_html_has_m2_elements():
     analysis = SC._fallback_analysis(groups, stats)
     file_matches = [{"query_file": "os/src/driver/uart.rs", "line_count": 88,
                      "matches": [{"repo_id": "2021/a", "file_path": "drv/uart.rs",
-                                  "line_count": 88, "func_count": 4}]}]
+                                  "line_count": 88, "func_count": 4}]},
+                    {"query_file": "user/src/bin/libctest/malloc.rs", "line_count": 40,
+                     "matches": [{"repo_id": "2021/a", "file_path": "tests/malloc.rs",
+                                  "line_count": 40, "func_count": 2}]}]
     contract = build_retrieval_contract({
         "complete": True, "configured": 167, "covered": 167,
         "missing_repo_ids": [],
@@ -976,15 +1021,22 @@ def test_generate_comparison_html_has_m2_elements():
         review_pairs=review_groups, file_matches=file_matches, file_similar=[],
         retrieval_contract=contract)
     assert "报告导读（请先阅读）" in html              # 导读卡（面向老师的语境引导）
-    assert "初步体检" in html                          # 体检结论
+    assert "证据概览" in html                          # 中性、非自动扣分的概览
     assert "高置信同源功能簇" in html                  # 函数聚合为功能级同源事件
     assert 'id="sec-review"' in html
-    assert "模型复核后仍存疑" in html                  # 模型不确定清单不是“尚未审核”
+    assert "模型复核难例" in html                        # 只展示值得人工判断的难例
     assert "结构相似但上下文不足" in html
     assert "候选来源（全部）" in html                  # U6 全候选
     assert "匹配片段完全相同" in html
     assert "覆盖目标函数" in html
     assert 'id="sec-files"' in html                  # 文件级清单
+    assert "libctest" not in html                    # 测试套件不进入评委证据
+    assert "cdn.jsdelivr.net/npm/alpine" not in html # 断网时不依赖 Alpine 展开内容
+    assert "cdn.tailwindcss.com" not in html          # 页面排版完全自带，不依赖 Tailwind
+    assert "页面布局不依赖 Tailwind CDN" in html
+    assert "chartAttempts<20" in html                # ECharts 加载失败有界重试
+    assert "内核赛道评分边界" in html
+    assert "查看官方评分说明" in html
     assert "整文件相同" in html
     assert "暂未检出相似（函数）" in html
     assert "相对参考实现的候选创新" in html
@@ -1121,6 +1173,41 @@ def test_innovation_map_rejects_invented_keys_and_adds_complexity():
     assert points[0]["references"][0]["key"] == "r0001"
     assert points[0]["complexity"]["code_lines"] == 33
     assert points[0]["complexity"]["branch_points"] >= 3
+
+
+def test_innovation_complexity_uses_full_function_beyond_model_excerpt(tmp_path):
+    query_code = (
+        "fn clone_process() {\n"
+        + "    let padding = prepare();\n" * 180
+        + "    if ready() { run(); }\n"
+        + "    for task in tasks() { schedule(task); }\n"
+        + "}\n"
+    )
+    assert query_code.index("if ready") > 1800
+    db = tmp_path / "functions.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE functions (id INTEGER PRIMARY KEY, repo_id TEXT, file_path TEXT, "
+            "start_line INTEGER, end_line INTEGER, func_name TEXT, module_tag TEXT, lang TEXT, raw_code TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO functions VALUES (7, '2025/ref-os', 'kernel/process.rs', 1, 20, "
+            "'clone_process', 'sched', 'rust', 'fn clone_process() {}')"
+        )
+    recall = {"results": [{
+        "query": {"file_path": "kernel/process.rs", "start_line": 1, "end_line": 184,
+                  "func_name": "clone_process", "module_tag": "sched", "lang": "rust",
+                  "raw_code": query_code},
+        "candidates": [{"id": 7, "score": 0.42,
+                        "payload": {"repo_id": "2025/ref-os", "file_path": "kernel/process.rs"}}],
+    }]}
+
+    candidates = SC.build_innovation_candidates(recall, [], functions_db_path=db)
+    complexity = SC._innovation_complexity(candidates)
+
+    assert len(candidates[0]["raw_code"]) == len(query_code)
+    assert len(candidates[0]["analysis_code"]) <= 12000
+    assert complexity["branch_points"] >= 2
 
 
 def test_generate_report_renders_innovation_code_map():

@@ -12,7 +12,8 @@ import pytest
 import src.segment.verify as segment_verify
 from src.normalize.segmenter import segment_function
 from src.segment.verify import (_raw_line_similarity, _rescore, _retier,
-                                run_segment, verify_segments)
+                                _select_segment_targets, run_segment,
+                                verify_segments)
 
 # 优先级扫描调度器（~18 行）
 PRIO = """pub fn schedule(&mut self, queue: &mut Vec<Task>) -> Option<usize> {
@@ -190,6 +191,29 @@ def test_segment_verification_deduplicates_source_and_embedding_work(monkeypatch
     second_hits = second["evidence"]["segment_hits"]["matched_segment_pairs"]
     assert second_hits and min(pair["q_lines"][0] for pair in second_hits) >= 300
     assert min(pair["c_lines"][0] for pair in second_hits) >= 400
+
+
+def test_segment_selection_keeps_best_distinct_contents_and_defers_the_rest():
+    candidates = []
+    for index, ratio in enumerate((0.52, 0.68, 0.59), start=1):
+        suspect = _suspect(PRIO, RR + f"\n// variant {index}", final=ratio)
+        suspect["candidate_func"].update({
+            "repo_id": f"202{index}/team", "start_line": 200 + index * 10,
+        })
+        suspect["evidence"].update({
+            "line_similarity": ratio,
+            "exact_match_lines": round(ratio * 20),
+            "function_identity_score": 0.8,
+        })
+        candidates.append(suspect)
+
+    selected, eligible, selected_contents = _select_segment_targets(candidates)
+
+    assert eligible == 3
+    assert selected_contents == 2
+    assert {item["evidence"]["line_similarity"] for item in selected} == {0.68, 0.59}
+    assert candidates[0]["evidence"]["segment_selection"] == "deferred_secondary"
+    assert candidates[0]["tier"] == "review"  # 只延后昂贵分段，不删除召回证据
 
 
 def test_run_segment_writes_v2_and_keeps_original(embedder, tmp_path):

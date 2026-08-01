@@ -48,6 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="每个子模块送入语义分析的最大相似代码对数（默认 20；模块借鉴对 <20 时全部分析）")
     pc.add_argument("--skip-opencode", action="store_true",
                     help="跳过 opencode，仅用规则生成报告（调试用）")
+    pc.add_argument(
+        "--global-semantic-analysis", action="store_true",
+        help="可选启用全局语义摘要与创新归纳模型；默认只用模型复核准入难例",
+    )
 
     gh = sub.add_parser("gitlab-heads", help="预取历史仓库 HEAD sha 缓存（报告里文件链接用）")
     gh.add_argument("--repos-yaml", default="config/repos.yaml")
@@ -78,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
                 output_dir      = args.output_dir,
                 top_per_module  = args.top_per_module,
                 skip_opencode   = args.skip_opencode,
+                global_semantic_analysis = args.global_semantic_analysis,
                 filematch_path  = args.filematch,
                 functions_db_path = args.db,
             )

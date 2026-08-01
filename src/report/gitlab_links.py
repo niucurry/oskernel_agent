@@ -231,7 +231,15 @@ class GitLabLinker:
         # query 仓库：repo_id 通常是 "year/team" 或 recall.query_repo_id；用注入的新作品信息
         if self.query_repo_url and repo_id and repo_id == self._query_key():
             return self.query_repo_url, self.query_sha
-        url = self.url_map.get(repo_id or "")
+        raw_id = str(repo_id or "").replace("\\", "/").strip("/")
+        candidate_ids = [raw_id]
+        # 外部/旧产物有时把 repos_root 一并写入 repo_id（例如
+        # data/repos/0/baseline_rcore_v3）。配置键仍是 0/baseline_rcore_v3。
+        # 只剔除到明确的年份/基线组件，不猜测仓库名。
+        match = re.search(r"(?:^|/)((?:0|\d{4})/.+)$", raw_id)
+        if match and match.group(1) not in candidate_ids:
+            candidate_ids.append(match.group(1))
+        url = next((self.url_map[key] for key in candidate_ids if key in self.url_map), None)
         if not url:
             return None, None
         return url, self.heads.get(_canonical_repo_url(url))

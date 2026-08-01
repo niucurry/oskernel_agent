@@ -17,6 +17,11 @@ from typing import Protocol
 MIN_INCREMENTAL_LINE_SIM_DELTA = 0.10
 MIN_INCREMENTAL_MATCH_LINES = 3
 
+# 向量相似只用于发现“可能的公共基线”，不能单独作为排除历史相似证据的依据。
+# 至少要有一段可直接核验的逐行重合；完全规范化指纹相同则不受最少行数限制。
+MIN_DIRECT_BASELINE_LINE_SIMILARITY = 0.50
+MIN_DIRECT_BASELINE_MATCH_LINES = 3
+
 
 def pair_line_evidence(suspect: dict) -> tuple[float, int]:
     """Return comparable (line similarity, matched lines) for a suspect pair.
@@ -68,6 +73,24 @@ def has_incremental_history_evidence(
         candidate_similarity >= strongest_similarity + min_similarity_delta
         and candidate_lines >= most_lines + min_extra_lines
     )
+
+
+def has_substantive_baseline_evidence(
+    baseline_pair: dict,
+    *,
+    min_similarity: float = MIN_DIRECT_BASELINE_LINE_SIMILARITY,
+    min_matched_lines: int = MIN_DIRECT_BASELINE_MATCH_LINES,
+) -> bool:
+    """公共基线是否有足够的直接代码证据，可用于排除历史命中。
+
+    嵌入向量用于高召回发现候选，最终排除必须回到源码证据。这样既不依赖仓库名、
+    路径或具体函数名，也不会把“主题相近但实际代码覆盖很低”的函数误判成公共基线。
+    """
+    evidence = baseline_pair.get("evidence") or {}
+    if evidence.get("normalized_fingerprint_match"):
+        return True
+    similarity, matched = pair_line_evidence(baseline_pair)
+    return similarity >= min_similarity and matched >= min_matched_lines
 
 
 class BaselineMatcher(Protocol):

@@ -184,20 +184,109 @@ class _FakeMatcher:
         return self.mapping.get(nc, (None, 0.0))
 
 
-def test_channel_baseline_downgrades_both_sides_and_vendored():
+def test_channel_baseline_does_not_exclude_on_vector_similarity_alone(tmp_path):
     s_both = {"tier": "review", "query_func": {"normalized_code": "Q1"},
               "candidate_func": {"normalized_code": "C1"}, "evidence": {}}
     s_one = {"tier": "review", "query_func": {"normalized_code": "Q2"},
              "candidate_func": {"normalized_code": "C2"}, "evidence": {}}
     # Q2 命中基线（vendored 上游），C2 不命中 → 单侧也扣
     matcher = _FakeMatcher({"Q1": (5, 0.9), "C1": (5, 0.91), "Q2": (5, 0.9), "C2": (None, 0.0)})
-    n = channel_baseline({"suspects": [s_both, s_one]}, matcher, SETTINGS)
-    assert n == 2  # 双侧 + 单侧 vendored 均扣除
-    assert s_both["tier"] == "baseline_derived" and s_both["evidence"]["baseline_flag"] is True
-    assert s_one["tier"] == "baseline_derived"
+    n = channel_baseline(
+        {"suspects": [s_both, s_one]}, matcher, SETTINGS,
+        db_path=tmp_path / "missing.db",
+    )
+    assert n == 0
+    assert s_both["tier"] == "review"
+    assert s_one["tier"] == "review"
+    assert s_both["evidence"]["baseline_vector_candidate_only"] is True
 
 
-def test_explicit_baseline_candidate_is_direct_evidence_and_propagates_per_query():
+def test_channel_baseline_requires_direct_source_evidence(tmp_path):
+    baseline_code = """fn common() {
+    let a = prepare();
+    let b = transform(a);
+    commit(b);
+}"""
+    db = tmp_path / "functions.db"
+    with FunctionStore(db) as store:
+        baseline_id = store.add_function(
+            _rec("0/baseline_kernel", "common", baseline_code), [], [],
+        )
+        store.conn.commit()
+    query = {
+        "repo_id": "2026/new", "file_path": "src/common.rs", "start_line": 1,
+        "end_line": 5, "func_name": "common", "module_tag": "other", "lang": "rust",
+        "raw_code": baseline_code, "normalized_code": "Q",
+    }
+    suspect = {
+        "tier": "review", "final_score": 0.8, "query_func": query,
+        "candidate_func": {
+            "repo_id": "2025/team", "file_path": "src/common.rs", "start_line": 1,
+            "end_line": 5, "func_name": "common", "module_tag": "other", "lang": "rust",
+            "raw_code": baseline_code, "normalized_code": "C",
+        },
+        "evidence": {"line_similarity": 1.0, "exact_match_lines": 5},
+    }
+    matcher = _FakeMatcher({
+        "Q": (baseline_id, 0.93), "C": (baseline_id, 0.94),
+    })
+
+    n = channel_baseline({"suspects": [suspect]}, matcher, SETTINGS, db_path=db)
+
+    assert n == 1
+    assert suspect["tier"] == "baseline_derived"
+    assert suspect["evidence"]["baseline_reference"]["repo_id"] == "0/baseline_kernel"
+    assert "直接逐行相似" in suspect["baseline_note"]
+
+
+def test_low_direct_baseline_overlap_cannot_hide_stronger_history(tmp_path):
+    baseline_code = """fn run_tasks() {
+    shared_one();
+    shared_two();
+}"""
+    query_code = """fn run_tasks() {
+    shared_one();
+    shared_two();
+    team_step_one();
+    team_step_two();
+    team_step_three();
+    team_step_four();
+    team_step_five();
+    finish();
+}"""
+    history_code = query_code
+    db = tmp_path / "functions.db"
+    with FunctionStore(db) as store:
+        baseline_id = store.add_function(
+            _rec("0/baseline_kernel", "run_tasks", baseline_code), [], [],
+        )
+        store.conn.commit()
+    query = {
+        "repo_id": "2026/new", "file_path": "src/task.rs", "start_line": 90,
+        "end_line": 100, "func_name": "run_tasks", "module_tag": "sched", "lang": "rust",
+        "raw_code": query_code, "normalized_code": "Q",
+    }
+    suspect = {
+        "tier": "review", "final_score": 1.0, "query_func": query,
+        "candidate_func": {
+            "repo_id": "2025/team", "file_path": "src/task.rs", "start_line": 60,
+            "end_line": 70, "func_name": "run_tasks", "module_tag": "sched", "lang": "rust",
+            "raw_code": history_code, "normalized_code": "H",
+        },
+        "evidence": {"line_similarity": 1.0, "exact_match_lines": 10},
+    }
+    matcher = _FakeMatcher({
+        "Q": (baseline_id, 0.92), "H": (baseline_id, 0.93),
+    })
+
+    n = channel_baseline({"suspects": [suspect]}, matcher, SETTINGS, db_path=db)
+
+    assert n == 0
+    assert suspect["tier"] == "review"
+    assert suspect["evidence"]["baseline_vector_candidate_only"] is True
+
+
+def test_explicit_baseline_candidate_without_direct_code_does_not_propagate_per_query():
     query = {"file_path": "src/mm.rs", "start_line": 20, "func_name": "map",
              "normalized_code": "Q"}
     direct = {
@@ -225,11 +314,36 @@ def test_explicit_baseline_candidate_is_direct_evidence_and_propagates_per_query
     )
 
     assert is_baseline_repo(r"data\repos\0\baseline_kernel") is True
-    assert n == 2
+    assert n == 1
     assert direct["tier"] == "baseline_derived"
-    assert historical["tier"] == "baseline_derived"
-    assert "增量同源证据" in historical["baseline_note"]
+    assert direct["evidence"]["baseline_source_substantive"] is False
+    assert historical["tier"] == "confirmed"
     assert same_name_different_function["tier"] == "confirmed"
+
+
+def test_explicit_baseline_candidate_with_direct_code_propagates_per_query():
+    query = {"file_path": "src/mm.rs", "start_line": 20, "func_name": "map",
+             "normalized_code": "Q"}
+    direct = {
+        "tier": "review", "query_func": query,
+        "candidate_func": {
+            "repo_id": "data/repos/0/baseline_kernel", "normalized_code": "B",
+        },
+        "evidence": {"line_similarity": 0.9, "exact_match_lines": 10},
+    }
+    historical = {
+        "tier": "confirmed", "query_func": dict(query),
+        "candidate_func": {"repo_id": "2025/team", "normalized_code": "H"},
+        "evidence": {"line_similarity": 0.85, "exact_match_lines": 9},
+    }
+
+    n = channel_baseline(
+        {"suspects": [direct, historical]}, _FakeMatcher({}), SETTINGS,
+    )
+
+    assert n == 2
+    assert direct["evidence"]["baseline_source_substantive"] is True
+    assert direct["tier"] == historical["tier"] == "baseline_derived"
 
 
 def test_weak_explicit_baseline_does_not_hide_stronger_history_evidence():
@@ -265,8 +379,8 @@ def test_weak_explicit_baseline_does_not_hide_stronger_history_evidence():
     assert n == 1
     assert direct["tier"] == "baseline_derived"
     assert historical["tier"] == "weak"
-    assert historical["evidence"]["baseline_incremental_evidence"] is True
-    assert "增量同源证据" in historical["baseline_note"]
+    assert direct["evidence"]["baseline_source_substantive"] is False
+    assert "baseline_incremental_evidence" not in historical["evidence"]
 
 
 # ---------- 通道 4：公共/框架代码广度过滤 ----------

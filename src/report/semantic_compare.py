@@ -21,7 +21,6 @@ import json
 import os
 import re
 import sqlite3
-import subprocess
 import uuid
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -33,8 +32,10 @@ from src.exact.identity import identity_can_rescue
 from src.fastpath.scan import (WHOLE_FILE_LINE_RATIO, WHOLE_FILE_SIM_RATIO,
                                aggregate_file_similarity)
 from src.metadata.baseline import (has_incremental_history_evidence,
+                                   has_substantive_baseline_evidence,
                                    pair_line_evidence)
 from src.models import is_baseline_repo
+from src.normalize.discovery import is_test_or_benchmark_path
 from src.retrieval_contract import (CONTRACT_VERSION, contract_errors,
                                     require_complete_contract)
 
@@ -48,6 +49,7 @@ DEFAULT_OUTPUT_DIR = "data/output"
 _SEMANTIC_PROMPT_VERSION = "semantic-cn-v2"
 _INNOVATION_PROMPT_VERSION = "innovation-map-cn-v3-no-benchmark"
 DEFAULT_FUNCTIONS_DB = Path(__file__).resolve().parents[2] / "data" / "db" / "functions.db"
+MIN_INNOVATION_REFERENCE_SCORE = 0.30
 
 # 子模块列表及其显示名称
 MODULES = ["sched", "mm", "fs", "trap", "driver", "arch", "other"]
@@ -87,7 +89,7 @@ _MODULE_DISPLAY = {
 # 不通过 tier 名称伪装成“仍存疑”。
 _TIER_DISPLAY = {
     "confirmed": "高置信同源代码",
-    "review":    "模型复核后仍存疑",
+    "review":    "模型复核难例",
     "weak":      "低强度相似信号",
 }
 # clone_type 展示名：按「逐字相同行占比」描述相似程度，中性命名，不臆断「改名」动机。
@@ -176,6 +178,15 @@ _OPENCODE = _find_opencode()
 # 不计入「值得关注的借鉴」。复用上游 metadata 通道4 的判定（与 config common_code_repo_threshold 一致）。
 COMMON_CODE_REPO_THRESHOLD = 5
 
+_KERNEL_JUDGE_SCORING_URL = (
+    "https://course.educg.net/pages/contest/contest.jsp?"
+    "contestCID=0&contestID=Z7zWWwTfti0&my=false&tabDocID=4754285"
+)
+_KERNEL_JUDGE_INTEGRITY_URL = (
+    "https://course.educg.net/pages/contest/contest.jsp?"
+    "contestCID=0&contestID=Z7zWWwTfti0&my=false&tabDocID=2523538"
+)
+
 
 def _query_key(q: dict) -> tuple:
     """报告内目标函数的稳定主键；同文件同名函数必须用起始行区分。"""
@@ -194,17 +205,29 @@ def _tag_query_level_baselines(suspects: list[dict]) -> int:
     changed = 0
     for s in suspects:
         repo = str((s.get("candidate_func") or {}).get("repo_id") or "")
-        if not is_baseline_repo(repo) or s.get("tier") == "baseline_derived":
+        if not is_baseline_repo(repo):
             continue
-        s.setdefault("evidence", {})["baseline_flag"] = True
-        s["evidence"]["baseline_query_scope"] = False
+        ev = s.setdefault("evidence", {})
+        ev["baseline_flag"] = True
+        ev["baseline_query_scope"] = False
+        ev["baseline_source_substantive"] = has_substantive_baseline_evidence(s)
+        if s.get("tier") == "baseline_derived":
+            continue
         s["tier"] = "baseline_derived"
-        s["baseline_note"] = "候选函数直接来自显式公共基线仓库"
+        s["baseline_note"] = (
+            "候选函数直接来自显式公共基线仓库；"
+            + ("已形成可传播的直接代码证据"
+               if ev["baseline_source_substantive"]
+               else "当前直接代码证据不足，不传播为目标函数级排除")
+        )
         changed += 1
 
     baseline_by_query: dict[tuple, list[dict]] = defaultdict(list)
     for s in suspects:
-        if s.get("tier") == "baseline_derived":
+        ev = s.get("evidence") or {}
+        if (s.get("tier") == "baseline_derived"
+                and (ev.get("baseline_query_scope")
+                     or ev.get("baseline_source_substantive"))):
             baseline_by_query[_query_key(s.get("query_func") or {})].append(s)
     for s in suspects:
         baselines = baseline_by_query.get(_query_key(s.get("query_func") or {}), [])
@@ -303,13 +326,41 @@ def baseline_stats(suspects: list[dict]) -> list[dict]:
     for s in suspects:
         if s.get("tier") != "baseline_derived":
             continue
+        evidence = s.get("evidence") or {}
+        # 显式基线仓库中的弱候选只负责避免把基线本身列成历史队伍来源；没有形成
+        # 目标函数级直接证据时，不得在本节宣称目标实现“已通过基线源码复核”。
+        if not (evidence.get("baseline_query_scope")
+                or evidence.get("baseline_source_substantive")):
+            continue
         q = s.get("query_func", {})
+        candidate = s.get("candidate_func", {})
+        reference = evidence.get("baseline_reference") or {}
         key = _query_key(q)
-        funcs.setdefault(key, {
+        item = funcs.setdefault(key, {
             "name": q.get("func_name", ""), "file": q.get("file_path", ""),
             "start": q.get("start_line", 0), "module": q.get("module_tag", "other"),
-            "source": s.get("candidate_func", {}).get("repo_id", ""),
+            "baseline_repo": reference.get("repo_id", ""),
+            "baseline_file": reference.get("file_path", ""),
+            "baseline_start": reference.get("start_line", 0),
+            "baseline_func": reference.get("func_name", ""),
+            "baseline_line_similarity": reference.get("line_similarity"),
+            "baseline_matched_lines": reference.get("matched_lines"),
+            "history_candidates": set(),
             "note": s.get("baseline_note", "")})
+        candidate_repo = candidate.get("repo_id", "")
+        if candidate_repo and candidate_repo != item.get("baseline_repo"):
+            item["history_candidates"].add(candidate_repo)
+        if reference and not item.get("baseline_repo"):
+            item.update({
+                "baseline_repo": reference.get("repo_id", ""),
+                "baseline_file": reference.get("file_path", ""),
+                "baseline_start": reference.get("start_line", 0),
+                "baseline_func": reference.get("func_name", ""),
+                "baseline_line_similarity": reference.get("line_similarity"),
+                "baseline_matched_lines": reference.get("matched_lines"),
+            })
+    for item in funcs.values():
+        item["history_candidates"] = sorted(item["history_candidates"])
     return sorted(funcs.values(), key=lambda x: (x["module"], x["name"]))
 
 
@@ -318,7 +369,7 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) ->
 
     按 query 函数去重、取最高档归类：
       借鉴(confirmed)：confirmed 且非库复用、非公共/样板；
-      模型仍存疑(review)：review/weak 且模型返回有效“疑似”；
+      模型复核难例(review)：review/weak 且模型返回有效“借鉴/疑似”；
       复核未完成：模型调用/格式校验失败，或未配置模型；绝不计入“模型仍存疑”；
       原创(original)：recall 中（非库）完全未进入嫌疑清单的函数。
     库复用 / 公共样板 / baseline 既不算借鉴也不算原创，**不计入 total**（在各自小节单列），
@@ -347,7 +398,7 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) ->
             mod = "other"
         if tier == "confirmed":
             category = "confirmed"
-        elif s.get("review_verdict") == "疑似":
+        elif s.get("review_verdict") in ("借鉴", "疑似", "规则保留"):
             category = "review"
         elif s.get("review_verdict") == "复核失败":
             category = "review_failed"
@@ -576,7 +627,7 @@ def build_innovation_candidates(
                        or payload.get("lang") or "").lower()
         return bool(query_lang and ref_lang and query_lang == ref_lang)
 
-    selected_refs: dict[int, tuple[dict, dict, str]] = {}
+    selected_ref_ids: dict[tuple, set[int]] = {}
     for _, item, _, mod in recall_items:
         q = item.get("query") or {}
         preferred_repo = refs_by_mod.get(mod, "")
@@ -593,10 +644,12 @@ def build_innovation_candidates(
                 continue
             repo = str(payload.get("repo_id") or "")
             priority = 1 if preferred_repo and repo == preferred_repo else 0
-            candidates.append((priority, float(candidate.get("score") or 0.0), func_id, candidate, payload))
+            score = float(candidate.get("score") or 0.0)
+            if score < MIN_INNOVATION_REFERENCE_SCORE:
+                continue
+            candidates.append((score, priority, func_id, candidate, payload))
         candidates.sort(key=lambda x: (-x[0], -x[1]))
-        for _, _, func_id, candidate, payload in candidates[:1]:
-            selected_refs[func_id] = (candidate, payload, preferred_repo)
+        selected_ref_ids[_query_key(q)] = {entry[2] for entry in candidates[:1]}
 
     result: list[dict] = []
     reference_seq = 0
@@ -611,16 +664,18 @@ def build_innovation_candidates(
                 func_id = int(candidate.get("id") or payload.get("id"))
             except (TypeError, ValueError):
                 continue
-            if func_id not in selected_refs:
+            if func_id not in selected_ref_ids.get(_query_key(q), set()):
                 continue
             if not same_language(q, payload, func_id):
                 continue
             repo = str(payload.get("repo_id") or "")
             priority = 1 if preferred_repo and repo == preferred_repo else 0
-            candidates.append((priority, float(candidate.get("score") or 0.0), func_id, candidate, payload))
+            score = float(candidate.get("score") or 0.0)
+            candidates.append((score, priority, func_id, candidate, payload))
         candidates.sort(key=lambda x: (-x[0], -x[1]))
-        for _, score, func_id, _, payload in candidates[:1]:
+        for score, _, func_id, _, payload in candidates[:1]:
             row = hydrated.get(func_id, {})
+            ref_code = row.get("raw_code") or ""
             reference_seq += 1
             refs.append({
                 "key": f"r{reference_seq:04d}",
@@ -631,8 +686,12 @@ def build_innovation_candidates(
                 "func": row.get("func_name") or payload.get("func_name", ""),
                 "lang": row.get("lang") or payload.get("lang", ""),
                 "score": round(score, 3),
-                "raw_code": (row.get("raw_code") or "")[:1400],
+                "raw_code": ref_code,
+                "analysis_code": ref_code[:8000],
             })
+        if not refs:
+            continue
+        query_code = q.get("raw_code") or ""
         result.append({
             "key": f"t{index:04d}",
             "module": mod,
@@ -644,7 +703,8 @@ def build_innovation_candidates(
             "func": q.get("func_name", ""),
             "lang": q.get("lang", ""),
             "lines": int(meta.get("lines") or 0),
-            "raw_code": (q.get("raw_code") or "")[:1800],
+            "raw_code": query_code,
+            "analysis_code": query_code[:12000],
             "references": refs,
         })
     return result
@@ -904,6 +964,15 @@ def _review_admission(s: dict) -> dict | None:
           and shorter_coverage >= MIN_REVIEW_SHORTER_COVERAGE
           and supports):
         basis = "multi_signal_code_similarity"
+    elif (line_sim >= 0.35
+          and matched >= 15
+          and shorter_coverage >= 0.40
+          and identity >= 0.80
+          and relation in ("exact_counterpart", "same_name_code_clone")):
+        # 长函数在共享核心之后大幅扩写时，整体比例会被新代码稀释。
+        # 15 行以上的保序直接证据、双侧有效覆盖和高函数身份同时成立时，
+        # 应保留人工核查；该分支不依赖函数名或仓库身份。
+        basis = "identity_supported_large_partial_match"
     elif (line_sim >= 0.40
           and matched >= 12
           and shorter_coverage >= 0.55
@@ -1471,71 +1540,6 @@ def select_model_review_pairs(
     }
 
 
-# ─── 3. 上下文文件 + opencode 短消息 ─────────────────────────────────────────
-# Windows 命令行限制 ~32K 字符，不能把完整代码对塞进 CLI 参数。
-# 解决方案：把所有数据写到仓库里的临时 JSON 文件，用 read_file MCP 工具读取。
-
-_CONTEXT_FILENAME = "_plagiarism_context.json"
-
-
-def _write_context_file(
-    query_repo_path: str,
-    query_repo_id: str,
-    file_pairs: list[dict],
-    submodule_stats: dict,
-    output_path: str,
-) -> Path:
-    """把分析上下文序列化到 {query_repo_path}/_plagiarism_context.json。"""
-    ctx = {
-        "query_repo_id":   query_repo_id,
-        "output_path":     str(output_path),
-        "submodule_stats": {
-            mod: {
-                "display":      _MODULE_DISPLAY.get(mod, mod),
-                "confirmed":    s["confirmed"],
-                "review":       s["review"],
-                "weak":         s["weak"],
-                "total":        s["total"],
-                "copy_pct_pct": round(s["copy_pct"] * 100, 1),
-                "top_source":   s["top_source"],
-            }
-            for mod, s in submodule_stats.items()
-            if s["confirmed"] + s["review"] + s["weak"] > 0
-        },
-        "file_pairs": file_pairs,
-    }
-    ctx_path = Path(query_repo_path) / _CONTEXT_FILENAME
-    ctx_path.write_text(json.dumps(ctx, ensure_ascii=False, indent=2), encoding="utf-8")
-    return ctx_path
-
-
-def _build_short_request(query_repo_path: str, output_path: str,
-                          ctx_path: str) -> str:
-    """生成传给 opencode 的精简消息（直接指向绝对路径，用 bash 读写文件）。"""
-    ctx_posix = Path(ctx_path).as_posix()
-    out_posix  = Path(output_path).as_posix()
-    return (
-        f"请对 OS 内核新作品进行语义级功能借鉴分析，生成 HTML 对比报告。\n\n"
-        f"**不要调用 initialize_analysis**（已知会超时）。直接用 bash 读写文件。\n\n"
-        f"步骤：\n"
-        f"1. bash: 读取分析上下文（JSON）\n"
-        f"   命令示例：python -c \"import json; d=json.load(open(r'{ctx_posix}', encoding='utf-8')); "
-        f"print(json.dumps(d['submodule_stats'], ensure_ascii=False, indent=2))\"\n"
-        f"2. 对 file_pairs 中每个子模块，分析功能借鉴（语义层面，不只是文本相似）：\n"
-        f"   - 借鉴了哪些功能/算法/机制\n"
-        f"   - 借鉴程度：直接复制/变量改名/结构保留/受启发重实现\n"
-        f"   - 代码证据：引用 文件:行号 格式\n"
-        f"3. **必须**调用 write 工具将完整 HTML 写入（不要用 bash echo）：\n"
-        f"   output_path: {out_posix}\n\n"
-        f"HTML 格式：\n"
-        f"- 每个模块一个 <section data-module=\"模块tag\">…</section>\n"
-        f"- 用 <h3>模块名</h3><p>分析</p><ul><li>证据</li></ul>\n"
-        f"- 文件引用写 path:line 纯文本（如 os/src/task/mod.rs:125）\n"
-        f"- 不要写 Markdown，只写 HTML 标签\n\n"
-        f"Context 文件：{ctx_posix}"
-    )
-
-
 # ─── 4. 调用 opencode ────────────────────────────────────────────────────────
 
 def _opencode_env() -> dict:
@@ -1620,7 +1624,7 @@ def _build_analysis_message(
         if mod != current_mod:
             lines.append(f"### {_MODULE_DISPLAY.get(mod, mod)} ({mod})")
             current_mod = mod
-        tier_label = {"confirmed": "高置信同源代码", "review": "模型复核后仍存疑",
+        tier_label = {"confirmed": "高置信同源代码", "review": "模型复核难例",
                       "weak": "低强度相似信号"}.get(
             g["overall_tier"], g["overall_tier"])
         lines.append(
@@ -1776,15 +1780,22 @@ _INNOVATION_SYSTEM = """你是 OS 内核代码差异分析助手。你的任务�
 def _innovation_message(query_repo_id: str, candidates: list[dict]) -> str:
     compact = []
     for candidate in candidates:
+        references = []
+        for reference in candidate.get("references", []):
+            references.append({
+                key: value for key, value in reference.items()
+                if key not in ("raw_code", "analysis_code")
+            } | {"raw_code": reference.get("analysis_code") or ""})
         compact.append({
             "key": candidate["key"],
             "module": candidate["module_display"],
             "reference_repo": candidate.get("reference_repo", ""),
             "target": {
                 "file": candidate["file"], "start": candidate["start"], "end": candidate["end"],
-                "func": candidate["func"], "raw_code": candidate["raw_code"],
+                "func": candidate["func"],
+                "raw_code": candidate.get("analysis_code") or "",
             },
-            "references": candidate.get("references", []),
+            "references": references,
         })
     return (
         f"目标仓库：{query_repo_id}\n"
@@ -1951,12 +1962,12 @@ def _pct_bar(copy_pct: float, review_pct: float = 0.0,
     if c:
         seg += f'<div class="pct-copy" style="width:{c}%">{c}%&nbsp;高置信同源代码</div>'
     if rv:
-        seg += f'<div class="pct-review" style="width:{rv}%">{rv}%&nbsp;模型复核后仍存疑</div>'
+        seg += f'<div class="pct-review" style="width:{rv}%">{rv}%&nbsp;模型复核难例</div>'
     if inc:
         seg += f'<div class="pct-incomplete" style="width:{inc}%">{inc}%&nbsp;复核未完成</div>'
     if o:
         seg += f'<div class="pct-orig" style="width:{o}%">{o}%&nbsp;暂未检出相似</div>'
-    title = (f"高置信同源代码 {c}% / 模型复核后仍存疑 {rv}% / "
+    title = (f"高置信同源代码 {c}% / 模型复核难例 {rv}% / "
              f"复核未完成 {inc}% / 暂未检出相似 {o}%")
     return f'<div class="pct-bar" title="{title}">{seg}</div>'
 
@@ -1977,7 +1988,7 @@ def _echarts_overview(submodule_stats: dict) -> str:
     series = [{"name": "高置信同源代码", "type": "bar", "stack": "pct", "data": copy_vals[::-1],
                "itemStyle": {"color": "#ef4444"}, "label": {"show": True, "formatter": "{c}%"}}]
     if show_rev:
-        series.append({"name": "模型复核后仍存疑", "type": "bar", "stack": "pct", "data": rev_vals[::-1],
+        series.append({"name": "模型复核难例", "type": "bar", "stack": "pct", "data": rev_vals[::-1],
                        "itemStyle": {"color": "#f59e0b"}, "label": {"show": True, "formatter": "{c}%"}})
     if show_inc:
         series.append({"name": "复核失败/未完成", "type": "bar", "stack": "pct",
@@ -1988,7 +1999,7 @@ def _echarts_overview(submodule_stats: dict) -> str:
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
         "legend": {"data": ["高置信同源代码"]
-                   + (["模型复核后仍存疑"] if show_rev else [])
+                   + (["模型复核难例"] if show_rev else [])
                    + (["复核失败/未完成"] if show_inc else [])
                    + ["暂未检出相似"]},
         "grid": {"left": "25%", "right": "12%", "top": "8%", "bottom": "6%"},
@@ -2055,7 +2066,7 @@ def _echarts_overall_donut(copy_pct: float, review_pct: float = 0.0,
         },
         "tooltip": {"trigger": "item", "formatter": "{b}: {c}%"},
         "legend": {"bottom": 0, "data": ["高置信同源代码"]
-                   + (["模型复核后仍存疑"] if rv else [])
+                   + (["模型复核难例"] if rv else [])
                    + (["复核失败/未完成"] if inc else [])
                    + ["暂未检出相似"]},
         "series": [{
@@ -2063,7 +2074,7 @@ def _echarts_overall_donut(copy_pct: float, review_pct: float = 0.0,
             "center": ["50%", "44%"], "avoidLabelOverlap": False,
             "label": {"show": False}, "labelLine": {"show": False},
             "data": [{"value": c, "name": "高置信同源代码", "itemStyle": {"color": "#ef4444"}}]
-                    + ([{"value": rv, "name": "模型复核后仍存疑", "itemStyle": {"color": "#f59e0b"}}] if rv else [])
+                    + ([{"value": rv, "name": "模型复核难例", "itemStyle": {"color": "#f59e0b"}}] if rv else [])
                     + ([{"value": inc, "name": "复核失败/未完成", "itemStyle": {"color": "#94a3b8"}}] if inc else [])
                     + [{"value": o, "name": "暂未检出相似", "itemStyle": {"color": "#22c55e"}}],
         }],
@@ -2190,7 +2201,7 @@ _LEGEND_HTML = (
     '<div class="legend">'
     '<span><b>档位：</b></span>'
     '<span><span class="dot" style="background:#ef4444"></span>高置信同源代码</span>'
-    '<span><span class="dot" style="background:#f59e0b"></span>模型复核后仍存疑</span>'
+    '<span><span class="dot" style="background:#f59e0b"></span>模型复核难例（需人工确认）</span>'
     '<span><span class="dot" style="background:#94a3b8"></span>复核失败/未完成（不计为存疑）</span>'
     '<span><span class="dot" style="background:#22c55e"></span>暂未检出相似</span>'
     '<span style="margin-left:.6rem"><b>相似程度：</b></span>'
@@ -2317,27 +2328,32 @@ def _reading_guide(query_repo_id: str, borrowed_n: int, review_n: int,
         '<div class="text-base font-bold text-slate-800 mb-1">报告导读（请先阅读）</div>'
         '<p class="text-sm text-slate-700 leading-relaxed m-0">'
         '本报告由 AI 自动比对该作品与历年参赛作品，标记「与历史代码相似、可能存在借鉴」的函数，'
-        '<b>仅作为人工评审的辅助参考，不构成抄袭的最终认定</b>。'
-        '系统已自动过滤掉所有团队都会用的「上游框架代码、第三方库、ABI/规范受限写法」等机械重复，'
-        '下方数字仅针对<b>排除机械重复后的待评估部分</b>。</p>'
+        '<b>仅辅助评委核查来源披露、独立增量与答辩抽查，不构成抄袭认定，也不自动映射扣分</b>。'
+        '本报告不评价客观测例、功能正确性、性能、现场修改能力或答辩质量。系统按当前规则识别并单列'
+        '「上游框架、第三方库、ABI/规范受限写法」等可解释复用；规则仍受历史库、解析与阈值限制。</p>'
         # 体检结论
         f'<div class="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-md font-semibold text-sm" '
         f'style="background:{vcolor}1a;color:{vcolor}">'
         f'<span class="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs" '
         f'style="background:{vcolor}">{vicon}</span>'
-        f'初步体检：{verdict}（高置信同源代码占纳入统计函数 {overall_copy_pct}%）</div>'
+        f'证据概览：{verdict}（确定性高置信同源 {borrowed_n} 个函数）</div>'
         f'<p class="text-sm text-slate-600 mt-2 mb-0">{vtext}</p>'
         # 透明度：扣除了多少误报
         '<div class="mt-3 text-xs text-slate-500 bg-white/70 rounded px-3 py-2 border border-slate-200">'
         f'📊 <b>过滤透明度</b>：系统纳入统计 <b>{total_kept}</b> 个函数，其中 '
-        f'<b>{borrowed_n}</b> 个高置信同源代码、<b>{review_n}</b> 个模型有效复核后仍存疑、'
+        f'<b>{borrowed_n}</b> 个确定性高置信同源代码、<b>{review_n}</b> 个模型复核难例、'
         f'<b>{review_failed_n}</b> 个复核失败、<b>{review_pending_n}</b> 个复核未完成；'
-        f'另已剔除 <b>{excl_total}</b> 个机械重复函数（{excl_detail}），这些不计入上方借鉴统计，'
+        f'另按规则单列 <b>{excl_total}</b> 个可解释复用/受约束函数（{excl_detail}），这些不计入上方同源统计，'
         '在第 7 节「合法复用与许可证合规」分类列出，可点开核对。'
         + '</div>'
         '<p class="text-xs text-slate-400 mt-2 mb-0">'
         '建议用法：①看总体结果 → ②先核对「高置信同源代码」的代码证据 → '
-        '③再查看模型存疑与复核异常清单 → ④结合候选创新与合规复用证据完成判断。</p>'
+        '③再查看模型难例与复核异常清单 → ④结合来源披露、基础版本和提交过程完成人工判断。</p>'
+        '<div class="judge-note"><b>内核赛道评分边界：</b>本报告只支持来源披露、独立增量与答辩抽查。'
+        '客观测例与双架构适配、功能正确性、稳定性/性能、文档与提交演进、现场修改和答辩表现，'
+        '必须结合赛事平台材料另行评分；不得把本报告的函数占比直接换算成扣分。'
+        f'<a href="{_KERNEL_JUDGE_SCORING_URL}" target="_blank" rel="noopener noreferrer">查看官方评分说明</a> · '
+        f'<a href="{_KERNEL_JUDGE_INTEGRITY_URL}" target="_blank" rel="noopener noreferrer">查看学术诚信要求</a></div>'
         '</div></div></section>'
     )
 
@@ -2359,6 +2375,12 @@ def _summary_card(
     review_pending_n = sum(st.get("review_pending", 0) for st in submodule_stats.values())
     review_incomplete_n = review_failed_n + review_pending_n
     original_n = sum(st["original"] for st in submodule_stats.values())
+    recall_function_count = None
+    if recall is not None:
+        recall_function_count = len({
+            _query_key(item.get("query", {}))
+            for item in recall.get("results", [])
+        })
 
     # 加权总占比（按函数）
     all_total = sum(st["total"] for st in submodule_stats.values()) or 1
@@ -2371,8 +2393,10 @@ def _summary_card(
     # 高置信同源与模型仍存疑明确分栏，避免把“已经过模型但模型拿不准”误读成尚未审核。
     kpis = (
         '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">'
+        + (_kpi(f"{recall_function_count}", "本次解析函数（完整口径）", "#2563eb")
+           if recall_function_count is not None else "")
         + _kpi(f"{borrowed_n}", "高置信同源代码（函数）", "#ef4444")
-        + (_kpi(f"{review_n}", "模型复核后仍存疑（函数）", "#d97706") if review_n else "")
+        + (_kpi(f"{review_n}", "模型复核难例（函数）", "#d97706") if review_n else "")
         + (_kpi(f"{review_failed_n}", "模型复核失败（函数）", "#64748b") if review_failed_n else "")
         + (_kpi(f"{review_pending_n}", "模型复核未完成（函数）", "#64748b") if review_pending_n else "")
         + _kpi(f"{original_n}", "暂未检出相似（函数）", "#16a34a")
@@ -2400,19 +2424,13 @@ def _summary_card(
         '<div class="chart-title mt-4">各模块高置信同源函数数</div>'
         + _echarts_tier_distribution(submodule_stats)
     )
-    pct_title = '各模块：高置信同源 / 模型仍存疑 / 复核未完成 / 暂未检出 占比'
+    pct_title = '各模块：确定性高置信同源 / 模型复核难例 / 复核未完成 / 暂未检出 占比'
     pct_chart = (
         f'<div class="chart-title mt-4">{pct_title}</div>'
         + _echarts_overview(submodule_stats)
     )
 
     # 顶部导读 + 体检结论卡（老师第一眼看到，建立正确语境）
-    recall_function_count = None
-    if recall is not None:
-        recall_function_count = len({
-            _query_key(item.get("query", {}))
-            for item in recall.get("results", [])
-        })
     guide = _reading_guide(query_repo_id, borrowed_n, review_n,
                            review_failed_n, review_pending_n, original_n,
                            overall_copy_pct, _exclusion_totals(suspects, recall),
@@ -2426,9 +2444,10 @@ def _summary_card(
         '<h2>总体结果</h2></div><span class="summary-repo">'
         f'{_ref_repo_anchor(linker, query_repo_id)}</span></div>'
         '<p class="text-xs text-slate-500 mt-1 mb-0">下列数字为<b>扣除上游框架/库/规范受限代码后的待评估口径</b>；'
-        '「高置信同源代码」和有效模型复核后的「仍存疑」均为辅助筛查结果；'
+        '「高置信同源代码」由确定性代码证据形成；模型结论只进入「复核难例」，不自动升为高置信；'
         '复核失败/未完成是流程状态，不是风险结论。'
-        '<b>需结合代码证据人工判断</b>，不代表系统已经认定抄袭。</p>'
+        '图中的比例分母仅为纳入统计函数，不是全作品函数，也不是赛事扣分比例。'
+        '<b>需结合代码、来源披露和提交过程人工判断</b>。</p>'
         f'{_LEGEND_HTML}{kpis}{head_charts}{tier_chart}{pct_chart}'
         '</section>'
     )
@@ -2476,8 +2495,8 @@ def _candidates_cell(group: dict, linker) -> str:
             + f' <span class="{_sim_class(c["sim"])} font-semibold">综合 {c["sim"]}</span>'
             + f' <span class="text-slate-500">逐行 {c.get("line_similarity", "—")}</span>'
             + (f' <span class="text-blue-600">{relation}</span>' if relation else "")
-            + (f' <span class="text-violet-600" title="广泛出现不等于公共来源，仍保留本函数对结论">'
-               f'跨 {int(c.get("widespread_match_repos") or 0)} 仓传播</span>'
+            + (f' <span class="text-violet-600" title="多仓出现不证明传播方向或直接来源">'
+               f'跨 {int(c.get("widespread_match_repos") or 0)} 仓出现</span>'
                if int(c.get("widespread_match_repos") or 0) else "")
             + (' <span class="text-amber-700" title="架构不同仍可能存在移植借鉴；仅作复核提示">跨架构</span>'
                if c.get("cross_arch_signal") else "")
@@ -2567,6 +2586,7 @@ def _code_evidence(group: dict, colspan: int = 6, linker=None,
 _REVIEW_VERDICT_STYLE = {
     "借鉴":   ("bg-red-50 text-red-700", "借鉴"),
     "疑似":   ("bg-amber-50 text-amber-700", "模型仍存疑"),
+    "规则保留": ("bg-amber-50 text-amber-800", "强证据保留人工复核"),
     "非借鉴": ("bg-green-50 text-green-700", "非借鉴"),
     "复核失败": ("bg-rose-50 text-rose-700", "复核失败"),
     "未复核": ("bg-slate-100 text-slate-500", "复核未完成"),
@@ -2577,10 +2597,11 @@ def _verdict_cell(g: dict) -> str:
     """展示职责门控、严格复核结论、可核验理由及代码锚点。"""
     v = g.get("review_verdict", "未复核")
     cls, lbl = _REVIEW_VERDICT_STYLE.get(v, _REVIEW_VERDICT_STYLE["未复核"])
-    reason = html.escape(g.get("review_reason", "") or "")
+    reason = html.escape(_legacy_review_text_for_display(
+        g.get("review_reason", "") or "", 120))
     responsibility = html.escape(g.get("review_responsibility", "未判定") or "未判定")
-    responsibility_reason = html.escape(
-        g.get("review_responsibility_reason", "") or "")
+    responsibility_reason = html.escape(_legacy_review_text_for_display(
+        g.get("review_responsibility_reason", "") or "", 80))
     anchors = [str(x) for x in (g.get("review_evidence_anchors") or []) if str(x).strip()]
     role_html = (
         f'<div class="text-xs text-slate-500 mt-1 max-w-[18rem]">'
@@ -2659,8 +2680,8 @@ def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, ac
                'whitespace-nowrap" title="相似度中等、经 AI 模型复核认定为借鉴（非逐行铁证）">'
                '模型复核认定</span>' if g.get("via_review") else "")
             + (f'<span class="ml-1 px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 '
-               f'whitespace-nowrap" title="广泛传播只作背景，不单独证明公共代码">'
-               f'跨 {int(g.get("widespread_match_repos") or 0)} 仓传播</span>'
+               f'whitespace-nowrap" title="多仓共享只作背景，不证明传播方向或直接来源">'
+               f'跨 {int(g.get("widespread_match_repos") or 0)} 仓出现</span>'
                if int(g.get("widespread_match_repos") or 0) else "")
             + '</td>'
             + (_priority_cell(g) if show_priority else "")
@@ -2761,85 +2782,6 @@ def _chapter_heading(index: str, title: str, description: str) -> str:
     )
 
 
-def _module_section(
-    mod: str,
-    submodule_stats: dict,
-    file_pairs: list[dict],
-    analysis_html: str,
-    linker,
-    query_repo_id: str,
-    idx: int,
-) -> tuple[str, str]:
-    """返回 (toc_entry_html, section_html)。"""
-    stats = submodule_stats.get(mod, {})
-    pairs = [p for p in file_pairs if p["module"] == mod]
-
-    if not pairs and stats.get("confirmed", 0) == 0:
-        return "", ""
-
-    disp  = _MODULE_DISPLAY.get(mod, mod)
-    sid   = f"sec-mod-{mod}"
-    label = f"{disp} ({mod})"
-    copy_pct = stats.get("copy_pct", 0.0)
-    review_pct = stats.get("review_pct", 0.0)
-    incomplete_pct = stats.get("review_incomplete_pct", 0.0)
-    original_pct = stats.get("original_pct", 0.0)
-
-    # 子模块统计概要行（借鉴/原创，按函数；库复用/公共样板不计入）
-    # 只有有效“疑似”算模型仍存疑；失败/未完成单列，不能混算。
-    rev_n = stats.get("review", 0)
-    incomplete_n = stats.get("review_incomplete", 0)
-    review_chip = (f'<span class="status-chip status-review">'
-                   f'模型复核后仍存疑 {review_pct*100:.0f}%</span>') if rev_n else ""
-    review_cnt = f' / 模型复核后仍存疑 {rev_n}' if rev_n else ""
-    incomplete_chip = (f'<span class="status-chip status-incomplete">'
-                       f'复核失败/未完成 {incomplete_pct*100:.0f}%</span>') if incomplete_n else ""
-    incomplete_cnt = f' / 复核失败或未完成 {incomplete_n}' if incomplete_n else ""
-    stat_row = (
-        f'<div class="module-summary">'
-        f'<span class="status-chip status-confirmed">'
-        f'高置信同源代码 {copy_pct*100:.0f}%</span>'
-        + review_chip +
-        incomplete_chip +
-        f'<span class="status-chip status-original">'
-        f'暂未检出相似 {original_pct*100:.0f}%</span>'
-        f'<span class="module-summary-text">函数总数 {stats.get("total","—")} 个 · '
-        f'高置信同源 {stats.get("confirmed",0)}{review_cnt}{incomplete_cnt} · 暂未检出 {stats.get("original",0)}</span>'
-        f'<span class="module-summary-source">主要匹配仓库：'
-        f'{_ref_repo_anchor(linker, str(stats.get("top_source") or "—"))}</span>'
-        f'</div>'
-        + _pct_bar(copy_pct, review_pct, incomplete_pct, original_pct)
-    )
-
-    # 只展示「已确认借鉴」清单（U6：每函数列出全部候选）
-    confirmed = [g for g in pairs if g["overall_tier"] == "confirmed"]
-    table = _groups_table("高置信同源代码清单", confirmed, linker, query_repo_id, "text-red-700")
-
-    # 语义分析片段（从 LLM 输出中抠取当前模块的部分）。
-    # 表格已逐函数给出 文件:行 与链接，分析正文只讲语义、不再列地址，故不做链接化；
-    # 兜底清掉模型偶尔仍写出的裸 path:line 文本，避免与表格重复。
-    mod_analysis = _extract_module_analysis(analysis_html, mod)
-    if mod_analysis:
-        mod_analysis = _strip_addr_refs(mod_analysis)
-
-    body = stat_row + table
-    if mod_analysis:
-        body += (
-            '<div class="analysis-panel">'
-            '<h4>语义级功能相似分析</h4>'
-            + mod_analysis +
-            '</div>'
-        )
-
-    section = _collapsible_html(
-        sid, label, body, tone="evidence",
-        subtitle="按函数聚合全部同语言候选，可展开查看并排代码证据",
-    )
-    n_conf = stats.get("confirmed", 0)
-    toc = _toc_link(sid, label, str(n_conf), "confirmed" if n_conf else "zero")
-    return toc, section
-
-
 _FEATURE_LABELS = {
     "ext4": "Ext4 文件系统", "fat32": "FAT32 文件系统", "vfs": "虚拟文件系统",
     "inode": "Inode 与目录项", "page": "页与页缓存", "frame": "物理页帧",
@@ -2893,9 +2835,18 @@ def build_similarity_clusters(file_pairs: list[dict]) -> list[dict]:
         c["file_count"] = len(c.pop("files"))
         mean_sim = sum(c.pop("similarities")) / max(1, len(c["groups"]))
         size_factor = min(1.0, c["effective_loc"] / 300)
-        c["priority_score"] = round(100 * (
+        widespread_repos = max(
+            (int(group.get("widespread_match_repos") or 0) for group in c["groups"]),
+            default=0,
+        )
+        # 多仓高频出现会削弱“某一历史队伍是具体来源”的区分度。它不删除相似证据，
+        # 只降低评委抽查优先级，让稀有、多函数、集中来源的证据排在通用包装函数之前。
+        ambiguity_penalty = min(18, max(0, widespread_repos - 2) * 2)
+        c["widespread_repos"] = widespread_repos
+        c["source_ambiguous"] = widespread_repos >= COMMON_CODE_REPO_THRESHOLD
+        c["priority_score"] = max(0, round(100 * (
             .5 * mean_sim + .3 * _MODULE_PRIORITY.get(c["module"], .55) + .2 * size_factor
-        ))
+        ) - ambiguity_penalty))
         c["priority"] = "重点核查" if c["priority_score"] >= 78 else (
             "优先核查" if c["priority_score"] >= 62 else "常规核查")
         clusters.append(c)
@@ -2928,7 +2879,9 @@ def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
                 f'<b>{html.escape(c["feature"])}</b><small>{html.escape(_MODULE_DISPLAY.get(c["module"], c["module"]))}</small></span>'
                 f'<span class="cluster-metrics">{c["function_count"]} 函数 · {c["file_count"]} 文件 · '
                 f'{c["effective_loc"]} 有效相似行</span>'
-                f'<span class="cluster-priority">{c["priority"]} {c["priority_score"]}</span>'
+                + (f'<span class="text-xs text-violet-700">多仓出现 {c["widespread_repos"]}，来源不唯一</span>'
+                   if c.get("source_ambiguous") else "")
+                + f'<span class="cluster-priority">{c["priority"]} {c["priority_score"]}</span>'
                 '<span class="cluster-chevron" x-text="open?\'▾\':\'▸\'"></span></button>'
                 f'<div class="cluster-body" x-show="open" x-cloak>'
                 f'<div class="text-xs text-slate-500 mb-2">主要匹配仓库：'
@@ -2936,7 +2889,8 @@ def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
             )
         intro = (
             '<div class="section-intro">系统将同一匹配仓库、同一子系统且属于同一功能域的函数合并为一个'
-            '“同源事件”。优先级综合代码相似度、有效相似行和内核子系统重要度；函数级链接与并排代码'
+            '“同源事件”。优先级综合代码相似度、有效相似行和内核子系统重要度，并对多仓高频出现的'
+            '来源歧义降权；函数级链接与并排代码'
             '仍保留在簇内。</div>'
         )
         body = intro + "".join(cards)
@@ -2992,13 +2946,6 @@ def _lineage_section(query_repo_id: str, suspects: list[dict], linker,
     return _toc_link(sid, "共同上游判断"), section
 
 
-def _make_link(resolver, file_path: str, line: int) -> str:
-    if resolver is None:
-        return "#"
-    url = resolver(file_path, str(line))
-    return url or "#"
-
-
 # ─── GitLab 链接辅助 ──────────────────────────────────────────────────────────
 
 def _build_gitlab_linker(
@@ -3006,20 +2953,18 @@ def _build_gitlab_linker(
     query_repo_id: str,
     ref_repos: set[str],
 ) -> "GitLabLinker | None":
-    """构建 GitLabLinker：新作品用本地克隆精确 sha，参考仓库用字面量 HEAD。"""
+    """构建 GitLabLinker：新作品用精确 SHA，历史仓库优先用缓存 SHA。"""
     try:
         from .gitlab_links import (
-            GitLabLinker, build_repo_url_map, query_repo_info,
+            GitLabLinker, build_repo_url_map, load_heads, query_repo_info,
         )
         url_map = build_repo_url_map()
         if not url_map and not query_repo_path:
             return None
 
-        # 参考仓库（历史库）不绑定具体 sha：functions.db 建库时未记录 commit sha，
-        # data/repos 历史克隆工作树已清理（无法 rev-parse），远程最新 HEAD 又可能因仓库
-        # 更新导致文件移动/删除。heads 留空 → gitlab_blob_url 兜底用字面量 HEAD
-        # （/-/blob/HEAD/<path>），文件仍在即可打开；也省掉 ls-remote 的逐仓超时。
-        heads: dict[str, str] = {}
+        # 优先使用已缓存的历史仓库提交 SHA，避免评委点击后因远端 HEAD 移动而看到不同代码。
+        # 老数据尚未记录“建库时提交”，因此缓存缺失时仍明确回退 HEAD；报告限制中披露该边界。
+        heads = load_heads()
 
         # 新作品（query）仓库：本地克隆 = 分析版本，sha 精确，行号一一对应
         q_url = q_sha = None
@@ -3079,74 +3024,6 @@ def _strip_addr_refs(fragment: str) -> str:
     text = re.sub(r"<code>\s*</code>", "", text)
     text = re.sub(r"[（(]\s*[)）]", "", text)
     text = re.sub(r"\s{2,}", " ", text)
-    return text
-
-
-def _linkify_with_gitlab(fragment: str, linker, query_repo_id: str,
-                          file_pairs: list[dict] | None = None) -> str:
-    """把 HTML 片段（LLM 语义分析）里的 path:line 引用转为 GitLab 在线链接。
-
-    LLM 写的路径不可信（会简写成纯文件名、带仓库名前缀、残缺），所以不直接用它的路径，
-    而是用「文件名 + 行号」去 file_pairs（按 query 函数聚合的 group）里精确反查出
-    **完整路径 + 正确仓库归属**：
-      - loc_map (basename, line) → (repo_id, full_path)  精确匹配优先
-      - base_map basename → [(repo_id, full_path, line), ...]  行号不精确时取最近
-    命中新作品→用精确 sha；命中历史仓库→用 HEAD；file_pairs 无此文件→保留纯文本（不造坏链）。
-    正则字符类含反斜杠以完整匹配 a\\b\\c.c:120；<code> 内也链接化（证据常写在 <code> 里）。
-    """
-    import re
-    if linker is None:
-        return fragment
-
-    loc_map: dict[tuple[str, int], tuple[str, str]] = {}
-    base_map: dict[str, list[tuple[str, str, int]]] = defaultdict(list)
-
-    def _reg(repo_id: str, raw_path: str, line: int) -> None:
-        fp = (raw_path or "").replace("\\", "/")
-        if not fp:
-            return
-        base = fp.rsplit("/", 1)[-1]
-        loc_map[(base, line)] = (repo_id, fp)
-        base_map[base].append((repo_id, fp, line))
-
-    for g in (file_pairs or []):
-        _reg(query_repo_id, g.get("query_file", ""), g.get("query_start", 0))
-        for c in g.get("candidates", []):
-            _reg(c.get("ref_repo", ""), c.get("ref_file", ""), c.get("ref_start", 0))
-
-    _FILEREF_RE = re.compile(
-        r"([A-Za-z0-9_./\\\-]+\.(?:rs|c|h|cc|cpp|hpp|S|s|py|sh|toml|md))"
-        r"(?::(\d+)(?:-(\d+))?)?"
-    )
-    _PROTECT_RE = re.compile(r"<(script|style|pre|a)\b[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
-
-    blocks: list[str] = []
-
-    def _stash(m: re.Match) -> str:
-        blocks.append(m.group(0))
-        return f"\x00B{len(blocks)-1}\x00"
-
-    text = _PROTECT_RE.sub(_stash, fragment)
-
-    def _sub(m: re.Match) -> str:
-        fp, start, end = m.group(1), m.group(2), m.group(3)
-        line = int(start) if start else 0
-        end_line = int(end) if end else line
-        base = fp.replace("\\", "/").rsplit("/", 1)[-1]
-        hit = loc_map.get((base, line))
-        if hit is None and base in base_map:
-            repo_id, full_path, _ = min(base_map[base], key=lambda c: abs(c[2] - line))
-            hit = (repo_id, full_path)
-        if hit is None:
-            return m.group(0)
-        repo_id, full_path = hit
-        url = _gitlab_url(linker, repo_id, full_path, line, end_line)
-        if not url:
-            return m.group(0)
-        return f'<a class="file-jump" href="{html.escape(url)}" target="_blank">{m.group(0)}</a>'
-
-    text = _FILEREF_RE.sub(_sub, text)
-    text = re.sub(r"\x00B(\d+)\x00", lambda m: blocks[int(m.group(1))], text)
     return text
 
 
@@ -3338,56 +3215,30 @@ def _innovation_section(points: list[dict], linker, query_repo_id: str,
 
 
 def _original_section(original_funcs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
-    """列出全部暂未命中函数；不把“未命中”直接表述为原创。"""
+    """只披露暂未命中数量，不向评委铺陈可能被误读为原创证明的大清单。"""
     sid = "sec-original"
     if not original_funcs:
         body = ("<p class='text-slate-500 text-sm'>没有暂未命中的函数"
                 "（所有函数都与历史代码库有相似命中）。</p>")
     else:
-        rows_parts = []
-        for f in original_funcs:
-            module = _MODULE_DISPLAY.get(f["module"], f["module"])
-            search_text = html.escape(f'{module} {f["func"]} {f["file"]}'.lower(), quote=True)
-            rows_parts.append(
-                f'<tr data-search="{search_text}">'
-                f'<td class="text-xs">{html.escape(module)}</td>'
-                f'<td class="text-xs">{html.escape(f["func"])}</td>'
-                f'<td class="font-mono text-xs">'
-                + _make_gitlab_anchor(linker, query_repo_id, f["file"], f["start"], f.get("end", 0))
-                + f'</td><td class="text-xs">{f["lines"]} 行</td></tr>'
-            )
-        rows = "".join(rows_parts)
         body = (
             '<p class="text-sm text-slate-600 mb-3">'
             f'共 <b>{len(original_funcs)}</b> 个函数在当前历史库中暂未形成有效相似命中。'
             '<b>这只表示系统暂未检出，不等于原创认定</b>；可能仍受历史库覆盖、召回与阈值影响。'
-            '以下按规模降序全部列出，供继续人工核验：'
+            '为避免评委把“未检出”大清单误读为原创证明，本报告不展开这些条目；查全抽样和'
+            '无命中复核只在内部质量审计中执行。'
             '</p>'
-            '<input class="appendix-search" type="search" placeholder="筛选子系统、函数或路径…" '
-            'oninput="var q=this.value.toLowerCase();this.parentElement.querySelectorAll(\'tr[data-search]\').forEach(function(r){r.style.display=r.dataset.search.indexOf(q)>=0?\'\':\'none\'})">'
-            '<div class="overflow-x-auto">'
-            '<table class="w-full text-sm border-collapse">'
-            '<thead><tr class="bg-slate-50 text-slate-600">'
-            '<th class="text-left p-2 border-b">子系统</th>'
-            '<th class="text-left p-2 border-b">函数</th>'
-            '<th class="text-left p-2 border-b">文件:行</th>'
-            '<th class="text-left p-2 border-b">规模</th>'
-            '</tr></thead>'
-            f'<tbody>{rows}</tbody>'
-            '</table></div>'
         )
     section = _collapsible_html(
         sid, "附录：暂未检出相似函数（不等于原创）", body, default_open=False,
-        tone="appendix", subtitle="完整清单默认折叠，可按子系统、函数或路径筛选",
+        tone="appendix", subtitle="只保留统计边界，不把未命中当作原创证据",
     )
     toc = _toc_link(sid, "暂未检出相似函数", str(len(original_funcs)), "original")
     return toc, section
 
 
 _CDN_HEAD = """
-<script src="https://cdn.tailwindcss.com?plugins=typography"></script>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 """
 
 _STYLES = """
@@ -3397,7 +3248,6 @@ _STYLES = """
   --green:#16803c;--shadow:0 10px 30px rgba(15,23,42,.06)}
 *{box-sizing:border-box}
 html{scroll-behavior:smooth;scroll-padding-top:1.25rem}
-[x-cloak]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
 .layout{display:flex;align-items:flex-start;gap:1.5rem;max-width:1540px;margin:0 auto;padding:1.5rem 1.75rem 4rem}
 .main{flex:1;min-width:0;max-width:1210px}
@@ -3439,6 +3289,9 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
 .summary-heading h2{margin:.18rem 0 0;font-size:1.2rem;color:#0f172a}.summary-repo{max-width:48%;color:#64748b;
   font:500 .72rem/1.35 ui-monospace,SFMono-Regular,Consolas,monospace;text-align:right;overflow-wrap:anywhere}
 .chart-title{font-size:.82rem;font-weight:700;color:#334155}
+.judge-note{margin-top:.75rem;padding:.72rem .82rem;border:1px solid #bfdbfe;border-radius:9px;
+  background:#fff;color:#40546d;font-size:.75rem;line-height:1.65}
+.judge-note a{color:#1d5fbf;text-decoration:underline;text-underline-offset:2px}
 /* 正文层级 */
 .chapter-heading,.excluded-heading{display:flex;align-items:flex-start;gap:.85rem;margin:2.25rem 0 .85rem;padding:.1rem .15rem .75rem;
   border-bottom:1px solid #cbd5e1}
@@ -3519,7 +3372,37 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
 .to-top{position:fixed;right:1.1rem;bottom:1.1rem;width:2.4rem;height:2.4rem;border-radius:999px;background:#2563eb;color:#fff;
   display:flex;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 4px 14px rgba(37,99,235,.28);font-size:1.1rem;opacity:.9}
 .to-top:hover{opacity:1}
+/* 报告自带的常用排版工具类。页面布局不依赖 Tailwind CDN，断网时仍保持完整层级。 */
+.flex{display:flex}.inline-flex{display:inline-flex}.grid{display:grid}.flex-1{flex:1 1 0%}.flex-wrap{flex-wrap:wrap}
+.items-start{align-items:flex-start}.items-center{align-items:center}.justify-center{justify-content:center}.min-w-0{min-width:0}
+.grid-cols-1{grid-template-columns:repeat(1,minmax(0,1fr))}.grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.gap-2{gap:.5rem}.gap-3{gap:.75rem}.gap-4{gap:1rem}.gap-x-3{column-gap:.75rem}.gap-y-2{row-gap:.5rem}
+.p-0{padding:0}.p-2{padding:.5rem}.p-3{padding:.75rem}.p-4{padding:1rem}.p-5{padding:1.25rem}
+.px-1\.5{padding-left:.375rem;padding-right:.375rem}.px-2{padding-left:.5rem;padding-right:.5rem}
+.px-3{padding-left:.75rem;padding-right:.75rem}.px-4{padding-left:1rem;padding-right:1rem}
+.py-0\.5{padding-top:.125rem;padding-bottom:.125rem}.py-1\.5{padding-top:.375rem;padding-bottom:.375rem}
+.py-2{padding-top:.5rem;padding-bottom:.5rem}.py-3{padding-top:.75rem;padding-bottom:.75rem}
+.mt-1{margin-top:.25rem}.mt-2{margin-top:.5rem}.mt-3{margin-top:.75rem}.mt-4{margin-top:1rem}
+.mb-0{margin-bottom:0}.mb-1{margin-bottom:.25rem}.mb-2{margin-bottom:.5rem}.mb-3{margin-bottom:.75rem}.mb-4{margin-bottom:1rem}.mb-6{margin-bottom:1.5rem}
+.ml-1{margin-left:.25rem}.mr-auto{margin-right:auto}.m-0{margin:0}.pl-4{padding-left:1rem}.pl-5{padding-left:1.25rem}
+.space-y-0\.5>*+*{margin-top:.125rem}.space-y-1>*+*{margin-top:.25rem}
+.text-xs{font-size:.75rem;line-height:1rem}.text-sm{font-size:.875rem;line-height:1.25rem}.text-base{font-size:1rem;line-height:1.5rem}.text-2xl{font-size:1.5rem;line-height:2rem}
+.font-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.font-semibold{font-weight:600}.font-bold{font-weight:700}
+.leading-none{line-height:1}.leading-5{line-height:1.25rem}.leading-relaxed{line-height:1.625}.text-left{text-align:left}.align-top{vertical-align:top}
+.text-white{color:#fff}.text-slate-400{color:#94a3b8}.text-slate-500{color:#64748b}.text-slate-600{color:#475569}.text-slate-700{color:#334155}.text-slate-800{color:#1e293b}
+.text-blue-600{color:#2563eb}.text-blue-700{color:#1d4ed8}.text-red-500{color:#ef4444}.text-red-600{color:#dc2626}.text-red-700{color:#b91c1c}
+.text-amber-600{color:#d97706}.text-amber-700{color:#b45309}.text-amber-800{color:#92400e}.text-violet-600{color:#7c3aed}.text-violet-700{color:#6d28d9}.text-emerald-700{color:#047857}
+.bg-white{background:#fff}.bg-slate-50{background:#f8fafc}.bg-slate-100{background:#f1f5f9}.bg-red-50{background:#fef2f2}.bg-amber-50{background:#fffbeb}.bg-violet-50{background:#f5f3ff}.bg-emerald-50{background:#ecfdf5}
+.bg-blue-50\/60{background:rgba(239,246,255,.6)}.bg-white\/70{background:rgba(255,255,255,.7)}.bg-emerald-50\/30{background:rgba(236,253,245,.3)}
+.border{border:1px solid #e2e8f0}.border-b{border-bottom:1px solid #e2e8f0}.border-l-4{border-left-width:4px}
+.border-slate-100{border-color:#f1f5f9}.border-slate-200{border-color:#e2e8f0}.border-emerald-100{border-color:#d1fae5}.border-emerald-200{border-color:#a7f3d0}.border-red-200{border-color:#fecaca}
+.rounded{border-radius:.25rem}.rounded-md{border-radius:.375rem}.rounded-lg{border-radius:.5rem}.rounded-full{border-radius:9999px}
+.w-full{width:100%}.w-5{width:1.25rem}.h-5{height:1.25rem}.overflow-x-auto{overflow-x:auto}.overflow-hidden{overflow:hidden}.whitespace-nowrap{white-space:nowrap}.list-disc{list-style-type:disc}.border-collapse{border-collapse:collapse}
+.max-w-\[16rem\]{max-width:16rem}.max-w-\[18rem\]{max-width:18rem}.hover\:underline:hover{text-decoration:underline}
 @media(max-width:1060px){.layout{gap:1rem;padding:1rem}.toc{width:242px;flex-basis:242px}}
+@media(min-width:640px){.sm\:grid-cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(min-width:768px){.md\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.md\:grid-cols-\[9rem_1fr\]{grid-template-columns:9rem minmax(0,1fr)}}
+@media(min-width:1024px){.lg\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.lg\:grid-cols-\[1fr_17rem\]{grid-template-columns:minmax(0,1fr) 17rem}}
 @media(max-width:860px){
   .layout{display:block;padding:.8rem}.toc{position:static;width:auto;margin-bottom:1rem}.toc-scroll{max-height:none}
   .toc-header{padding:.8rem 1rem}.toc-scroll{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.35rem .75rem}
@@ -3542,8 +3425,17 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
 _INIT_SCRIPT = """
 <script>
 (function(){
+  var chartAttempts=0;
   function initECharts(){
-    if(typeof echarts==='undefined'){setTimeout(initECharts,100);return}
+    if(typeof echarts==='undefined'){
+      chartAttempts+=1;
+      if(chartAttempts<20){setTimeout(initECharts,150);return}
+      document.querySelectorAll('.echarts-chart:not([data-rendered])').forEach(function(el){
+        el.setAttribute('data-rendered','fallback');
+        el.innerHTML='<p class="text-sm p-3">图表库未加载；不影响下方表格、数量和代码证据阅读。</p>';
+      });
+      return;
+    }
     document.querySelectorAll('.echarts-chart:not([data-rendered])').forEach(function(el){
       var d=el.querySelector('script[type="application/json"]');
       if(!d)return;
@@ -3554,6 +3446,29 @@ _INIT_SCRIPT = """
         c.setOption(opt);el.setAttribute('data-rendered','1');el.__chart=c;
         window.addEventListener('resize',function(){c.resize()});
       }catch(e){el.innerHTML='<p class="text-red-500 text-sm p-2">ECharts 配置解析失败: '+e.message+'</p>'}
+    });
+  }
+  function initDisclosures(){
+    document.querySelectorAll('section.report-section[x-data]').forEach(function(root){
+      var body=root.querySelector('.section-body'), button=root.querySelector('.section-toggle');
+      if(!body||!button)return;
+      var open=(root.getAttribute('x-data')||'').indexOf('open:true')>=0;
+      function render(){body.hidden=!open;var icon=button.querySelector('.section-chevron');if(icon)icon.textContent=open?'▾':'▸'}
+      button.addEventListener('click',function(){open=!open;render();if(open)document.dispatchEvent(new Event('section:opened'))});
+      render();
+    });
+    document.querySelectorAll('article.cluster-card[x-data]').forEach(function(root){
+      var body=root.querySelector('.cluster-body'), button=root.querySelector('.cluster-head');
+      if(!body||!button)return;
+      var open=(root.getAttribute('x-data')||'').indexOf('open:true')>=0;
+      function render(){body.hidden=!open;var icon=button.querySelector('.cluster-chevron');if(icon)icon.textContent=open?'▾':'▸'}
+      button.addEventListener('click',function(){open=!open;render()});render();
+    });
+    document.querySelectorAll('tbody[x-data]').forEach(function(root){
+      var panel=root.querySelector('tr[x-show="o"]'), button=root.querySelector('.code-toggle');
+      if(!panel||!button)return;var open=false;
+      function render(){panel.hidden=!open;button.textContent=open?'收起代码 ▴':'查看代码 ▾'}
+      button.addEventListener('click',function(){open=!open;render()});render();
     });
   }
   function initScrollSpy(){
@@ -3573,7 +3488,7 @@ _INIT_SCRIPT = """
     },{rootMargin:'-20% 0px -70% 0px',threshold:0});
     secs.forEach(function(s){obs.observe(s)});
   }
-  document.addEventListener('DOMContentLoaded',function(){initECharts();initScrollSpy()});
+  document.addEventListener('DOMContentLoaded',function(){initDisclosures();initECharts();initScrollSpy()});
   document.addEventListener('section:opened',function(){setTimeout(initECharts,30)});
 })();
 </script>
@@ -3613,12 +3528,17 @@ def _file_level_section(file_matches: list[dict], file_similar: list[dict],
         1 for m in file_matches
         if Path(str(m.get("query_file") or "")).suffix.lower() in nonfunc_suffixes
     )
-    nonfunc_lines = sum(int(f.get("line_nonfunc") or 0) for f in file_similar)
+    exact_nonfunc_lines = sum(
+        int(m.get("line_count") or 0) for m in file_matches
+        if Path(str(m.get("query_file") or "")).suffix.lower() in nonfunc_suffixes
+    )
+    nonfunc_lines = exact_nonfunc_lines + sum(
+        int(f.get("line_nonfunc") or 0) for f in file_similar)
     parts: list[str] = [
         '<div class="section-intro">函数清单之外，本节保留整文件规范化哈希与文件覆盖率证据；'
         '因此结构体、枚举、常量、宏、汇编、链接脚本和配置等非函数实现不会被函数级分析遮蔽。'
-        f'当前直接涉及 <b>{nonfunc_files}</b> 个非函数型整文件，文件覆盖统计另包含 '
-        f'<b>{nonfunc_lines}</b> 行非函数内容。</div>'
+        f'当前整文件证据中有 <b>{nonfunc_files}</b> 个汇编/链接脚本/配置等非函数文件；'
+        f'合计覆盖约 <b>{nonfunc_lines}</b> 行非函数内容（含整体相似文件中的结构体等内容）。</div>'
     ]
     if file_matches:
         rows = "".join(
@@ -3753,7 +3673,7 @@ def _common_code_section(cc_funcs: list[dict], linker, query_repo_id: str) -> tu
     body = (
         '<p class="text-sm text-slate-600 mb-3">'
         f'下列 <b>{len(cc_funcs)}</b> 个函数已有基线、来源登记或人工确认支持其属于公共/框架/样板代码；'
-        f'表中的跨仓数量仅作传播背景，命中 ≥{COMMON_CODE_REPO_THRESHOLD} 个仓库本身不会进入本节，'
+        f'表中的跨仓数量仅表示多仓出现背景，命中 ≥{COMMON_CODE_REPO_THRESHOLD} 个仓库本身不会进入本节，'
         f'<b>不计入值得关注的借鉴</b>，已从摘要、历史匹配图与各模块清单中剔除{more}。'
         '</p>'
         '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
@@ -3778,28 +3698,43 @@ def _baseline_section(base_funcs: list[dict], linker, query_repo_id: str) -> tup
         return "", ""
     sid = "sec-baseline"
     shown = base_funcs
-    rows = "".join(
-        '<tr>'
-        f'<td class="text-xs font-mono">{html.escape(f["name"])}</td>'
-        '<td class="font-mono text-xs">'
-        + _make_gitlab_anchor(linker, query_repo_id, f["file"], f.get("start", 0))
-        + '</td>'
-        f'<td class="text-xs">{html.escape(f.get("source", "") or "—")}</td>'
-        f'<td class="text-xs text-slate-500">{html.escape(f.get("note", "") or "—")}</td>'
-        '</tr>'
-        for f in shown
-    )
+    rendered_rows = []
+    for f in shown:
+        baseline_repo = str(f.get("baseline_repo") or "")
+        baseline_file = str(f.get("baseline_file") or "")
+        baseline_func = str(f.get("baseline_func") or "")
+        baseline_link = _make_gitlab_anchor(
+            linker, baseline_repo, baseline_file, int(f.get("baseline_start") or 0),
+        ) if baseline_repo and baseline_file else html.escape(baseline_repo or "未定位")
+        baseline_label = (
+            _ref_repo_anchor(linker, baseline_repo) + " · " + baseline_link
+            + (f' · <code>{html.escape(baseline_func)}</code>' if baseline_func else "")
+        ) if baseline_repo else baseline_link
+        history = "、".join(f.get("history_candidates") or []) or "—"
+        rendered_rows.append(
+            '<tr>'
+            f'<td class="text-xs font-mono">{html.escape(f["name"])}</td>'
+            '<td class="font-mono text-xs">'
+            + _make_gitlab_anchor(linker, query_repo_id, f["file"], f.get("start", 0))
+            + '</td>'
+            f'<td class="text-xs">{baseline_label}</td>'
+            f'<td class="text-xs">{html.escape(history)}</td>'
+            f'<td class="text-xs text-slate-500">{html.escape(f.get("note", "") or "—")}</td>'
+            '</tr>'
+        )
+    rows = "".join(rendered_rows)
     body = (
         '<p class="text-sm text-slate-600 mb-3">'
-        f'下列 <b>{len(base_funcs)}</b> 个函数与新作品、历史库**同时**高度相似于某个基线库'
-        '（教学 OS rCore/uCore/xv6、组委会模板、官方第三方库等），属公共模板代码，'
-        '<b>不计入值得关注的借鉴</b>。清单完整列出并默认折叠，便于按函数名检索核对。'
+        f'下列 <b>{len(base_funcs)}</b> 个函数已通过真实基线源码逐行复核，历史候选可由同一公共基线解释'
+        '（教学 OS、组委会模板或已登记上游等），因此不进入队际同源统计。'
+        '向量相似只用于发现候选，不再单独触发排除；历史候选若显著超过基线覆盖会保留到人工核查。'
         '</p>'
         '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
         '<thead><tr class="bg-slate-50 text-slate-600">'
         '<th class="text-left p-2 border-b">函数</th>'
         '<th class="text-left p-2 border-b">文件:行</th>'
-        '<th class="text-left p-2 border-b">基线来源</th>'
+        '<th class="text-left p-2 border-b">实际公共基线</th>'
+        '<th class="text-left p-2 border-b">被解释的历史候选</th>'
         '<th class="text-left p-2 border-b">说明</th>'
         '</tr></thead>'
         f'<tbody>{rows}</tbody></table></div>'
@@ -3998,33 +3933,6 @@ def _upstream_baseline_section(ub_funcs: list[dict], linker, query_repo_id: str)
     return _toc_link(sid, "上游基线 / ABI 受限代码", str(len(ub_funcs)), "excluded"), section
 
 
-def _excluded_divider() -> tuple[str, str]:
-    """「不计入借鉴的代码」分隔横幅 + TOC 锚（其后跟 库复用/公共样板/基线衍生 各小节）。"""
-    sid = "sec-excluded"
-    section = (
-        f'<section id="{sid}" data-section-id="{sid}" class="excluded-heading">'
-        '<span class="chapter-index">04</span><div>'
-        '<h2>排除项与统计口径</h2>'
-        '<p>以下代码已从上方统计中剔除，用于核对系统的排除是否合理。为避免误判，系统把'
-        '「所有团队都会用、并非该团队原创」的代码自动剔除，不计入借鉴。'
-        '主要包括：<b>①上游框架自带代码</b>（如 ArceOS/Starry 框架的 axfs/axhal 等模块）；'
-        '<b>②第三方开源库</b>（lwext4、fatfs 等整库签入）；'
-        '<b>③标准规范受限写法</b>（POSIX 系统调用、文件系统魔数、Linux ABI 转换等只有唯一正确写法的代码）；'
-        '<b>④多团队通用样板</b>（print 宏、panic 处理等）；'
-        '<b>⑤教学/模板衍生代码</b>。下方按类别列出，可逐项点开核对扣除是否合理。</p></div>'
-        '</section>'
-    )
-    toc = _toc_link(sid, "排除项说明")
-    return toc, section
-
-
-def _collapsible(sid: str, title: str, body: str) -> tuple[str, str]:
-    """统一的可折叠 section 外壳。返回 (toc_entry, section_html)。"""
-    section = _collapsible_html(sid, title, body)
-    toc = _toc_link(sid, title)
-    return toc, section
-
-
 _REVIEW_PROMPT_VERSION = "v7-json-mode-retry"  # 改 prompt 即 bump，使旧缓存自动失效
 
 _REVIEW_ROLE_SYSTEM = """你是代码函数职责分析助手。只判断给定两个函数的职责是否一致，不判断代码借鉴。
@@ -4060,11 +3968,27 @@ _REVIEW_SIM_SYSTEM = """你是跨语言代码同源复核助手。职责分析�
 {"verdict":"借鉴|疑似|非借鉴","reason":"不超过120字的中文复核理由","evidence_anchors":["代码中的原文锚点"]}"""
 
 
+def _bounded_review_text(value: object, limit: int) -> str:
+    """限制模型说明长度且显式标出截断，避免报告出现半句话却看似完整。"""
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:max(1, limit - 1)].rstrip() + "…"
+
+
+def _legacy_review_text_for_display(value: object, limit: int) -> str:
+    """旧缓存曾直接切片；对疑似正好卡在旧上限的半句补截断标记。"""
+    text = str(value or "").strip()
+    if len(text) == limit and text[-1:] not in "。！？；….!?;":
+        return text + "…"
+    return text
+
+
 def _review_failure(detail: str) -> dict:
     """构造明确的复核失败结果；失败不等价于模型仍存疑。"""
     return {
         "verdict": "复核失败",
-        "reason": f"复核失败：{detail}"[:180],
+        "reason": _bounded_review_text(f"复核失败：{detail}", 180),
         "responsibility": "未判定",
         "responsibility_reason": "",
         "evidence_anchors": [],
@@ -4133,7 +4057,7 @@ def _parse_role_payload(text: str, query_code: str, ref_code: str) -> dict:
         raise ValueError("职责依据为空或过于笼统")
     return {
         "responsibility": responsibility,
-        "responsibility_reason": reason[:80],
+        "responsibility_reason": _bounded_review_text(reason, 80),
         "evidence_anchors": _validate_evidence_anchors(
             data.get("evidence_anchors"), query_code, ref_code),
     }
@@ -4154,7 +4078,7 @@ def _parse_verdict_payload(text: str, query_code: str, ref_code: str) -> dict:
         raise ValueError("复核理由为空或过于笼统")
     return {
         "verdict": verdict,
-        "reason": reason[:120],
+        "reason": _bounded_review_text(reason, 120),
         "evidence_anchors": _validate_evidence_anchors(
             data.get("evidence_anchors"), query_code, ref_code,
             min_count=2 if verdict in ("借鉴", "疑似") else 1,
@@ -4193,9 +4117,9 @@ def _parse_review_payload(text: str, query_code: str, ref_code: str) -> dict:
 
     return {
         "verdict": verdict,
-        "reason": reason[:120],
+        "reason": _bounded_review_text(reason, 120),
         "responsibility": responsibility,
-        "responsibility_reason": responsibility_reason[:80],
+        "responsibility_reason": _bounded_review_text(responsibility_reason, 80),
         "evidence_anchors": clean_anchors,
     }
 
@@ -4501,13 +4425,40 @@ def run_review_judgment(review_pairs: list[dict], work_dir: Path,
         g["review_evidence_anchors"] = c.get("evidence_anchors", [])
 
 
+def _model_negative_requires_human_review(suspect: dict, responsibility: str) -> bool:
+    """模型阴性是否不足以覆盖强直接代码证据。
+
+    只保留具体函数身份已对应、双方职责不冲突、且有足量逐行/指纹证据的难例。
+    该规则不依赖仓库、路径、年份或具体函数名。
+    """
+    if suspect.get("tier") not in ("review", "weak"):
+        return False
+    if responsibility not in ("一致", "部分一致"):
+        return False
+    ev = suspect.get("evidence") or {}
+    relation = str(ev.get("function_identity_relation") or "")
+    if relation not in ("exact_counterpart", "same_name_code_clone"):
+        return False
+    if ev.get("normalized_fingerprint_match"):
+        return True
+    matched = int(ev.get("exact_match_lines") or 0) + int(
+        ev.get("renamed_match_lines") or 0
+    )
+    line_similarity = _raw_line_sim(suspect)
+    identity = float(ev.get("function_identity_score") or 0.0)
+    return bool(
+        (line_similarity >= 0.60 and matched >= 10)
+        or (line_similarity >= 0.35 and matched >= 15 and identity >= 0.80)
+    )
+
+
 def _apply_review_verdicts(suspects: list[dict], groups: list[dict]) -> tuple[int, int]:
-    """据 LLM 复核结论保守改写 tier，不把“不确定”降成未命中。
-      - review/weak：借鉴 → confirmed；疑似 → 保留；非借鉴 → dismissed
-      - confirmed（全量送复核）：**仅** 非借鉴 → dismissed（保守，不丢失信号）；借鉴/疑似保留 confirmed
+    """据 LLM 复核结论保守标注难例，不把模型意见伪装成确定性证据。
+      - review/weak：借鉴/疑似 → 保留原证据档位；非借鉴通常 → dismissed
+      - 若模型认为职责一致，且函数身份与强逐行/指纹证据均成立，
+        模型阴性不得把它改写为“未命中”，改为规则保留人工复核
       - 复核失败 / 未复核 → 保持原档不动，并单独记录状态，绝不折算为“疑似”
-    confirmed 用保守口径：文本相似≠借鉴，但只在 LLM 明确判「非借鉴」（ABI/规范/标准算法/不同机制）
-    时才降级；疑似（拿不准）不降，避免误降真实借鉴。返回 (升档数, 明确排除数)。
+    返回 (模型支持数, 明确排除数)。
     """
     result_map = {_review_group_pair_key(g): g for g in groups}
     # 相同目标代码 + 相同候选函数内容在镜像仓库、分支或年份快照中只调用一次模型，
@@ -4540,14 +4491,26 @@ def _apply_review_verdicts(suspects: list[dict], groups: list[dict]) -> tuple[in
             "review_responsibility_reason", "")
         s["review_evidence_anchors"] = result.get("review_evidence_anchors", [])
         if v == "借鉴":
-            if tier != "confirmed":       # review/weak 升为 confirmed；已 confirmed 不动
-                s["tier"] = "confirmed"
-                s["confirm_via"] = "review_llm"
+            if tier != "confirmed":
+                # 模型意见只能提高人工核查优先级，不能把低逐行覆盖自动升级成
+                # 与指纹/高覆盖逐行证据同档的“高置信同源”。
+                s["model_supported"] = True
                 up += 1
         elif v == "非借鉴":
-            s["tier"] = "dismissed"
-            s["dismiss_reason"] = "review_非借鉴"
-            dn += 1
+            responsibility = str(s.get("review_responsibility") or "")
+            if _model_negative_requires_human_review(s, responsibility):
+                s["review_raw_verdict"] = "非借鉴"
+                s["review_verdict"] = "规则保留"
+                s["review_reason"] = (
+                    "模型倾向非借鉴：" + str(s.get("review_reason") or "")
+                    + "；但双方职责不冲突，且具体函数身份与强直接代码证据同时成立，"
+                      "保留供评委人工复核。"
+                )
+                s["model_negative_overridden_by_evidence"] = True
+            else:
+                s["tier"] = "dismissed"
+                s["dismiss_reason"] = "review_非借鉴"
+                dn += 1
         elif v == "疑似":
             # 不确定不是阴性证据：所有档位原样保留，交给人工复核。
             pass
@@ -4591,21 +4554,27 @@ def _review_section(review_pairs: list[dict], linker, query_repo_id: str,
             g,
         )
     rows = list(unique_review.values())
+    supported = [g for g in rows if g.get("review_verdict") == "借鉴"]
     uncertain = [g for g in rows if g.get("review_verdict") == "疑似"]
+    retained = [g for g in rows if g.get("review_verdict") == "规则保留"]
     failed = [g for g in rows if g.get("review_verdict") == "复核失败"]
-    pending = [g for g in rows if g.get("review_verdict") not in ("疑似", "复核失败")]
+    pending = [g for g in rows if g.get("review_verdict") not in (
+        "借鉴", "疑似", "规则保留", "复核失败")]
     active_keys = {
         (g.get("query_file", ""), int(g.get("query_start") or 0),
          g.get("query_func", "")) for g in rows
     }
-    n_funcs, n_uncertain, n_failed, n_pending = (
-        len(active_keys), len(uncertain), len(failed), len(pending),
+    n_funcs, n_supported, n_uncertain, n_retained, n_failed, n_pending = (
+        len(active_keys), len(supported), len(uncertain), len(retained),
+        len(failed), len(pending),
     )
 
     intro = ('<p class="text-sm text-slate-600 mb-3">'
              f'下列 <b>{n_funcs}</b> 个函数通过了多证据准入且仍需继续判断。模型先判断双方职责，'
              '职责一致或部分一致时才继续代码相似判断，并提供能在代码中定位的证据锚点。'
-             f'其中有效返回“疑似” <b>{n_uncertain}</b> 个、复核失败 <b>{n_failed}</b> 个、'
+             f'其中模型认为“借鉴”但仍待人工确认 <b>{n_supported}</b> 个、'
+             f'返回“疑似” <b>{n_uncertain}</b> 个、复核失败 <b>{n_failed}</b> 个、'
+             f'模型阴性但强直接证据保留 <b>{n_retained}</b> 个、'
              f'未复核 <b>{n_pending}</b> 个。'
              '复核失败和未复核只是流程状态，<b>不计入模型仍存疑</b>。'
              + (f'另有 <b>{n_cleared}</b> 个准入函数已被模型明确排除，'
@@ -4613,19 +4582,26 @@ def _review_section(review_pairs: list[dict], linker, query_repo_id: str,
              + '本节按综合相似度、有效代码规模、子系统重要度与克隆类型排序。</p>')
 
     chips = []
-    for verdict, count in (("疑似", n_uncertain), ("复核失败", n_failed),
+    for verdict, count in (("借鉴", n_supported), ("疑似", n_uncertain),
+                           ("规则保留", n_retained), ("复核失败", n_failed),
                            ("未复核", n_pending)):
         if count:
             cls, label = _REVIEW_VERDICT_STYLE[verdict]
             chips.append(f'<span class="px-2 py-0.5 rounded {cls}">{label} {count}</span>')
     summary = ('<div class="review-note"><b>状态口径</b>：只有通过 JSON、非空理由和代码锚点校验后'
-               '仍返回“疑似”的结果才进入存疑统计；任何格式错误、空理由、锚点无法定位或模型调用异常'
-               '均显示为“复核失败”。<div class="flex flex-wrap gap-2 mt-2 text-sm">'
+               '仍返回“疑似”，或与强直接证据冲突而被规则保留的结果，才进入存疑统计；任何格式错误、空理由、锚点无法定位或模型调用异常'
+               '均显示为“复核失败”。“强证据保留”表示模型阴性与可核验直接证据冲突，'
+               '不让概率意见清除确定性证据。<div class="flex flex-wrap gap-2 mt-2 text-sm">'
                + "".join(chips) + '</div></div>')
 
     tables = (
-        _groups_table("模型有效复核后仍存疑", uncertain, linker, query_repo_id,
+        _groups_table("模型认为借鉴（仍需人工确认）", supported, linker, query_repo_id,
+                      "text-red-700", show_verdict=True, show_priority=True)
+        + _groups_table("模型有效复核后仍存疑", uncertain, linker, query_repo_id,
                       "text-amber-700", show_verdict=True, show_priority=True)
+        + _groups_table("模型阴性与强直接证据冲突（人工复核）", retained,
+                        linker, query_repo_id, "text-amber-800",
+                        show_verdict=True, show_priority=True)
         + _groups_table("复核失败（不计为存疑）", failed, linker, query_repo_id,
                         "text-rose-700", show_verdict=True, show_priority=True)
         + _groups_table("复核未完成（不计为存疑）", pending, linker, query_repo_id,
@@ -4649,12 +4625,14 @@ _AI_STAGE_DISP = {
 def _ai_detect_section(ai_data: dict | None, linker, query_repo_id: str) -> tuple[str, str]:
     """AI 生成代码检测：整体 KPI + 疑似 AI 函数明细（含指标通俗说明）。"""
     if not ai_data or ai_data.get("status") != "ok":
-        body = '<p class="text-sm text-slate-500">当前批次没有可用的 AI 生成代码检测产物；该缺失不影响同源分析。</p>'
+        body = ('<p class="text-sm text-slate-500">当前批次未采集可用的 AI 代码统计信号；'
+                '这不能推断作品未使用 AI。比赛合规应以队伍披露的工具、场景、生成范围、'
+                '人工修改、交互记录和验证方式为准。</p>')
         section = _collapsible_html(
-            "sec-aidetect", "附录：AI 生成代码检测", body, default_open=False,
-            tone="appendix", subtitle="独立辅助信号，不改变同源代码与候选创新结论",
+            "sec-aidetect", "附录：AI 使用披露提示", body, default_open=False,
+            tone="appendix", subtitle="概率信号不能替代队伍披露材料与现场解释",
         )
-        return _toc_link("sec-aidetect", "AI 生成代码检测附录", "0", "zero"), section
+        return _toc_link("sec-aidetect", "AI 使用披露提示", "0", "zero"), section
     ov = (ai_data.get("aggregated") or {}).get("overall") or {}
     if not ov:
         body = '<p class="text-sm text-slate-500">AI 检测产物中没有整体统计，无法形成有效附录。</p>'
@@ -4672,7 +4650,8 @@ def _ai_detect_section(ai_data: dict | None, linker, query_repo_id: str) -> tupl
         + _kpi(f'{ov.get("llm_ratio_by_count", 0.0)*100:.0f}%', "疑似 AI 占比（按函数）", "#9333ea")
         + '</div>'
     )
-    meta = (f'<p class="text-sm text-slate-600 mb-3">本节<b>独立于上方查重</b>，检测疑似「未声明使用 AI 生成」的代码。'
+    meta = (f'<p class="text-sm text-slate-600 mb-3">本节<b>独立于上方同源分析</b>，只展示概率式代码统计信号，'
+            '<b>不能判断是否已披露、是否违规或队员是否掌握代码</b>。'
             f'在 <b>{ov.get("total_functions", 0)}</b> 个非借鉴函数中检测'
             f'（此口径含框架等代码，与上方查重「自研函数」数不同，属正常）；疑似 AI 占比按代码行数为 '
             f'{ov.get("llm_ratio_by_loc", 0.0)*100:.0f}%。打分模型 '
@@ -4734,11 +4713,11 @@ def _ai_detect_section(ai_data: dict | None, linker, query_repo_id: str) -> tupl
         '判定阈值与打分模型强相关、整体准确率（AUC）约 0.86，“无法判定”的函数尤其需要人工核查。</div>'
     )
     section = _collapsible_html(
-        "sec-aidetect", "附录：AI 生成代码检测", disclaimer + kpis + meta + sf_table,
+        "sec-aidetect", "附录：AI 代码统计信号", disclaimer + kpis + meta + sf_table,
         default_open=False, tone="appendix",
-        subtitle="独立辅助信号，不改变同源代码与候选创新结论",
+        subtitle="仅提示披露核查，不作为违规、扣分或代码归属证据",
     )
-    return _toc_link("sec-aidetect", "AI 生成代码检测附录",
+    return _toc_link("sec-aidetect", "AI 代码统计信号",
                      str(len(sf)), "review"), section
 
 
@@ -4821,7 +4800,10 @@ def _technical_appendix(retrieval_contract: dict | None, analysis_mode: str) -> 
         '函数规模×最终相似度估算有效相似行；不会用同一函数的候选 pair 数放大排名。'
         '该统计只说明相似实现出现在哪些仓库，不单独证明传播方向或直接来源。'
         '功能簇与复核优先级只用于组织人工审阅，不替代代码证据、时间证据或最终评审结论。'
-        '阈值、规则和模型结论都可能受历史库覆盖与实现形态影响。</div>'
+        '阈值、规则和模型结论都可能受历史库覆盖与实现形态影响。自动化测试套件与性能基准资产不参与'
+        '内核同源风险统计。目标作品链接固定到本次分析提交；历史链接优先使用缓存提交 SHA，'
+        '缓存缺失时回退 HEAD，此时只能用于导航，不能视为建库快照证明。页面排版与折叠逻辑已内置；'
+        '只有图表渲染依赖固定版本的可选 ECharts CDN，CDN 不可用时数量、表格和源码证据仍可阅读。</div>'
     )
     section = _collapsible_html(
         "sec-technical", "附录：运行信息与统计口径", body, default_open=False,
@@ -4868,8 +4850,10 @@ def _generation_metadata_html(metadata: dict | None) -> str:
         ("报告组装耗时", _format_elapsed(meta.get("report_elapsed_sec"))),
         ("编排/等待及初始化耗时", _format_elapsed(meta.get("orchestration_overhead_sec"))),
         ("目标代码版本", meta.get("target_revision") or "—"),
-        ("各阶段耗时", timing_text),
     ]
+    if meta.get("visible_commit_count") is not None:
+        fields.append(("本地可见提交数", f'{meta["visible_commit_count"]}（浅克隆时可能截断）'))
+    fields.append(("各阶段耗时", timing_text))
     cards = "".join(
         f'<div><span>{html.escape(label)}</span><b>{html.escape(str(value))}</b></div>'
         for label, value in fields
@@ -4917,8 +4901,24 @@ def generate_comparison_html(
     analysis_mode: str = "模型分析（失败时规则兜底）",
 ) -> str:
     """组装完整的查重对比 HTML 报告（直接产出，不经 Markdown 转换）。"""
-    file_matches = file_matches or []
-    file_similar = file_similar or []
+    # 防御公共 API 的直接调用：即使上游仍传入旧产物，也不让测试套件或 benchmark
+    # 重新进入面向评委的文件级证据。
+    file_matches = [
+        {
+            **match,
+            "matches": [
+                candidate for candidate in (match.get("matches") or [])
+                if not is_test_or_benchmark_path(candidate.get("file_path", ""))
+            ],
+        }
+        for match in (file_matches or [])
+        if not is_test_or_benchmark_path(match.get("query_file", ""))
+    ]
+    file_matches = [match for match in file_matches if match["matches"]]
+    file_similar = [
+        item for item in (file_similar or [])
+        if not is_test_or_benchmark_path(item.get("file_path", ""))
+    ]
     summary_html = _summary_card(query_repo_id, suspects, submodule_stats,
                                  file_match_count=len(file_matches),
                                  file_similar_count=len(file_similar),
@@ -4985,7 +4985,7 @@ def generate_comparison_html(
         _chapter_heading("07", "合法复用与许可证合规", "允许复用、共同上游和比赛基线独立核查，不混入同源结论。"),
         sec_compliance,
         *excluded_sections,
-        _chapter_heading("08", "AI 生成代码检测附录", "独立辅助信号，不改变同源代码和候选创新判断。"),
+        _chapter_heading("08", "AI 使用披露提示", "以队伍披露材料和现场解释为准；可选概率信号不作认定。"),
         sec_ai,
         _chapter_heading("09", "暂未检出及运行信息附录", "大清单默认折叠；保留生成时间、模型版本和统计口径。"),
         sec_orig,
@@ -5032,6 +5032,7 @@ def run_semantic_compare(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     top_per_module: int = 20,
     skip_opencode: bool = False,
+    global_semantic_analysis: bool = False,
     filematch_path: str | Path | None = None,
     ai_detect_path: str | Path | None = None,
     functions_db_path: str | Path | None = None,
@@ -5053,6 +5054,14 @@ def run_semantic_compare(
     suspects_path = Path(suspects_path)
     data          = json.loads(suspects_path.read_text(encoding="utf-8"))
     suspects      = data.get("suspects", [])
+    suspects = [
+        suspect for suspect in suspects
+        if not is_test_or_benchmark_path(
+            (suspect.get("query_func") or {}).get("file_path", ""))
+        and not is_test_or_benchmark_path(
+            (suspect.get("candidate_func") or {}).get("file_path", ""))
+    ]
+    data["suspects"] = suspects
     query_repo_id = data.get("query_repo_id") or suspects_path.stem.split("_suspects")[0]
     baseline_boundary_n = _tag_query_level_baselines(suspects)
     reuse_n       = tag_library_reuse(suspects)  # 标注 vendored 库复用，供各图/清单剔除
@@ -5081,6 +5090,18 @@ def run_semantic_compare(
     file_matches: list[dict] = []
     if filematch_path and Path(filematch_path).exists():
         file_matches = json.loads(Path(filematch_path).read_text(encoding="utf-8")).get("matched_files", [])
+        filtered_file_matches = []
+        for match in file_matches:
+            if is_test_or_benchmark_path(match.get("query_file", "")):
+                continue
+            filtered = dict(match)
+            filtered["matches"] = [
+                item for item in (match.get("matches") or [])
+                if not is_test_or_benchmark_path(item.get("file_path", ""))
+            ]
+            if filtered["matches"]:
+                filtered_file_matches.append(filtered)
+        file_matches = filtered_file_matches
 
     # 输出 / 工作目录（复核与语义分析共用）
     out_dir = Path(output_dir).resolve()
@@ -5089,7 +5110,8 @@ def run_semantic_compare(
 
     # 只对 review/weak 中通过多证据准入的难例做两阶段模型复核；confirmed 已有确定性证据，
     # 不再重复消耗模型。职责不一致直接排除；职责门控通过后才做同源判断。
-    # 判「借鉴」升为 confirmed，判“非借鉴”降为 dismissed；只有格式有效的“疑似”保留信号，
+    # 判「借鉴」只提高人工核查优先级，不能升为确定性 confirmed；“非借鉴”降为 dismissed，
+    # 格式有效的“疑似”保留信号，
     # 格式/调用失败单列状态，不能冒充“模型仍存疑”。
     # 必须在统计 / file_pairs / 未检出清单计算之前。
     pairing_mismatches = _suppress_dominated_candidate_mismatches(suspects)
@@ -5133,7 +5155,7 @@ def run_semantic_compare(
         run_review_judgment(review_judgments, work_dir)
         up, dn = _apply_review_verdicts(suspects, review_judgments)
         if up or dn:
-            logger.info("[review] 复核：判借鉴 {} 对升档，明确非借鉴 {} 对移出相似清单",
+            logger.info("[review] 复核：模型支持借鉴 {} 对（保留难例档），明确非借鉴 {} 对移出相似清单",
                         up, dn)
 
     # 内部跨架构硬拷贝复用标注：须在复核升档之后（覆盖升上来的 confirmed），统计之前。
@@ -5173,9 +5195,14 @@ def run_semantic_compare(
     # 表格展示：confirmed 全量；送 LLM 做语义分析：每模块取 sim 最高的 top_per_module 个
     file_pairs = collect_file_pairs(suspects)
     final_review_pairs = collect_file_pairs(suspects, keep_tiers=("review", "weak"))
+    cleared_pair_keys = {
+        _suspect_pair_key(suspect) for suspect in suspects
+        if suspect.get("tier") == "dismissed"
+        and suspect.get("dismiss_reason") == "review_非借鉴"
+    }
     cleared_review_pairs = [
         group for group in review_judgments
-        if group.get("review_verdict") == "非借鉴"
+        if _review_group_pair_key(group) in cleared_pair_keys
     ]
     # 统计口径把同一文件中的同名函数视为一个评审单元并取最高档；若某个起始行已经有
     # confirmed 证据，就不要让同名的另一起始行再次出现在“模型仍存疑”中。
@@ -5200,9 +5227,11 @@ def run_semantic_compare(
     innovation_candidates = build_innovation_candidates(
         recall, suspects, functions_db_path=functions_db_path)
     innovation_points = run_innovation_analysis(
-        query_repo_id, innovation_candidates, work_dir, skip_llm=skip_opencode)
+        query_repo_id, innovation_candidates, work_dir,
+        skip_llm=(skip_opencode or not global_semantic_analysis),
+    )
 
-    if skip_opencode or not llm_pairs:
+    if skip_opencode or not global_semantic_analysis or not llm_pairs:
         analysis_html = _fallback_analysis(llm_pairs, submodule_stats)
     else:
         qpath = str(Path(query_repo_path).resolve()) if query_repo_path else ""
@@ -5246,11 +5275,15 @@ def run_semantic_compare(
         ub_funcs        = ub_funcs,
         retrieval_contract = recall.get("retrieval_contract") if recall else None,
         recall          = recall,
-        analysis_mode   = ("规则分析（显式跳过模型）" if skip_opencode
-                           else "DeepSeek 模型复核与语义分析（失败时规则兜底）"),
+        analysis_mode   = (
+            "确定性规则分析（显式跳过所有模型）" if skip_opencode
+            else ("DeepSeek 难例复核与全局语义分析"
+                  if global_semantic_analysis
+                  else "模型仅复核准入难例；聚合与创新候选使用确定性规则")
+        ),
     )
 
-    # 档位标签统一（高置信同源代码 / 模型复核后仍存疑 / 暂未检出相似），避免各处叫法不一
+    # 档位标签统一（高置信同源代码 / 模型复核难例 / 暂未检出相似），避免各处叫法不一
     from .label_normalize import normalize_labels
     html_text = normalize_labels(html_text)
 

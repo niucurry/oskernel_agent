@@ -26,6 +26,7 @@ from .vector_store import VectorStore
 
 DEFAULT_OUTPUT_DIR = "data/output"
 MAX_STRUCTURAL_CANDIDATES = 10_000
+MAX_NAME_CANDIDATES = 10_000
 MAX_IDENTITY_NEIGHBORS_SCANNED = 10_000
 MAX_IDENTITY_DOMAIN_CACHE = 2_048
 MAX_IDENTITY_FEATURE_CACHE = 50_000
@@ -149,7 +150,12 @@ def _fingerprint_candidates(conn: sqlite3.Connection, normalized_code: str,
 
 def _name_candidates(conn: sqlite3.Connection, func_name: str,
                      exclude_repo_id: str, lang: str | None = None) -> list[dict]:
-    """同名方法确定性补召回；取全库结果后每仓留一个，不做数量截断。"""
+    """同名方法确定性补召回；保留每个具体实现，不按仓库折叠。
+
+    同一仓库常有多个同名 trait 方法、协议族实现或架构实现。每仓只留第一条会把真正
+    对应函数替换成邻近同名函数，既造成漏报也造成具体函数配错。这里宁可交给后续逐行
+    核验全部排除，也不在召回层猜测代表项；超过安全上限时明确失败而不静默截断。
+    """
     if len(func_name) < 5:
         return []
     conn.row_factory = sqlite3.Row
@@ -166,12 +172,13 @@ def _name_candidates(conn: sqlite3.Connection, func_name: str,
     ).fetchall()
     if not rows:
         return []
+    if len(rows) > MAX_NAME_CANDIDATES:
+        raise RuntimeError(
+            f"同名候选 {func_name!r} 共 {len(rows)} 个，超过安全上限 "
+            f"{MAX_NAME_CANDIDATES}；拒绝按仓库折叠或静默截断"
+        )
     out: list[dict] = []
-    seen_repos: set[str] = set()
     for r in rows:
-        if r["repo_id"] in seen_repos:
-            continue
-        seen_repos.add(r["repo_id"])
         year_head = r["repo_id"].split("/", 1)[0]
         out.append({
             "id": r["id"], "score": 0.0, "recall_source": "function_name",
@@ -309,6 +316,10 @@ def _identity_neighbor_candidates(
         query["func_name"], query["raw_code"],
     )
     for row in rows:
+        # 已由任一主通道直接召回的函数不需要再次计算身份特征；身份邻域只负责
+        # 补回同文件中尚未召回的具体对应函数。
+        if row["id"] in existing:
+            continue
         candidate_features = feature_cache.get(int(row["id"])) if feature_cache is not None else None
         if candidate_features is None:
             candidate_features = function_identity_features(
@@ -321,10 +332,6 @@ def _identity_neighbor_candidates(
         identity = compare_function_identity_features(
             query_features, candidate_features,
         )
-        if row["id"] in existing:
-            existing[row["id"]]["identity_score"] = identity["score"]
-            existing[row["id"]]["identity_components"] = identity
-            continue
         # 非同名函数只有在行为也有交集时才扩展；同名仍需总身份分通过签名约束。
         if identity["score"] < MIN_IDENTITY_SCORE:
             continue
@@ -355,7 +362,7 @@ def _identity_neighbor_candidates(
 
 def query_repo(
     repo_path: str | Path,
-    store: VectorStore,
+    store: VectorStore | None,
     embedder: BaseEmbedder,
     *,
     top_k: int = 20,
@@ -418,6 +425,8 @@ def query_repo(
                 "完整查全模式要求与 functions.db 同代的 FAISS 索引；"
                 "索引缺失、损坏或签名过期，拒绝回退到未证明同代的向量库"
             )
+        if store is None:
+            raise RuntimeError("FAISS 索引不可用，且未提供向量库回退后端")
         logger.warning("[{}] faiss 索引不存在，回退 qdrant-local（慢）；可运行 "
                        "`python -m src.embed build-faiss` 构建", repo_id)
 
@@ -641,7 +650,10 @@ def query_repo(
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{repo_path.name}_recall.json"
-    out_path.write_text(json.dumps(recall, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(
+        json.dumps(recall, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
     logger.info("召回结果写入 {}", out_path)
     recall["_output_path"] = str(out_path)
     return recall

@@ -28,12 +28,13 @@ def test_fingerprint_recall_returns_every_matching_history_repo(tmp_path):
     assert all(c["fingerprint_match"] and c["score"] == 1.0 for c in got)
 
 
-def test_function_name_recall_is_per_repo_and_skips_vector_gate(tmp_path):
+def test_function_name_recall_keeps_every_concrete_implementation(tmp_path):
     db = tmp_path / "functions.db"
     with FunctionStore(db) as store:
-        for repo_id in ("2024/a", "2025/b"):
+        for index, repo_id in enumerate(("2024/a", "2025/b", "2025/b"), start=1):
             rec = FunctionRecord(
-                repo_id=repo_id, file_path="processor.rs", start_line=1, end_line=40,
+                repo_id=repo_id, file_path="processor.rs", start_line=index * 50,
+                end_line=index * 50 + 39,
                 func_name="run_tasks", module_tag=ModuleTag.SCHED, lang="rust",
                 raw_code="fn run_tasks() {}", normalized_code=f"different {repo_id}",
             )
@@ -43,6 +44,8 @@ def test_function_name_recall_is_per_repo_and_skips_vector_gate(tmp_path):
     got = _name_candidates(conn, "run_tasks", "2026/new")
     conn.close()
     assert {c["payload"]["repo_id"] for c in got} == {"2024/a", "2025/b"}
+    assert len(got) == 3
+    assert sum(c["payload"]["repo_id"] == "2025/b" for c in got) == 2
     assert all(c["name_match"] and c["score"] == 0.0 for c in got)
 
 
