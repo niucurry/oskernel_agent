@@ -96,3 +96,17 @@ def test_repo_url_map_includes_history_and_baseline_configs(tmp_path):
 
     assert result["2025/work"] == "https://gitlab.example.com/team/work"
     assert result["0/baseline_base"] == "https://github.com/example/base"
+
+
+def test_wrapped_baseline_repo_id_still_resolves_to_clickable_source():
+    linker = GL.GitLabLinker(
+        {"0/baseline_rcore_v3": "https://github.com/rcore-os/rCore-Tutorial-v3"},
+        {"https://github.com/rcore-os/rCore-Tutorial-v3": "f" * 40},
+    )
+
+    link = linker.link(
+        "data/repos/0/baseline_rcore_v3", "os/src/task/processor.rs", 38, 52,
+    )
+
+    assert link.startswith("[")
+    assert "github.com/rcore-os/rCore-Tutorial-v3/blob/" in link

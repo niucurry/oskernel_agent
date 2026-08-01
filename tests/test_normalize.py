@@ -8,7 +8,7 @@ import pytest
 
 from src.models import ModuleTag
 from src.normalize.classify import load_classifier
-from src.normalize.discovery import discover_files
+from src.normalize.discovery import discover_files, is_test_or_benchmark_path
 from src.normalize.extract import extract_functions
 from src.normalize.normalizer import normalize_asm, normalize_snippet
 from src.normalize.runner import normalize_repo
@@ -39,6 +39,40 @@ def test_discovery_language_detection():
     assert langs["os/src/sched/task.rs"] == "rust"
     assert langs["os/src/mm/heap.c"] == "c"
     assert langs["os/src/arch/boot.S"] == "asm"
+
+
+@pytest.mark.parametrize("path", [
+    "user/src/bin/libctest/malloc.rs",
+    "kernel/integration-tests/scheduler.rs",
+    "src/test_sched.rs",
+    "src/sched_benchmark.c",
+    "benches/syscall.rs",
+])
+def test_test_and_benchmark_paths_are_detected(path):
+    assert is_test_or_benchmark_path(path)
+
+
+@pytest.mark.parametrize("path", [
+    "kernel/contest/entry.rs",
+    "kernel/latest/snapshot.rs",
+    "src/testament.rs",
+    "drivers/benchpress.rs",
+])
+def test_test_path_detection_does_not_match_incidental_substrings(path):
+    assert not is_test_or_benchmark_path(path)
+
+
+def test_discovery_excludes_test_assets_but_keeps_similar_names(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "user" / "src" / "bin" / "libctest").mkdir(parents=True)
+    for rel in ("src/kernel.rs", "src/test_sched.rs", "src/testament.rs",
+                "tests/syscall.rs", "user/src/bin/libctest/malloc.rs"):
+        (tmp_path / rel).write_text("fn sample() {}", encoding="utf-8")
+
+    rels = {item.rel_path.replace("\\", "/") for item in discover_files(tmp_path)}
+
+    assert rels == {"src/kernel.rs", "src/testament.rs"}
 
 
 # ---------- 模块归类 ----------

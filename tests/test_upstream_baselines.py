@@ -90,7 +90,11 @@ def test_tag_upstream_baselines_catches_framework_path():
     # 候选改名 axfs-ng（双侧路径不等）；框架路径还必须有独立代码证据才可判 upstream。
     s = _pair(_q("arceos/modules/axfs/src/disk.rs", "new"),
               _q("2025/team/arceos/modules/axfs-ng/src/disk.rs", "new"))
-    s["evidence"] = {"line_similarity": 0.9, "exact_match_lines": 8}
+    s["evidence"] = {
+        "line_similarity": 0.9,
+        "exact_match_lines": 8,
+        "function_identity_relation": "exact_counterpart",
+    }
     UB.tag_upstream_baselines([s])
     assert s.get("upstream_vendored")  # 被标为上游基线
     # 只有路径提示、没有 pair 代码证据时不能把任意候选归入共同上游。
@@ -170,6 +174,44 @@ def test_abi_generic_sys_name_does_not_exclude_complex_implementation():
     }"""
     s = _pair({**_q("api/src/syscall/fs.rs", "sys_fchdir"), "raw_code": code},
               _q("2025/o/api/src/syscall/fs.rs", "sys_fchdir"))
+    assert UB.is_abi_constrained(s) is False
+
+
+def test_multiline_user_syscall_forwarder_is_abi_constrained():
+    code = """pub fn sys_sendto(
+        sockfd: usize,
+        buf: *const u8,
+        len: usize,
+        flags: u32,
+        dest_addr: *const u8,
+        addrlen: u32,
+    ) -> isize {
+        syscall(
+            SYSCALL_SENDTO,
+            [
+                sockfd as isize,
+                buf as isize,
+                len as isize,
+                flags as isize,
+                dest_addr as isize,
+                addrlen as isize,
+            ],
+        )
+    }"""
+    s = _pair({**_q("user/src/syscall/socket.rs", "sys_sendto"), "raw_code": code},
+              _q("2025/o/user/src/syscall.rs", "sys_mmap"))
+    assert UB.is_abi_constrained(s) is True
+
+
+def test_long_syscall_with_real_statements_is_not_thin_adapter():
+    statements = "\n".join(f"let value_{i} = transform({i});" for i in range(8))
+    code = f"""pub fn sys_custom(arg: usize) -> isize {{
+        {statements}
+        commit_state(arg);
+        0
+    }}"""
+    s = _pair({**_q("os/src/syscall/custom.rs", "sys_custom"), "raw_code": code},
+              _q("2025/o/os/src/syscall/custom.rs", "sys_custom"))
     assert UB.is_abi_constrained(s) is False
 
 
@@ -256,6 +298,7 @@ def test_abi_stats_never_uses_unrelated_first_candidate_as_source():
         "line_similarity": 0.76,
         "exact_match_lines": 9,
         "function_identity_score": 1.0,
+        "function_identity_relation": "exact_counterpart",
     }
     UB.tag_upstream_baselines([noise, valid])
     stats = UB.upstream_baseline_stats([noise, valid])
@@ -270,6 +313,28 @@ def test_abi_stats_has_no_source_when_all_candidates_are_retrieval_noise():
         _q("thirdparty/smoltcp/src/socket.rs", "poll"),
         score=0.38,
     )
+    UB.tag_upstream_baselines([s])
+    stats = UB.upstream_baseline_stats([s])
+    assert len(stats) == 1
+    assert stats[0]["source"] is None
+
+
+def test_abi_stats_does_not_show_different_syscall_wrapper_as_source():
+    code = """pub fn sys_sendto(a: usize, b: usize, c: usize, d: usize, e: usize, f: usize) -> isize {
+        syscall(SYSCALL_SENDTO, [a as isize, b as isize, c as isize,
+                                d as isize, e as isize, f as isize])
+    }"""
+    s = _pair(
+        {**_q("user/src/syscall/socket.rs", "sys_sendto"), "raw_code": code},
+        _q("2025/o/user/src/syscall.rs", "sys_mmap"),
+        score=0.91,
+    )
+    s["evidence"] = {
+        "line_similarity": 0.75,
+        "exact_match_lines": 15,
+        "function_identity_score": 0.82,
+        "function_identity_relation": "compatible_renamed",
+    }
     UB.tag_upstream_baselines([s])
     stats = UB.upstream_baseline_stats([s])
     assert len(stats) == 1

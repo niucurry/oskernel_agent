@@ -40,9 +40,8 @@ LOGDIR = OUT / "_batch"
 PROGRESS = LOGDIR / "progress.log"
 STATE = LOGDIR / "state.json"
 
-PRIMARY_KEY = "sk-ws-H.RXHMRRD.Ij8W.MEUCIQCPodogVIJeGAfPmi7HOU8_LBZV-IWCMD_xvBw3SypGGwIgewezB0-2BCyy5WSplx_1YvEs4DMQmj95f_j5_MOetbY"
-FALLBACK_KEY = "sk-ws-H.RXHMRRD.Ij8W.MEUCIQCPodogVIJeGAfPmi7HOU8_LBZV-IWCMD_xvBw3SypGGwIgewezB0-2BCyy5WSplx_1YvEs4DMQmj95f_j5_MOetbY"
-BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+_BATCH_PRIMARY_KEY_ENV = "BATCH_PRIMARY_LLM_API_KEY"
+_BATCH_FALLBACK_KEY_ENV = "BATCH_FALLBACK_LLM_API_KEY"
 
 # 额度耗尽 / 鉴权失败的日志特征
 QUOTA_TOKENS = [
@@ -72,21 +71,60 @@ def save_state(st: dict) -> None:
     STATE.write_text(json.dumps(st, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+class BatchConfigurationError(RuntimeError):
+    """批处理凭据缺失或无效；错误信息不得包含凭据值。"""
+
+
+def _batch_api_key(which: str) -> str:
+    """从环境读取指定槽位的密钥，不允许源码或默认值兜底。"""
+    env_name = {
+        "primary": _BATCH_PRIMARY_KEY_ENV,
+        "fallback": _BATCH_FALLBACK_KEY_ENV,
+    }.get(which)
+    if env_name is None:
+        raise BatchConfigurationError(f"未知 API key 槽位：{which!r}")
+
+    key = os.environ.get(env_name, "").strip()
+    if not key:
+        raise BatchConfigurationError(
+            f"未配置环境变量 {env_name}；请写入本地 .env 或进程环境，勿提交真实密钥"
+        )
+    if which == "fallback":
+        primary = os.environ.get(_BATCH_PRIMARY_KEY_ENV, "").strip()
+        if primary and primary == key:
+            raise BatchConfigurationError(
+                f"{_BATCH_FALLBACK_KEY_ENV} 必须与 {_BATCH_PRIMARY_KEY_ENV} 不同"
+            )
+    return key
+
+
 def set_api_key(which: str) -> None:
     """把 config.toml [api].key 和 .env LLM_API_KEY 改成 primary/fallback，并重跑 setup_opencode。"""
-    key = PRIMARY_KEY if which == "primary" else FALLBACK_KEY
+    key = _batch_api_key(which)
     cfg = ROOT / "config.toml"
+    if not cfg.is_file():
+        raise BatchConfigurationError("缺少本地 config.toml，请先由 config.toml.example 创建")
     text = cfg.read_text(encoding="utf-8")
-    text = re.sub(r'(?m)^(key\s*=\s*)".*?"', f'\\1"{key}"', text, count=1)
+    text, replacements = re.subn(
+        r'(?m)^(key\s*=\s*)".*?"',
+        lambda match: f'{match.group(1)}"{key}"',
+        text,
+        count=1,
+    )
+    if replacements != 1:
+        raise BatchConfigurationError("config.toml 中未找到 [api] key 配置项")
     cfg.write_text(text, encoding="utf-8")
 
     env = ROOT / ".env"
-    etext = env.read_text(encoding="utf-8")
+    etext = env.read_text(encoding="utf-8") if env.is_file() else ""
     if re.search(r"(?m)^LLM_API_KEY=", etext):
-        etext = re.sub(r"(?m)^LLM_API_KEY=.*$", f"LLM_API_KEY={key}", etext)
+        etext = re.sub(
+            r"(?m)^LLM_API_KEY=.*$", lambda _: f"LLM_API_KEY={key}", etext
+        )
     else:
         etext = f"LLM_API_KEY={key}\n" + etext
     env.write_text(etext, encoding="utf-8")
+    os.environ["LLM_API_KEY"] = key
 
     # 让 OpenCode（描述报告 DIR/VERDICT agent）用上新 key
     try:
@@ -95,6 +133,18 @@ def set_api_key(which: str) -> None:
     except Exception as e:  # noqa: BLE001
         log(f"  setup_opencode 失败（忽略）：{e}")
     log(f"  已切换 API key → {which}")
+
+
+def switch_to_fallback(st: dict) -> bool:
+    """安全切换备用凭据；配置错误只记录变量名，不改变持久状态。"""
+    try:
+        set_api_key("fallback")
+    except BatchConfigurationError as exc:
+        log(f"  无法切换备用 API key：{exc}")
+        return False
+    st["key"] = "fallback"
+    save_state(st)
+    return True
 
 
 def child_env() -> dict:
@@ -212,6 +262,8 @@ def ensure_clone(url: str, repo_name: str, retries: int = 4) -> bool:
 def do_comparison(team_id: str, url: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
     repo_name = fork_to_repo_name(url)
     cmd = [PY, "-m", "src.pipeline", "--repo", url + ".git", "--baselines"]
+    if os.environ.get("BATCH_ENABLE_AI_DETECT", "").strip().lower() in {"1", "true", "yes"}:
+        cmd.append("--ai-detect")
     cmp_timeout = int(os.environ.get("BATCH_CMP_TIMEOUT", "3600"))  # 巨型仓库可调大
     ok, body = run_step("对比报告", cmd, logfile, timeout=cmp_timeout)
     # 归档 HTML：pipeline 落到 data/output/<repo_name>/<repo_name>_comparison.html
@@ -242,10 +294,17 @@ def do_description(team_id: str, url: str, final_dir: Path, logfile: Path) -> tu
 
 
 def main() -> None:
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env", override=False)
     teams = json.loads(WORKS.read_text(encoding="utf-8"))
     st = load_state()
-    if st.get("key") == "fallback":
-        set_api_key("fallback")
+    active_key = st.get("key") if st.get("key") in {"primary", "fallback"} else "primary"
+    st["key"] = active_key
+    try:
+        set_api_key(active_key)
+    except BatchConfigurationError as exc:
+        raise SystemExit(f"[batch] 配置错误：{exc}") from None
 
     total = len(teams)
     log(f"==== 批处理启动，共 {total} 个作品 ====")
@@ -291,8 +350,8 @@ def main() -> None:
             ok, body = do_comparison(team_id, url, final_dir, lf)
             if not ok and quota_exhausted(body) and st["key"] == "primary":
                 log("  检测到额度/鉴权问题，切换备用 key 后重试对比报告")
-                st["key"] = "fallback"; save_state(st); set_api_key("fallback")
-                ok, body = do_comparison(team_id, url, final_dir, lf)
+                if switch_to_fallback(st):
+                    ok, body = do_comparison(team_id, url, final_dir, lf)
             tstate["comparison"] = "done" if ok else "failed"
             log(f"  对比报告 {'成功' if ok else '失败'}")
             save_state(st)
@@ -303,8 +362,8 @@ def main() -> None:
             ok, body = do_description(team_id, url, final_dir, lf)
             if not ok and quota_exhausted(body) and st["key"] == "primary":
                 log("  检测到额度/鉴权问题，切换备用 key 后重试描述报告")
-                st["key"] = "fallback"; save_state(st); set_api_key("fallback")
-                ok, body = do_description(team_id, url, final_dir, lf)
+                if switch_to_fallback(st):
+                    ok, body = do_description(team_id, url, final_dir, lf)
             tstate["description"] = "done" if ok else "failed"
             log(f"  描述报告 {'成功' if ok else '失败'}")
             save_state(st)

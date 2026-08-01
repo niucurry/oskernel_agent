@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 
 import numpy as np
 
@@ -26,6 +27,58 @@ class BaseEmbedder(ABC):
     @abstractmethod
     def encode_batch(self, texts: list[str]) -> np.ndarray:
         """把一批文本编码为 (len(texts), dim) 的 float32 向量。"""
+
+
+class CachingEmbedder(BaseEmbedder):
+    """跨流水线阶段复用按源码内容计算的嵌入向量。
+
+    召回、分段验证和公共基线扣除会重复编码同一目标函数或代码片段。这个有界 LRU
+    只改变计算复用方式，不改变向量、候选或判定集合；默认容量约占几十 MB。
+    """
+
+    def __init__(self, backend: BaseEmbedder, *, max_items: int = 20_000):
+        self.backend = backend
+        self.dim = backend.dim
+        self.max_items = max(0, int(max_items))
+        self._cache: OrderedDict[str, np.ndarray] = OrderedDict()
+
+    def encode_batch(self, texts: list[str]) -> np.ndarray:
+        if not texts:
+            return np.zeros((0, self.dim), dtype=np.float32)
+
+        keys = [text or " " for text in texts]
+        missing = list(dict.fromkeys(key for key in keys if key not in self._cache))
+        if missing:
+            encoded = np.asarray(self.backend.encode_batch(missing), dtype=np.float32)
+            for key, vector in zip(missing, encoded):
+                if self.max_items:
+                    self._cache[key] = vector.copy()
+                    self._cache.move_to_end(key)
+                    while len(self._cache) > self.max_items:
+                        self._cache.popitem(last=False)
+
+        result = np.empty((len(keys), self.dim), dtype=np.float32)
+        # max_items=0 是显式禁用缓存；此时一次批量编码后直接按唯一文本回填。
+        if self.max_items:
+            for index, key in enumerate(keys):
+                vector = self._cache.get(key)
+                if vector is None:
+                    # 单批唯一文本数超过容量时，最早项目可能已被逐出；只补算这些极端项。
+                    vector = np.asarray(self.backend.encode_batch([key])[0], dtype=np.float32)
+                    self._cache[key] = vector.copy()
+                    self._cache.move_to_end(key)
+                    while len(self._cache) > self.max_items:
+                        self._cache.popitem(last=False)
+                else:
+                    self._cache.move_to_end(key)
+                result[index] = vector
+            return result
+
+        encoded = np.asarray(self.backend.encode_batch(list(dict.fromkeys(keys))), dtype=np.float32)
+        by_key = dict(zip(dict.fromkeys(keys), encoded))
+        for index, key in enumerate(keys):
+            result[index] = by_key[key]
+        return result
 
 
 def _windows(ids: list[int], size: int, stride: int) -> list[list[int]]:

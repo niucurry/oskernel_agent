@@ -13,7 +13,7 @@ from loguru import logger
 
 from src.exact.matcher import normalized_file_hash, normalized_file_lines
 from src.models import is_baseline_repo
-from src.normalize.discovery import discover_files
+from src.normalize.discovery import discover_files, is_test_or_benchmark_path
 from src.normalize.runner import DEFAULT_MAX_LINES, DEFAULT_REPOS_ROOT, derive_repo_id
 from src.normalize.store import DEFAULT_DB, FunctionStore
 
@@ -61,6 +61,9 @@ def scan_repo(
     common_files = 0
     with FunctionStore(db_path) as store:
         for f in files:
+            # discover_files 已过滤；这里保留防御，避免自定义发现器或旧调用路径绕过。
+            if is_test_or_benchmark_path(f.rel_path):
+                continue
             try:
                 text = f.path.read_text(encoding="utf-8", errors="replace")
             except OSError:
@@ -73,6 +76,7 @@ def scan_repo(
             hist = [
                 h for h in store.find_files_by_norm_hash(nh, exclude_repo_id=repo_id)
                 if (h.get("lang") or "").lower() == f.lang.lower()
+                and not is_test_or_benchmark_path(h.get("file_path", ""))
             ]
             if not hist:
                 continue
@@ -177,6 +181,8 @@ def aggregate_file_similarity(
         for item in recall.get("results", []):
             q = item.get("query", {})
             fp = q.get("file_path", "")
+            if is_test_or_benchmark_path(fp):
+                continue
             total_by_file[fp] += 1
             s, e = q.get("start_line"), q.get("end_line")
             if isinstance(s, int) and isinstance(e, int) and e >= s:
@@ -193,6 +199,10 @@ def aggregate_file_similarity(
         q = s.get("query_func", {})
         c = s.get("candidate_func", {})
         fp = q.get("file_path", "")
+        # 旧 suspects/recall 产物可能早于发现层过滤；聚合时再次拦截两侧测试资产。
+        if (is_test_or_benchmark_path(fp)
+                or is_test_or_benchmark_path(c.get("file_path", ""))):
+            continue
         hit_funcs[fp].add(q.get("func_name", ""))
         st, en = q.get("start_line"), q.get("end_line")
         if isinstance(st, int) and isinstance(en, int) and en >= st:
@@ -205,6 +215,8 @@ def aggregate_file_similarity(
     root = Path(query_repo_path) if query_repo_path else None
     out: list[dict] = []
     for fp, hits in hit_funcs.items():
+        if is_test_or_benchmark_path(fp):
+            continue
         func_total = max(total_by_file.get(fp, 0), len(hits))
         stats = (_query_file_line_stats(root, fp, func_spans.get(fp, []), hit_spans.get(fp, []))
                  if root is not None else None)

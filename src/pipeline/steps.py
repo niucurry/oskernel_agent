@@ -37,17 +37,25 @@ def local_ingest(repo_arg: str, work_root: str | Path) -> Path:
 
 def build_local_meta(repo_path: str | Path) -> list[dict]:
     """从本地 git log 生成 _meta.json 的 commits（供 commit 信号通道）。"""
-    repo_path = Path(repo_path)
+    repo_path = Path(repo_path).resolve()
     if not (repo_path / ".git").exists():
         return []
     try:
-        raw = subprocess.run(
-            ["git", "-C", str(repo_path), "log", "--numstat", "--date=iso-strict",
+        proc = subprocess.run(
+            # 只信任调用方明确传入的这个仓库，避免不同容器/Windows 账户所有者
+            # 导致只读日志查询被 Git 拒绝；不污染用户的全局 safe.directory。
+            ["git", "-c", f"safe.directory={repo_path}", "-C", str(repo_path),
+             "log", "--numstat", "--date=iso-strict",
              "--pretty=format:@@%H|%an|%aI|%s"],
-            check=True, capture_output=True, timeout=60,
-        ).stdout
-        out = raw.decode("utf-8", errors="replace")
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+            capture_output=True, timeout=60,
+        )
+        if proc.returncode != 0:
+            detail = proc.stderr.decode("utf-8", errors="replace").strip()
+            logger.warning("读取仓库提交历史失败 {}: {}", repo_path, detail[:300])
+            return []
+        out = proc.stdout.decode("utf-8", errors="replace")
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        logger.warning("读取仓库提交历史失败 {}: {}", repo_path, exc)
         return []
 
     commits: list[dict] = []

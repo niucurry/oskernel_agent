@@ -4,13 +4,15 @@
                          [--resume-from <step>] [--baselines]
 
 按序执行 ingest → fastpath → recall(含 normalize) → exact → segment → metadata
-→ ai_detect → report，每步落盘中间结果，打印每步耗时与漏斗数字。
+→ report，每步落盘中间结果，打印每步耗时与漏斗数字。`ai_detect` 只在显式传入
+`--ai-detect` 时插入 report 之前。
 （LLM 复核步已下线：tier 由 exact/segment/metadata 确定性级联判定。）
 """
 
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import re
 import sys
@@ -38,8 +40,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--resume-from", choices=STEPS, default=None, help="从指定步骤续跑（需前序产物存在）")
     p.add_argument("--no-simhash", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--baselines", action="store_true", help="启用基线扣除（需 Qdrant 已有基线数据）")
-    p.add_argument("--skip-ai-detect", action="store_true",
-                   help="跳过 AI 生成代码检测（无参考模型/GPU 时；report 章六给出未运行说明）")
+    ai_group = p.add_mutually_exclusive_group()
+    ai_group.add_argument(
+        "--ai-detect", action="store_true",
+        help=("可选运行 AI 生成代码概率统计（费时且不作为合规或评分依据）"),
+    )
+    ai_group.add_argument(
+        "--skip-ai-detect", action="store_true",
+        help="兼容旧脚本；AI 概率统计现已默认跳过",
+    )
     p.add_argument("--db", default=DEFAULT_DB)
     p.add_argument("--history-config", default="config/repos.yaml",
                    help="历史作品清单；运行前逐仓核验 functions.db 覆盖率")
@@ -221,8 +230,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     def get_emb():
         nonlocal embedder
         if embedder is None:
-            from src.embed.embedder import get_embedder
-            embedder = get_embedder(show_progress=False)
+            from src.embed.embedder import CachingEmbedder, get_embedder
+            embedder = CachingEmbedder(get_embedder(show_progress=False))
         return embedder
 
     def get_store():
@@ -233,6 +242,18 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             st = load_settings()
             vector_store = VectorStore(st.qdrant.collection, path=args.qdrant_path)
         return vector_store
+
+    def release_store() -> None:
+        """阶段边界释放本地 Qdrant/向量索引内存，需要时再按需重开。"""
+        nonlocal vector_store
+        if vector_store is None:
+            return
+        try:
+            vector_store.client.close()
+        except Exception as exc:  # noqa: BLE001 — 释放失败不覆盖已生成阶段产物
+            logger.warning("[内存] 关闭向量库客户端失败：{}", exc)
+        vector_store = None
+        gc.collect()
 
     # ---- fastpath (L0 文件指纹层) ----
     skip_files: set[str] = set()
@@ -249,7 +270,6 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     if _should_run("recall", args.resume_from):
         from src.embed.query import query_repo
 
-        store = get_store()
         simhash_query = None
         if args.no_simhash:
             logger.error("完整查全模式不允许关闭 SimHash；如需调试请单独调用底层模块")
@@ -283,7 +303,9 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             return 2
 
         def _recall():
-            return query_repo(repo_path, store, get_emb(), top_k=args.top_k,
+            # 完整模式强制使用已签名且与 functions.db 同代的 FAISS 索引；召回阶段
+            # 无需提前打开 24 万点的 Qdrant local。基线阶段需要时再按需打开。
+            return query_repo(repo_path, None, get_emb(), top_k=args.top_k,
                               repos_root=args.repos_root, output_dir=out, simhash_query=simhash_query,
                               skip_files=skip_files, db_path=args.db,
                               code_simhash_query=code_simhash_query,
@@ -293,6 +315,11 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         recall = timed("recall", _recall)
         funnel["recall_query_funcs"] = len(recall["results"])
         funnel["recall_candidates"] = recall["simhash"]["total_recalled"]
+        # exact 从已写盘产物读取；不让召回对象和本地向量库与下一份
+        # 大 JSON 在内存中重叠。metadata 需要基线向量时会按需重开 store。
+        del recall
+        release_store()
+        gc.collect()
 
     # ---- exact ----
     if _should_run("exact", args.resume_from):
@@ -301,12 +328,16 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             recall_path, db_path=args.db, output_dir=out, require_complete_recall=True))
         funnel["exact_compared"] = res["compared_pairs"]
         funnel["after_exact"] = res["tier_counts"]
+        del res
+        gc.collect()
 
     # ---- segment ----
     if _should_run("segment", args.resume_from):
         from src.segment.verify import run_segment
         res = timed("segment", lambda: run_segment(suspects_path, get_emb(), output_dir=out))
         funnel["after_segment"] = tier_counts(res["suspects"])
+        del res
+        gc.collect()
 
     # ---- metadata ----
     if _should_run("metadata", args.resume_from):
@@ -321,9 +352,15 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             v2_path, db_path=args.db, output_dir=out, baseline_matcher=baseline_matcher))
         funnel["metadata"] = res["metadata_summary"]
         funnel["after_metadata"] = tier_counts(res["suspects"])
+        del res
+        # matcher 持有同一个本地向量库客户端；先解除引用，再关闭 store，
+        # 避免后续报告阶段继续占用大块索引内存。
+        baseline_matcher = None
+        release_store()
+        gc.collect()
 
     # ---- ai_detect（AI 生成代码检测，独立于查重漏斗；缺模型则优雅跳过）----
-    if not args.skip_ai_detect and _should_run("ai_detect", args.resume_from):
+    if args.ai_detect and not args.skip_ai_detect and _should_run("ai_detect", args.resume_from):
         from src.ai_detect.runner import run_ai_detect
         # 排除借鉴代码：文件级（fastpath 整文件命中）+ 函数级（查重命中的可疑函数），
         # 只对未匹配上的原创代码做 AI 生成检测（借鉴自参考 OS 的代码不计入）
@@ -355,6 +392,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         try:
             report_input = json.loads(final_path.read_text(encoding="utf-8"))
             report_query_repo_id = str(report_input.get("query_repo_id") or repo_name)
+            del report_input
+            gc.collect()
         except (OSError, json.JSONDecodeError):
             report_query_repo_id = repo_name
         _restore_semantic_cache(out, repo_name, report_query_repo_id)
@@ -391,6 +430,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
                 "report_elapsed_sec": timings.get("report"),
                 "orchestration_overhead_sec": orchestration_overhead,
                 "target_revision": _resolve_git_revision(repo_path),
+                "visible_commit_count": len(meta_commits),
                 "stage_timings": timings,
             },
         )
