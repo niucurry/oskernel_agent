@@ -1,6 +1,7 @@
 """AI 生成代码检测编排：抽取 → log-rank/NPR 检测 → 仓库级聚合 → 落盘 JSON。
 
-与其他模块一致：独立 CLI、中间产物落盘、可注入 mock（scorer）做单测、缺模型时优雅降级。
+与其他模块一致：独立 CLI、中间产物落盘、可注入 mock（scorer）做单测。
+模型不可用时记录失败状态；交付报告的完整性门禁会拒绝把失败状态渲染成占位模块。
 
 输出 `{repo}_ai_detect.json`：
     {
@@ -15,10 +16,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 from loguru import logger
+
+from src.report.libraries import match_library
 
 from .extract import extract_blocks
 from .settings import AIDetectSettings, load_ai_detect_settings
@@ -27,6 +31,29 @@ from .vendor.ai_code_detector.detector import DetectCodeGPT, LogRankProvider
 from .vendor.ai_code_detector.pipeline import DetectionPipeline, ThresholdConfig
 
 DEFAULT_OUTPUT_DIR = "data/output"
+
+
+def _blocks_source_fingerprint(blocks: list, repo_root: Path) -> str:
+    """对受支持语言的完整函数集合做内容寻址，防止复用过期模型产物。"""
+    digest = hashlib.sha256()
+    records = []
+    for block in blocks:
+        try:
+            rel = Path(block.file_path).resolve().relative_to(repo_root).as_posix()
+        except ValueError:
+            rel = Path(block.file_path).name
+        records.append((rel, int(block.start_line), int(block.end_line), block.name, block.source))
+    for rel, start, end, name, source in sorted(records):
+        for value in (rel, str(start), str(end), name, source):
+            digest.update(value.encode("utf-8", errors="replace"))
+            digest.update(b"\x1f")
+    return digest.hexdigest()
+
+
+def compute_source_fingerprint(repo: str | Path) -> str:
+    """计算与 AI 检测抽取口径一致的仓库源码指纹，供安全续跑校验。"""
+    repo_root = Path(repo).resolve()
+    return _blocks_source_fingerprint(extract_blocks(repo_root, max_functions=0), repo_root)
 
 
 def _threshold_config(st: AIDetectSettings) -> ThresholdConfig:
@@ -78,8 +105,8 @@ def run_ai_detect(
     """对单个仓库跑 AI 生成代码检测，返回结果 dict（并按需落盘）。
 
     Args:
-        scorer: 注入的 LogRankProvider（单测用 mock）；为 None 时按 settings 加载真实模型，
-                加载失败则返回 status="skipped" 而非抛错（VM 无模型/无磁盘时不阻塞流水线）。
+        scorer: 注入的 LogRankProvider（单测用 mock）；为 None 时按 settings 加载真实模型。
+                加载失败会落盘 status="skipped" 供诊断，但交付报告不会接受该结果。
         exclude_files: 文件级借鉴的相对路径集合（posix）。命中整文件的函数全部跳过。
         exclude_funcs: 函数级借鉴集合 {(相对文件路径 posix, 函数名)}。命中的单个函数跳过。
 
@@ -92,11 +119,13 @@ def run_ai_detect(
     repo_id = repo_name or repo.resolve().name
     out_dir = Path(output_dir)
     out_path = out_dir / f"{repo_id}_ai_detect.json"
+    source_fingerprint = ""
 
     def _emit(payload: dict) -> dict:
         payload.setdefault("repo_id", repo_id)
         payload.setdefault("model_id", st.model_id)
         payload.setdefault("config", _config_snapshot(st))
+        payload.setdefault("source_fingerprint", source_fingerprint)
         if write:
             out_dir.mkdir(parents=True, exist_ok=True)
             out_path.write_text(
@@ -107,23 +136,40 @@ def run_ai_detect(
         return payload
 
     # 1) 抽取函数（复用 normalize 解析器）
-    # 排除借鉴模式（exclude_files/exclude_funcs 给定）抽全量后剔除借鉴代码，再按 max_functions 截断
+    # 始终先抽全量：必须先剔除借鉴代码和第三方库，再按 max_functions 限额，
+    # 否则按路径靠前的 vendored 库会占掉检测配额。
     exclude_mode = exclude_files is not None or exclude_funcs is not None
-    extract_max = 0 if exclude_mode else st.max_functions
-    blocks = extract_blocks(repo, max_functions=extract_max)
+    blocks = extract_blocks(repo, max_functions=0)
+    source_fingerprint = _blocks_source_fingerprint(blocks, repo.resolve())
     if not blocks:
-        return _emit({"status": "skipped", "reason": "未抽取到 rust/c 函数"})
+        return _emit({
+            "status": "skipped",
+            "reason": "未抽取到 rust/c 函数",
+            "total_functions": 0,
+            "scope": {
+                "extracted_functions": 0,
+                "borrowed_excluded": 0,
+                "third_party_excluded": 0,
+                "eligible_functions": 0,
+                "analyzed_functions": 0,
+                "truncated": False,
+            },
+        })
+
+    extracted_count = len(blocks)
+    repo_root = repo.resolve()
+
+    def _rel(block) -> str:
+        try:
+            return Path(block.file_path).resolve().relative_to(repo_root).as_posix()
+        except ValueError:
+            return Path(block.file_path).name
+
+    borrowed_excluded = 0
 
     if exclude_mode:
         ex_files = exclude_files or set()
         ex_funcs = exclude_funcs or set()
-        repo_root = repo.resolve()
-
-        def _rel(b) -> str:
-            try:
-                return Path(b.file_path).resolve().relative_to(repo_root).as_posix()
-            except ValueError:
-                return Path(b.file_path).name
 
         def _keep(b) -> bool:
             rel = _rel(b)
@@ -134,29 +180,73 @@ def run_ai_detect(
             return True
 
         kept = [b for b in blocks if _keep(b)]
+        borrowed_excluded = len(blocks) - len(kept)
         logger.info("[ai_detect] 排除借鉴代码：文件级 {} / 函数级 {} → 跳过 {} 个借鉴函数，"
                     "{}/{} 个未匹配函数进入检测",
-                    len(ex_files), len(ex_funcs), len(blocks) - len(kept), len(kept), len(blocks))
+                    len(ex_files), len(ex_funcs), borrowed_excluded, len(kept), len(blocks))
         blocks = kept
         if not blocks:
             return _emit({"status": "skipped",
                           "reason": "全部函数均为借鉴代码，无未匹配原创函数需检测",
-                          "total_functions": 0})
-        if st.max_functions and len(blocks) > st.max_functions:
-            logger.info("[ai_detect] 未匹配函数 {} 个超过 max_functions={}，截断",
-                        len(blocks), st.max_functions)
-            blocks = blocks[:st.max_functions]
+                          "total_functions": 0,
+                          "scope": {
+                              "extracted_functions": extracted_count,
+                              "borrowed_excluded": borrowed_excluded,
+                              "third_party_excluded": 0,
+                              "eligible_functions": 0,
+                              "analyzed_functions": 0,
+                              "truncated": False,
+                          }})
+
+    # AI 生成概率只能用于参赛队可归属的实现。复用库即使被模型判为 LLM，
+    # 也不能归因给当前队伍；复用报告层的通用库注册表与 vendor 目录规则统一剔除。
+    eligible_before_libraries = len(blocks)
+    blocks = [block for block in blocks if not match_library(_rel(block))]
+    third_party_excluded = eligible_before_libraries - len(blocks)
+    if third_party_excluded:
+        logger.info("[ai_detect] 排除已识别第三方复用库函数 {} 个", third_party_excluded)
+    if not blocks:
+        return _emit({
+            "status": "skipped",
+            "reason": "排除借鉴代码与第三方复用库后，无可归属参赛队的函数需检测",
+            "total_functions": 0,
+            "scope": {
+                "extracted_functions": extracted_count,
+                "borrowed_excluded": borrowed_excluded,
+                "third_party_excluded": third_party_excluded,
+                "eligible_functions": 0,
+                "analyzed_functions": 0,
+                "truncated": False,
+            },
+        })
+
+    eligible_count = len(blocks)
+    truncated = bool(st.max_functions and eligible_count > st.max_functions)
+    if truncated:
+        logger.info("[ai_detect] 可归属且未匹配函数 {} 个超过 max_functions={}，截断",
+                    eligible_count, st.max_functions)
+        blocks = blocks[:st.max_functions]
+
+    scope = {
+        "extracted_functions": extracted_count,
+        "borrowed_excluded": borrowed_excluded,
+        "third_party_excluded": third_party_excluded,
+        "eligible_functions": eligible_count,
+        "analyzed_functions": len(blocks),
+        "truncated": truncated,
+    }
 
     # 2) 取得 log-rank provider（注入优先；否则加载真实模型，失败则降级跳过）
     if scorer is None:
         try:
             scorer = _build_scorer(st)
-        except Exception as exc:  # noqa: BLE001 — 缺模型/磁盘/GPU 都降级，不阻塞流水线
+        except Exception as exc:  # noqa: BLE001 — 记录可诊断状态，由报告完整性门禁拒绝
             logger.warning("[ai_detect] 参考模型加载失败，跳过检测：{!r}", exc)
             return _emit({
                 "status": "skipped",
                 "reason": f"参考模型不可用（{type(exc).__name__}）：{exc}",
                 "total_functions": len(blocks),
+                "scope": scope,
             })
 
     # 3) 两阶段检测
@@ -174,4 +264,4 @@ def run_ai_detect(
     )
     report = agg.aggregate(results, repo.resolve())
 
-    return _emit({"status": "ok", "aggregated": report.to_dict()})
+    return _emit({"status": "ok", "aggregated": report.to_dict(), "scope": scope})

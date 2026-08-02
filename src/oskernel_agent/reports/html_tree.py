@@ -12,6 +12,7 @@ import json
 import re
 from pathlib import Path
 
+from ..report_quality import assert_report_complete
 from .html import (
     _BROKEN_PREFIX,
     _CDN_HEAD,
@@ -368,6 +369,8 @@ def _render_verdict(verdict: dict, resolver) -> str:
 def render_tree_html(tree_json: dict, title: str = "代码树报告",
                      resolver=None) -> str:
     """渲染完整 HTML 文档。"""
+    # 结构化分析任何一级失败都拒绝渲染，不能把失败节点包装成可交付模块。
+    assert_report_complete("", structured=tree_json)
     meta = tree_json.get("meta", {})
     verdict = tree_json.get("verdict", {}) or {}
     verdict_html = _render_verdict(verdict, resolver)
@@ -450,6 +453,7 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
 """
     # 产出前硬校验：每个目录项都必须精确定位到唯一锚点，否则抛错而非静默产出
     assert_toc_resolves(doc)
+    assert_report_complete(doc, structured=tree_json)
     return doc
 
 
@@ -510,15 +514,6 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
     # 节点标题字号随树深度递减：root > 子系统 > 模块 > 更深
     title_size = {0: "text-xl", 1: "text-lg", 2: "text-base"}.get(depth, "text-sm")
 
-    # 聚合失败留痕：标题旁红色徽章 + 展开后醒目提示，避免空白被当成「正常但没内容」
-    has_error = bool(node.get("_error"))
-    err_badge = (
-        '<span class="ml-1 px-1.5 py-0.5 rounded text-xs font-semibold '
-        'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" '
-        'title="该子系统 LLM 聚合失败，内容缺失——重跑可恢复">⚠ 聚合失败</span>'
-        if has_error else ""
-    )
-
     # 子系统/模块不打分，评分只在顶层 verdict 卡片展示
     # NOTE: role 角标 HTML 提到局部变量，避免 f-string 表达式内出现反斜杠（Python 3.11 兼容）。
     _role_badge = '<span class="text-xs text-slate-500">(' + role + ')</span>' if role else ""
@@ -530,18 +525,10 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
         f'<span class="font-semibold {title_size} {("text-cyan-700 dark:text-cyan-400" if is_container else "")}">'
         f'{name}{"/" if typ == "dir" else ""}</span>'
         f'{_role_badge}'
-        f'{err_badge}'
         f'</div>'
     )
 
     body_parts: list[str] = []
-    if has_error:
-        body_parts.append(
-            '<div class="mt-1 mb-2 p-2 rounded border border-red-300 dark:border-red-800 '
-            'bg-red-50 dark:bg-red-900/20 text-sm text-red-700 dark:text-red-300">'
-            '本子系统 LLM 聚合失败，正文与模块缺失（当前为规则兜底）。'
-            '重跑即可恢复；失败结果不再写入缓存。</div>'
-        )
     if summary:
         body_parts.append(
             f'<div class="text-sm text-slate-700 dark:text-slate-300 mt-1 mb-2">'

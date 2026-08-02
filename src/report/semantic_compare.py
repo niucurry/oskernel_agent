@@ -23,7 +23,6 @@ import re
 import sqlite3
 import uuid
 from collections import Counter, defaultdict
-from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
@@ -46,8 +45,8 @@ from .upstream_baselines import (is_excluded_file_path, tag_upstream_baselines,
                                  upstream_baseline_stats)
 
 DEFAULT_OUTPUT_DIR = "data/output"
-_SEMANTIC_PROMPT_VERSION = "semantic-cn-v2"
-_INNOVATION_PROMPT_VERSION = "innovation-map-cn-v3-no-benchmark"
+_SEMANTIC_PROMPT_VERSION = "semantic-cn-v3-complete-budgeted"
+_INNOVATION_PROMPT_VERSION = "innovation-map-cn-v4-complete"
 DEFAULT_FUNCTIONS_DB = Path(__file__).resolve().parents[2] / "data" / "db" / "functions.db"
 MIN_INNOVATION_REFERENCE_SCORE = 0.30
 
@@ -370,7 +369,7 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) ->
     按 query 函数去重、取最高档归类：
       借鉴(confirmed)：confirmed 且非库复用、非公共/样板；
       模型复核难例(review)：review/weak 且模型返回有效“借鉴/疑似”；
-      复核未完成：模型调用/格式校验失败，或未配置模型；绝不计入“模型仍存疑”；
+      复核未完成：模型调用/格式校验失败，或已入队但未配置模型；绝不计入“模型仍存疑”；
       原创(original)：recall 中（非库）完全未进入嫌疑清单的函数。
     库复用 / 公共样板 / baseline 既不算借鉴也不算原创，**不计入 total**（在各自小节单列），
     所以 total = 同源 + 存疑 + 复核未完成 + 暂未检出，占比相加为 100%。
@@ -732,41 +731,6 @@ def _innovation_complexity(targets: list[dict]) -> dict:
     }
 
 
-def _fallback_innovation_points(candidates: list[dict]) -> list[dict]:
-    """LLM 不可用时保守展示代码差异候选，不把“未命中”冒充已证实创新。"""
-    by_module: dict[str, list[dict]] = defaultdict(list)
-    for candidate in candidates:
-        by_module[candidate["module"]].append(candidate)
-    points: list[dict] = []
-    for mod in MODULES:
-        targets = by_module.get(mod, [])[:3]
-        if not targets:
-            continue
-        refs = [ref for target in targets for ref in target.get("references", [])[:1]]
-        reference_repo = targets[0].get("reference_repo") or (refs[0]["repo"] if refs else "")
-        funcs = "、".join(t["func"] for t in targets)
-        points.append({
-            "title": f'{_MODULE_DISPLAY.get(mod, mod)}代码差异候选：{funcs}',
-            "kind": "待核验候选",
-            "confidence": "low",
-            "reference_repo": reference_repo,
-            "baseline": (
-                f"以 {reference_repo} 中的最近邻函数为比较基线；当前未启用语义模型，"
-                "无法自动确认二者是否承担同一机制。"
-            ),
-            "delta": "这些目标函数未形成有效历史相似命中，只能说明实现存在代码差异，不能据此直接认定创新。",
-            "why_it_matters": "建议点击目标与参考实现，人工核对数据结构、控制流和跨函数协作。",
-            "impact_scope": "影响范围尚未由模型确认，以所列文件、函数及自动发现的调用位置为边界。",
-            "counterevidence": "未形成历史相似命中只能证明当前检索未命中，不能单独证明机制创新。",
-            "targets": targets,
-            "references": refs,
-            "complexity": _innovation_complexity(targets),
-        })
-        if len(points) >= 5:
-            break
-    return points
-
-
 def _normalize_innovation_points(raw: object, candidates: list[dict]) -> list[dict]:
     target_map = {c["key"]: c for c in candidates}
     ref_map = {r["key"]: r for c in candidates for r in c.get("references", [])}
@@ -787,7 +751,11 @@ def _normalize_innovation_points(raw: object, candidates: list[dict]) -> list[di
         title = str(item.get("title") or "").strip()
         baseline = str(item.get("baseline") or "").strip()
         delta = str(item.get("delta") or "").strip()
-        if not targets or not title or not baseline or not delta:
+        why_it_matters = str(item.get("why_it_matters") or "").strip()
+        impact_scope = str(item.get("impact_scope") or "").strip()
+        counterevidence = str(item.get("counterevidence") or "").strip()
+        if not all((targets, title, baseline, delta, why_it_matters,
+                    impact_scope, counterevidence)):
             continue
         # 只能引用与这些目标函数真实关联的 reference key，防止模型跨卡拼错来源。
         allowed_refs = {r["key"] for target in targets for r in target.get("references", [])}
@@ -814,15 +782,15 @@ def _normalize_innovation_points(raw: object, candidates: list[dict]) -> list[di
             "reference_repo": repo_counts.most_common(1)[0][0] if repo_counts else "未识别",
             "baseline": baseline[:400],
             "delta": delta[:400],
-            "why_it_matters": str(item.get("why_it_matters") or "")[:400],
-            "impact_scope": str(item.get("impact_scope") or "")[:400],
-            "counterevidence": str(item.get("counterevidence") or "")[:400],
+            "why_it_matters": why_it_matters[:400],
+            "impact_scope": impact_scope[:400],
+            "counterevidence": counterevidence[:400],
             "targets": targets,
             "references": refs,
             "complexity": _innovation_complexity(targets),
         })
         used_target_keys.update(target_keys)
-    return normalized or _fallback_innovation_points(candidates)
+    return normalized
 
 
 
@@ -847,6 +815,7 @@ MIN_REVIEW_IDENTITY_SCORE = 0.72
 MIN_REVIEW_SHORTER_COVERAGE = 0.50
 MIN_REVIEW_DISTINCTIVE_LITERALS = 2
 REVIEW_SECONDARY_SCORE_MARGIN = 0.03
+REVIEW_SECONDARY_FALLBACK_ROUNDS = 2
 
 
 def _pair_sim(s: dict) -> float:
@@ -1235,6 +1204,26 @@ def _candidate_is_reportable(candidate: dict) -> bool:
     )
 
 
+_REVIEW_RESULT_RANK = {
+    # 组级结论必须优先采用已经完成的候选复核，不能让一个因预算延后的候选覆盖它。
+    # 多个有效结论并存时，先展示更需要评委关注的结论，再以直接证据强度排序。
+    "借鉴": 5,
+    "规则保留": 4,
+    "疑似": 3,
+    "复核失败": 2,
+    "未复核": 1,
+    "非借鉴": 0,  # 正常已转为 dismissed；保留该值用于旧产物的防御性排序。
+}
+
+
+def _candidate_review_result_rank(candidate: dict) -> int:
+    verdict = str(candidate.get("review_verdict") or "未复核")
+    if verdict == "未复核" and candidate.get("model_review_selection") in (
+            "deferred_secondary", "supplemental_source"):
+        return 0
+    return _REVIEW_RESULT_RANK.get(verdict, 1)
+
+
 def collect_file_pairs(
     suspects: list[dict], top_per_module: int = 5, max_candidates: int = 4,
     keep_tiers: tuple[str, ...] = ("confirmed",),
@@ -1278,9 +1267,11 @@ def collect_file_pairs(
         # 该 confirmed 是否「仅由模型复核认定」（无逐行铁证候选）——供清单加标记区分
         conf_cands = [c for c in cands if c["tier"] == "confirmed"]
         g["via_review"] = bool(conf_cands) and all(c.get("via_review") for c in conf_cands)
-        # 先按最终档位、再按综合分排序，确保组级结论与用于展示/解释的候选是同一对。
+        # 先按最终档位，再优先已经完成的候选复核，最后按直接证据强度排序。否则一个
+        # deferred_secondary 候选可能排在已复核候选之前，把整个目标函数误报成“未复核”。
         cands.sort(key=lambda x: (
-            -_TIER_RANK.get(x["tier"], 0), -x.get("pairing_score", 0.0), -x["sim"],
+            -_TIER_RANK.get(x["tier"], 0), -_candidate_review_result_rank(x),
+            -x.get("pairing_score", 0.0), -x["sim"],
         ))
         g["overall_sim"] = cands[0]["sim"] if cands else 0.0
         g["clone_type"] = cands[0]["clone_type"] if cands else "—"
@@ -1331,16 +1322,54 @@ def collect_file_pairs(
     return result
 
 
+_SEMANTIC_PROMPT_CHAR_BUDGET = 90_000
+_SEMANTIC_CODE_CHAR_LIMIT = 3_000
+
+
+def _semantic_group_cost(group: dict) -> int:
+    best = group.get("candidates", [{}])[0] if group.get("candidates") else {}
+    return (
+        min(len(group.get("query_code") or ""), _SEMANTIC_CODE_CHAR_LIMIT)
+        + min(len(best.get("ref_code") or ""), _SEMANTIC_CODE_CHAR_LIMIT)
+        + 700
+    )
+
+
 def _limit_per_module(groups: list[dict], n: int) -> list[dict]:
-    """每模块取整体相似度最高的 n 个 group（送 LLM 控 token，不影响表格全量展示）。"""
+    """在统一字符预算内选语义证据，并保证每个有证据的模块至少一个代码对。"""
     by_mod: dict[str, list[dict]] = defaultdict(list)
     for g in groups:
         by_mod[g["module"]].append(g)
-    out: list[dict] = []
+    ranked: dict[str, list[dict]] = {}
     for mod in MODULES:
-        gs = sorted(by_mod.get(mod, []), key=lambda x: -x["overall_sim"])
-        out.extend(gs[:n])
-    return out
+        ranked[mod] = sorted(
+            by_mod.get(mod, []), key=lambda x: -x["overall_sim"]
+        )[:max(1, n)]
+
+    selected: dict[str, list[dict]] = defaultdict(list)
+    used = 0
+    # 第一轮优先保证模块覆盖；单对代码已经有统一截断上限，不会被超长函数挤掉。
+    for mod in MODULES:
+        if ranked[mod]:
+            group = ranked[mod][0]
+            selected[mod].append(group)
+            used += _semantic_group_cost(group)
+    # 后续按轮次公平补充高相似证据，避免文件系统等大模块独占上下文。
+    for index in range(1, max(1, n)):
+        progressed = False
+        for mod in MODULES:
+            if index >= len(ranked[mod]):
+                continue
+            group = ranked[mod][index]
+            cost = _semantic_group_cost(group)
+            if used + cost > _SEMANTIC_PROMPT_CHAR_BUDGET:
+                continue
+            selected[mod].append(group)
+            used += cost
+            progressed = True
+        if not progressed:
+            break
+    return [group for mod in MODULES for group in selected.get(mod, [])]
 
 
 def _exclude_confirmed_review_groups(review_groups: list[dict],
@@ -1540,6 +1569,146 @@ def select_model_review_pairs(
     }
 
 
+def _secondary_candidate_has_independent_strong_evidence(candidate: dict) -> bool:
+    """预算外候选是否强到值得在首选候选排除后补充送审。
+
+    规则仅使用代码证据，不依赖仓库、路径、年份或函数名。普通次级来源不会形成评委报告中的
+    “未复核”队列；只有指纹、低频字面量或高覆盖具体函数对应等独立强证据才消耗补充模型预算。
+    """
+    matched = int(candidate.get("matched_lines") or 0)
+    coverage = float(candidate.get("match_coverage") or 0.0)
+    line_similarity = float(candidate.get("line_similarity") or 0.0)
+    identity = float(candidate.get("function_identity_score") or 0.0)
+    relation = str(candidate.get("function_identity_relation") or "")
+    unique_strings = int(candidate.get("unique_string_matches") or 0)
+
+    if candidate.get("normalized_fingerprint_match"):
+        return True
+    if (unique_strings > 0 and line_similarity >= 0.55
+            and matched >= 8 and coverage >= 0.50):
+        return True
+    if relation in ("exact_counterpart", "same_name_code_clone"):
+        return bool(
+            (line_similarity >= 0.85 and matched >= 8 and coverage >= 0.60)
+            or (line_similarity >= 0.65 and matched >= 12 and coverage >= 0.60)
+        )
+    return bool(
+        candidate.get("segment_evidence")
+        and line_similarity >= 0.70 and matched >= 12
+        and coverage >= 0.60 and identity >= 0.80
+    )
+
+
+def _target_has_active_review_result(suspect: dict) -> bool:
+    if suspect.get("tier") not in ("review", "weak"):
+        return False
+    if suspect.get("review_verdict") in ("借鉴", "疑似", "规则保留", "复核失败"):
+        return True
+    return suspect.get("model_review_selection") in ("selected", "selected_secondary")
+
+
+def _suspect_review_target_key(suspect: dict) -> tuple:
+    query = suspect.get("query_func") or {}
+    return (
+        query.get("repo_id", ""), query.get("file_path", ""),
+        int(query.get("start_line") or 0), query.get("func_name", ""),
+    )
+
+
+def select_exceptional_secondary_review_pairs(suspects: list[dict]) -> list[dict]:
+    """为首选候选已排除的目标函数挑选一份独立强证据次级候选补充送审。"""
+    active_targets = {
+        _suspect_review_target_key(suspect)
+        for suspect in suspects if _target_has_active_review_result(suspect)
+    }
+    cleared_targets = {
+        _suspect_review_target_key(suspect)
+        for suspect in suspects
+        if suspect.get("tier") == "dismissed"
+        and suspect.get("dismiss_reason") == "review_非借鉴"
+    }
+
+    representatives: dict[tuple, dict] = {}
+    for group in collect_review_pairs(suspects, keep_tiers=("review", "weak")):
+        target_key = _review_target_key(group)
+        candidate = (group.get("candidates") or [{}])[0]
+        if target_key in active_targets or target_key not in cleared_targets:
+            continue
+        if candidate.get("model_review_selection") != "deferred_secondary":
+            continue
+        if candidate.get("review_verdict", "未复核") != "未复核":
+            continue
+        if not _secondary_candidate_has_independent_strong_evidence(candidate):
+            continue
+        content_key = (target_key, _review_content_key(group))
+        previous = representatives.get(content_key)
+        if previous is None or _review_selection_rank(group) > _review_selection_rank(previous):
+            representatives[content_key] = group
+
+    by_target: dict[tuple, list[dict]] = defaultdict(list)
+    for group in representatives.values():
+        by_target[_review_target_key(group)].append(group)
+    selected = [
+        max(groups, key=_review_selection_rank)
+        for groups in by_target.values() if groups
+    ]
+    selected_content_keys = {
+        (_review_target_key(group), _review_content_key(group)) for group in selected
+    }
+    for suspect in suspects:
+        if suspect.get("tier") not in ("review", "weak"):
+            continue
+        candidate = suspect.get("candidate_func") or {}
+        key = (
+            _suspect_review_target_key(suspect),
+            (str(candidate.get("func_name") or ""), str(candidate.get("raw_code") or "")),
+        )
+        if key in selected_content_keys:
+            suspect["model_review_selection"] = "selected_secondary"
+            suspect.pop("model_review_note", None)
+    for group in selected:
+        group["model_review_selection"] = "selected_secondary"
+        if group.get("candidates"):
+            group["candidates"][0]["model_review_selection"] = "selected_secondary"
+    return sorted(selected, key=lambda group: (
+        MODULES.index(group["module"]), -_review_selection_rank(group)[0],
+        group.get("query_file", ""), int(group.get("query_start") or 0),
+    ))
+
+
+def finalize_secondary_review_candidates(suspects: list[dict]) -> dict[str, int]:
+    """把剩余预算外候选变为补充来源或移出报告，杜绝形成独立未复核模块。"""
+    active_targets = {
+        _suspect_review_target_key(suspect)
+        for suspect in suspects if _target_has_active_review_result(suspect)
+    }
+    cleared_targets = {
+        _suspect_review_target_key(suspect)
+        for suspect in suspects
+        if suspect.get("tier") == "dismissed"
+        and suspect.get("dismiss_reason") == "review_非借鉴"
+    }
+    supplemental = dismissed = 0
+    for suspect in suspects:
+        if (suspect.get("tier") not in ("review", "weak")
+                or suspect.get("model_review_selection") != "deferred_secondary"):
+            continue
+        target_key = _suspect_review_target_key(suspect)
+        if target_key in active_targets:
+            suspect["model_review_selection"] = "supplemental_source"
+            suspect.pop("model_review_note", None)
+            supplemental += 1
+        elif target_key in cleared_targets:
+            suspect["tier"] = "dismissed"
+            suspect["dismiss_reason"] = "review_secondary_after_primary_cleared"
+            suspect["review_gate_reason"] = (
+                "首选候选已经模型排除，且该次级候选未形成需要补充送审的独立强证据"
+            )
+            suspect.pop("model_review_note", None)
+            dismissed += 1
+    return {"supplemental": supplemental, "dismissed": dismissed}
+
+
 # ─── 4. 调用 opencode ────────────────────────────────────────────────────────
 
 def _opencode_env() -> dict:
@@ -1638,9 +1807,11 @@ def _build_analysis_message(
                 f"`{c['ref_func']}`（相似度 {c['sim']}，{ck}）"
             )
         best = g["candidates"][0] if g["candidates"] else {}
+        query_code = (g.get("query_code") or "")[:_SEMANTIC_CODE_CHAR_LIMIT]
+        ref_code = (best.get("ref_code") or "")[:_SEMANTIC_CODE_CHAR_LIMIT]
         lines += [
-            "新作品代码：", "```", g["query_code"], "```",
-            "最强候选来源代码：", "```", best.get("ref_code", ""), "```", "",
+            "新作品代码（按统一上下文预算截取）：", "```", query_code, "```",
+            "最强候选来源代码（按统一上下文预算截取）：", "```", ref_code, "```", "",
         ]
 
     lines += [
@@ -1670,6 +1841,32 @@ def run_semantic_analysis(
     cache_dir   = work_dir.resolve() / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
+    def validate_complete(content: str) -> None:
+        expected_modules = list(dict.fromkeys(
+            str(group.get("module") or "") for group in file_pairs
+            if group.get("module")
+        ))
+        missing_modules = [
+            module for module in expected_modules
+            if not _extract_module_analysis(content, module).strip()
+        ]
+        if missing_modules:
+            raise RuntimeError(
+                "语义级分析模型未返回完整模块：" + "、".join(missing_modules))
+        incomplete_modules = []
+        for module in expected_modules:
+            fragment = _extract_module_analysis(content, module)
+            visible = html.unescape(re.sub(r"<[^>]+>", " ", fragment))
+            visible = re.sub(r"\s+", " ", visible).strip()
+            if (len(visible) < 60 or "<p" not in fragment.lower()
+                    or "<li" not in fragment.lower()):
+                incomplete_modules.append(module)
+        if incomplete_modules:
+            raise RuntimeError(
+                "语义级分析模块内容不完整：" + "、".join(incomplete_modules))
+        from src.oskernel_agent.report_quality import assert_report_complete
+        assert_report_complete(content)
+
     # 缓存
     pair_sig = json.dumps(
         [(g["module"], g["query_func"], g["overall_sim"], g.get("query_code", ""),
@@ -1685,8 +1882,13 @@ def run_semantic_analysis(
         cached_html = html_cache.read_text(encoding="utf-8")
         from src.oskernel_agent.pipeline.lang_guard import needs_translation
         if not needs_translation(cached_html):
-            logger.info("[semantic] 中文缓存命中 → {}", html_cache)
-            return cached_html
+            try:
+                validate_complete(cached_html)
+            except RuntimeError as exc:
+                logger.warning("[semantic] 缓存未通过完整性门禁，重新生成：{}", exc)
+            else:
+                logger.info("[semantic] 中文缓存命中 → {}", html_cache)
+                return cached_html
         logger.warning("[semantic] 缓存含英文正文，忽略并重新生成：{}", html_cache)
 
     # 读取 API 配置
@@ -1698,8 +1900,7 @@ def run_semantic_analysis(
         api_key = base_url = ""
 
     if not api_key:
-        logger.warning("[semantic] 未找到 API key（config.toml），使用规则兜底")
-        return _fallback_analysis(file_pairs, submodule_stats)
+        raise RuntimeError("语义级分析未完成：config.toml 中没有可用的 API key")
 
     user_msg = _build_analysis_message(query_repo_id, file_pairs, submodule_stats)
     logger.info("[semantic] 调用 DeepSeek API 进行语义分析（消息 {} 字符）", len(user_msg))
@@ -1722,8 +1923,7 @@ def run_semantic_analysis(
         )
         html_text = (resp.choices[0].message.content or "").strip()
     except Exception as e:
-        logger.warning("[semantic] API 调用失败：{}，使用规则兜底", e)
-        return _fallback_analysis(file_pairs, submodule_stats)
+        raise RuntimeError(f"语义级分析模型调用失败：{type(e).__name__}: {e}") from e
 
     # 提取 HTML 片段（模型可能在 markdown 代码块里）
     html_content = _extract_html_from_text(html_text) or html_text
@@ -1732,18 +1932,20 @@ def run_semantic_analysis(
     from src.oskernel_agent.pipeline.lang_guard import normalize_html_language
     html_content, lang_stats = normalize_html_language(html_content)
     if not lang_stats["complete"]:
-        logger.warning(
-            "[semantic] 中文兜底仍未通过校验，改用确定性的中文规则报告（残留 {} 处）",
-            lang_stats["remaining"],
-        )
-        html_content = _fallback_analysis(file_pairs, submodule_stats)
+        raise RuntimeError(
+            f"语义级分析未通过中文交付校验：仍有 {lang_stats['remaining']} 处")
     elif lang_stats["translated"]:
         logger.warning("[semantic] 首轮残留英文，已启用保留的翻译兜底")
+
+    validate_complete(html_content)
 
     output_path.write_text(html_content, encoding="utf-8")
     html_cache.write_text(html_content, encoding="utf-8")
     logger.info("[semantic] 分析完成（{} 字符）", len(html_content))
     return html_content
+
+
+_INNOVATION_CODE_CHAR_LIMIT = 2_500
 
 
 _INNOVATION_SYSTEM = """你是 OS 内核代码差异分析助手。你的任务不是复述 README，也不是把
@@ -1773,7 +1975,8 @@ _INNOVATION_SYSTEM = """你是 OS 内核代码差异分析助手。你的任务�
   "reference_keys":["r0001"]
 }]}
 
-输出 2–6 个最有实质性的条目；确实不足 2 个时可以更少，不能凑数。所有自然语言字段使用简体中文。
+输出 1–4 个最有实质性的条目；证据不足时可以返回空数组，不能凑数。每个自然语言字段不超过
+160 个汉字，所有自然语言字段使用简体中文，必须结束全部 JSON 字符串并闭合对象。
 """
 
 
@@ -1785,7 +1988,7 @@ def _innovation_message(query_repo_id: str, candidates: list[dict]) -> str:
             references.append({
                 key: value for key, value in reference.items()
                 if key not in ("raw_code", "analysis_code")
-            } | {"raw_code": reference.get("analysis_code") or ""})
+            } | {"raw_code": (reference.get("analysis_code") or "")[:_INNOVATION_CODE_CHAR_LIMIT]})
         compact.append({
             "key": candidate["key"],
             "module": candidate["module_display"],
@@ -1793,7 +1996,7 @@ def _innovation_message(query_repo_id: str, candidates: list[dict]) -> str:
             "target": {
                 "file": candidate["file"], "start": candidate["start"], "end": candidate["end"],
                 "func": candidate["func"],
-                "raw_code": candidate.get("analysis_code") or "",
+                "raw_code": (candidate.get("analysis_code") or "")[:_INNOVATION_CODE_CHAR_LIMIT],
             },
             "references": references,
         })
@@ -1805,7 +2008,7 @@ def _innovation_message(query_repo_id: str, candidates: list[dict]) -> str:
     )
 
 
-def _parse_json_object(text: str) -> dict | None:
+def _parse_innovation_json_object(text: str) -> dict | None:
     cleaned = (text or "").strip()
     fenced = re.search(r"```(?:json)?\s*(.*?)```", cleaned, re.DOTALL | re.IGNORECASE)
     if fenced:
@@ -1835,7 +2038,7 @@ def run_innovation_analysis(
     if not candidates:
         return []
     if skip_llm:
-        return _fallback_innovation_points(candidates)
+        return []
 
     signature = json.dumps(
         [(c["key"], c["file"], c["func"], c.get("reference_repo"), c.get("raw_code", ""),
@@ -1854,7 +2057,10 @@ def run_innovation_analysis(
     if cache_path.is_file():
         try:
             cached = json.loads(cache_path.read_text(encoding="utf-8"))
-            return _normalize_innovation_points(cached, candidates)
+            normalized = _normalize_innovation_points(cached, candidates)
+            if normalized or cached.get("innovations") == []:
+                return normalized
+            logger.warning("[innovation] 缓存未通过完整性门禁，重新生成")
         except (OSError, json.JSONDecodeError):
             pass
 
@@ -1865,27 +2071,51 @@ def run_innovation_analysis(
     except Exception:
         api_key = base_url = ""
     if not api_key:
-        logger.warning("[innovation] 未找到 API key，使用保守代码差异候选")
-        return _fallback_innovation_points(candidates)
+        raise RuntimeError("创新实现语义归纳未完成：config.toml 中没有可用的 API key")
 
     try:
         from openai import OpenAI
         client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
-        response = client.chat.completions.create(
-            model=innovation_model,
-            messages=[
-                {"role": "system", "content": _INNOVATION_SYSTEM},
-                {"role": "user", "content": _innovation_message(query_repo_id, candidates)},
-            ],
-            temperature=0.15,
-            max_tokens=5000,
-        )
-        parsed = _parse_json_object(response.choices[0].message.content or "")
-    except Exception as exc:
-        logger.warning("[innovation] 代码差异归纳失败：{}，使用保守候选", exc)
+        user_message = _innovation_message(query_repo_id, candidates)
         parsed = None
+        last_error = "模型未返回内容"
+        for attempt in range(2):
+            system_message = _INNOVATION_SYSTEM
+            if attempt:
+                system_message += (
+                    "\n上一次响应未形成完整 JSON。本次最多返回 3 个条目，进一步压缩文字；"
+                    "只输出一个完整 JSON 对象。"
+                )
+            kwargs = {
+                "model": innovation_model,
+                "messages": [
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": user_message},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 6000,
+            }
+            if attempt == 0:
+                kwargs["response_format"] = {"type": "json_object"}
+            try:
+                response = client.chat.completions.create(**kwargs)
+                raw = response.choices[0].message.content or ""
+                parsed = _parse_innovation_json_object(raw)
+                if parsed is not None:
+                    break
+                last_error = "响应不是完整 JSON 对象"
+            except Exception as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
+                if attempt:
+                    raise
+        if parsed is None:
+            raise ValueError(last_error)
+    except Exception as exc:
+        raise RuntimeError(
+            f"创新实现语义归纳模型调用失败：{type(exc).__name__}: {exc}"
+        ) from exc
     if parsed is None:
-        return _fallback_innovation_points(candidates)
+        raise RuntimeError("创新实现语义归纳模型未返回合法 JSON")
     try:
         cache_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError:
@@ -1907,45 +2137,6 @@ def _extract_html_from_text(text: str) -> str:
     if m2:
         return m2.group(0).strip()
     return ""
-
-
-def _fallback_analysis(file_pairs: list[dict], submodule_stats: dict) -> str:
-    """LLM 不可用时的规则兜底分析 HTML（按 query 函数聚合，列出全部候选）。"""
-    by_mod: dict[str, list[dict]] = defaultdict(list)
-    for g in file_pairs:
-        by_mod[g["module"]].append(g)
-
-    parts = ['<div class="fallback-analysis">']
-    for mod in MODULES:
-        groups = by_mod.get(mod, [])
-        if not groups:
-            continue
-        disp = _MODULE_DISPLAY.get(mod, mod)
-        stats = submodule_stats.get(mod, {})
-        items = []
-        for g in groups:
-            cands = "；".join(
-                f'{c["ref_repo"]}/{c["ref_file"]}:{c["ref_start"]}'
-                f'（相似度 {c["sim"]}，{_clone_summary(c)}）'
-                for c in g["candidates"]
-            )
-            items.append(
-                f'<li><code>{html.escape(g["query_file"])}:{g["query_start"]}</code> '
-                f'函数 <code>{html.escape(g["query_func"])}</code>'
-                f'（{_tier_disp(g["overall_tier"])}，整体相似度 {g["overall_sim"]}）'
-                f'<br><span class="text-slate-500">候选来源：{html.escape(cands)}</span></li>'
-            )
-        parts.append(
-            f'<section data-module="{html.escape(mod)}">'
-            f'<h3>{html.escape(disp)}（{html.escape(mod)}）</h3>'
-            f'<p>检测到高置信同源代码 {stats.get("confirmed",0)} 个函数，'
-            f'主要匹配仓库：{html.escape(stats.get("top_source","—"))}。'
-            f'（未启用 LLM 语义分析，以下为规则汇总）</p>'
-            f'<ul>{"".join(items)}</ul>'
-            f'</section>'
-        )
-    parts.append('</div>')
-    return "\n".join(parts)
 
 
 # ─── 5. 生成完整 HTML 报告 ────────────────────────────────────────────────────
@@ -3215,23 +3406,51 @@ def _innovation_section(points: list[dict], linker, query_repo_id: str,
 
 
 def _original_section(original_funcs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
-    """只披露暂未命中数量，不向评委铺陈可能被误读为原创证明的大清单。"""
+    """列出全部暂未命中函数，同时明确该清单不构成原创认定。"""
     sid = "sec-original"
     if not original_funcs:
         body = ("<p class='text-slate-500 text-sm'>没有暂未命中的函数"
                 "（所有函数都与历史代码库有相似命中）。</p>")
     else:
+        ordered = sorted(original_funcs, key=lambda item: (
+            MODULES.index(item.get("module"))
+            if item.get("module") in MODULES else len(MODULES),
+            str(item.get("file") or ""), int(item.get("start") or 0),
+            str(item.get("func") or ""),
+        ))
+        rows = []
+        for item in ordered:
+            module = item.get("module", "other")
+            module_name = _MODULE_DISPLAY.get(module, _MODULE_DISPLAY["other"])
+            file_path = str(item.get("file") or "")
+            start = int(item.get("start") or 0)
+            end = int(item.get("end") or 0)
+            lines = int(item.get("lines") or max(0, end - start + 1))
+            rows.append(
+                '<tr>'
+                f'<td>{html.escape(module_name)}</td>'
+                '<td class="font-mono text-xs">'
+                + _make_gitlab_anchor(
+                    linker, query_repo_id, file_path, start, end,
+                )
+                + '</td>'
+                f'<td class="font-mono text-xs">{html.escape(str(item.get("func") or ""))}</td>'
+                f'<td>{lines} 行</td>'
+                '</tr>'
+            )
         body = (
             '<p class="text-sm text-slate-600 mb-3">'
             f'共 <b>{len(original_funcs)}</b> 个函数在当前历史库中暂未形成有效相似命中。'
             '<b>这只表示系统暂未检出，不等于原创认定</b>；可能仍受历史库覆盖、召回与阈值影响。'
-            '为避免评委把“未检出”大清单误读为原创证明，本报告不展开这些条目；查全抽样和'
-            '无命中复核只在内部质量审计中执行。'
+            '下表完整列出这些函数，供评委定位代码和结合答辩材料核查，不据此自动加分。'
             '</p>'
+            '<div class="overflow-x-auto"><table><thead><tr>'
+            '<th>子系统</th><th>新作品 文件:行</th><th>函数</th><th>规模</th>'
+            '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div>'
         )
     section = _collapsible_html(
         sid, "附录：暂未检出相似函数（不等于原创）", body, default_open=False,
-        tone="appendix", subtitle="只保留统计边界，不把未命中当作原创证据",
+        tone="appendix", subtitle="完整列出未命中函数，但不把未命中当作原创证据",
     )
     toc = _toc_link(sid, "暂未检出相似函数", str(len(original_funcs)), "original")
     return toc, section
@@ -3241,7 +3460,7 @@ _CDN_HEAD = """
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 """
 
-_STYLES = """
+_STYLES = r"""
 <style>
 :root{--bg:#f3f6fa;--card:#fff;--line:#dbe3ec;--line-soft:#e9eef4;--text:#172033;
   --muted:#64748b;--blue:#2563eb;--blue-soft:#eff6ff;--red:#dc2626;--amber:#d97706;
@@ -3336,9 +3555,9 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
 .main tbody>tr:hover>td{background:#fafcff}
 .source-metrics-table{margin-top:.7rem;overflow-x:auto;border:1px solid var(--line-soft);border-radius:9px}
 /* 时间线与功能簇 */
-.lineage-summary,.compliance-grid,.technical-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.65rem;margin-bottom:.9rem}
-.lineage-summary>div,.compliance-grid>div,.technical-grid>div{display:flex;min-width:0;flex-direction:column;gap:.2rem;padding:.68rem .75rem;border:1px solid var(--line-soft);border-radius:9px;background:#fafcff}
-.lineage-summary span,.compliance-grid span,.technical-grid span{font-size:.66rem;color:#7b8ba1}.lineage-summary b,.compliance-grid b,.technical-grid b{font-size:.77rem;overflow-wrap:anywhere}
+.lineage-summary,.compliance-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.65rem;margin-bottom:.9rem}
+.lineage-summary>div,.compliance-grid>div{display:flex;min-width:0;flex-direction:column;gap:.2rem;padding:.68rem .75rem;border:1px solid var(--line-soft);border-radius:9px;background:#fafcff}
+.lineage-summary span,.compliance-grid span{font-size:.66rem;color:#7b8ba1}.lineage-summary b,.compliance-grid b{font-size:.77rem;overflow-wrap:anywhere}
 .cluster-card{margin:.65rem 0;border:1px solid var(--line);border-radius:10px;overflow:hidden}.cluster-card[data-priority="critical"]{border-color:#efb2b2}
 .cluster-head{display:grid;width:100%;grid-template-columns:2.4rem minmax(11rem,1fr) auto auto 1rem;align-items:center;gap:.7rem;padding:.72rem .8rem;border:0;background:#f8fafc;text-align:left;cursor:pointer}
 .cluster-card[data-priority="critical"] .cluster-head{background:#fff7f7}.cluster-index{font:.72rem ui-monospace,SFMono-Regular,Consolas;color:#64748b}.cluster-main{display:flex;min-width:0;flex-direction:column}.cluster-main b{font-size:.82rem}.cluster-main small{margin-top:.12rem;color:#718096;font-size:.66rem}
@@ -3407,10 +3626,10 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
   .layout{display:block;padding:.8rem}.toc{position:static;width:auto;margin-bottom:1rem}.toc-scroll{max-height:none}
   .toc-header{padding:.8rem 1rem}.toc-scroll{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.35rem .75rem}
   .toc-group+.toc-group{margin:0;padding:0;border:0}.main{max-width:none}.report-header h1{font-size:1.35rem}
-  .module-summary-source{width:100%;margin-left:0}.lineage-summary,.compliance-grid,.technical-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .module-summary-source{width:100%;margin-left:0}.lineage-summary,.compliance-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .cluster-head{grid-template-columns:2.2rem minmax(8rem,1fr) auto 1rem}.cluster-metrics{display:none}
 }
-@media(max-width:620px){.toc-scroll{grid-template-columns:1fr}.summary-heading{display:block}.summary-repo{display:block;max-width:none;text-align:left;margin-top:.4rem}.lineage-summary,.compliance-grid,.technical-grid,.innovation-evidence-grid{grid-template-columns:1fr}.innovation-evidence-grid .innovation-counter{grid-column:auto}.cluster-head{grid-template-columns:2rem minmax(0,1fr) 1rem}.cluster-priority{display:none}}
+@media(max-width:620px){.toc-scroll{grid-template-columns:1fr}.summary-heading{display:block}.summary-repo{display:block;max-width:none;text-align:left;margin-top:.4rem}.lineage-summary,.compliance-grid,.innovation-evidence-grid{grid-template-columns:1fr}.innovation-evidence-grid .innovation-counter{grid-column:auto}.cluster-head{grid-template-columns:2rem minmax(0,1fr) 1rem}.cluster-priority{display:none}}
 @media print{
   .toc,.to-top{display:none!important}
   body{background:#fff}
@@ -4276,17 +4495,20 @@ def _review_one(client, model: str, g: dict, timeout: int) -> dict:
 
 def run_review_judgment(review_pairs: list[dict], work_dir: Path,
                         model: str | None = None, timeout: int = 30,
-                        workers: int = 8) -> None:
+                        workers: int = 8,
+                        cache_lookup_pairs: list[dict] | None = None) -> list[dict]:
     """对候选逐对执行“职责门控→同源复核”，原地写入严格校验后的结果与证据。
 
     模型默认 deepseek-v4-flash（可经环境变量 REVIEW_MODEL 覆盖）；曾用 qwen-turbo，但实测
     qwen-turbo 无法识别「异步重构 / 不同锁机制 / ABI 受限字段拼接」等语义级非借鉴（把
     register_timer_callback、fmt 误判为借鉴），deepseek-v4-flash 能正确识别（24 vs 8 个非借鉴）。
     base_url / api_key 复用 config.toml 的 [api]。职责不一致不会调用第二阶段；有效结果逐对缓存，
-    失败结果下次运行自动重试。
+    失败结果下次运行自动重试。``cache_lookup_pairs`` 只查询已有缓存、不产生额外模型调用；
+    用于给本轮预算外候选回填此前已经取得的有效结论。
     """
-    if not review_pairs:
-        return
+    cache_lookup_pairs = cache_lookup_pairs or review_pairs
+    if not review_pairs and not cache_lookup_pairs:
+        return []
     model = model or os.getenv("REVIEW_MODEL", "deepseek-v4-flash")
     try:
         workers = max(1, int(os.getenv("REVIEW_WORKERS", str(workers))))
@@ -4332,17 +4554,27 @@ def run_review_judgment(review_pairs: list[dict], work_dir: Path,
         except ValueError:
             return False
 
+    selected_cache_keys = {_key(g) for g in review_pairs}
+
+    def _write_result(g: dict, value: dict) -> None:
+        g["review_verdict"] = value.get("verdict", "未复核")
+        g["review_reason"] = value.get("reason", "本次未获得有效模型结论")
+        g["review_responsibility"] = value.get("responsibility", "未判定")
+        g["review_responsibility_reason"] = value.get("responsibility_reason", "")
+        g["review_evidence_anchors"] = value.get("evidence_anchors", [])
+
     if not api_key:
-        logger.warning("[review] 未配置 API key，疑似借鉴跳过 LLM 复核")
-        for g in review_pairs:
-            g.update({
-                "review_verdict": "未复核",
-                "review_reason": "未配置 API key",
-                "review_responsibility": "未判定",
-                "review_responsibility_reason": "",
-                "review_evidence_anchors": [],
-            })
-        return
+        logger.warning("[review] 未配置 API key，未命中缓存的入队候选跳过 LLM 复核")
+        resolved = []
+        for g in cache_lookup_pairs:
+            value = cache.get(_key(g), {})
+            if _valid_cached_result(value, g):
+                _write_result(g, value)
+                resolved.append(g)
+            elif _key(g) in selected_cache_keys:
+                _write_result(g, {"verdict": "未复核", "reason": "未配置 API key"})
+                resolved.append(g)
+        return resolved
 
     from openai import OpenAI
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -4373,6 +4605,13 @@ def run_review_judgment(review_pairs: list[dict], work_dir: Path,
         len(review_pairs) - len(pending_pairs), len(pending), duplicate_jobs, model,
         workers,
     )
+    cache_only_hits = sum(
+        1 for g in cache_lookup_pairs
+        if _key(g) not in selected_cache_keys
+        and _valid_cached_result(cache.get(_key(g)), g)
+    )
+    if cache_only_hits:
+        logger.info("[review] 另回填 {} 个预算外候选的既有有效缓存，不增加模型调用", cache_only_hits)
 
     def _work(g: dict):
         return _key(g), _review_one(client, model, g, timeout)
@@ -4416,13 +4655,14 @@ def run_review_judgment(review_pairs: list[dict], work_dir: Path,
                     cache[k] = result
             _save_cache()
 
-    for g in review_pairs:
+    resolved = []
+    for g in cache_lookup_pairs:
         c = cache.get(_key(g), {})
-        g["review_verdict"] = c.get("verdict", "未复核")
-        g["review_reason"] = c.get("reason", "本次未获得有效模型结论")
-        g["review_responsibility"] = c.get("responsibility", "未判定")
-        g["review_responsibility_reason"] = c.get("responsibility_reason", "")
-        g["review_evidence_anchors"] = c.get("evidence_anchors", [])
+        if not _valid_cached_result(c, g) and _key(g) not in selected_cache_keys:
+            continue
+        _write_result(g, c)
+        resolved.append(g)
+    return resolved
 
 
 def _model_negative_requires_human_review(suspect: dict, responsibility: str) -> bool:
@@ -4515,6 +4755,37 @@ def _apply_review_verdicts(suspects: list[dict], groups: list[dict]) -> tuple[in
             # 不确定不是阴性证据：所有档位原样保留，交给人工复核。
             pass
     return up, dn
+
+
+def _assert_model_review_complete(suspects: list[dict]) -> None:
+    """正常交付时，所有仍保留的模型难例都必须有通过协议校验的有效结论。"""
+    from src.oskernel_agent.report_quality import IncompleteReportError
+
+    accepted = {"借鉴", "疑似", "规则保留", "非借鉴"}
+    incomplete = [
+        suspect for suspect in suspects
+        if suspect.get("tier") in ("review", "weak")
+        and suspect.get("model_review_selection") != "supplemental_source"
+        and suspect.get("review_verdict") not in accepted
+    ]
+    if not incomplete:
+        return
+    targets = {
+        (
+            (suspect.get("query_func") or {}).get("file_path", ""),
+            int((suspect.get("query_func") or {}).get("start_line") or 0),
+            (suspect.get("query_func") or {}).get("func_name", ""),
+        )
+        for suspect in incomplete
+    }
+    failures = sum(
+        1 for suspect in incomplete
+        if suspect.get("review_verdict") == "复核失败"
+    )
+    raise IncompleteReportError(
+        f"模型复核未完整完成：{len(targets)} 个目标函数仍有 {len(incomplete)} 个有效候选对"
+        f"未取得合格结论（其中调用或格式失败 {failures} 对）"
+    )
 
 
 def _review_section(review_pairs: list[dict], linker, query_repo_id: str,
@@ -4623,37 +4894,93 @@ _AI_STAGE_DISP = {
 
 
 def _ai_detect_section(ai_data: dict | None, linker, query_repo_id: str) -> tuple[str, str]:
-    """AI 生成代码检测：整体 KPI + 疑似 AI 函数明细（含指标通俗说明）。"""
-    if not ai_data or ai_data.get("status") != "ok":
-        body = ('<p class="text-sm text-slate-500">当前批次未采集可用的 AI 代码统计信号；'
-                '这不能推断作品未使用 AI。比赛合规应以队伍披露的工具、场景、生成范围、'
-                '人工修改、交互记录和验证方式为准。</p>')
-        section = _collapsible_html(
-            "sec-aidetect", "附录：AI 使用披露提示", body, default_open=False,
-            tone="appendix", subtitle="概率信号不能替代队伍披露材料与现场解释",
+    """只渲染本次 AI 检测模型产物，不用仓库披露文件代替模型判断。"""
+    from src.oskernel_agent.report_quality import IncompleteReportError
+
+    status = str((ai_data or {}).get("status") or "")
+    scope = (ai_data or {}).get("scope") or {}
+    # 仓库中确实没有归属当前作品、且属于检测器支持语言的函数，是可验证的“不适用”状态，
+    # 不是模型失败。该状态保留空结果模块，避免把 0 个适用函数误写成“模型检测通过”。
+    try:
+        scope_eligible = int(scope.get("eligible_functions") or 0)
+        scope_analyzed = int(scope.get("analyzed_functions") or 0)
+    except (TypeError, ValueError) as exc:
+        raise IncompleteReportError("AI 检测产物的适用范围统计格式无效") from exc
+    if status == "skipped" and scope and scope_eligible == 0 and scope_analyzed == 0:
+        reason = str((ai_data or {}).get("reason") or "当前没有符合检测口径的函数")
+        try:
+            extracted = int(scope.get("extracted_functions") or 0)
+            borrowed = int(scope.get("borrowed_excluded") or 0)
+            third_party = int(scope.get("third_party_excluded") or 0)
+        except (TypeError, ValueError) as exc:
+            raise IncompleteReportError("AI 检测空结果的排除统计格式无效") from exc
+        if min(extracted, borrowed, third_party) < 0:
+            raise IncompleteReportError("AI 检测空结果包含负数统计")
+        body = (
+            '<p class="text-sm text-slate-600"><b>本次 AI 代码检测不适用。</b>'
+            f'{html.escape(reason)}。共抽取 <b>{extracted}</b> 个受支持语言函数，'
+            f'其中同源代码排除 <b>{borrowed}</b> 个、第三方复用排除 <b>{third_party}</b> 个，'
+            '最终符合归属口径的函数为 <b>0</b> 个，因此没有可供模型判断的对象；'
+            '这不表示作品未使用 AI。</p>'
         )
-        return _toc_link("sec-aidetect", "AI 使用披露提示", "0", "zero"), section
+        section = _collapsible_html(
+            "sec-aidetect", "附录：AI 代码检测", body, default_open=False,
+            tone="appendix", subtitle="经确定性适用范围检查后无可检测函数",
+        )
+        return _toc_link("sec-aidetect", "AI 代码检测", "不适用", "zero"), section
+
+    if status != "ok":
+        reason = str((ai_data or {}).get("reason") or "未生成 AI 检测模型产物")
+        raise IncompleteReportError(f"AI 代码检测未完整完成：{reason}")
+
     ov = (ai_data.get("aggregated") or {}).get("overall") or {}
-    if not ov:
-        body = '<p class="text-sm text-slate-500">AI 检测产物中没有整体统计，无法形成有效附录。</p>'
-        section = _collapsible_html(
-            "sec-aidetect", "附录：AI 生成代码检测", body, default_open=False,
-            tone="appendix", subtitle="独立辅助信号，不改变同源代码与候选创新结论",
+    required_overall = {
+        "total_functions", "llm_count", "human_count", "uncertain_count",
+        "llm_ratio_by_count", "llm_ratio_by_loc",
+    }
+    missing = sorted(required_overall - set(ov))
+    if missing or not str(ai_data.get("model_id") or "").strip():
+        detail = "、".join(missing) if missing else "model_id"
+        raise IncompleteReportError(f"AI 检测产物字段不完整：{detail}")
+    try:
+        total_functions = int(ov.get("total_functions") or 0)
+        class_counts = [
+            int(ov.get(key) or 0) for key in ("llm_count", "human_count", "uncertain_count")
+        ]
+        ratios = [float(ov[key]) for key in ("llm_ratio_by_count", "llm_ratio_by_loc")]
+    except (TypeError, ValueError) as exc:
+        raise IncompleteReportError("AI 检测产物的整体统计格式无效") from exc
+    classified_functions = sum(class_counts)
+    if (total_functions <= 0 or min(class_counts) < 0
+            or classified_functions != total_functions
+            or not all(0.0 <= ratio <= 1.0 for ratio in ratios)
+            or scope_analyzed <= 0 or scope_eligible < scope_analyzed):
+        raise IncompleteReportError(
+            "AI 检测产物统计不一致：分类总数、比例或实际检测范围无效"
         )
-        return _toc_link("sec-aidetect", "AI 生成代码检测附录", "0", "zero"), section
     ag = ai_data["aggregated"]
     kpis = (
         '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-1 mb-3">'
         + _kpi(f'{ov.get("llm_count", 0)}', "疑似 AI 生成（函数）", "#9333ea")
         + _kpi(f'{ov.get("human_count", 0)}', "判为人工编写（函数）", "#16a34a")
         + _kpi(f'{ov.get("uncertain_count", 0)}', "无法判定（信号不足）", "#64748b")
-        + _kpi(f'{ov.get("llm_ratio_by_count", 0.0)*100:.0f}%', "疑似 AI 占比（按函数）", "#9333ea")
+        + _kpi(f'{ov.get("llm_ratio_by_count", 0.0)*100:.0f}%', "可判定函数中的疑似 AI 占比", "#9333ea")
         + '</div>'
     )
+    scope = ai_data.get("scope") or {}
+    eligible = int(scope.get("eligible_functions") or ov.get("total_functions", 0))
+    analyzed = int(scope.get("analyzed_functions") or ov.get("total_functions", 0))
+    third_party_excluded = int(scope.get("third_party_excluded") or 0)
+    scope_note = (
+        f'送入模型前另排除 <b>{third_party_excluded}</b> 个已识别第三方复用库函数。'
+        f'符合归属口径的函数共 <b>{eligible}</b> 个，本次实际检测 <b>{analyzed}</b> 个。'
+    )
+    if scope.get("truncated"):
+        scope_note += '因固定检测配额，本次结果不是对全部符合口径函数的全量检测。'
     meta = (f'<p class="text-sm text-slate-600 mb-3">本节<b>独立于上方同源分析</b>，只展示概率式代码统计信号，'
             '<b>不能判断是否已披露、是否违规或队员是否掌握代码</b>。'
-            f'在 <b>{ov.get("total_functions", 0)}</b> 个非借鉴函数中检测'
-            f'（此口径含框架等代码，与上方查重「自研函数」数不同，属正常）；疑似 AI 占比按代码行数为 '
+            f'{scope_note}疑似 AI 占比只在模型给出明确分类的函数中计算：按函数为 '
+            f'{ov.get("llm_ratio_by_count", 0.0)*100:.0f}%，按代码行数为 '
             f'{ov.get("llm_ratio_by_loc", 0.0)*100:.0f}%。打分模型 '
             f'<code>{html.escape(ai_data.get("model_id", "") or "")}</code>。'
             '原理：把代码喂给一个代码大模型，统计它对每个 token 的“眼熟程度”——'
@@ -4713,11 +5040,12 @@ def _ai_detect_section(ai_data: dict | None, linker, query_repo_id: str) -> tupl
         '判定阈值与打分模型强相关、整体准确率（AUC）约 0.86，“无法判定”的函数尤其需要人工核查。</div>'
     )
     section = _collapsible_html(
-        "sec-aidetect", "附录：AI 代码统计信号", disclaimer + kpis + meta + sf_table,
+        "sec-aidetect", "附录：AI 代码检测",
+        disclaimer + kpis + meta + sf_table,
         default_open=False, tone="appendix",
-        subtitle="仅提示披露核查，不作为违规、扣分或代码归属证据",
+        subtitle="实际模型检测的辅助信号，不作为违规、扣分或代码归属证据",
     )
-    return _toc_link("sec-aidetect", "AI 代码统计信号",
+    return _toc_link("sec-aidetect", "AI 代码检测",
                      str(len(sf)), "review"), section
 
 
@@ -4783,99 +5111,6 @@ def _compliance_section(query_repo_path: Path | None, linker, query_repo_id: str
                      str(unique_excluded), "excluded"), section
 
 
-def _technical_appendix(retrieval_contract: dict | None, analysis_mode: str) -> tuple[str, str]:
-    # 召回契约仍在生成入口强制校验并以隐藏属性供机器审计，但不再把核验过程、
-    # 历史库覆盖数和通道清单展示给报告读者。
-    generation_meta = _generation_metadata_html({
-        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-    })
-    body = (
-        generation_meta
-        + '<div class="technical-grid">'
-        f'<div><span>模型分析模式</span><b>{html.escape(analysis_mode)}</b></div>'
-        f'<div><span>语义提示版本</span><b>{_SEMANTIC_PROMPT_VERSION}</b></div>'
-        f'<div><span>创新提示版本</span><b>{_INNOVATION_PROMPT_VERSION}</b></div>'
-        '</div>'
-        '<div class="section-intro">高置信历史匹配按“每个历史仓库内的唯一目标函数”计数，并以匹配行证据或'
-        '函数规模×最终相似度估算有效相似行；不会用同一函数的候选 pair 数放大排名。'
-        '该统计只说明相似实现出现在哪些仓库，不单独证明传播方向或直接来源。'
-        '功能簇与复核优先级只用于组织人工审阅，不替代代码证据、时间证据或最终评审结论。'
-        '阈值、规则和模型结论都可能受历史库覆盖与实现形态影响。自动化测试套件与性能基准资产不参与'
-        '内核同源风险统计。目标作品链接固定到本次分析提交；历史链接优先使用缓存提交 SHA，'
-        '缓存缺失时回退 HEAD，此时只能用于导航，不能视为建库快照证明。页面排版与折叠逻辑已内置；'
-        '只有图表渲染依赖固定版本的可选 ECharts CDN，CDN 不可用时数量、表格和源码证据仍可阅读。</div>'
-    )
-    section = _collapsible_html(
-        "sec-technical", "附录：运行信息与统计口径", body, default_open=False,
-        tone="appendix", subtitle="生成时间、模型版本、统计单位与限制",
-    )
-    return _toc_link("sec-technical", "运行信息与统计口径"), section
-
-
-_GENERATION_META_START = "<!-- generation-meta:start -->"
-_GENERATION_META_END = "<!-- generation-meta:end -->"
-
-
-def _format_elapsed(seconds: object) -> str:
-    try:
-        total = max(0.0, float(seconds))
-    except (TypeError, ValueError):
-        return "—"
-    hours, remainder = divmod(int(round(total)), 3600)
-    minutes, secs = divmod(remainder, 60)
-    if hours:
-        return f"{hours} 小时 {minutes} 分 {secs} 秒（{total:.2f}s）"
-    if minutes:
-        return f"{minutes} 分 {secs} 秒（{total:.2f}s）"
-    return f"{total:.2f} 秒"
-
-
-def _generation_metadata_html(metadata: dict | None) -> str:
-    """生成可被流水线末尾原位更新的报告运行溯源块。"""
-    meta = metadata or {}
-    timings = meta.get("stage_timings") or {}
-    step_labels = {
-        "ingest": "就位", "fastpath": "文件快筛", "recall": "召回",
-        "exact": "精确比对", "segment": "分段验证", "metadata": "元数据",
-        "ai_detect": "AI 检测", "report": "报告组装",
-    }
-    timing_text = " · ".join(
-        f"{step_labels.get(str(step), str(step))} {_format_elapsed(value)}"
-        for step, value in timings.items() if step != "total"
-    ) or "仅记录独立报告组装时间"
-    fields = [
-        ("流水线开始时间", meta.get("started_at") or "—"),
-        ("报告完成时间", meta.get("generated_at") or "—"),
-        ("完整流水线总耗时", _format_elapsed(meta.get("total_elapsed_sec"))),
-        ("报告组装耗时", _format_elapsed(meta.get("report_elapsed_sec"))),
-        ("编排/等待及初始化耗时", _format_elapsed(meta.get("orchestration_overhead_sec"))),
-        ("目标代码版本", meta.get("target_revision") or "—"),
-    ]
-    if meta.get("visible_commit_count") is not None:
-        fields.append(("本地可见提交数", f'{meta["visible_commit_count"]}（浅克隆时可能截断）'))
-    fields.append(("各阶段耗时", timing_text))
-    cards = "".join(
-        f'<div><span>{html.escape(label)}</span><b>{html.escape(str(value))}</b></div>'
-        for label, value in fields
-    )
-    return (
-        _GENERATION_META_START
-        + f'<div id="generation-meta" class="technical-grid">{cards}</div>'
-        + _GENERATION_META_END
-    )
-
-
-def stamp_generation_metadata(html_text: str, metadata: dict) -> str:
-    """用流水线完成后的精确时间覆盖报告中的占位运行信息。"""
-    start = html_text.find(_GENERATION_META_START)
-    end = html_text.find(_GENERATION_META_END)
-    replacement = _generation_metadata_html(metadata)
-    if start < 0 or end < start:
-        return html_text
-    end += len(_GENERATION_META_END)
-    return html_text[:start] + replacement + html_text[end:]
-
-
 def generate_comparison_html(
     query_repo_id: str,
     suspects: list[dict],
@@ -4898,7 +5133,6 @@ def generate_comparison_html(
     ub_funcs: list[dict] | None = None,
     retrieval_contract: dict | None = None,
     recall: dict | None = None,
-    analysis_mode: str = "模型分析（失败时规则兜底）",
 ) -> str:
     """组装完整的查重对比 HTML 报告（直接产出，不经 Markdown 转换）。"""
     # 防御公共 API 的直接调用：即使上游仍传入旧产物，也不让测试套件或 benchmark
@@ -4939,7 +5173,6 @@ def generate_comparison_html(
         fp_funcs or [], ub_funcs or [], base_funcs or [], recall)
     toc_ai, sec_ai = _ai_detect_section(ai_detect_data, linker, query_repo_id)
     toc_orig, sec_orig = _original_section(original_funcs, linker, query_repo_id)
-    toc_technical, sec_technical = _technical_appendix(retrieval_contract, analysis_mode)
 
     excluded_toc: list[str] = []
     excluded_sections: list[str] = []
@@ -4965,7 +5198,7 @@ def generate_comparison_html(
         + _toc_group("同源判断", [toc_lineage, toc_clusters, toc_review, toc_files])
         + _toc_group("候选创新", [toc_innovation])
         + _toc_group("合规复用", [toc_compliance] + excluded_toc)
-        + _toc_group("附录", [toc_ai, toc_orig, toc_technical])
+        + _toc_group("附录", [toc_ai, toc_orig])
         + '</div></div>'
     )
 
@@ -4985,11 +5218,10 @@ def generate_comparison_html(
         _chapter_heading("07", "合法复用与许可证合规", "允许复用、共同上游和比赛基线独立核查，不混入同源结论。"),
         sec_compliance,
         *excluded_sections,
-        _chapter_heading("08", "AI 使用披露提示", "以队伍披露材料和现场解释为准；可选概率信号不作认定。"),
+        _chapter_heading("08", "AI 代码检测", "展示实际模型检测信号；结果仅供辅助核查，不作单独认定。"),
         sec_ai,
-        _chapter_heading("09", "暂未检出及运行信息附录", "大清单默认折叠；保留生成时间、模型版本和统计口径。"),
+        _chapter_heading("09", "暂未检出相似函数附录", "完整列出当前未命中函数，但不据此作原创认定。"),
         sec_orig,
-        sec_technical,
     ]
 
     main_html = "\n".join(part for part in body_parts if part)
@@ -5032,7 +5264,7 @@ def run_semantic_compare(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     top_per_module: int = 20,
     skip_opencode: bool = False,
-    global_semantic_analysis: bool = False,
+    global_semantic_analysis: bool = True,
     filematch_path: str | Path | None = None,
     ai_detect_path: str | Path | None = None,
     functions_db_path: str | Path | None = None,
@@ -5047,7 +5279,9 @@ def run_semantic_compare(
         output_dir:      HTML 输出目录
         top_per_module:  每个子模块送入 LLM 语义分析的最大代码对数（默认 20；
                          模块借鉴对 <20 时即全部做语义分析，仅超量时截断以控 token）
-        skip_opencode:   True 时跳过 LLM，仅用规则生成报告（调试用）
+        skip_opencode:   True 时跳过全部 LLM（仅诊断用，不渲染模型分析占位模块）
+        global_semantic_analysis: 默认 True，实际运行模块语义分析和创新归纳；
+                                  False 仅供诊断，相关模块不渲染占位内容
         filematch_path:  fastpath（L0 文件指纹层）产出的 *_filematch.json（整文件复制清单）
         functions_db_path: 历史函数库路径，用于读取参考 repo 的函数源码并生成创新实现地图
     """
@@ -5145,18 +5379,55 @@ def run_semantic_compare(
         logger.info(
             "[review] 高精度难例队列：{} 个目标 / {} 个准入来源 pair / {} 个不同代码组合，"
             "选取 {} 个代表代码组合（覆盖 {} 个镜像来源 pair）模型复核；"
-            "{} 对独立次级来源本轮暂缓复核但保留原证据档位",
+            "{} 对独立次级来源先作为补充来源，仅独立强证据在首选排除后补充送审",
             review_selection["targets"], review_selection["eligible_pairs"],
             review_selection["eligible_unique_content_pairs"],
             review_selection["selected_pairs"],
             review_selection["selected_source_pairs"],
             review_selection["deferred_secondary_pairs"],
         )
-        run_review_judgment(review_judgments, work_dir)
+        all_review_candidates = collect_review_pairs(
+            suspects, keep_tiers=("review", "weak"))
+        review_judgments = run_review_judgment(
+            review_judgments, work_dir,
+            cache_lookup_pairs=all_review_candidates,
+        )
         up, dn = _apply_review_verdicts(suspects, review_judgments)
         if up or dn:
             logger.info("[review] 复核：模型支持借鉴 {} 对（保留难例档），明确非借鉴 {} 对移出相似清单",
                         up, dn)
+        try:
+            fallback_rounds = max(0, int(os.getenv(
+                "REVIEW_SECONDARY_FALLBACK_ROUNDS",
+                str(REVIEW_SECONDARY_FALLBACK_ROUNDS),
+            )))
+        except ValueError:
+            fallback_rounds = REVIEW_SECONDARY_FALLBACK_ROUNDS
+        for round_index in range(fallback_rounds):
+            fallback_pairs = select_exceptional_secondary_review_pairs(suspects)
+            if not fallback_pairs:
+                break
+            logger.info(
+                "[review] 次级强证据补充复核第 {} 轮：{} 个目标函数（每目标最多 1 个候选）",
+                round_index + 1, len(fallback_pairs),
+            )
+            fallback_results = run_review_judgment(fallback_pairs, work_dir)
+            review_judgments.extend(fallback_results)
+            fallback_up, fallback_down = _apply_review_verdicts(
+                suspects, fallback_results)
+            logger.info(
+                "[review] 次级强证据补充结果：支持借鉴 {} 对，明确排除 {} 对",
+                fallback_up, fallback_down,
+            )
+        secondary_resolution = finalize_secondary_review_candidates(suspects)
+        if any(secondary_resolution.values()):
+            logger.info(
+                "[review] 次级来源收口：{} 对仅作为已复核函数的补充来源，"
+                "{} 对在首选已排除且无独立强证据后移出报告",
+                secondary_resolution["supplemental"],
+                secondary_resolution["dismissed"],
+            )
+        _assert_model_review_complete(suspects)
 
     # 内部跨架构硬拷贝复用标注：须在复核升档之后（覆盖升上来的 confirmed），统计之前。
     dup_n = tag_internal_arch_dups(suspects)
@@ -5185,7 +5456,7 @@ def run_semantic_compare(
                 ub_counts["abi_constrained"], sum(fp_counts.values()), dup_n,
                 len(file_matches), len(file_similar))
 
-    # 统计采用复核后的档位与互斥复核状态：有效疑似、失败、未复核分开。
+    # 统计采用复核后的档位与互斥复核状态：有效疑似、失败、真正未完成分开。
     submodule_stats = compute_submodule_stats(suspects, recall)
     lib_stats       = reused_library_stats(suspects, recall)
     cc_funcs        = common_code_stats(suspects)
@@ -5226,14 +5497,14 @@ def run_semantic_compare(
     # 代码级归纳。文档不进入该输入，“未命中”也不会直接升级为创新结论。
     innovation_candidates = build_innovation_candidates(
         recall, suspects, functions_db_path=functions_db_path)
+    semantic_enabled = not skip_opencode and global_semantic_analysis
     innovation_points = run_innovation_analysis(
         query_repo_id, innovation_candidates, work_dir,
-        skip_llm=(skip_opencode or not global_semantic_analysis),
+        skip_llm=not semantic_enabled,
     )
 
-    if skip_opencode or not global_semantic_analysis or not llm_pairs:
-        analysis_html = _fallback_analysis(llm_pairs, submodule_stats)
-    else:
+    analysis_html = ""
+    if semantic_enabled and llm_pairs:
         qpath = str(Path(query_repo_path).resolve()) if query_repo_path else ""
         analysis_html = run_semantic_analysis(
             query_repo_id, qpath, llm_pairs, submodule_stats, work_dir
@@ -5275,17 +5546,13 @@ def run_semantic_compare(
         ub_funcs        = ub_funcs,
         retrieval_contract = recall.get("retrieval_contract") if recall else None,
         recall          = recall,
-        analysis_mode   = (
-            "确定性规则分析（显式跳过所有模型）" if skip_opencode
-            else ("DeepSeek 难例复核与全局语义分析"
-                  if global_semantic_analysis
-                  else "模型仅复核准入难例；聚合与创新候选使用确定性规则")
-        ),
     )
 
     # 档位标签统一（高置信同源代码 / 模型复核难例 / 暂未检出相似），避免各处叫法不一
     from .label_normalize import normalize_labels
     html_text = normalize_labels(html_text)
+    from src.oskernel_agent.report_quality import assert_report_complete
+    assert_report_complete(html_text)
 
     safe_id  = query_repo_id.replace("/", "_")
     out_path = out_dir / f"{safe_id}_comparison.html"

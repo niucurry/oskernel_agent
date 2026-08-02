@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import pytest
 import shutil
 import sqlite3
 import subprocess
@@ -37,16 +38,21 @@ def test_finalize_preserves_and_restores_content_addressed_review_cache(tmp_path
     content_cache.write_text("<section>cached</section>", encoding="utf-8")
     intermediate = out / "target_recall.json"
     intermediate.write_text("{}", encoding="utf-8")
+    ai_result = out / "target-repo_ai_detect.json"
+    ai_result.write_text('{"status":"ok"}', encoding="utf-8")
     html = out / "target_comparison.html"
     html.write_text("<html></html>", encoding="utf-8")
 
     final_html = _finalize_comparison_output(
-        out, repo_name, html, query_repo_id, intermediate)
+        out, repo_name, html, query_repo_id, intermediate, ai_result,
+        preserve_paths=(ai_result,))
 
     archived = out / repo_name / ".semantic_cache" / cache.name
     archived_content = out / repo_name / ".semantic_cache" / "cache" / content_cache.name
     assert final_html.exists() and archived.exists() and archived_content.exists()
+    assert (out / repo_name / ai_result.name).read_text(encoding="utf-8") == '{"status":"ok"}'
     assert not intermediate.exists() and not work_dir.exists()
+    assert not ai_result.exists()
 
     restored = _restore_semantic_cache(out, repo_name, query_repo_id)
 
@@ -55,25 +61,7 @@ def test_finalize_preserves_and_restores_content_addressed_review_cache(tmp_path
     assert (work_dir / "cache" / content_cache.name).read_text(encoding="utf-8") == "<section>cached</section>"
 
 
-def test_report_generation_metadata_records_wall_time_elapsed_time_and_revision(tmp_path):
-    placeholder = SC._generation_metadata_html({"generated_at": "old"})
-    stamped = SC.stamp_generation_metadata(placeholder, {
-        "started_at": "2026-07-30T10:00:00+08:00",
-        "generated_at": "2026-07-30T10:02:03+08:00",
-        "total_elapsed_sec": 123,
-        "report_elapsed_sec": 23.5,
-        "orchestration_overhead_sec": 19.5,
-        "target_revision": "a" * 40,
-        "stage_timings": {"recall": 80, "report": 23.5},
-    })
-
-    assert "2026-07-30T10:02:03+08:00" in stamped
-    assert "2 分 3 秒（123.00s）" in stamped
-    assert "报告组装 23.50 秒" in stamped
-    assert "编排/等待及初始化耗时" in stamped
-    assert "19.50 秒" in stamped
-    assert "a" * 40 in stamped
-
+def test_resolve_git_revision_reads_git_metadata_without_running_git(tmp_path):
     git_dir = tmp_path / ".git"
     (git_dir / "refs" / "heads").mkdir(parents=True)
     (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
@@ -102,6 +90,33 @@ def _sc_suspect(qfile, qfunc, repo, cfile, cfunc, tier, score, module="fs",
                            "raw_code": "fn x(){}", "lang": "rust"},
         "evidence": {"exact_match_lines": exact, "renamed_match_lines": renamed},
         "match_type_per_span": mtypes or [],
+    }
+
+
+def _actual_ai_model_result() -> dict:
+    """最小但完整的实际模型产物，供低层 HTML 组装测试使用。"""
+    return {
+        "status": "ok",
+        "model_id": "test/code-model",
+        "scope": {
+            "extracted_functions": 1,
+            "borrowed_excluded": 0,
+            "third_party_excluded": 0,
+            "eligible_functions": 1,
+            "analyzed_functions": 1,
+            "truncated": False,
+        },
+        "aggregated": {
+            "overall": {
+                "total_functions": 1,
+                "llm_count": 0,
+                "human_count": 1,
+                "uncertain_count": 0,
+                "llm_ratio_by_count": 0.0,
+                "llm_ratio_by_loc": 0.0,
+            },
+            "suspicious_functions": [],
+        },
     }
 
 
@@ -838,6 +853,159 @@ def test_model_review_budget_does_not_change_evidence_tiers_or_originality():
     assert SC._original_functions(recall, all_candidates) == []
 
 
+def test_review_group_prefers_completed_candidate_over_deferred_secondary():
+    deferred = _sc_suspect(
+        "os/mm.rs", "from_elf", "2025/deferred", "mm.rs", "from_elf",
+        "review", .95, exact=20,
+    )
+    deferred["model_review_selection"] = "deferred_secondary"
+    deferred["model_review_note"] = "未进入本轮模型预算"
+    reviewed = _sc_suspect(
+        "os/mm.rs", "from_elf", "2024/reviewed", "mm.rs", "from_elf",
+        "review", .80, exact=18,
+    )
+    reviewed.update({
+        "model_review_selection": "selected",
+        "review_verdict": "借鉴",
+        "review_reason": "共享非必要的装载步骤与常量",
+        "review_responsibility": "一致",
+        "review_responsibility_reason": "都构造同一类用户地址空间",
+        "review_evidence_anchors": ["from_elf", "fn"],
+    })
+
+    group = SC.collect_file_pairs(
+        [deferred, reviewed], keep_tiers=("review", "weak"))[0]
+    resolution = SC.finalize_secondary_review_candidates([deferred, reviewed])
+    stats = SC.compute_submodule_stats([deferred, reviewed], None)["fs"]
+    _toc, section = SC._review_section([group], None, "2024/new")
+
+    assert group["review_verdict"] == "借鉴"
+    assert group["candidates"][0]["ref_repo"] == "2024/reviewed"
+    assert group["overall_sim"] == .80
+    assert resolution == {"supplemental": 1, "dismissed": 0}
+    assert deferred["model_review_selection"] == "supplemental_source"
+    assert stats["review"] == 1
+    assert stats["review_pending"] == 0
+    assert "模型认为借鉴（仍需人工确认）" in section
+    assert "次级候选未送模型（人工核验）" not in section
+
+
+def test_weak_deferred_secondary_is_removed_after_primary_is_cleared():
+    cleared = _sc_suspect(
+        "os/mm.rs", "map_page", "2025/cleared", "mm.rs", "map_page",
+        "dismissed", .90, exact=18,
+    )
+    cleared["dismiss_reason"] = "review_非借鉴"
+    cleared["review_verdict"] = "非借鉴"
+    deferred = _sc_suspect(
+        "os/mm.rs", "map_page", "2024/deferred", "mm.rs", "map_page",
+        "review", .78, exact=15,
+    )
+    deferred["model_review_selection"] = "deferred_secondary"
+    deferred["model_review_note"] = "未进入本轮模型预算"
+
+    resolution = SC.finalize_secondary_review_candidates([cleared, deferred])
+
+    assert resolution == {"supplemental": 0, "dismissed": 1}
+    assert deferred["tier"] == "dismissed"
+    assert deferred["dismiss_reason"] == "review_secondary_after_primary_cleared"
+    assert SC.collect_file_pairs(
+        [cleared, deferred], keep_tiers=("review", "weak")) == []
+
+
+def test_independent_strong_secondary_is_selected_for_bounded_fallback_review():
+    cleared = _sc_suspect(
+        "os/mm.rs", "map_page", "2025/cleared", "mm.rs", "map_page",
+        "dismissed", .92, exact=9,
+    )
+    cleared["dismiss_reason"] = "review_非借鉴"
+    cleared["review_verdict"] = "非借鉴"
+    deferred = _sc_suspect(
+        "os/mm.rs", "map_page", "2024/deferred", "mm.rs", "map_page",
+        "review", .90, exact=9,
+    )
+    deferred["query_func"]["raw_code"] = "\n".join(
+        f"target_step_{line}();" for line in range(10)
+    )
+    deferred["query_func"]["end_line"] = 19
+    deferred["candidate_func"]["end_line"] = 10
+    deferred["candidate_func"]["raw_code"] = "\n".join(
+        f"source_step_{line}();" for line in range(10)
+    )
+    deferred["model_review_selection"] = "deferred_secondary"
+    deferred["evidence"].update({
+        "line_similarity": .90,
+        "function_identity_score": .90,
+        "function_identity_relation": "exact_counterpart",
+        "function_name_exact": True,
+    })
+
+    selected = SC.select_exceptional_secondary_review_pairs([cleared, deferred])
+
+    assert len(selected) == 1
+    assert selected[0]["query_func"] == "map_page"
+    assert deferred["model_review_selection"] == "selected_secondary"
+
+
+def test_review_judgment_hydrates_cached_deferred_pairs_without_model_calls(
+        monkeypatch, tmp_path):
+    from src.oskernel_agent import config as cfg
+
+    query_code = "fn shared() { common(); target_step(); }"
+
+    def group(repo, ref_code):
+        return {
+            "query_func": "shared", "query_file": "a.rs", "query_code": query_code,
+            "query_repo": "2026/new", "query_start": 10,
+            "overall_sim": .8, "clone_type": "renamed", "match_coverage": .7,
+            "candidates": [{
+                "ref_func": "shared", "ref_repo": repo, "ref_file": f"{repo}.rs",
+                "ref_start": 20, "ref_code": ref_code,
+            }],
+        }
+
+    selected = group("2025/selected", "fn shared() { common(); selected_step(); }")
+    deferred = group("2024/deferred", "fn shared() { common(); deferred_step(); }")
+    model = "test-model"
+
+    def key(item):
+        candidate = item["candidates"][0]
+        return SC._cache_key(
+            SC._REVIEW_PROMPT_VERSION, model, item["query_func"],
+            candidate["ref_func"], item["query_code"], candidate["ref_code"],
+        )
+
+    def cached(verdict, reason):
+        return {
+            "responsibility": "一致",
+            "responsibility_reason": "都执行 common 步骤",
+            "verdict": verdict,
+            "reason": reason,
+            "evidence_anchors": ["shared", "common"],
+        }
+
+    cache = {
+        key(selected): cached("疑似", "实现共享 common 步骤"),
+        key(deferred): cached("借鉴", "实现共享 common 步骤及非必要结构"),
+    }
+    (tmp_path / f"review_judgment_{model}.json").write_text(
+        json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setitem(cfg.api, "key", "test-key")
+    monkeypatch.setitem(cfg.api, "base_url", "https://example.invalid/v1")
+    monkeypatch.setattr(
+        SC, "_review_one",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("有效缓存不得再次调用模型")),
+    )
+
+    resolved = SC.run_review_judgment(
+        [selected], tmp_path, model=model, cache_lookup_pairs=[selected, deferred])
+
+    assert len(resolved) == 2
+    assert selected["review_verdict"] == "疑似"
+    assert deferred["review_verdict"] == "借鉴"
+
+
 def test_strong_direct_evidence_survives_model_negative_and_keeps_secondary_source():
     candidates = []
     for idx, similarity in enumerate((.80, .70), start=1):
@@ -1005,7 +1173,11 @@ def test_generate_comparison_html_has_m2_elements():
     review_groups = SC.collect_file_pairs(suspects, keep_tiers=("review", "weak"))
     review_groups[0]["review_verdict"] = "疑似"
     review_groups[0]["review_reason"] = "结构相似但上下文不足"
-    analysis = SC._fallback_analysis(groups, stats)
+    analysis = (
+        '<section data-module="fs"><h3>文件系统语义分析</h3>'
+        '<p><code>read</code> 的读取职责与历史实现一致，控制流和错误处理形成直接同源证据。</p>'
+        '<ul><li>目标函数与来源函数共享完整的读取步骤。</li></ul></section>'
+    )
     file_matches = [{"query_file": "os/src/driver/uart.rs", "line_count": 88,
                      "matches": [{"repo_id": "2021/a", "file_path": "drv/uart.rs",
                                   "line_count": 88, "func_count": 4}]},
@@ -1019,7 +1191,7 @@ def test_generate_comparison_html_has_m2_elements():
     html = SC.generate_comparison_html(
         "2024/new", suspects, stats, groups, analysis, original_funcs=[],
         review_pairs=review_groups, file_matches=file_matches, file_similar=[],
-        retrieval_contract=contract)
+        retrieval_contract=contract, ai_detect_data=_actual_ai_model_result())
     assert "报告导读（请先阅读）" in html              # 导读卡（面向老师的语境引导）
     assert "证据概览" in html                          # 中性、非自动扣分的概览
     assert "高置信同源功能簇" in html                  # 函数聚合为功能级同源事件
@@ -1056,14 +1228,96 @@ def test_generate_comparison_html_has_m2_elements():
     assert 'class="report-section"' in html            # 正文统一章节外壳
     # 九段式结构固定且顺序稳定
     section_ids = ["summary", "sec-lineage", "sec-clusters", "sec-review", "sec-files",
-                   "sec-innovation", "sec-compliance", "sec-aidetect", "sec-original",
-                   "sec-technical"]
+                   "sec-innovation", "sec-compliance", "sec-aidetect", "sec-original"]
     positions = [html.index(f'id="{sid}"') for sid in section_ids]
     assert positions == sorted(positions)
+    assert 'id="sec-technical"' not in html
+    assert "运行信息与统计口径" not in html
     # 所有 echarts JSON 必须可解析（前端 JSON.parse 不能炸）
     import re
     for blob in re.findall(r'<script type="application/json">(.*?)</script>', html, re.DOTALL):
         json.loads(blob)
+
+
+def test_ai_detect_section_rejects_model_failure_instead_of_rendering_placeholder():
+    with pytest.raises(RuntimeError, match="参考模型加载失败"):
+        SC._ai_detect_section(
+            {"status": "skipped", "reason": "参考模型加载失败"}, None, "2026/new")
+
+
+def test_ai_detect_section_accepts_verified_not_applicable_scope():
+    toc, section = SC._ai_detect_section({
+        "status": "skipped",
+        "reason": "排除借鉴代码后无可归属函数",
+        "scope": {
+            "extracted_functions": 8,
+            "borrowed_excluded": 8,
+            "third_party_excluded": 0,
+            "eligible_functions": 0,
+            "analyzed_functions": 0,
+        },
+    }, None, "2026/new")
+
+    assert "不适用" in toc
+    assert "符合归属口径的函数为 <b>0</b>" in section
+    assert "模型检测未完成" not in section
+
+
+def test_ai_detect_section_renders_actual_model_result():
+    ai_data = {
+        "status": "ok",
+        "model_id": "bigcode/starcoder2-3b",
+        "scope": {
+            "third_party_excluded": 3,
+            "eligible_functions": 4,
+            "analyzed_functions": 2,
+            "truncated": True,
+        },
+        "aggregated": {
+            "overall": {
+                "total_functions": 2,
+                "llm_count": 1,
+                "human_count": 1,
+                "uncertain_count": 0,
+                "llm_ratio_by_count": .5,
+                "llm_ratio_by_loc": .4,
+            },
+            "suspicious_functions": [{
+                "file_path": "os/src/main.rs", "start_line": 10, "end_line": 40,
+                "function_name": "generated", "loc": 31, "confidence": .91,
+                "log_rank": .2, "stage": "fast_filter",
+            }],
+        },
+    }
+
+    toc, section = SC._ai_detect_section(ai_data, None, "2026/new")
+
+    assert "AI 代码检测" in toc
+    assert "bigcode/starcoder2-3b" in section
+    assert "generated" in section
+    assert "疑似 AI 生成（函数）" in section
+    assert "排除 <b>3</b> 个已识别第三方复用库函数" in section
+    assert "固定检测配额" in section
+    assert "可判定函数中的疑似 AI 占比" in section
+    assert "披露材料" not in section
+
+
+def test_original_section_lists_every_unmatched_function_without_original_claim():
+    functions = [
+        {"module": "mm", "file": "os/mm.rs", "start": 20, "end": 34,
+         "func": "map_private", "lines": 15, "max_sim": .2},
+        {"module": "fs", "file": "os/fs.rs", "start": 8, "end": 17,
+         "func": "open_special", "lines": 10, "max_sim": .1},
+    ]
+
+    toc, section = SC._original_section(functions, None, "2026/new")
+
+    assert "os/mm.rs:20-34" in section and "map_private" in section
+    assert "os/fs.rs:8-17" in section and "open_special" in section
+    assert section.count("<tr>") == 3  # 表头 + 全部两个函数
+    assert "完整列出这些函数" in section
+    assert "不等于原创认定" in section
+    assert ">2<" in toc
 
 
 def test_innovation_candidates_bind_target_to_reference_code(tmp_path):
@@ -1156,6 +1410,8 @@ def test_innovation_map_rejects_invented_keys_and_adds_complexity():
             "baseline": "参考实现采用单队列轮转",
             "delta": "目标实现增加多级队列与老化路径",
             "why_it_matters": "缓解饥饿但增加状态维护成本",
+            "impact_scope": "影响调度选择与任务等待时间",
+            "counterevidence": "尚缺少运行时调度轨迹验证收益",
             "confidence": "high",
             "target_keys": ["t0001"],
             "reference_keys": ["r0001"],
@@ -1234,6 +1490,7 @@ def test_generate_report_renders_innovation_code_map():
         "2026/new", [], SC.compute_submodule_stats([], None), [], "", [],
         innovation_points=[point],
         linker=linker,
+        ai_detect_data=_actual_ai_model_result(),
     )
 
     assert 'id="sec-innovation"' in html
@@ -1293,7 +1550,8 @@ def test_full_legacy_html_is_marked_stale_idempotently():
 
 def test_low_level_report_without_contract_keeps_hidden_stale_audit_marker():
     html = SC.generate_comparison_html(
-        "2024/new", [], SC.compute_submodule_stats([], None), [], "", [])
+        "2024/new", [], SC.compute_submodule_stats([], None), [], "", [],
+        ai_detect_data=_actual_ai_model_result())
     assert 'data-retrieval-complete="false"' in html
     assert 'id="retrieval-stale" hidden' in html
     assert "已失效，必须重跑" not in html
