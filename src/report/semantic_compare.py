@@ -3,7 +3,7 @@
 取代旧流程：
   review (逐对 LLM) → reviewed.json → report (Markdown→HTML)
 新流程：
-  suspects.json → collect pairs → opencode (一次调用) → 直接 HTML
+  suspects.json → collect pairs → 功能簇级 LLM 分批分析 → 直接 HTML
 
 用法：
   python -m src.report compare \\
@@ -40,12 +40,13 @@ from src.retrieval_contract import (CONTRACT_VERSION, contract_errors,
 
 from .false_positives import (FP_REASON_DISP, false_positive_stats,
                               tag_false_positives, tag_internal_arch_dups)
-from .libraries import match_library, reused_library_stats, tag_library_reuse
+from .libraries import (LibraryContext, discover_library_context, match_library,
+                        reused_library_stats, tag_library_reuse)
 from .upstream_baselines import (is_excluded_file_path, tag_upstream_baselines,
                                  upstream_baseline_stats)
 
 DEFAULT_OUTPUT_DIR = "data/output"
-_SEMANTIC_PROMPT_VERSION = "semantic-cn-v3-complete-budgeted"
+_SEMANTIC_PROMPT_VERSION = "semantic-cn-v4-cluster-complete-batched"
 _INNOVATION_PROMPT_VERSION = "innovation-map-cn-v4-complete"
 DEFAULT_FUNCTIONS_DB = Path(__file__).resolve().parents[2] / "data" / "db" / "functions.db"
 MIN_INNOVATION_REFERENCE_SCORE = 0.30
@@ -203,6 +204,9 @@ def _tag_query_level_baselines(suspects: list[dict]) -> int:
     """
     changed = 0
     for s in suspects:
+        # 第三方库及经依赖证据确认的适配层具有更具体的归属；不得再重复归入公共基线。
+        if s.get("reuse_library"):
+            continue
         repo = str((s.get("candidate_func") or {}).get("repo_id") or "")
         if not is_baseline_repo(repo):
             continue
@@ -223,12 +227,16 @@ def _tag_query_level_baselines(suspects: list[dict]) -> int:
 
     baseline_by_query: dict[tuple, list[dict]] = defaultdict(list)
     for s in suspects:
+        if s.get("reuse_library"):
+            continue
         ev = s.get("evidence") or {}
         if (s.get("tier") == "baseline_derived"
                 and (ev.get("baseline_query_scope")
                      or ev.get("baseline_source_substantive"))):
             baseline_by_query[_query_key(s.get("query_func") or {})].append(s)
     for s in suspects:
+        if s.get("reuse_library"):
+            continue
         baselines = baseline_by_query.get(_query_key(s.get("query_func") or {}), [])
         if s.get("tier") not in ("confirmed", "review", "weak") or not baselines:
             continue
@@ -323,7 +331,8 @@ def baseline_stats(suspects: list[dict]) -> list[dict]:
     """
     funcs: dict[tuple, dict] = {}
     for s in suspects:
-        if s.get("tier") != "baseline_derived":
+        # 分类展示互斥：库归属优先于公共基线，即使旧 metadata 产物已留下 baseline tier。
+        if s.get("reuse_library") or s.get("tier") != "baseline_derived":
             continue
         evidence = s.get("evidence") or {}
         # 显式基线仓库中的弱候选只负责避免把基线本身列成历史队伍来源；没有形成
@@ -363,7 +372,8 @@ def baseline_stats(suspects: list[dict]) -> list[dict]:
     return sorted(funcs.values(), key=lambda x: (x["module"], x["name"]))
 
 
-def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) -> dict:
+def compute_submodule_stats(suspects: list[dict], recall: dict | None = None, *,
+                            library_context: LibraryContext | None = None) -> dict:
     """各子模块同源、明确存疑、复核未完成、暂未检出四类**函数数**统计。
 
     按 query 函数去重、取最高档归类：
@@ -422,7 +432,7 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) ->
     if recall:
         for item in recall.get("results", []):
             q = item.get("query", {})
-            if match_library(q.get("file_path")):
+            if match_library(q.get("file_path"), context=library_context):
                 continue
             key = _query_key(q)
             if key in matched_keys:
@@ -455,7 +465,8 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None) ->
     return result
 
 
-def _original_functions(recall: dict, suspects: list[dict], top_n: int | None = None) -> list[dict]:
+def _original_functions(recall: dict, suspects: list[dict], top_n: int | None = None, *,
+                        library_context: LibraryContext | None = None) -> list[dict]:
     """recall 中「完全未进入嫌疑清单（非库复用/非公共样板/非任何命中）」的函数 = 原创/自研。
 
     与 compute_submodule_stats 的「原创」同口径（matched = 任何非 dismissed 命中），所以二者
@@ -471,7 +482,7 @@ def _original_functions(recall: dict, suspects: list[dict], top_n: int | None = 
     out = []
     for item in recall.get("results", []):
         q = item.get("query", {})
-        if match_library(q.get("file_path")):
+        if match_library(q.get("file_path"), context=library_context):
             continue  # vendored 第三方库代码不算原创/自研
         key = _query_key(q)
         if key in matched_keys:
@@ -568,6 +579,8 @@ def build_innovation_candidates(
     suspects: list[dict],
     functions_db_path: str | Path | None = None,
     max_candidates: int = 18,
+    *,
+    library_context: LibraryContext | None = None,
 ) -> list[dict]:
     """构造“目标未命中函数 ↔ 主要参考 repo 最近实现”的代码比较输入。
 
@@ -577,7 +590,8 @@ def build_innovation_candidates(
     if not recall:
         return []
     refs_by_mod = _reference_repo_by_module(suspects, recall)
-    originals = _original_functions(recall, suspects)
+    originals = _original_functions(
+        recall, suspects, library_context=library_context)
     original_keys = {
         (f["file"], int(f.get("start") or 0), f["func"]) for f in originals
     }
@@ -1335,43 +1349,6 @@ def _semantic_group_cost(group: dict) -> int:
     )
 
 
-def _limit_per_module(groups: list[dict], n: int) -> list[dict]:
-    """在统一字符预算内选语义证据，并保证每个有证据的模块至少一个代码对。"""
-    by_mod: dict[str, list[dict]] = defaultdict(list)
-    for g in groups:
-        by_mod[g["module"]].append(g)
-    ranked: dict[str, list[dict]] = {}
-    for mod in MODULES:
-        ranked[mod] = sorted(
-            by_mod.get(mod, []), key=lambda x: -x["overall_sim"]
-        )[:max(1, n)]
-
-    selected: dict[str, list[dict]] = defaultdict(list)
-    used = 0
-    # 第一轮优先保证模块覆盖；单对代码已经有统一截断上限，不会被超长函数挤掉。
-    for mod in MODULES:
-        if ranked[mod]:
-            group = ranked[mod][0]
-            selected[mod].append(group)
-            used += _semantic_group_cost(group)
-    # 后续按轮次公平补充高相似证据，避免文件系统等大模块独占上下文。
-    for index in range(1, max(1, n)):
-        progressed = False
-        for mod in MODULES:
-            if index >= len(ranked[mod]):
-                continue
-            group = ranked[mod][index]
-            cost = _semantic_group_cost(group)
-            if used + cost > _SEMANTIC_PROMPT_CHAR_BUDGET:
-                continue
-            selected[mod].append(group)
-            used += cost
-            progressed = True
-        if not progressed:
-            break
-    return [group for mod in MODULES for group in selected.get(mod, [])]
-
-
 def _exclude_confirmed_review_groups(review_groups: list[dict],
                                      confirmed_groups: list[dict]) -> list[dict]:
     """按 (文件, 起始行, 函数名) 去重，避免同文件同名实现彼此吞并。"""
@@ -1734,7 +1711,8 @@ def _cache_key(*parts: str) -> str:
 _ANALYSIS_SYSTEM = """\
 你是 OS 内核代码原创性分析助手，专注于语义级（功能层面）的对比分析，面向评审人员。
 
-对每个子模块输出一段信息充分、可追溯的 HTML 分析片段。
+对输入中的每个功能簇分别输出一段信息充分、可追溯的 HTML 分析片段；不同功能簇不得共用
+或复制同一段笼统的子系统说明。
 
 分析维度（每条结论尽量覆盖）：
 1. 借鉴对象：借鉴了哪些**算法**（如调度策略、分配器、置换算法）、**数据结构**
@@ -1750,7 +1728,7 @@ _ANALYSIS_SYSTEM = """\
 - **最终交付必须一次性使用简体中文**：所有标题、段落、列表项和自然语言说明均用中文；
   函数名、类型名、算法名、数据结构名、代码标识符和专有名词可保留英文原文。
 - 禁止出现整句英文、整段英文或整节英文。即使输入代码和来源材料是英文，也必须用中文分析。
-- 每个子模块用 2~4 句概述 + 一个 <ul> 列举具体借鉴点。
+- 每个功能簇用 2~4 句概述 + 一个 <ul> 列举具体借鉴点。
 - 用函数名、算法名、数据结构名指代具体对象（如「run_tasks 的任务切换」「buddy 分配器」）。
 - **不要写文件路径和行号**：报告表格已逐函数给出 文件:行 与可点击链接，分析正文只讲
   「借鉴了什么功能、借鉴到什么程度、做了哪些改动」，专注语义，不重复罗列地址。
@@ -1758,7 +1736,8 @@ _ANALYSIS_SYSTEM = """\
 
 输出格式（严格遵守）：
 - 只输出 HTML 标签，不要输出 Markdown
-- 每个子模块用 <section data-module="模块tag">...</section> 包裹
+- 每个功能簇用 <section data-cluster="输入给出的功能簇ID" data-module="模块tag">...</section> 包裹
+- data-cluster 必须逐字复制输入中的功能簇 ID，每个输入 ID 恰好输出一次，不得遗漏或合并
 - 用 <h3>/<p>/<ul>/<li> 语义标签
 - 不要写 path:line，不要手写 <a> 标签
 - 输出前逐个检查 <h3>/<p>/<li>/<th>/<td>：如仍有英文自然语言句子，先改写成中文再输出。
@@ -1767,10 +1746,11 @@ _ANALYSIS_SYSTEM = """\
 
 def _build_analysis_message(
     query_repo_id: str,
-    file_pairs: list[dict],
+    clusters: list[dict],
     submodule_stats: dict,
+    members_per_cluster: int = 20,
 ) -> str:
-    """构造给 DeepSeek API 的完整分析消息（含代码片段）。"""
+    """构造功能簇级语义分析消息；每簇用代表代码，成员清单保留覆盖范围。"""
     lines = [
         f"请对新作品（{query_repo_id}）进行语义级功能借鉴分析。",
         "",
@@ -1785,38 +1765,43 @@ def _build_analysis_message(
             f"- **{disp}**（{mod}）：高置信同源代码 {stats['confirmed']} 个函数，"
             f"主要匹配仓库：{stats['top_source']}"
         )
-    lines += ["", "## 相似代码对（按子模块、按 query 函数聚合全部候选）", ""]
+    lines += ["", "## 待分析功能簇", ""]
 
-    current_mod = None
-    for g in file_pairs:
-        mod = g["module"]
-        if mod != current_mod:
-            lines.append(f"### {_MODULE_DISPLAY.get(mod, mod)} ({mod})")
-            current_mod = mod
-        tier_label = {"confirmed": "高置信同源代码", "review": "模型复核难例",
-                      "weak": "低强度相似信号"}.get(
-            g["overall_tier"], g["overall_tier"])
+    member_limit = max(1, int(members_per_cluster or 1))
+    for cluster in clusters:
+        mod = cluster["module"]
         lines.append(
-            f"**新作品** `{g['query_file']}:{g['query_start']}` 函数 `{g['query_func']}` "
-            f"← {tier_label}（整体相似度 {g['overall_sim']}，{g['candidate_count']} 个候选来源）"
+            f"### 功能簇 {cluster['analysis_id']}：{cluster['feature']}"
+            f"（{_MODULE_DISPLAY.get(mod, mod)} / {mod}）"
         )
-        for c in g["candidates"]:
-            ck = _clone_summary(c)
+        lines.append(
+            f"- 主要匹配仓库：`{cluster['source']}`；簇内 {cluster['function_count']} 个函数，"
+            f"{cluster['effective_loc']} 行有效相似代码。"
+        )
+        lines.append("- 簇内函数映射：")
+        for g in cluster["groups"][:member_limit]:
+            best = g["candidates"][0] if g["candidates"] else {}
             lines.append(
-                f"  - 来源 `{c['ref_repo']}/{c['ref_file']}:{c['ref_start']}` 函数 "
-                f"`{c['ref_func']}`（相似度 {c['sim']}，{ck}）"
+                f"  - 新作品 `{g['query_func']}` ← `{best.get('ref_func', '')}`"
+                f"（来源 `{best.get('ref_repo', '')}`，相似度 {g['overall_sim']}，"
+                f"{_clone_summary(g)}）"
             )
-        best = g["candidates"][0] if g["candidates"] else {}
-        query_code = (g.get("query_code") or "")[:_SEMANTIC_CODE_CHAR_LIMIT]
+        if len(cluster["groups"]) > member_limit:
+            lines.append(f"  - 另有 {len(cluster['groups']) - member_limit} 个同簇函数，按相似度省略名称。")
+
+        representative = cluster["groups"][0]
+        best = representative["candidates"][0] if representative["candidates"] else {}
+        query_code = (representative.get("query_code") or "")[:_SEMANTIC_CODE_CHAR_LIMIT]
         ref_code = (best.get("ref_code") or "")[:_SEMANTIC_CODE_CHAR_LIMIT]
         lines += [
+            f"功能簇 {cluster['analysis_id']} 的最高相似代表代码：",
             "新作品代码（按统一上下文预算截取）：", "```", query_code, "```",
             "最强候选来源代码（按统一上下文预算截取）：", "```", ref_code, "```", "",
         ]
 
     lines += [
         "## 任务",
-        "对每个**有相似代码对**的子模块，输出一段语义分析 HTML 片段。",
+        "对上面每个功能簇分别输出一段语义分析 HTML；必须覆盖全部 data-cluster ID。",
         "报告必须一次性完整使用简体中文；仅代码标识符和技术专名保留英文，不要生成英文版等待翻译。",
         "直接输出 HTML，不要输出 Markdown，不要有任何额外说明文字。",
     ]
@@ -1830,40 +1815,55 @@ def run_semantic_analysis(
     submodule_stats: dict,
     work_dir: Path,
     timeout: int = 120,
+    members_per_cluster: int = 20,
 ) -> str:
     """直接调用 DeepSeek API 进行语义分析，返回 HTML 片段。
 
-    使用 config.toml 中的 api.key 和 api.base_url，一次 API 调用完成全部子模块分析，
+    使用 config.toml 中的 api.key 和 api.base_url，按统一上下文预算并发分批完成全部功能簇，
     替代 opencode CLI（opencode MCP 超时不稳定）。
     """
     work_dir.mkdir(parents=True, exist_ok=True)
     output_path = work_dir.resolve() / "semantic_analysis.html"
     cache_dir   = work_dir.resolve() / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
+    expected_clusters = build_similarity_clusters(file_pairs)
 
     def validate_complete(content: str) -> None:
-        expected_modules = list(dict.fromkeys(
-            str(group.get("module") or "") for group in file_pairs
-            if group.get("module")
-        ))
-        missing_modules = [
-            module for module in expected_modules
-            if not _extract_module_analysis(content, module).strip()
+        found_ids = re.findall(
+            r'<section[^>]*data-cluster=["\']([^"\']+)["\']',
+            content, re.IGNORECASE,
+        )
+        counts = Counter(found_ids)
+        duplicate_ids = sorted(cluster_id for cluster_id, count in counts.items() if count != 1)
+        unexpected_ids = sorted(set(found_ids) - {
+            cluster["analysis_id"] for cluster in expected_clusters
+        })
+        missing_clusters = [
+            cluster["analysis_id"] for cluster in expected_clusters
+            if not _extract_cluster_analysis(content, cluster["analysis_id"]).strip()
         ]
-        if missing_modules:
+        if missing_clusters or duplicate_ids or unexpected_ids:
+            details = []
+            if missing_clusters:
+                details.append("缺失 " + "、".join(missing_clusters))
+            if duplicate_ids:
+                details.append("重复 " + "、".join(duplicate_ids))
+            if unexpected_ids:
+                details.append("未知 " + "、".join(unexpected_ids))
             raise RuntimeError(
-                "语义级分析模型未返回完整模块：" + "、".join(missing_modules))
-        incomplete_modules = []
-        for module in expected_modules:
-            fragment = _extract_module_analysis(content, module)
+                "语义级分析模型未返回一一对应的完整功能簇：" + "；".join(details))
+        incomplete_clusters = []
+        for cluster in expected_clusters:
+            cluster_id = cluster["analysis_id"]
+            fragment = _extract_cluster_analysis(content, cluster_id)
             visible = html.unescape(re.sub(r"<[^>]+>", " ", fragment))
             visible = re.sub(r"\s+", " ", visible).strip()
             if (len(visible) < 60 or "<p" not in fragment.lower()
                     or "<li" not in fragment.lower()):
-                incomplete_modules.append(module)
-        if incomplete_modules:
+                incomplete_clusters.append(cluster_id)
+        if incomplete_clusters:
             raise RuntimeError(
-                "语义级分析模块内容不完整：" + "、".join(incomplete_modules))
+                "语义级分析功能簇内容不完整：" + "、".join(incomplete_clusters))
         from src.oskernel_agent.report_quality import assert_report_complete
         assert_report_complete(content)
 
@@ -1902,31 +1902,59 @@ def run_semantic_analysis(
     if not api_key:
         raise RuntimeError("语义级分析未完成：config.toml 中没有可用的 API key")
 
-    user_msg = _build_analysis_message(query_repo_id, file_pairs, submodule_stats)
-    logger.info("[semantic] 调用 DeepSeek API 进行语义分析（消息 {} 字符）", len(user_msg))
+    cluster_batches = _semantic_cluster_batches(file_pairs, members_per_cluster)
+    covered_ids = {
+        cluster["analysis_id"] for batch in cluster_batches for cluster in batch
+    }
+    expected_ids = {cluster["analysis_id"] for cluster in expected_clusters}
+    if covered_ids != expected_ids:
+        raise RuntimeError("语义级分析分批覆盖不完整，拒绝生成报告")
+    messages = [
+        _build_analysis_message(
+            query_repo_id, batch, submodule_stats, members_per_cluster)
+        for batch in cluster_batches
+    ]
+    logger.info(
+        "[semantic] {} 个功能簇按预算拆为 {} 批（总消息 {} 字符）",
+        len(expected_clusters), len(messages), sum(map(len, messages)),
+    )
 
     try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         from openai import OpenAI
-        client = OpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            timeout=timeout,
-        )
-        resp = client.chat.completions.create(
-            model=semantic_model,
-            messages=[
-                {"role": "system", "content": _ANALYSIS_SYSTEM},
-                {"role": "user",   "content": user_msg},
-            ],
-            temperature=0.2,
-            max_tokens=8000,
-        )
-        html_text = (resp.choices[0].message.content or "").strip()
+        client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+
+        def request_batch(batch_index: int) -> tuple[int, str]:
+            response = client.chat.completions.create(
+                model=semantic_model,
+                messages=[
+                    {"role": "system", "content": _ANALYSIS_SYSTEM},
+                    {"role": "user", "content": messages[batch_index]},
+                ],
+                temperature=0.2,
+                max_tokens=8000,
+            )
+            return batch_index, (response.choices[0].message.content or "").strip()
+
+        try:
+            configured_workers = int(os.getenv("SEMANTIC_WORKERS", "3"))
+        except ValueError:
+            configured_workers = 3
+        workers = max(1, min(configured_workers, len(messages)))
+        responses = [""] * len(messages)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(request_batch, index) for index in range(len(messages))]
+            for future in as_completed(futures):
+                index, response_text = future.result()
+                responses[index] = response_text
     except Exception as e:
         raise RuntimeError(f"语义级分析模型调用失败：{type(e).__name__}: {e}") from e
 
-    # 提取 HTML 片段（模型可能在 markdown 代码块里）
-    html_content = _extract_html_from_text(html_text) or html_text
+    # 提取各批 HTML 片段（模型可能在 markdown 代码块里），按原功能簇顺序合并。
+    html_content = "\n".join(
+        _extract_html_from_text(response_text) or response_text
+        for response_text in responses
+    )
 
     # 首轮直接生成中文；只有确实检测到英文正文时才保留一次翻译兜底。
     from src.oskernel_agent.pipeline.lang_guard import normalize_html_language
@@ -2132,8 +2160,11 @@ def _extract_html_from_text(text: str) -> str:
     m = re.search(r'```html\s*(.*?)```', text, re.DOTALL | re.IGNORECASE)
     if m:
         return m.group(1).strip()
-    # 尝试匹配直接包含 <section data-module 的 HTML 内容
-    m2 = re.search(r'(<section\s+data-module=.*?</section>\s*)+', text, re.DOTALL | re.IGNORECASE)
+    # 尝试匹配直接包含功能簇/旧模块 section 的 HTML 内容
+    m2 = re.search(
+        r'(<section\s+[^>]*data-(?:cluster|module)=.*?</section>\s*)+',
+        text, re.DOTALL | re.IGNORECASE,
+    )
     if m2:
         return m2.group(0).strip()
     return ""
@@ -2241,15 +2272,21 @@ def _echarts_tier_distribution(submodule_stats: dict) -> str:
 
 def _echarts_overall_donut(copy_pct: float, review_pct: float = 0.0,
                            review_incomplete_pct: float = 0.0,
-                           original_pct: float | None = None) -> str:
-    """整体同源/有效存疑/复核未完成/暂未检出环形图（按函数加权）。"""
+                           original_pct: float | None = None,
+                           excluded_pct: float | None = None) -> str:
+    """整体同源/有效存疑/复核未完成/暂未检出/可解释复用环形图（按全部解析函数加权）。
+
+    分母为本次解析函数总数：可解释复用（第三方库/上游/基线/样板/误报）也占一个扇区，
+    让评审看到全部函数的归属，而不是只看到“纳入统计”的部分。
+    """
     c = round(copy_pct, 1)
     rv = round(review_pct, 1)
     inc = round(review_incomplete_pct, 1)
-    o = round(original_pct if original_pct is not None else max(0.0, 100 - c - rv - inc), 1)
+    ex = round(excluded_pct if excluded_pct is not None else 0.0, 1)
+    o = round(original_pct if original_pct is not None else max(0.0, 100 - c - rv - inc - ex), 1)
     option = {
         "title": {
-            "text": f"{c}%", "subtext": "高置信同源占纳入统计函数",
+            "text": f"{c}%", "subtext": "高置信同源占全部解析函数",
             "left": "center", "top": "38%",
             "textAlign": "center",
             "textStyle": {"fontSize": 26, "fontWeight": "bold", "color": "#ef4444"},
@@ -2259,7 +2296,8 @@ def _echarts_overall_donut(copy_pct: float, review_pct: float = 0.0,
         "legend": {"bottom": 0, "data": ["高置信同源代码"]
                    + (["模型复核难例"] if rv else [])
                    + (["复核失败/未完成"] if inc else [])
-                   + ["暂未检出相似"]},
+                   + ["暂未检出相似"]
+                   + (["可解释复用/已排除"] if ex else [])},
         "series": [{
             "name": "占比", "type": "pie", "radius": ["54%", "78%"],
             "center": ["50%", "44%"], "avoidLabelOverlap": False,
@@ -2267,7 +2305,8 @@ def _echarts_overall_donut(copy_pct: float, review_pct: float = 0.0,
             "data": [{"value": c, "name": "高置信同源代码", "itemStyle": {"color": "#ef4444"}}]
                     + ([{"value": rv, "name": "模型复核难例", "itemStyle": {"color": "#f59e0b"}}] if rv else [])
                     + ([{"value": inc, "name": "复核失败/未完成", "itemStyle": {"color": "#94a3b8"}}] if inc else [])
-                    + [{"value": o, "name": "暂未检出相似", "itemStyle": {"color": "#22c55e"}}],
+                    + [{"value": o, "name": "暂未检出相似", "itemStyle": {"color": "#22c55e"}}]
+                    + ([{"value": ex, "name": "可解释复用/已排除", "itemStyle": {"color": "#64748b"}}] if ex else []),
         }],
     }
     return (
@@ -2369,25 +2408,6 @@ def _echarts_top_sources(metrics: list[dict], top: int = 8) -> str:
     )
 
 
-def _source_metrics_table(metrics: list[dict], linker=None, top: int = 8) -> str:
-    if not metrics:
-        return ""
-    rows = "".join(
-        '<tr>'
-        f'<td>{_ref_repo_anchor(linker, x["repo"])}</td>'
-        f'<td>{x["functions"]}</td><td>{x["effective_loc"]}</td>'
-        f'<td>{x["files"]}</td><td>{x["modules"]}</td><td>{x["multi_repo_functions"]}</td>'
-        '</tr>'
-        for x in metrics[:top]
-    )
-    return (
-        '<div class="source-metrics-table"><table>'
-        '<thead><tr><th>匹配历史作品</th><th>唯一目标函数</th><th>有效相似行</th>'
-        '<th>涉及文件</th><th>涉及子系统</th><th title="同一目标函数还匹配其他历史仓库，不能唯一归因">多仓同时命中</th></tr></thead>'
-        f'<tbody>{rows}</tbody></table></div>'
-    )
-
-
 _LEGEND_HTML = (
     '<div class="legend">'
     '<span><b>档位：</b></span>'
@@ -2408,7 +2428,8 @@ def _kpi(value, label: str, color: str = "#0f172a") -> str:
             f'<span class="l">{html.escape(label)}</span></div>')
 
 
-def _exclusion_totals(suspects: list[dict], recall: dict | None = None) -> dict:
+def _exclusion_totals(suspects: list[dict], recall: dict | None = None, *,
+                      library_context: LibraryContext | None = None) -> dict:
     """统计「已扣除的机械误报」各类去重函数数，**互斥归一**（每个函数按优先级只归一类），
     使各类之和 == 总数，供导读卡透明呈现，避免「分类相加远超总数」让评审困惑。
 
@@ -2454,7 +2475,7 @@ def _exclusion_totals(suspects: list[dict], recall: dict | None = None) -> dict:
             key = _query_key(query)
             if key in included_keys:
                 continue
-            if match_library(query.get("file_path")):
+            if match_library(query.get("file_path"), context=library_context):
                 best[key] = "library"
     out = {k: 0 for k in _PRIO}
     for cat in best.values():
@@ -2558,6 +2579,7 @@ def _summary_card(
     retrieval_contract: dict | None = None,
     recall: dict | None = None,
     linker=None,
+    library_context: LibraryContext | None = None,
 ) -> str:
     # 按**函数**计（与各清单一致）：借鉴/疑似借鉴/原创 来自三类口径的统计
     borrowed_n = sum(st["confirmed"] for st in submodule_stats.values())
@@ -2573,14 +2595,18 @@ def _summary_card(
             for item in recall.get("results", [])
         })
 
-    # 加权总占比（按函数）
+    # 加权总占比（按全部解析函数计，含可解释复用/已排除，保证 2094 = 各分类之和）
     all_total = sum(st["total"] for st in submodule_stats.values()) or 1
-    overall_copy_pct = round(borrowed_n / all_total * 100, 1)
-    overall_review_pct = round(review_n / all_total * 100, 1)
-    overall_incomplete_pct = round(review_incomplete_n / all_total * 100, 1)
-    overall_original_pct = round(original_n / all_total * 100, 1)
+    excl = _exclusion_totals(suspects, recall, library_context=library_context)
+    excl_total = int(excl.get("total_excluded") or 0)
+    full_total = recall_function_count if recall_function_count else (all_total + excl_total)
+    overall_copy_pct = round(borrowed_n / full_total * 100, 1)
+    overall_review_pct = round(review_n / full_total * 100, 1)
+    overall_incomplete_pct = round(review_incomplete_n / full_total * 100, 1)
+    overall_original_pct = round(original_n / full_total * 100, 1)
+    overall_excluded_pct = round(excl_total / full_total * 100, 1)
 
-    # KPI 卡片（按函数；库复用 / 公共样板已剔除，单列各自小节）
+    # KPI 卡片（按函数；库复用 / 公共样板等可解释复用单独成卡，保证全部函数有归属）
     # 高置信同源与模型仍存疑明确分栏，避免把“已经过模型但模型拿不准”误读成尚未审核。
     kpis = (
         '<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">'
@@ -2591,23 +2617,31 @@ def _summary_card(
         + (_kpi(f"{review_failed_n}", "模型复核失败（函数）", "#64748b") if review_failed_n else "")
         + (_kpi(f"{review_pending_n}", "模型复核未完成（函数）", "#64748b") if review_pending_n else "")
         + _kpi(f"{original_n}", "暂未检出相似（函数）", "#16a34a")
+        + _kpi(f"{excl_total}", "可解释复用/已排除（函数）", "#64748b")
         + _kpi(f"{file_match_count}", "整文件相同（文件）", "#e11d48")
         + _kpi(f"{file_similar_count}", "整体相似文件（个）", "#d97706")
         + '</div>'
+        + ('<p class="text-xs text-slate-500 mt-1 mb-0">'
+           f'对账：{full_total}（本次解析函数） = {borrowed_n} 高置信同源 + {review_n} 模型复核难例'
+           f' + {review_incomplete_n} 复核失败/未完成 + {original_n} 暂未检出相似'
+           f' + {excl_total} 可解释复用/已排除（第三方库 {excl.get("library", 0)}、'
+           f'基线衍生 {excl.get("baseline", 0)}、上游/ABI {excl.get("upstream", 0)}、'
+           f'机械误报 {excl.get("false_positive", 0)}、公共样板 {excl.get("common", 0)}）；'
+           '每类清单见「合法复用与许可证合规」一节。</p>')
     )
 
     # 头部：环形图 + Top 历史匹配仓库，左右并排；不把相似关系表述为因果来源。
     donut = _echarts_overall_donut(
-        overall_copy_pct, overall_review_pct, overall_incomplete_pct, overall_original_pct)
+        overall_copy_pct, overall_review_pct, overall_incomplete_pct,
+        overall_original_pct, overall_excluded_pct)
     source_metrics = _source_metrics(suspects)
     top_src = _echarts_top_sources(source_metrics)
-    source_table = _source_metrics_table(source_metrics, linker)
     head_charts = (
         '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 items-start">'
-        '<div><div class="chart-title">整体结果分布（按纳入统计函数）</div>'
+        '<div><div class="chart-title">整体结果分布（按全部解析函数）</div>'
         + donut + '</div>'
         + ('<div><div class="chart-title">高置信历史匹配（按唯一目标函数，Top 8；不代表直接来源）</div>'
-           + top_src + source_table + '</div>' if top_src else '<div></div>')
+           + top_src + '</div>' if top_src else '<div></div>')
         + '</div>'
     )
 
@@ -2624,7 +2658,7 @@ def _summary_card(
     # 顶部导读 + 体检结论卡（老师第一眼看到，建立正确语境）
     guide = _reading_guide(query_repo_id, borrowed_n, review_n,
                            review_failed_n, review_pending_n, original_n,
-                           overall_copy_pct, _exclusion_totals(suspects, recall),
+                           overall_copy_pct, excl,
                            retrieval_contract, recall_function_count)
 
     return (
@@ -2637,7 +2671,8 @@ def _summary_card(
         '<p class="text-xs text-slate-500 mt-1 mb-0">下列数字为<b>扣除上游框架/库/规范受限代码后的待评估口径</b>；'
         '「高置信同源代码」由确定性代码证据形成；模型结论只进入「复核难例」，不自动升为高置信；'
         '复核失败/未完成是流程状态，不是风险结论。'
-        '图中的比例分母仅为纳入统计函数，不是全作品函数，也不是赛事扣分比例。'
+        '环形图与对账行按全部解析函数计；各模块分布图的分母为纳入统计函数，'
+        '任何比例都不是赛事扣分比例。'
         '<b>需结合代码、来源披露和提交过程人工判断</b>。</p>'
         f'{_LEGEND_HTML}{kpis}{head_charts}{tier_chart}{pct_chart}'
         '</section>'
@@ -3009,7 +3044,8 @@ def build_similarity_clusters(file_pairs: list[dict]) -> list[dict]:
         mod = g.get("module", "other")
         key = (repo, mod, feature_key)
         cluster = grouped.setdefault(key, {
-            "source": repo, "module": mod, "feature": feature_name, "groups": [],
+            "source": repo, "module": mod, "feature_key": feature_key,
+            "feature": feature_name, "groups": [],
             "files": set(), "effective_loc": 0, "similarities": [],
         })
         cluster["groups"].append(g)
@@ -3040,8 +3076,48 @@ def build_similarity_clusters(file_pairs: list[dict]) -> list[dict]:
         ) - ambiguity_penalty))
         c["priority"] = "重点核查" if c["priority_score"] >= 78 else (
             "优先核查" if c["priority_score"] >= 62 else "常规核查")
+        identity = json.dumps(
+            [c["source"], c["module"], c["feature_key"]],
+            ensure_ascii=False, separators=(",", ":"),
+        )
+        c["analysis_id"] = "cluster-" + hashlib.sha1(
+            identity.encode("utf-8", errors="replace")
+        ).hexdigest()[:12]
         clusters.append(c)
     return sorted(clusters, key=lambda c: (-c["priority_score"], -c["effective_loc"], c["feature"]))
+
+
+def _semantic_cluster_cost(cluster: dict, members_per_cluster: int = 20) -> int:
+    """估算单个功能簇提示长度；代码只取最高相似代表，其他成员保留短映射。"""
+    groups = cluster.get("groups") or []
+    representative = groups[0] if groups else {}
+    return (
+        _semantic_group_cost(representative)
+        + min(len(groups), max(1, members_per_cluster)) * 260
+        + 1_200
+    )
+
+
+def _semantic_cluster_batches(
+    file_pairs: list[dict],
+    members_per_cluster: int = 20,
+) -> list[list[dict]]:
+    """按统一字符预算分批，但不截断任何将出现在报告中的功能簇。"""
+    clusters = build_similarity_clusters(file_pairs)
+    batches: list[list[dict]] = []
+    current: list[dict] = []
+    used = 0
+    for cluster in clusters:
+        cost = _semantic_cluster_cost(cluster, members_per_cluster)
+        if current and used + cost > _SEMANTIC_PROMPT_CHAR_BUDGET:
+            batches.append(current)
+            current = []
+            used = 0
+        current.append(cluster)
+        used += cost
+    if current:
+        batches.append(current)
+    return batches
 
 
 def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
@@ -3052,17 +3128,19 @@ def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
         body = '<p class="text-sm text-slate-500">没有形成高置信同源功能簇。</p>'
     else:
         cards = []
-        analyzed_modules = set()
         for index, c in enumerate(clusters, 1):
             tone = "critical" if c["priority"] == "重点核查" else "normal"
             table = _groups_table(
                 "簇内函数证据", c["groups"], linker, query_repo_id, "text-red-700")
-            analysis = ""
-            if c["module"] not in analyzed_modules:
+            frag = _extract_cluster_analysis(analysis_html, c["analysis_id"])
+            # 兼容低层调用传入的旧模块级片段；正式流程的 v4 完整性门禁只接受功能簇 ID。
+            if not frag:
                 frag = _extract_module_analysis(analysis_html, c["module"])
-                if frag:
-                    analyzed_modules.add(c["module"])
-                    analysis = '<div class="cluster-analysis"><b>模块语义说明</b>' + _strip_addr_refs(frag) + '</div>'
+            analysis = (
+                '<div class="cluster-analysis"><b>功能簇语义说明</b>'
+                + _strip_addr_refs(frag) + '</div>'
+                if frag else ""
+            )
             cards.append(
                 f'<article class="cluster-card" data-priority="{tone}" x-data="{{open:{str(index <= 3).lower()}}}">'
                 '<button type="button" class="cluster-head" @click="open=!open">'
@@ -3094,7 +3172,7 @@ def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
 
 def _lineage_section(query_repo_id: str, suspects: list[dict], linker,
                      recall: dict | None = None) -> tuple[str, str]:
-    """展示排除共同上游后的来源统计，不输出时间或版本方向判断。"""
+    """展示排除可归因公共来源后的主要历史匹配，不输出时间或版本方向判断。"""
     sid = "sec-lineage"
     metrics = _source_metrics(suspects)
     rows = []
@@ -3105,34 +3183,25 @@ def _lineage_section(query_repo_id: str, suspects: list[dict], linker,
             f'<td>{x["functions"]}</td><td>{x["effective_loc"]}</td>'
             f'<td>{x["multi_repo_functions"]}</td></tr>'
         )
-    exclusion = _exclusion_totals(suspects, recall)
-    categories = [
-        ("共同上游 / ABI", exclusion.get("upstream", 0)),
-        ("比赛基线衍生", exclusion.get("baseline", 0)),
-        ("第三方库", exclusion.get("library", 0)),
-        ("机械误报", exclusion.get("false_positive", 0)),
-        ("公共 / 样板代码", exclusion.get("common", 0)),
-    ]
-    cards = "".join(
-        f'<div><span>{html.escape(label)}</span><b>{int(count)}</b></div>'
-        for label, count in categories
-    )
     body = (
-        '<div class="lineage-summary">'
-        f'<div><span>唯一排除函数</span><b>{exclusion.get("total_excluded", 0)}</b></div>'
-        f'{cards}'
-        '</div>'
-        '<div class="section-intro">系统约定比较运行时取得的最新代码，因此本节不展示版本或时间方向。'
-        '<b>判断重点是：相似代码能否由共同上游、ABI 规范、第三方库、比赛基线或公共样板解释。</b>'
-        '上方数量按目标函数互斥归一；详细排除证据在第 7 节展开。下表仅保留排除这些因素后的主要'
-        '高置信历史匹配。相似关系本身不证明传播方向或直接来源。</div>'
+        '<div class="section-intro">本节判断相似代码能否由公共来源解释。'
+        '<b>判断时已排除：共同上游（vendored / ABI 受限）、第三方库复用、'
+        '比赛基线衍生、机械误报和公共样板代码</b>——这些代码不计入'
+        '“高置信同源代码”，详细清单见“合法复用与许可证合规”一节。'
+        '下表仅保留排除这些因素后的主要高置信历史匹配；系统约定比较运行时取得的最新代码，'
+        '因此不展示版本或时间方向，相似关系本身也不证明传播方向或直接来源。</div>'
         '<div class="overflow-x-auto"><table><thead><tr><th>主要匹配历史作品</th>'
-        '<th>唯一目标函数</th><th>有效相似行</th><th>多仓同时命中</th>'
+        '<th>唯一目标函数</th><th>有效相似行</th>'
+        '<th title="同一目标函数还匹配其他历史仓库，不能唯一归因">多仓同时命中</th>'
         f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>'
+        '<p class="text-xs text-slate-500 mt-2">'
+        '“多仓同时命中”按函数计数：一个目标函数若同时高相似出现在多个历史仓库中，'
+        '就不能把它当作指向某单一仓库的独占证据（它更可能是公共代码）；'
+        '但它仍作为相似证据保留，只降低抽查优先级。</p>'
     )
     section = _collapsible_html(
         sid, "共同上游判断", body, tone="evidence",
-        subtitle="解释可归因的公共来源，并保留排除后的主要历史匹配",
+        subtitle="判断相似是否由共同上游等公共来源解释，并列出排除后的主要历史匹配",
     )
     return _toc_link(sid, "共同上游判断"), section
 
@@ -3246,6 +3315,16 @@ def _extract_module_analysis(analysis_html: str, mod: str) -> str:
     if m3:
         return m3.group(1)
     return ""
+
+
+def _extract_cluster_analysis(analysis_html: str, cluster_id: str) -> str:
+    """按稳定功能簇 ID 提取模型语义片段，避免把模块总述误配给多个不同功能簇。"""
+    pattern = re.compile(
+        rf'<section[^>]*data-cluster=["\']{re.escape(cluster_id)}["\'][^>]*>.*?</section>',
+        re.DOTALL | re.IGNORECASE,
+    )
+    match = pattern.search(analysis_html or "")
+    return match.group(0) if match else ""
 
 
 def _innovation_runtime_evidence(point: dict, query_repo_path: Path | None) -> dict:
@@ -3822,10 +3901,11 @@ def _file_level_section(file_matches: list[dict], file_similar: list[dict],
 
 
 def _reused_libraries_section(lib_stats: list[dict], query_repo_id: str) -> tuple[str, str]:
-    """复用库统计：列出新作品 vendored 的公开第三方库及规模。
+    """复用库统计：列出新作品复用的公开第三方库组件及规模。
 
-    这些库代码（lwext4 / smoltcp / fatfs …）为多队合法共用，已从借鉴图/清单中剔除，
-    此处单列说明，避免「数字凭空消失」。无复用库时返回空（不渲染本节）。
+    这些库本体及经包清单/导入关系确认的适配层（lwext4 / smoltcp / fatfs …）为多队
+    合法共用，已从借鉴图/清单中剔除，此处单列说明，避免「数字凭空消失」。
+    无复用库时返回空（不渲染本节）。
     """
     if not lib_stats:
         return "", ""
@@ -3843,20 +3923,21 @@ def _reused_libraries_section(lib_stats: list[dict], query_repo_id: str) -> tupl
     )
     body = (
         '<p class="text-sm text-slate-600 mb-3">'
-        '本作品 vendored（整库签入）了以下公开第三方库。这类库代码为多队合法共用，'
+        '本作品复用了以下公开第三方库组件（含 vendored 库本体，以及经包清单与源码导入关系'
+        '共同确认的适配层）。这类库组件为多队合法共用，'
         '<b>不计入值得关注的借鉴/抄袭</b>，已从「主要历史匹配」图、各模块借鉴占比/清单、'
-        '原创代码清单与文件级清单中剔除，仅在此单列。识别规则见 <code>config/libraries.yaml</code>，'
-        '如有遗漏可在该文件补充。'
+        '原创代码清单与文件级清单中剔除，仅在此单列。识别规则见 <code>config/libraries.yaml</code>；'
+        '适配层不会仅凭目录名命中。'
         '</p>'
         '<div class="flex flex-wrap gap-3 text-sm mb-3">'
         f'<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">复用库 {len(lib_stats)} 个</span>'
-        f'<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">库函数 {total_funcs} 个</span>'
+        f'<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">库组件函数 {total_funcs} 个</span>'
         f'<span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">已剔除嫌疑对 {total_pairs}</span>'
         '</div>'
         '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
         '<thead><tr class="bg-slate-50 text-slate-600">'
         '<th class="text-left p-2 border-b">复用库</th>'
-        '<th class="text-left p-2 border-b">新作品中函数数</th>'
+        '<th class="text-left p-2 border-b">库本体/适配层函数数</th>'
         '<th class="text-left p-2 border-b">已剔除嫌疑对</th>'
         '<th class="text-left p-2 border-b">命中历史仓库数</th>'
         '</tr></thead>'
@@ -4762,10 +4843,11 @@ def _assert_model_review_complete(suspects: list[dict]) -> None:
     from src.oskernel_agent.report_quality import IncompleteReportError
 
     accepted = {"借鉴", "疑似", "规则保留", "非借鉴"}
+    required_selections = {"selected", "selected_secondary", "deferred_secondary"}
     incomplete = [
         suspect for suspect in suspects
         if suspect.get("tier") in ("review", "weak")
-        and suspect.get("model_review_selection") != "supplemental_source"
+        and suspect.get("model_review_selection") in required_selections
         and suspect.get("review_verdict") not in accepted
     ]
     if not incomplete:
@@ -5069,10 +5151,12 @@ def _compliance_section(query_repo_path: Path | None, linker, query_repo_id: str
                         suspects: list[dict],
                         lib_stats: list[dict], cc_funcs: list[dict], fp_funcs: list[dict],
                         ub_funcs: list[dict], base_funcs: list[dict],
-                        recall: dict | None = None) -> tuple[str, str]:
+                        recall: dict | None = None, *,
+                        library_context: LibraryContext | None = None) -> tuple[str, str]:
     """合法复用与许可证证据总览；只做材料检查，不给法律结论。"""
     license_files = _license_files(query_repo_path)
-    exclusion = _exclusion_totals(suspects, recall)
+    exclusion = _exclusion_totals(
+        suspects, recall, library_context=library_context)
     unique_excluded = int(exclusion.get("total_excluded") or 0)
     categories = [
         ("第三方库复用", sum(int(x.get("func_count") or 0) for x in lib_stats), "检查来源、版本和许可证"),
@@ -5133,6 +5217,7 @@ def generate_comparison_html(
     ub_funcs: list[dict] | None = None,
     retrieval_contract: dict | None = None,
     recall: dict | None = None,
+    library_context: LibraryContext | None = None,
 ) -> str:
     """组装完整的查重对比 HTML 报告（直接产出，不经 Markdown 转换）。"""
     # 防御公共 API 的直接调用：即使上游仍传入旧产物，也不让测试套件或 benchmark
@@ -5158,7 +5243,8 @@ def generate_comparison_html(
                                  file_similar_count=len(file_similar),
                                  retrieval_contract=retrieval_contract,
                                  recall=recall,
-                                 linker=linker)
+                                 linker=linker,
+                                 library_context=library_context)
     toc_lineage, sec_lineage = _lineage_section(
         query_repo_id, suspects, linker, recall)
     toc_clusters, sec_clusters = _cluster_section(
@@ -5170,7 +5256,8 @@ def generate_comparison_html(
         innovation_points or [], linker, query_repo_id, query_repo_path)
     toc_compliance, sec_compliance = _compliance_section(
         query_repo_path, linker, query_repo_id, suspects, lib_stats or [], cc_funcs or [],
-        fp_funcs or [], ub_funcs or [], base_funcs or [], recall)
+        fp_funcs or [], ub_funcs or [], base_funcs or [], recall,
+        library_context=library_context)
     toc_ai, sec_ai = _ai_detect_section(ai_detect_data, linker, query_repo_id)
     toc_orig, sec_orig = _original_section(original_funcs, linker, query_repo_id)
 
@@ -5205,7 +5292,7 @@ def generate_comparison_html(
     body_parts = [
         _chapter_heading("01", "评审结论摘要", "先给出可执行结论、证据规模和历史匹配排名。"),
         summary_html,
-        _chapter_heading("02", "共同上游判断", "解释可归因的公共来源，并将这些代码从同源证据中分离。"),
+        _chapter_heading("02", "共同上游判断", "判断相似代码能否由共同上游、第三方库等公共来源解释，并列出排除后的主要历史匹配。"),
         sec_lineage,
         _chapter_heading("03", "高置信同源功能簇", "以功能级同源事件替代零散函数堆叠，簇内保留全部代码映射。"),
         sec_clusters,
@@ -5277,8 +5364,8 @@ def run_semantic_compare(
         query_repo_path: 新作品本地克隆路径（用于文件链接 + 语义分析）
         recall_path:     embed 阶段产出的 *_recall.json（用于计算函数总数 / 原创函数）
         output_dir:      HTML 输出目录
-        top_per_module:  每个子模块送入 LLM 语义分析的最大代码对数（默认 20；
-                         模块借鉴对 <20 时即全部做语义分析，仅超量时截断以控 token）
+        top_per_module:  每个功能簇送入语义模型的成员映射上限（默认 20）；不截断功能簇，
+                         超出统一上下文预算时自动分批，保证报告中的每个功能簇都有语义说明
         skip_opencode:   True 时跳过全部 LLM（仅诊断用，不渲染模型分析占位模块）
         global_semantic_analysis: 默认 True，实际运行模块语义分析和创新归纳；
                                   False 仅供诊断，相关模块不渲染占位内容
@@ -5297,8 +5384,17 @@ def run_semantic_compare(
     ]
     data["suspects"] = suspects
     query_repo_id = data.get("query_repo_id") or suspects_path.stem.split("_suspects")[0]
+    library_context = discover_library_context(query_repo_path)
+    if library_context.integration_roots:
+        logger.info(
+            "[compare] 依赖归属证据确认 {} 个第三方库适配层：{}",
+            len(library_context.integration_roots),
+            "、".join(
+                f"{root} → {library}" for root, library in library_context.integration_roots),
+        )
+    reuse_n       = tag_library_reuse(
+        suspects, context=library_context)  # 标注库本体及经证据确认的适配层
     baseline_boundary_n = _tag_query_level_baselines(suspects)
-    reuse_n       = tag_library_reuse(suspects)  # 标注 vendored 库复用，供各图/清单剔除
     fp_counts     = tag_false_positives(suspects)  # 标注跨架构/跨语言/样板汇编误报（降级，不丢弃）
     ub_counts     = tag_upstream_baselines(suspects)  # 标注上游基线 vendored / ABI 受限代码（降级）
     if baseline_boundary_n:
@@ -5445,10 +5541,10 @@ def run_semantic_compare(
     non_excluded = [s for s in suspects if not _is_excluded_pair(s)]
     file_similar = aggregate_file_similarity(non_excluded, recall, query_repo_path=query_repo_path)
     file_matches = [m for m in file_matches
-                    if not match_library(m.get("query_file"))
+                    if not match_library(m.get("query_file"), context=library_context)
                     and not is_excluded_file_path(m.get("query_file", ""))]
     file_similar = [f for f in file_similar
-                    if not match_library(f.get("file_path"))
+                    if not match_library(f.get("file_path"), context=library_context)
                     and not is_excluded_file_path(f.get("file_path", ""))]
 
     logger.info("[compare] 新作品 {}：{} 个嫌疑对（剔除库复用 {} / 上游基线 {} / ABI {} / 误报 {} / 内部复用 {}），整文件相同 {} 个，整体相似 {} 个",
@@ -5457,13 +5553,16 @@ def run_semantic_compare(
                 len(file_matches), len(file_similar))
 
     # 统计采用复核后的档位与互斥复核状态：有效疑似、失败、真正未完成分开。
-    submodule_stats = compute_submodule_stats(suspects, recall)
-    lib_stats       = reused_library_stats(suspects, recall)
+    submodule_stats = compute_submodule_stats(
+        suspects, recall, library_context=library_context)
+    lib_stats       = reused_library_stats(
+        suspects, recall, context=library_context)
     cc_funcs        = common_code_stats(suspects)
     fp_funcs        = false_positive_stats(suspects)
     ub_funcs        = upstream_baseline_stats(suspects)
     base_funcs      = baseline_stats(suspects)
-    # 表格展示：confirmed 全量；送 LLM 做语义分析：每模块取 sim 最高的 top_per_module 个
+    # confirmed 功能簇全量展示并全量进行语义分析；top_per_module 只限制每个簇在 prompt 中
+    # 展开的成员映射数，超出统一上下文预算时自动分批，不能形成“有卡片、无说明”的报告。
     file_pairs = collect_file_pairs(suspects)
     final_review_pairs = collect_file_pairs(suspects, keep_tiers=("review", "weak"))
     cleared_pair_keys = {
@@ -5480,7 +5579,7 @@ def run_semantic_compare(
     final_review_pairs = _exclude_confirmed_review_groups(final_review_pairs, file_pairs)
     # collect_file_pairs 从每个仍有效的候选对读取复核结论，再按目标函数聚合；不会把一个
     # 候选的结论套到同目标函数的其他候选上。
-    llm_pairs  = _limit_per_module(file_pairs, top_per_module)
+    llm_pairs = file_pairs
 
     # AI 生成代码检测结果（独立链路产物，可选并入报告）
     ai_detect_data = None
@@ -5491,12 +5590,14 @@ def run_semantic_compare(
             logger.warning("[compare] 读取 ai_detect 结果失败：{}", e)
 
     # 暂未命中函数（含复核判「非借鉴」而降级的函数）
-    original_funcs  = _original_functions(recall, suspects) if recall else []
+    original_funcs  = _original_functions(
+        recall, suspects, library_context=library_context) if recall else []
 
     # 独立创新实现地图：从暂未命中函数出发，绑定各模块主要参考 repo 的最近实现后再做
     # 代码级归纳。文档不进入该输入，“未命中”也不会直接升级为创新结论。
     innovation_candidates = build_innovation_candidates(
-        recall, suspects, functions_db_path=functions_db_path)
+        recall, suspects, functions_db_path=functions_db_path,
+        library_context=library_context)
     semantic_enabled = not skip_opencode and global_semantic_analysis
     innovation_points = run_innovation_analysis(
         query_repo_id, innovation_candidates, work_dir,
@@ -5507,7 +5608,8 @@ def run_semantic_compare(
     if semantic_enabled and llm_pairs:
         qpath = str(Path(query_repo_path).resolve()) if query_repo_path else ""
         analysis_html = run_semantic_analysis(
-            query_repo_id, qpath, llm_pairs, submodule_stats, work_dir
+            query_repo_id, qpath, llm_pairs, submodule_stats, work_dir,
+            members_per_cluster=top_per_module,
         )
 
     # 构建 GitLab linker（取各参考仓库的在线 URL + HEAD sha）
@@ -5546,6 +5648,7 @@ def run_semantic_compare(
         ub_funcs        = ub_funcs,
         retrieval_contract = recall.get("retrieval_contract") if recall else None,
         recall          = recall,
+        library_context = library_context,
     )
 
     # 档位标签统一（高置信同源代码 / 模型复核难例 / 暂未检出相似），避免各处叫法不一

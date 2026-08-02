@@ -376,7 +376,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             baseline_matcher = VectorBaselineMatcher(get_emb(), get_store())
         # commit 信号通道已停用（git blame 逐函数分析过慢、对查重结论非必需）
         res = timed("metadata", lambda: run_metadata(
-            v2_path, db_path=args.db, output_dir=out, baseline_matcher=baseline_matcher))
+            v2_path, db_path=args.db, output_dir=out, baseline_matcher=baseline_matcher,
+            query_repo=repo_path))
         funnel["metadata"] = res["metadata_summary"]
         funnel["after_metadata"] = tier_counts(res["suspects"])
         del res
@@ -389,9 +390,15 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     # ---- ai_detect（AI 生成代码检测，独立于查重漏斗；失败状态不得进入交付报告）----
     if args.ai_detect and _should_run("ai_detect", args.resume_from):
         from src.ai_detect.runner import run_ai_detect
+        from src.report.libraries import discover_library_context, match_library
         # 排除借鉴代码：文件级（fastpath 整文件命中）+ 函数级（查重命中的可疑函数），
         # 只对未匹配上的原创代码做 AI 生成检测（借鉴自参考 OS 的代码不计入）
-        exclude_files = {p.replace("\\", "/") for p in skip_files}
+        library_context = discover_library_context(repo_path)
+        exclude_files = {
+            p.replace("\\", "/") for p in skip_files
+            if not match_library(
+                p.replace("\\", "/"), context=library_context)
+        }
         exclude_funcs: set[tuple[str, str]] = set()
         if final_path.exists():
             try:
@@ -401,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
                      s.get("query_func", {}).get("func_name", ""))
                     for s in _sd.get("suspects", [])
                     if s.get("tier") in ("confirmed", "review", "weak")
+                    and not s.get("reuse_library")
                 }
             except (OSError, json.JSONDecodeError):
                 exclude_funcs = set()

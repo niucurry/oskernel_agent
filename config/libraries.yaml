@@ -4,19 +4,25 @@
 # 借鉴/抄袭**——报告里会从「主要借鉴来源」图、各模块借鉴占比/清单、原创代码清单、
 # 文件级清单中剔除，另单列「复用库统计」小节呈现。
 #
-# 识别规则（见 src/report/libraries.py · match_library）：把文件路径分隔符与大小写归一后，
+# 识别规则（见 src/report/libraries.py）：把文件路径分隔符与大小写归一后，
 #   1) 若任一目录段 ∈ vendor_dirs（vendor/third_party/…），取其下一段为库名（结构兜底，
 #      自动覆盖 cargo vendor 出来的全部 crate）；
 #   2) 否则若任一目录段 == 某库的 segments 之一，则判为该库。可能同时表示业务模块的短名称
 #      可放入 context_required_segments；它们只有位于 crates/libs/deps 等依赖布局，或自身就是
 #      <crate>/src/... 根布局时才命中，避免把 src/arch/riscv 等自研代码当第三方库。
-# 新库在此补充 segments 即可，无需改代码。
+#   3) 包目录被改名时，从 Cargo.toml / pyproject.toml / package.json 的真实包名恢复归属；
+#   4) integration_segments 表示该库常见的适配层目录别名。只有仓库内确实存在对应依赖包，
+#      且适配目录源码存在 import_names 的真实导入语句时才继承库归属；仅目录名相同不会命中。
+# 新库、包导入名或适配层别名均在此补充，无需改代码，也不得按参赛仓库 ID 或函数名登记。
 #
 # 种子来自 config/baselines.yaml 已登记的 vendored 库（lwext4/rust-fatfs/virtio-drivers）
 # + 用户点名的 smoltcp + 实测语料里常见的 crate。
 libraries:
   - name: lwext4
     segments: [lwext4, lwext4_rust]
+    # lwext4_rust 的 VFS 接入层常独立放在内核源码中；需由包清单 + use lwext4_rust 双证据激活。
+    integration_segments: [ext4_lw]
+    import_names: [lwext4_rust]
   - name: smoltcp
     segments: [smoltcp]
   - name: fatfs

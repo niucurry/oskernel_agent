@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR,
                     help=f"HTML 输出目录（默认 {DEFAULT_OUTPUT_DIR}）")
     pc.add_argument("--top-per-module", type=int, default=20,
-                    help="每个子模块送入语义分析的最大相似代码对数（默认 20；模块借鉴对 <20 时全部分析）")
+                    help="每个功能簇在语义提示中展开的成员上限（默认 20；功能簇始终全覆盖并自动分批）")
     pc.add_argument("--skip-opencode", action="store_true",
                     help="跳过所有 LLM（仅诊断用；不渲染语义分析或创新占位模块）")
     semantic_group = pc.add_mutually_exclusive_group()

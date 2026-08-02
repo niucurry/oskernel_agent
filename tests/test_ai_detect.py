@@ -144,6 +144,32 @@ def test_run_ai_detect_excludes_registered_third_party_libraries(tmp_path: Path)
     assert res["scope"]["eligible_functions"] == 1
 
 
+def test_run_ai_detect_excludes_verified_library_adapter(tmp_path: Path):
+    own = tmp_path / "os" / "src"
+    adapter = own / "fs" / "ext4_lw"
+    package = tmp_path / "crates" / "renamed-ext4-package"
+    own.mkdir(parents=True)
+    adapter.mkdir(parents=True)
+    package.mkdir(parents=True)
+    (package / "Cargo.toml").write_text(
+        '[package]\nname = "lwext4_rust"\nversion = "0.1.0"\n', encoding="utf-8")
+    (own / "lib.rs").write_text(
+        _long_rust("own_impl", "own_marker"), encoding="utf-8")
+    (adapter / "inode.rs").write_text(
+        "use lwext4_rust::Ext4File;\n" + _long_rust("adapter_impl", "ai_like"),
+        encoding="utf-8",
+    )
+
+    res = run_ai_detect(
+        tmp_path, settings=AIDetectSettings(min_loc=20, git_blame=False),
+        scorer=FakeScorer(), show_progress=False, write=False,
+    )
+
+    assert res["status"] == "ok"
+    assert res["aggregated"]["overall"]["total_functions"] == 1
+    assert res["scope"]["third_party_excluded"] == 1
+
+
 def test_run_ai_detect_skips_when_no_functions(tmp_path: Path):
     (tmp_path / "readme.md").write_text("no code here", encoding="utf-8")
     res = run_ai_detect(tmp_path, settings=AIDetectSettings(), scorer=FakeScorer(),

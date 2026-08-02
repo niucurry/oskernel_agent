@@ -120,6 +120,43 @@ def test_metadata_string_channel_and_existing_pairs_are_same_language_only(tmp_p
     assert result["metadata_summary"]["string_new_pairs"] == 0
 
 
+def test_metadata_tags_verified_library_adapter_before_other_channels(tmp_path):
+    repo = tmp_path / "repo"
+    package = repo / "crates" / "renamed-lwext4"
+    adapter = repo / "os" / "src" / "fs" / "ext4_lw"
+    package.mkdir(parents=True)
+    adapter.mkdir(parents=True)
+    (package / "Cargo.toml").write_text(
+        '[package]\nname = "lwext4_rust"\nversion = "0.1.0"\n', encoding="utf-8")
+    (adapter / "inode.rs").write_text(
+        "use lwext4_rust::Ext4File;\nfn as_inode_type() {}\n", encoding="utf-8")
+    db = tmp_path / "functions.db"
+    with FunctionStore(db) as store:
+        store.conn.commit()
+    suspect = {
+        "tier": "confirmed",
+        "query_func": {
+            "repo_id": "2026/new", "file_path": "os/src/fs/ext4_lw/inode.rs",
+            "start_line": 2, "func_name": "as_inode_type", "lang": "rust",
+            "raw_code": "fn as_inode_type() {}", "normalized_code": "Q",
+        },
+        "candidate_func": {
+            "repo_id": "2025/team", "file_path": "os/src/fs/ext4_lw/inode.rs",
+            "start_line": 2, "func_name": "as_inode_type", "lang": "rust",
+            "raw_code": "fn as_inode_type() {}", "normalized_code": "C",
+        },
+        "evidence": {},
+    }
+
+    result = process_metadata(
+        {"suspects": [suspect]}, db, settings=SETTINGS, query_repo=repo)
+
+    assert result["metadata_summary"]["library_reuse_pairs"] == 1
+    assert result["metadata_summary"]["string_new_pairs"] == 0
+    assert suspect["reuse_library"] == "lwext4"
+    assert suspect["tier"] == "confirmed"
+
+
 # ---------- D1：字符串通道新建对计算真实 final_score（不再硬编码 0） ----------
 
 def test_string_channel_new_pair_scores_identical_copy(tmp_path):
@@ -182,6 +219,26 @@ class _FakeMatcher:
 
     def match(self, nc):
         return self.mapping.get(nc, (None, 0.0))
+
+
+def test_channel_baseline_never_reclassifies_library_reuse():
+    suspect = {
+        "tier": "confirmed", "reuse_library": "lwext4",
+        "query_func": {"normalized_code": "Q"},
+        "candidate_func": {
+            "repo_id": "data/repos/0/baseline_lwext4", "normalized_code": "B",
+        },
+        "evidence": {},
+    }
+
+    n = channel_baseline(
+        {"suspects": [suspect]}, _FakeMatcher({"Q": (1, 1.0), "B": (1, 1.0)}),
+        SETTINGS,
+    )
+
+    assert n == 0
+    assert suspect["tier"] == "confirmed"
+    assert "baseline_flag" not in suspect["evidence"]
 
 
 def test_channel_baseline_does_not_exclude_on_vector_similarity_alone(tmp_path):
