@@ -4,6 +4,7 @@
   python -m src.report compare \\
       --suspects data/output/xxx_suspects.json \\
       --query-repo data/historical_repos/team-xyz \\
+      --ai-detect-result data/output/xxx_ai_detect.json \\
       [--recall data/output/xxx_recall.json]
 
   # 预取历史仓库 HEAD sha 缓存（报告里文件链接用）
@@ -40,6 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="embed 阶段产出的 *_recall.json（用于计算函数总数 / 原创函数）")
     pc.add_argument("--filematch", default=None,
                     help="fastpath 产出的 *_filematch.json（L0 整文件复制清单）")
+    pc.add_argument("--ai-detect-result", required=True,
+                    help="实际 AI 检测模型产出的 *_ai_detect.json；失败或缺失时拒绝生成报告")
     pc.add_argument("--db", default=str(PROJECT_ROOT / "data/db/functions.db"),
                     help="历史 functions.db（用于读取参考 repo 的函数源码）")
     pc.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR,
@@ -47,10 +50,17 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--top-per-module", type=int, default=20,
                     help="每个子模块送入语义分析的最大相似代码对数（默认 20；模块借鉴对 <20 时全部分析）")
     pc.add_argument("--skip-opencode", action="store_true",
-                    help="跳过 opencode，仅用规则生成报告（调试用）")
-    pc.add_argument(
-        "--global-semantic-analysis", action="store_true",
-        help="可选启用全局语义摘要与创新归纳模型；默认只用模型复核准入难例",
+                    help="跳过所有 LLM（仅诊断用；不渲染语义分析或创新占位模块）")
+    semantic_group = pc.add_mutually_exclusive_group()
+    semantic_group.add_argument(
+        "--global-semantic-analysis", dest="global_semantic_analysis",
+        action="store_true", default=True,
+        help="运行模块语义分析与创新归纳模型（默认；保留参数以兼容已有命令）",
+    )
+    semantic_group.add_argument(
+        "--skip-global-semantic-analysis", dest="global_semantic_analysis",
+        action="store_false",
+        help="仅用于诊断；跳过后不渲染语义分析或创新占位内容",
     )
 
     gh = sub.add_parser("gitlab-heads", help="预取历史仓库 HEAD sha 缓存（报告里文件链接用）")
@@ -84,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
                 skip_opencode   = args.skip_opencode,
                 global_semantic_analysis = args.global_semantic_analysis,
                 filematch_path  = args.filematch,
+                ai_detect_path  = args.ai_detect_result,
                 functions_db_path = args.db,
             )
         except RuntimeError as exc:

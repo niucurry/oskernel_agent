@@ -21,6 +21,7 @@ from oskernel_agent.reports.html import (  # noqa: E402
     find_toc_locate_problems,
 )
 from oskernel_agent.reports.html_tree import render_tree_html  # noqa: E402
+from oskernel_agent.report_quality import IncompleteReportError  # noqa: E402
 
 
 def _sample_tree() -> dict:
@@ -84,21 +85,14 @@ class TocLocateAccuracy(unittest.TestCase):
         self.assertIn("tree", set(_HREF_RE.findall(self.html)))
 
 
-class AggregationFailureVisible(unittest.TestCase):
-    """聚合失败的子系统必须被显著标注，不能静默渲染成空白。"""
+class AggregationFailureRejected(unittest.TestCase):
+    """任一子系统聚合失败时必须拒绝生成报告，不能渲染占位模块。"""
 
-    def setUp(self):
+    def test_failed_subsystem_rejects_rendering(self):
         tree = _sample_tree()
         tree["tree"]["children"][1]["_error"] = "llm_batch_failed"  # 进程调度失败
-        self.html = render_tree_html(tree, title="t", resolver=None)
-
-    def test_failure_badge_shown(self):
-        self.assertIn("⚠ 聚合失败", self.html)
-
-    def test_failed_subsystem_still_navigable(self):
-        """即便失败，该子系统仍进目录且定位准确（便于一眼看到缺口）。"""
-        self.assertEqual(find_toc_locate_problems(self.html), [])
-        self.assertIn("subsys-1", set(_HREF_RE.findall(self.html)))
+        with self.assertRaises(IncompleteReportError):
+            render_tree_html(tree, title="t", resolver=None)
 
 
 class TocIntegrityCheck(unittest.TestCase):

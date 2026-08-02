@@ -273,15 +273,38 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
 
 
 def _subsys_fallback(subsys_node: dict) -> dict:
-    n = len(subsys_node["files"])
     return {
         "name":       subsys_node["name"],
         "role":       subsys_node["name"],
-        "summary":    f"本子系统包含 {n} 个文件（LLM 聚合失败，使用规则兜底）。",
+        "summary":    "",
         "highlights": [],
         "issues":     [],
         "modules":    [],
+        "_error":     "subsystem_analysis_failed",
     }
+
+
+def _validate_subsys_result(parsed: dict, subsystem_name: str) -> None:
+    """子系统分析必须有真实总览和至少一个完整模块，否则拒绝继续生成报告。"""
+    if parsed.get("_error"):
+        raise RuntimeError(f"{subsystem_name} 语义聚合失败：{parsed['_error']}")
+    if not str(parsed.get("summary") or "").strip():
+        raise RuntimeError(f"{subsystem_name} 缺少子系统语义摘要")
+    if not str(parsed.get("content") or "").strip():
+        raise RuntimeError(f"{subsystem_name} 缺少子系统分析正文")
+    modules = parsed.get("modules") or []
+    if not isinstance(modules, list) or not modules:
+        raise RuntimeError(f"{subsystem_name} 未形成任何真实模块分析")
+    for index, module in enumerate(modules, start=1):
+        if not isinstance(module, dict):
+            raise RuntimeError(f"{subsystem_name} 第 {index} 个模块格式无效")
+        missing = [field for field in ("name", "summary", "content")
+                   if not str(module.get(field) or "").strip()]
+        if not module.get("file_paths"):
+            missing.append("file_paths")
+        if missing:
+            raise RuntimeError(
+                f"{subsystem_name} 第 {index} 个模块缺少：{'、'.join(missing)}")
 
 
 def _process_one_subsys(subsys_node: dict, repo_path: Path,
@@ -329,6 +352,7 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
                     'file_paths:[...]}]}',
         timeout=600,
     )
+    _validate_subsys_result(parsed, subsys_node["name"])
 
     # 填子系统字段（子系统/模块不打分，评分只在顶层 VERDICT）
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
@@ -337,10 +361,6 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
     subsys_node["content"]    = parsed.get("content", "")
     subsys_node["highlights"] = parsed.get("highlights", [])
     subsys_node["issues"]     = parsed.get("issues", [])
-    # 聚合失败留痕：渲染端据此显著标注「内容缺失」，不再静默发空白
-    if parsed.get("_error"):
-        subsys_node["_error"] = parsed["_error"]
-
     # 把 modules 转成 children
     subsys_node["children"] = []
     for i, m in enumerate(parsed.get("modules") or [], start=1):
@@ -382,13 +402,17 @@ def run_subsys_stage(tree_root: dict, repo_path: Path,
                       work_dir, facts): n
             for n in subsys_nodes
         }
+        failures: list[str] = []
         for fut in as_completed(futs):
             n = futs[fut]
             try:
                 fut.result()
             except Exception as e:
+                failures.append(f"{n['name']}：{e}")
                 print(f"[tree] {n['name']} 异常：{e}",
                       file=sys.stderr, flush=True)
+        if failures:
+            raise RuntimeError("子系统语义分析未完整完成，拒绝生成占位报告：" + "；".join(failures))
 
 
 # 阶段 C：VERDICT（接收子系统总结 + facts 综合评判）
@@ -435,19 +459,12 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
 
 def _verdict_fallback() -> dict:
     return {
-        "score_total": 60,
-        "dimensions": [
-            {"name": "原创性",     "score": 60, "reason": "LLM 评判失败。"},
-            {"name": "架构合理性", "score": 60, "reason": "LLM 评判失败。"},
-            {"name": "代码质量",   "score": 60, "reason": "LLM 评判失败。"},
-            {"name": "文档质量",   "score": 60, "reason": "LLM 评判失败。"},
-            {"name": "完整性",     "score": 60, "reason": "LLM 评判失败。"},
-            {"name": "功能性",     "score": 60, "reason": "LLM 评判失败。"},
-        ],
+        "score_total": 0,
+        "dimensions": [],
         "highlights": [],
         "issues":     [],
         "similarity": {},
-        "one_line":   "LLM 顶层评判失败，使用规则兜底。",
+        "one_line":   "",
         "_error":     "verdict_fallback",
     }
 
@@ -484,26 +501,11 @@ def _normalize_verdict(parsed: dict) -> dict:
         nd["score"] = score
         by_name[name] = nd
 
-    if by_name:
-        fallback_score = int(round(sum(int(d["score"]) for d in by_name.values()) / len(by_name)))
-    else:
-        try:
-            fallback_raw = float(parsed.get("score_total"))
-        except (TypeError, ValueError):
-            fallback_raw = 60
-        fallback_scale = 10 if fallback_raw <= 10 else 1
-        fallback_score = max(0, min(100, int(round(fallback_raw * fallback_scale))))
-
     ordered_dims: list[dict] = []
     for name in VERDICT_DIMENSIONS:
-        if name in by_name:
-            ordered_dims.append(by_name[name])
-        else:
-            ordered_dims.append({
-                "name": name,
-                "score": fallback_score,
-                "reason": "LLM 未给出该维度评分，按已有评分均值兜底。",
-            })
+        if name not in by_name:
+            raise RuntimeError(f"顶层评判缺少评分维度：{name}")
+        ordered_dims.append(by_name[name])
     parsed["dimensions"] = ordered_dims
 
     num = den = 0.0
@@ -516,6 +518,34 @@ def _normalize_verdict(parsed: dict) -> dict:
     if den > 0:
         parsed["score_total"] = int(round(num / den))
     return parsed
+
+
+def _validate_verdict_result(parsed: dict) -> None:
+    """总评必须包含真实正文、六维评分和理由，不允许用固定分数补位。"""
+    if parsed.get("_error"):
+        raise RuntimeError(f"顶层评判失败：{parsed['_error']}")
+    if not str(parsed.get("content") or "").strip():
+        raise RuntimeError("顶层评判缺少详细正文")
+    if not str(parsed.get("one_line") or "").strip():
+        raise RuntimeError("顶层评判缺少一句话结论")
+    dimensions = parsed.get("dimensions") or []
+    if not isinstance(dimensions, list):
+        raise RuntimeError("顶层评判 dimensions 格式无效")
+    by_name = {
+        str(item.get("name") or "").strip(): item
+        for item in dimensions if isinstance(item, dict)
+    }
+    missing = [name for name in VERDICT_DIMENSIONS if name not in by_name]
+    if missing:
+        raise RuntimeError("顶层评判缺少评分维度：" + "、".join(missing))
+    for name in VERDICT_DIMENSIONS:
+        item = by_name[name]
+        try:
+            float(item.get("score"))
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"顶层评判 {name} 缺少有效分数") from exc
+        if not str(item.get("reason") or "").strip():
+            raise RuntimeError(f"顶层评判 {name} 缺少评分理由")
 
 
 def _collect_subsys_summaries(tree_root: dict) -> list[dict]:
@@ -580,6 +610,7 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                     '"one_line":str}',
         timeout=600,
     )
+    _validate_verdict_result(parsed)
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
     # 归一化评分：维度统一到 0–100，总分=维度加权平均（覆盖 LLM 自填值）
     return _normalize_verdict(parsed)

@@ -13,6 +13,7 @@ from src.ai_detect.extract import extract_blocks
 from src.ai_detect.runner import run_ai_detect
 from src.ai_detect.settings import AIDetectSettings, load_ai_detect_settings
 from src.ai_detect.vendor.ai_code_detector.models import Language
+from src.pipeline.__main__ import build_parser
 
 
 # ---------- mock provider ----------
@@ -122,11 +123,35 @@ def test_run_ai_detect_excludes_borrowed(tmp_path: Path):
     assert res["aggregated"]["overall"]["total_functions"] == 1
 
 
+def test_run_ai_detect_excludes_registered_third_party_libraries(tmp_path: Path):
+    own = tmp_path / "kernel" / "src"
+    third_party = tmp_path / "crates" / "smoltcp" / "src"
+    own.mkdir(parents=True)
+    third_party.mkdir(parents=True)
+    (own / "lib.rs").write_text(
+        _long_rust("own_impl", "own_marker"), encoding="utf-8")
+    (third_party / "lib.rs").write_text(
+        _long_rust("vendored_impl", "ai_like"), encoding="utf-8")
+
+    res = run_ai_detect(
+        tmp_path, settings=AIDetectSettings(min_loc=20, git_blame=False),
+        scorer=FakeScorer(), show_progress=False, write=False,
+    )
+
+    assert res["status"] == "ok"
+    assert res["aggregated"]["overall"]["total_functions"] == 1
+    assert res["scope"]["third_party_excluded"] == 1
+    assert res["scope"]["eligible_functions"] == 1
+
+
 def test_run_ai_detect_skips_when_no_functions(tmp_path: Path):
     (tmp_path / "readme.md").write_text("no code here", encoding="utf-8")
     res = run_ai_detect(tmp_path, settings=AIDetectSettings(), scorer=FakeScorer(),
                         show_progress=False, write=False)
     assert res["status"] == "skipped" and "rust/c" in res["reason"]
+    assert res["scope"]["eligible_functions"] == 0
+    assert res["scope"]["analyzed_functions"] == 0
+    assert len(res["source_fingerprint"]) == 64
 
 
 def test_write_false_creates_no_output_directory(tmp_path: Path, monkeypatch):
@@ -147,6 +172,12 @@ def test_settings_env_override(monkeypatch):
     st = load_ai_detect_settings()
     assert st.log_rank_llm_threshold == 1.2 and st.model_id == "bigcode/starcoder2-3b"
     load_ai_detect_settings.cache_clear()
+
+
+def test_pipeline_runs_ai_model_by_default_and_allows_explicit_skip():
+    assert build_parser().parse_args(["--repo", "demo"]).ai_detect is True
+    assert build_parser().parse_args(
+        ["--repo", "demo", "--skip-ai-detect"]).ai_detect is False
 
 
 # 说明：旧 Markdown 报告（src.report.generate）的「章六」拼装已随旧流程一并移除；

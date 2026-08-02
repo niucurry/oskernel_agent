@@ -111,8 +111,8 @@ GITLAB_TOKEN=<你的 token>           # 私有仓库克隆需要，公开仓库�
 > **改完 `config.toml` 后必须重跑 `python setup_opencode.py`** 让 OpenCode 配置生效（模型、max_steps 等）。
 >
 > **换 API key 是三件套**：`config.toml` 的 `[api].key`、`.env` 的 `LLM_API_KEY`、再重跑 `python setup_opencode.py`
-> （OpenCode 把 key 存在 `~/.local/share/opencode/auth.json`，漏第三步会导致描述报告 LLM 聚合静默失败、
-> 整份报告降级为"规则兜底"）。
+> （OpenCode 把 key 存在 `~/.local/share/opencode/auth.json`；漏第三步会导致描述报告 LLM 聚合失败，
+> 流水线将拒绝生成不完整报告，不会再输出固定分数或空模块。）
 
 ---
 
@@ -155,15 +155,16 @@ python -m src.pipeline --repo <新作品路径或 git url> --baselines
 
 对比报告采用面向评委的九段式结构：评审结论摘要、共同上游判断、高置信同源功能簇、
 模型复核与待处理队列、文件级和非函数代码证据、相对参考实现的候选创新、合法复用与许可证合规、
-AI 使用披露提示、暂未检出及运行信息附录。来源排名按唯一目标函数、有效相似行、涉及文件
+AI 代码检测、暂未检出相似函数附录。来源排名按唯一目标函数、有效相似行、涉及文件
 和子系统统计，不以候选 pair 数放大；函数证据会按来源、子系统和功能域聚合为同源事件。
 
 模型复核先判断两个函数的职责是否一致，职责一致或部分一致时才继续做代码同源判断。模型必须返回
 非空职责依据、非空复核理由，以及能在输入代码中逐字定位的证据锚点；JSON 格式错误、空理由、无效
 锚点或调用异常统一显示为“复核失败”，单独统计且不算作“模型复核后仍存疑”。报告中的
 “匹配片段完全相同”只描述已命中的局部片段，并同时展示匹配行占整个目标函数的比例。
-全局语义摘要和创新归纳默认使用确定性规则，避免把模型推测当成证据并减少耗时；
-仅 `python -m src.report compare --global-semantic-analysis ...` 会显式启用该可选研究能力。
+全局模块语义分析和创新归纳默认实际运行模型，并对输入代码量采用统一字符预算；模型不可用、
+返回模块不完整或仍含系统占位内容时，流水线拒绝生成交付报告。诊断时可显式传入
+`--skip-global-semantic-analysis`，此时相关模块不渲染，不会用规则列表冒充语义分析。
 
 “相对参考实现的候选创新”会把暂未形成有效相似命中的目标函数与主要历史来源的最近实现做代码级
 比较。每个候选都映射到目标/参考两侧源码，并补充调用或引用入口、影响范围、
@@ -172,14 +173,15 @@ AI 使用披露提示、暂未检出及运行信息附录。来源排名按唯�
 所有文件级、函数级和创新实现比较均限定为同一编程语言；跨语言候选在召回阶段直接过滤，
 不会进入相似度分层、误报清单或创新实现地图。
 
-流水线步骤：`ingest → fastpath → recall → exact → segment → metadata → report`；可选的 `ai_detect`
-仅在显式传入 `--ai-detect` 时运行。每步落盘中间 JSON。常用选项：
+流水线步骤：`ingest → fastpath → recall → exact → segment → metadata → ai_detect → report`；
+`ai_detect` 默认实际加载检测模型运行。每步落盘中间 JSON。常用选项：
 
 ```bash
 python -m src.pipeline --repo <路径或url> \
     [--resume-from <step>]          # 从指定步骤续跑（前序产物需已存在）
     [--baselines]                   # 启用基线扣除（需 Qdrant 已有基线数据）
-    [--ai-detect]                   # 可选概率统计；默认不运行
+    [--ai-detect]                   # 兼容已有命令；AI 模型检测默认运行
+    [--skip-ai-detect]              # 仅诊断前序阶段；不会生成缺少 AI 检测的交付报告
     [--qdrant-path data/db/qdrant_local]   # 无 docker 时用本地磁盘向量库
 ```
 
@@ -195,7 +197,8 @@ top-k 的补充通道，当前保证全局汉明距离不超过 15 的归一化�
 召回契约同时要求 `same_language_only=true`，旧的跨语言召回产物不能续跑生成新报告。
 
 报告中的绿色档统一表示“暂未检出相似”，不表示原创认定。召回契约仍在生成入口
-强制校验，但不再把这一内部核验过程写进面向评委的报告正文。
+强制校验，但不再把这一内部核验过程写进面向评委的报告正文。报告会完整列出暂未检出函数的
+文件、行号、函数名和子系统，方便评委定位核查，同时明确不能把这份清单直接当作原创证明。
 
 ```bash
 # 全量检查历史库与 reports_by_work_id；退出码 0 才表示全部有效
@@ -208,16 +211,15 @@ python -m src.report audit
 ## 五、AI 生成代码检测（基本命令）
 
 免训练的两阶段信号检测（log-rank + NPR），打分模型 `bigcode/starcoder2-3b`（RTX 4060 bf16）。
-该信号误判风险高且不能判断队伍是否披露、是否掌握代码，因此不纳入默认评委报告，
-仅在研究需要时显式运行：
+该信号误判风险高且不能判断队伍是否披露、是否掌握代码，因此只作为评委报告的辅助检测结果，
+不能单独作为违规或扣分依据。标准流水线默认运行实际模型：
 
 ```bash
 # 首次需下打分模型权重（之后离线加载）
 HF_ENDPOINT=https://hf-mirror.com huggingface-cli download bigcode/starcoder2-3b
 
-python -m src.ai_detect --repo <新作品路径>
-# 或与查重流水线一起运行
-python -m src.pipeline --repo <新作品路径> --baselines --ai-detect
+python -m src.ai_detect --repo <新作品路径>  # 单独运行模型检测
+python -m src.pipeline --repo <新作品路径> --baselines  # 标准流程，默认包含模型检测
 ```
 
 模型、阈值等见 [config/settings.yaml](config/settings.yaml) 的 `ai_detect` 段。合规审查仍以队伍披露材料和现场解释为准。
@@ -284,7 +286,7 @@ PYTHON_BIN=../.venv/Scripts/python.exe   # Windows 可选；不填会自动找�
 
 前端当前支持两类报告：
 
-- `comparison`：查重对比报告，调用 `python -m src.pipeline --baselines`。默认只给出 AI 使用披露提示，不运行概率式 AI 代码判定。
+- `comparison`：查重对比报告，调用 `python -m src.pipeline --baselines`。默认运行 AI 检测模型，并把本次模型产物写入报告；不会读取仓库披露文件来代替模型判断。
 - `description`：项目描述报告，调用 `agent.py --repo-path ... --output ...`，依赖 OpenCode 和 `oskernel_agent` MCP。
 
 页面可以对单个作品选择报告类型生成，也可以批量生成缺失报告。生成过程中可在任务列表查看日志；报告完成后从作品详情页直接打开。
@@ -370,7 +372,9 @@ python run_batch.py
 4. **review 档严格复核**：中等相似函数先由 LLM 判断职责是否一致，再做代码同源复核
    （`semantic_compare` 内置，模型 `LLM_MODEL`）；模型认为借鉴只提高人工核查优先级，不升为确定性高置信。
    模型阴性若与具体函数身份和强直接代码证据冲突，保留供评委人工复核；
-   格式或调用异常单列为复核失败，未调用则单列为复核未完成。
+   格式或调用异常单列为复核失败；已经入队但未取得结论才算复核未完成。普通次级来源只附在
+   已复核函数下；首选候选排除后，仅具有独立强代码证据的次级候选进入有限补充复核，不再生成
+   面向评委的“次级候选未复核”模块。已有有效缓存会直接回填且不增加模型调用。
 5. **规范命令固定**：对比报告一律 `python -m src.pipeline --repo <..> --baselines`
    （`run_batch.py` 与前端控制台均已按此调用）。
 

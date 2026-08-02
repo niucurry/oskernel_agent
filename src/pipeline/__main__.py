@@ -4,9 +4,9 @@
                          [--resume-from <step>] [--baselines]
 
 按序执行 ingest → fastpath → recall(含 normalize) → exact → segment → metadata
-→ report，每步落盘中间结果，打印每步耗时与漏斗数字。`ai_detect` 只在显式传入
-`--ai-detect` 时插入 report 之前。
-（LLM 复核步已下线：tier 由 exact/segment/metadata 确定性级联判定。）
+→ ai_detect → report，每步落盘中间结果，打印每步耗时与漏斗数字。`ai_detect` 默认运行；
+只有显式传入 `--skip-ai-detect` 才跳过，此时不会生成缺少该模块的交付报告。
+（LLM 复核在报告阶段只处理规则难例。）
 """
 
 from __future__ import annotations
@@ -42,12 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--baselines", action="store_true", help="启用基线扣除（需 Qdrant 已有基线数据）")
     ai_group = p.add_mutually_exclusive_group()
     ai_group.add_argument(
-        "--ai-detect", action="store_true",
-        help=("可选运行 AI 生成代码概率统计（费时且不作为合规或评分依据）"),
+        "--ai-detect", dest="ai_detect", action="store_true", default=True,
+        help="运行 AI 生成代码模型检测（默认；保留该参数以兼容已有命令）",
     )
     ai_group.add_argument(
-        "--skip-ai-detect", action="store_true",
-        help="兼容旧脚本；AI 概率统计现已默认跳过",
+        "--skip-ai-detect", dest="ai_detect", action="store_false",
+        help="仅诊断前序阶段；跳过后报告完整性门禁会拒绝生成交付报告",
     )
     p.add_argument("--db", default=DEFAULT_DB)
     p.add_argument("--history-config", default="config/repos.yaml",
@@ -140,8 +140,9 @@ def _restore_semantic_cache(out: Path, repo_name: str, query_repo_id: str) -> in
 
 
 def _finalize_comparison_output(out: Path, repo_name: str, html_path: Path,
-                                query_repo_id: str, *intermediate_paths: Path) -> Path:
-    """删除大体积中间产物，保留最终 HTML 与小型内容寻址复核缓存。
+                                query_repo_id: str, *intermediate_paths: Path,
+                                preserve_paths: tuple[Path, ...] = ()) -> Path:
+    """删除大体积中间产物，保留最终 HTML、模型产物与内容寻址复核缓存。
 
     缓存不包含被比较源码，只保存哈希键和模型结构化结论，供相同代码重复测试复用。
     """
@@ -160,8 +161,20 @@ def _finalize_comparison_output(out: Path, repo_name: str, html_path: Path,
     if content_cache.is_dir():
         shutil.copytree(content_cache, cache_dir / "cache", dirs_exist_ok=True)
 
+    preserved_destinations: set[Path] = set()
+    for source in preserve_paths:
+        source = Path(source)
+        if not source.is_file():
+            continue
+        destination = final_dir / source.name
+        preserved_destinations.add(destination.resolve())
+        if source.resolve() != destination.resolve():
+            shutil.copy2(source, destination)
+
     for p in intermediate_paths:
-        Path(p).unlink(missing_ok=True)
+        path = Path(p)
+        if path.resolve() not in preserved_destinations:
+            path.unlink(missing_ok=True)
 
     shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -175,7 +188,6 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     from dotenv import load_dotenv
     load_dotenv()
     pipeline_perf_started = time.perf_counter()
-    pipeline_started_at = datetime.now().astimezone()
     args = build_parser().parse_args(argv)
 
     # 查重必须 fail closed：历史库缺仓时继续出报告会把“没查到”误写成原创。
@@ -214,6 +226,21 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     v2_path = out / f"{repo_name}_suspects_v2.json"
     final_path = out / f"{repo_name}_suspects_final.json"
     ai_detect_path = out / f"{repo_name}_ai_detect.json"
+    archived_ai_detect_path = out / repo_name / ai_detect_path.name
+    if (not ai_detect_path.is_file() and archived_ai_detect_path.is_file()
+            and not _should_run("ai_detect", args.resume_from)):
+        try:
+            from src.ai_detect.runner import compute_source_fingerprint
+            archived_ai = json.loads(archived_ai_detect_path.read_text(encoding="utf-8"))
+            current_fingerprint = compute_source_fingerprint(repo_path)
+            if archived_ai.get("source_fingerprint") == current_fingerprint:
+                ai_detect_path = archived_ai_detect_path
+                logger.info("[ai_detect] 源码指纹一致，复用上次成功交付时保存的模型产物 {}",
+                            ai_detect_path)
+            else:
+                logger.warning("[ai_detect] 已保存模型产物与当前源码指纹不一致，不予复用")
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("[ai_detect] 已保存模型产物校验失败，不予复用：{}", exc)
 
     meta_commits = []
     if _should_run("ingest", args.resume_from):
@@ -359,8 +386,8 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         release_store()
         gc.collect()
 
-    # ---- ai_detect（AI 生成代码检测，独立于查重漏斗；缺模型则优雅跳过）----
-    if args.ai_detect and not args.skip_ai_detect and _should_run("ai_detect", args.resume_from):
+    # ---- ai_detect（AI 生成代码检测，独立于查重漏斗；失败状态不得进入交付报告）----
+    if args.ai_detect and _should_run("ai_detect", args.resume_from):
         from src.ai_detect.runner import run_ai_detect
         # 排除借鉴代码：文件级（fastpath 整文件命中）+ 函数级（查重命中的可疑函数），
         # 只对未匹配上的原创代码做 AI 生成检测（借鉴自参考 OS 的代码不计入）
@@ -397,13 +424,14 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         except (OSError, json.JSONDecodeError):
             report_query_repo_id = repo_name
         _restore_semantic_cache(out, repo_name, report_query_repo_id)
+        report_ai_detect_path = ai_detect_path if args.ai_detect else None
         res = timed("report", lambda: run_semantic_compare(
             suspects_path   = final_path,
             query_repo_path = str(repo_path),
             recall_path     = recall_path,
             output_dir      = out,
             filematch_path  = filematch_path,
-            ai_detect_path  = ai_detect_path,
+            ai_detect_path  = report_ai_detect_path,
             functions_db_path = args.db,
         ))
 
@@ -411,30 +439,13 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         # 重复测试无需再次请求模型。源码或 prompt 改变时缓存键会自动失效。
         final_html = _finalize_comparison_output(
             out, repo_name, Path(res["html_path"]), res["query_repo_id"],
-            filematch_path, recall_path, suspects_path, v2_path, final_path, ai_detect_path,
+            filematch_path, recall_path, suspects_path, v2_path, final_path,
+            *([ai_detect_path] if args.ai_detect else []),
+            preserve_paths=((ai_detect_path,) if args.ai_detect else ()),
         )
         pipeline_finished_at = datetime.now().astimezone()
         total_elapsed = time.perf_counter() - pipeline_perf_started
         timings["total"] = round(total_elapsed, 2)
-        measured_stage_elapsed = sum(
-            float(value) for step, value in timings.items() if step != "total"
-        )
-        orchestration_overhead = max(0.0, total_elapsed - measured_stage_elapsed)
-        from src.report.semantic_compare import stamp_generation_metadata
-        stamped = stamp_generation_metadata(
-            final_html.read_text(encoding="utf-8"),
-            {
-                "started_at": pipeline_started_at.isoformat(timespec="seconds"),
-                "generated_at": pipeline_finished_at.isoformat(timespec="seconds"),
-                "total_elapsed_sec": total_elapsed,
-                "report_elapsed_sec": timings.get("report"),
-                "orchestration_overhead_sec": orchestration_overhead,
-                "target_revision": _resolve_git_revision(repo_path),
-                "visible_commit_count": len(meta_commits),
-                "stage_timings": timings,
-            },
-        )
-        final_html.write_text(stamped, encoding="utf-8")
         logger.info(
             "[report] 完成时间 {}，完整流水线总耗时 {:.2f}s，目标版本 {}",
             pipeline_finished_at.isoformat(timespec="seconds"), total_elapsed,

@@ -1,0 +1,137 @@
+from __future__ import annotations
+
+import pytest
+
+from src.oskernel_agent.pipeline import tree_builder
+from src.oskernel_agent.report_quality import (
+    IncompleteReportError,
+    assert_report_complete,
+    find_system_placeholders,
+)
+from src.report import semantic_compare as SC
+from src.report.__main__ import build_parser as build_report_parser
+
+
+def test_system_placeholder_text_is_a_hard_report_error():
+    rendered = "<section><p>未启用 LLM 语义分析，以下为规则汇总。</p></section>"
+    assert find_system_placeholders(rendered) == ["未启用 LLM 语义分析"]
+    with pytest.raises(IncompleteReportError):
+        assert_report_complete(rendered)
+
+
+def test_ai_failure_placeholder_text_is_a_hard_report_error():
+    rendered = "<section><p>AI 模型检测未完成。</p></section>"
+    assert find_system_placeholders(rendered) == ["AI 模型检测未完成"]
+    with pytest.raises(IncompleteReportError):
+        assert_report_complete(rendered)
+
+
+def test_structured_analysis_error_is_a_hard_report_error():
+    tree = {"tree": {"children": [{"name": "内存管理", "_error": "timeout"}]}}
+    with pytest.raises(IncompleteReportError):
+        assert_report_complete("<html></html>", structured=tree)
+
+
+def test_report_cli_enables_real_semantic_analysis_by_default():
+    parser = build_report_parser()
+    default = parser.parse_args([
+        "compare", "--suspects", "demo.json", "--ai-detect-result", "ai.json",
+    ])
+    skipped = parser.parse_args([
+        "compare", "--suspects", "demo.json", "--ai-detect-result", "ai.json",
+        "--skip-global-semantic-analysis",
+    ])
+    assert default.global_semantic_analysis is True
+    assert skipped.global_semantic_analysis is False
+
+
+def test_semantic_pair_budget_preserves_module_coverage():
+    groups = []
+    for module in ("fs", "mm"):
+        for index in range(20):
+            groups.append({
+                "module": module,
+                "overall_sim": 1 - index / 100,
+                "query_code": "q" * 20_000,
+                "candidates": [{"ref_code": "r" * 20_000}],
+            })
+
+    selected = SC._limit_per_module(groups, 20)
+
+    assert {group["module"] for group in selected} == {"fs", "mm"}
+    assert sum(SC._semantic_group_cost(group) for group in selected) \
+        <= SC._SEMANTIC_PROMPT_CHAR_BUDGET
+    assert len(selected) < len(groups)
+
+
+def test_innovation_parser_is_independent_from_strict_review_parser():
+    fenced = '```json\n{"innovations": []}\n```'
+    assert SC._parse_innovation_json_object(fenced) == {"innovations": []}
+    with pytest.raises(ValueError):
+        SC._parse_json_object(fenced)
+
+
+def test_innovation_prompt_applies_repository_independent_code_budget():
+    candidates = []
+    for index in range(18):
+        candidates.append({
+            "key": f"t{index:04d}", "module_display": "内存管理",
+            "reference_repo": "history/ref", "file": f"src/{index}.rs",
+            "start": 1, "end": 100, "func": f"target_{index}",
+            "analysis_code": "q" * 20_000,
+            "references": [{
+                "key": f"r{index:04d}", "repo": "history/ref",
+                "file": f"ref/{index}.rs", "start": 1, "end": 100,
+                "func": f"reference_{index}", "analysis_code": "r" * 20_000,
+            }],
+        })
+
+    message = SC._innovation_message("new/repo", candidates)
+
+    assert len(message) < 120_000
+    assert "q" * (SC._INNOVATION_CODE_CHAR_LIMIT + 1) not in message
+    assert "r" * (SC._INNOVATION_CODE_CHAR_LIMIT + 1) not in message
+
+
+def test_normal_report_rejects_unfinished_model_review_candidates():
+    suspect = {
+        "tier": "review",
+        "review_verdict": "复核失败",
+        "query_func": {
+            "file_path": "src/mm.rs", "start_line": 10, "func_name": "map_page",
+        },
+    }
+    with pytest.raises(IncompleteReportError, match="模型复核未完整完成"):
+        SC._assert_model_review_complete([suspect])
+
+
+def test_review_completeness_gate_ignores_deterministic_and_valid_results():
+    confirmed = {"tier": "confirmed", "query_func": {"func_name": "copy"}}
+    reviewed = {
+        "tier": "review", "review_verdict": "疑似",
+        "query_func": {"file_path": "src/fs.rs", "start_line": 1, "func_name": "open"},
+    }
+    SC._assert_model_review_complete([confirmed, reviewed])
+
+
+def test_subsystem_validation_rejects_missing_module_content():
+    parsed = {
+        "summary": "负责页表与地址空间管理。",
+        "content": "<p>分析地址空间生命周期。</p>",
+        "modules": [{
+            "name": "页表", "summary": "维护多级页表。",
+            "content": "", "file_paths": ["src/mm/page.rs"],
+        }],
+    }
+    with pytest.raises(RuntimeError, match="content"):
+        tree_builder._validate_subsys_result(parsed, "内存管理")
+
+
+def test_verdict_validation_rejects_fixed_or_missing_dimensions():
+    parsed = {
+        "content": "<p>总体分析。</p>",
+        "one_line": "实现较完整。",
+        "dimensions": [{"name": "原创性", "score": 60, "reason": "有代码证据。"}],
+    }
+    with pytest.raises(RuntimeError, match="缺少评分维度"):
+        tree_builder._validate_verdict_result(parsed)

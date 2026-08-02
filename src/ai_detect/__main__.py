@@ -6,7 +6,8 @@
 
 重量级参考模型（CodeLlama-7B ~14GB）建议在带 GPU 的宿主机单独运行；产出
 `{name}_ai_detect.json` 后，主流水线 report 步骤会自动并入「AI 生成代码检测」章节。
-缺模型/磁盘/GPU 时本命令不报错，落盘 status=skipped 的占位结果。
+缺模型/磁盘/GPU 时本命令不报错，落盘 status=skipped 的诊断状态；
+交付报告会拒绝把该状态渲染成检测模块。
 """
 
 from __future__ import annotations
