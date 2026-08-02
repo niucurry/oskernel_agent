@@ -720,6 +720,19 @@ def test_report_boundary_keeps_history_that_materially_exceeds_weak_baseline():
     assert "baseline_incremental_evidence" not in history["evidence"]
 
 
+def test_library_classification_takes_priority_over_stale_baseline_tier():
+    library = _sc_suspect(
+        "os/src/fs/ext4_lw/inode.rs", "as_type",
+        "data/repos/0/baseline_kernel", "fs/ext4.rs", "from_type",
+        "baseline_derived", .9, exact=10,
+    )
+    library["reuse_library"] = "lwext4"
+    library["evidence"]["baseline_query_scope"] = True
+
+    assert SC._tag_query_level_baselines([library]) == 0
+    assert SC.baseline_stats([library]) == []
+
+
 def test_model_review_selection_skips_confirmed_and_defers_weaker_secondary():
     confirmed = _sc_suspect(
         "os/a.rs", "dispatch", "2025/a", "a.rs", "dispatch",
@@ -1122,6 +1135,33 @@ def test_similarity_clusters_aggregate_functions_into_one_feature_event():
     assert clusters[0]["feature"] == "Inode 与目录项"
     assert clusters[0]["function_count"] == 2
     assert clusters[0]["source"] == "2023/ref"
+
+
+def test_every_function_cluster_renders_its_own_semantic_explanation():
+    suspects = [
+        _sc_suspect("os/src/fs/inode.rs", "read_inode", "2023/ref", "inode.rs",
+                    "read_inode", "confirmed", .98, exact=20),
+        _sc_suspect("os/src/fs/vfs.rs", "mount_vfs", "2023/ref", "vfs.rs",
+                    "mount_vfs", "confirmed", .96, exact=18),
+    ]
+    groups = SC.collect_file_pairs(suspects)
+    clusters = SC.build_similarity_clusters(groups)
+    assert len(clusters) == 2
+    analyses = []
+    for cluster in clusters:
+        analyses.append(
+            f'<section data-cluster="{cluster["analysis_id"]}" '
+            f'data-module="{cluster["module"]}"><h3>{cluster["feature"]}</h3>'
+            f'<p>{cluster["feature"]}采用独立的功能簇分析正文。</p>'
+            f'<ul><li>{cluster["analysis_id"]} 的具体语义证据。</li></ul></section>'
+        )
+
+    _toc, section = SC._cluster_section(groups, "".join(analyses), None, "2026/new")
+
+    assert section.count("功能簇语义说明") == 2
+    assert all(cluster["analysis_id"] in section for cluster in clusters)
+    assert "Inode 与目录项采用独立的功能簇分析正文" in section
+    assert "虚拟文件系统采用独立的功能簇分析正文" in section
 
 
 def test_review_priority_is_explainable_and_favors_core_large_match():
@@ -1604,3 +1644,31 @@ def test_build_local_meta(tmp_path):
 def test_resume_step_order():
     assert STEPS.index("recall") < STEPS.index("report")
     assert tier_counts([{"tier": "review"}, {"tier": "review"}, {"tier": "weak"}]) == {"review": 2, "weak": 1}
+
+
+def test_verified_library_adapter_is_excluded_from_original_and_module_totals():
+    context = SC.LibraryContext(roots=(("os/src/fs/ext4_lw", "lwext4"),))
+    recall = {"results": [
+        {"query": {
+            "repo_id": "new", "file_path": "os/src/fs/ext4_lw/inode.rs",
+            "start_line": 10, "end_line": 20, "func_name": "as_inode_type",
+            "module_tag": "fs",
+        }, "candidates": []},
+        {"query": {
+            "repo_id": "new", "file_path": "os/src/fs/vfs.rs",
+            "start_line": 30, "end_line": 40, "func_name": "mount",
+            "module_tag": "fs",
+        }, "candidates": []},
+    ]}
+
+    originals = SC._original_functions(
+        recall, [], library_context=context)
+    stats = SC.compute_submodule_stats(
+        [], recall, library_context=context)
+    excluded = SC._exclusion_totals(
+        [], recall, library_context=context)
+
+    assert [item["func"] for item in originals] == ["mount"]
+    assert stats["fs"]["original"] == 1
+    assert stats["fs"]["total"] == 1
+    assert excluded["library"] == 1

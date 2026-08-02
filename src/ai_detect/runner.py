@@ -22,7 +22,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.report.libraries import match_library
+from src.report.libraries import discover_library_context, match_library
 
 from .extract import extract_blocks
 from .settings import AIDetectSettings, load_ai_detect_settings
@@ -200,8 +200,12 @@ def run_ai_detect(
 
     # AI 生成概率只能用于参赛队可归属的实现。复用库即使被模型判为 LLM，
     # 也不能归因给当前队伍；复用报告层的通用库注册表与 vendor 目录规则统一剔除。
+    library_context = discover_library_context(repo_root)
     eligible_before_libraries = len(blocks)
-    blocks = [block for block in blocks if not match_library(_rel(block))]
+    blocks = [
+        block for block in blocks
+        if not match_library(_rel(block), context=library_context)
+    ]
     third_party_excluded = eligible_before_libraries - len(blocks)
     if third_party_excluded:
         logger.info("[ai_detect] 排除已识别第三方复用库函数 {} 个", third_party_excluded)

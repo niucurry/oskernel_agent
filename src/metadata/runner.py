@@ -14,6 +14,7 @@ from src.exact.verify import tier_of
 from src.models import is_baseline_repo
 from src.normalize.normalizer import normalize_snippet
 from src.normalize.store import DEFAULT_DB
+from src.report.libraries import discover_library_context, tag_library_reuse
 
 from .baseline import (BaselineMatcher, has_incremental_history_evidence,
                        has_substantive_baseline_evidence, is_baseline_derived,
@@ -88,6 +89,8 @@ def channel_unique_strings(data: dict, db_path: str | Path, settings: MetadataSe
     existing = {_suspect_key(s): s for s in suspects}
     query_funcs: dict[tuple, dict] = {}
     for s in suspects:
+        if s.get("reuse_library"):
+            continue
         q = s["query_func"]
         query_funcs.setdefault((q["file_path"], q["start_line"]), q)
 
@@ -147,6 +150,8 @@ def channel_baseline(
 
     q_uniq: dict[str, None] = {}
     for s in suspects:
+        if s.get("reuse_library"):
+            continue
         q_nc = (s.get("query_func") or {}).get("normalized_code", "") or " "
         q_uniq.setdefault(q_nc, None)
     q_cache = _batch(list(q_uniq))
@@ -156,6 +161,8 @@ def channel_baseline(
     # metadata 阶段耗时，而不改变任何判定分支。
     c_uniq: dict[str, None] = {}
     for s in suspects:
+        if s.get("reuse_library"):
+            continue
         q_nc = (s.get("query_func") or {}).get("normalized_code", "") or " "
         q_id, q_sim = q_cache.get(q_nc, (None, 0.0))
         if (q_id is not None
@@ -240,6 +247,8 @@ def channel_baseline(
 
     n = 0
     for s in suspects:
+        if s.get("reuse_library"):
+            continue
         q_nc = (s.get("query_func") or {}).get("normalized_code", "") or " "
         c_nc = (s.get("candidate_func") or {}).get("normalized_code", "") or " "
         q_match = q_cache.get(q_nc, (None, 0.0))
@@ -298,12 +307,16 @@ def channel_baseline(
     for key, items in direct_baselines_by_query.items():
         baseline_by_query[key].extend(items)
     for s in suspects:
+        if s.get("reuse_library"):
+            continue
         ev = s.get("evidence") or {}
         if (s.get("tier") == "baseline_derived"
                 and (ev.get("baseline_query_scope")
                      or ev.get("baseline_source_substantive"))):
             baseline_by_query[_query_key(s)].append(s)
     for s in suspects:
+        if s.get("reuse_library"):
+            continue
         baselines = baseline_by_query.get(_query_key(s), [])
         if not baselines or s.get("tier") == "baseline_derived":
             continue
@@ -355,6 +368,8 @@ def channel_common_code(data: dict, settings: MetadataSettings) -> int:
     suspects = data["suspects"]
     by_query: dict[tuple, list[dict]] = defaultdict(list)
     for s in suspects:
+        if s.get("reuse_library"):
+            continue
         q = s["query_func"]
         by_query[(q["file_path"], q["start_line"])].append(s)
 
@@ -382,6 +397,8 @@ def channel_commits(data: dict, repo_path: str | Path, meta_commits: list[dict],
     """通道 3：commit 异常信号（附注，不改 tier）。返回有信号的嫌疑数。"""
     n = 0
     for s in data["suspects"]:
+        if s.get("reuse_library"):
+            continue
         signals = analyze_function(repo_path, meta_commits, s["query_func"], settings)
         if signals:
             s.setdefault("evidence", {})["commit_signals"] = signals
@@ -402,6 +419,9 @@ def process_metadata(
     """按需运行三通道（通道1 总是运行；2/3 视后端可用性）。"""
     settings = settings or load_metadata_settings()
     summary = {"cross_language_filtered": drop_cross_language_pairs(data)}
+    library_context = discover_library_context(query_repo)
+    summary["library_reuse_pairs"] = tag_library_reuse(
+        data.get("suspects") or [], context=library_context)
     summary["string_new_pairs"] = channel_unique_strings(data, db_path, settings)
     summary["widespread_match_pairs"] = channel_common_code(data, settings)
     if baseline_matcher is not None:
