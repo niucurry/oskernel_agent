@@ -7,14 +7,13 @@ import json
 import pytest
 import shutil
 import sqlite3
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
 from src.pipeline.__main__ import (_finalize_comparison_output,
                                    _resolve_git_revision,
                                    _restore_semantic_cache)
-from src.pipeline.steps import STEPS, build_local_meta, tier_counts
+from src.pipeline.steps import STEPS, tier_counts
 from src.report import semantic_compare as SC
 from src.report.audit import audit_reports
 from src.report.label_normalize import normalize_labels
@@ -1628,18 +1627,6 @@ def test_report_audit_finds_pipeline_named_comparison_report(tmp_path):
 
 
 # ---------- pipeline 辅助 ----------
-
-def test_build_local_meta(tmp_path):
-    repo = tmp_path / "r"; repo.mkdir()
-    def g(*a): subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True, text=True)
-    g("init", "-q"); g("config", "user.email", "t@t.com"); g("config", "user.name", "t")
-    (repo / "f.rs").write_text("a\nb\nc\n", encoding="utf-8")
-    g("add", "f.rs"); g("commit", "-q", "-m", "init kernel")
-    commits = build_local_meta(repo)
-    assert len(commits) == 1
-    assert commits[0]["additions"] == 3 and commits[0]["message"] == "init kernel"
-    assert (repo / "_meta.json").exists()
-
 
 def test_resume_step_order():
     assert STEPS.index("recall") < STEPS.index("report")

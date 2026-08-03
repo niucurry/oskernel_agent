@@ -1,16 +1,10 @@
-"""src.metadata 测试：独特字符串过滤/召回、基线双侧扣除、git blame 定位、commit 信号。"""
+"""src.metadata 测试：独特字符串过滤/召回、基线双侧扣除。"""
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 from src.metadata.baseline import is_baseline_derived
-from src.metadata.commits import (
-    detect_commit_signals,
-    find_introducing_commit,
-    parse_blame,
-)
 from src.metadata.config import MetadataSettings
 from src.metadata.runner import (channel_baseline, channel_common_code,
                                  channel_unique_strings, process_metadata)
@@ -472,46 +466,3 @@ def test_common_code_keeps_baseline_derived():
     others = [_sp("d.rs", 1, f"2025/t{i}", "confirmed", 0.99) for i in range(1, 6)]
     channel_common_code({"suspects": [s] + others}, SETTINGS)
     assert s["tier"] == "baseline_derived"  # 更具体的基线信号不被覆盖
-
-
-# ---------- 通道 3：git blame 定位 + 信号 ----------
-
-def _git(repo, *args):
-    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
-
-
-def test_find_introducing_commit_locates_right_commit(tmp_path):
-    repo = tmp_path / "r"
-    repo.mkdir()
-    _git(repo, "init", "-q")
-    _git(repo, "config", "user.email", "t@t.com")
-    _git(repo, "config", "user.name", "t")
-    f = repo / "foo.rs"
-    f.write_text("line1\nline2\nline3\n", encoding="utf-8")
-    _git(repo, "add", "foo.rs")
-    _git(repo, "commit", "-q", "-m", "init")
-    sha1 = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-
-    f.write_text("line1\nline2\nline3\nfn added() {\n    do_work();\n}\n", encoding="utf-8")
-    _git(repo, "add", "foo.rs")
-    _git(repo, "commit", "-q", "-m", "add scheduler function")
-    sha2 = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-
-    assert find_introducing_commit(repo, "foo.rs", 4, 6) == sha2   # 新增的函数行
-    assert find_introducing_commit(repo, "foo.rs", 1, 3) == sha1   # 初始行
-
-
-def test_detect_commit_signals():
-    big = detect_commit_signals({"additions": 3000, "message": "stuff", "date": "2023-01-01"}, 10, SETTINGS)
-    assert "large_commit" in big
-
-    vague = detect_commit_signals({"additions": 5, "message": "init", "date": "2023-01-01"}, 10, SETTINGS)
-    assert "vague_message" in vague
-
-    early = detect_commit_signals(
-        {"additions": 100, "message": "add full scheduler", "date": "2024-05-02T10:00:00Z"}, 40, SETTINGS
-    )
-    assert "early_complete_impl" in early   # 距 2024-05-01 < 3 天且 40 行
-
-    none = detect_commit_signals({"additions": 5, "message": "fix bug in scheduler", "date": "2024-08-01"}, 10, SETTINGS)
-    assert none == []

@@ -4,7 +4,7 @@
   python -m src.buildlib --skip-ingest        # 仓库已在 data/repos/，只重建索引
   python -m src.buildlib --incremental        # 新增仓库后增量补建（不清空已有向量）
 
-按序执行 ingest（GitLab 克隆+元数据）→ normalize（切分归一化→functions.db）
+按序执行 ingest（GitLab 克隆）→ normalize（切分归一化→functions.db）
 → embed（向量化→qdrant_local）→ simhash（IDF+指纹索引）。
 
 产物全部落在 data/db/：functions.db / qdrant_local / idf.json / simhash_index.pkl，
@@ -57,12 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help=f"归一化代码结构 SimHash 索引（默认 {DEFAULT_CODE_SIMHASH}）")
     p.add_argument("--skip-ingest", action="store_true", help="跳过 GitLab 克隆（仓库已在 repos-root）")
     p.add_argument("--force", action="store_true", help="ingest 时强制重新克隆已存在的仓库")
-    p.add_argument("--no-commit-stats", action="store_true", help="ingest 跳过逐 commit 增删行抓取（更快）")
     p.add_argument(
         "--reclaim-source",
         action="store_true",
         help="磁盘安全模式：逐仓「浅克隆→归一化入库→删源码」，适合大量/大体积历史仓库。"
-        "跳过 GitLab API 元数据（_meta.json），克隆+归一化交替进行，全程只占用单仓空间。",
+        "克隆+归一化交替进行，全程只占用单仓空间。",
     )
     p.add_argument("--depth", type=int, default=None, help="git clone 深度（--reclaim-source 默认浅克隆 depth=1）")
     p.add_argument("--no-embed", action="store_true", help="只做 拉取+归一化（建 functions.db），跳过向量化与 SimHash")
@@ -173,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
 
         res = timed("ingest", lambda: ingest(
             config_path, args.repos_root, token=token,
-            force=args.force, fetch_commit_stats=not args.no_commit_stats,
+            force=args.force,
         ))
         ok = sum(1 for r in res if "error" not in r)
         summary["ingest"] = {"total": len(res), "ok": ok}
@@ -190,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         if not args.skip_baselines and Path(args.baselines_config).exists():
             bres = timed("ingest-baselines", lambda: ingest(
                 Path(args.baselines_config), args.repos_root, token=token,
-                force=args.force, fetch_commit_stats=False,
+                force=args.force,
             ))
             summary["ingest_baselines"] = {"total": len(bres),
                                            "ok": sum(1 for r in bres if "error" not in r)}

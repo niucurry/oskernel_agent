@@ -19,7 +19,6 @@ from src.report.libraries import discover_library_context, tag_library_reuse
 from .baseline import (BaselineMatcher, has_incremental_history_evidence,
                        has_substantive_baseline_evidence, is_baseline_derived,
                        pair_line_evidence)
-from .commits import analyze_function
 from .config import MetadataSettings, load_metadata_settings
 from .strings import build_reverse_index, fetch_function, string_hits_for_func
 
@@ -393,20 +392,6 @@ def channel_common_code(data: dict, settings: MetadataSettings) -> int:
     return n
 
 
-def channel_commits(data: dict, repo_path: str | Path, meta_commits: list[dict], settings: MetadataSettings) -> int:
-    """通道 3：commit 异常信号（附注，不改 tier）。返回有信号的嫌疑数。"""
-    n = 0
-    for s in data["suspects"]:
-        if s.get("reuse_library"):
-            continue
-        signals = analyze_function(repo_path, meta_commits, s["query_func"], settings)
-        if signals:
-            s.setdefault("evidence", {})["commit_signals"] = signals
-            n += 1
-    logger.info("通道3 commit 信号：{} 个嫌疑函数命中信号", n)
-    return n
-
-
 def process_metadata(
     data: dict,
     db_path: str | Path = DEFAULT_DB,
@@ -414,9 +399,8 @@ def process_metadata(
     settings: MetadataSettings | None = None,
     baseline_matcher: BaselineMatcher | None = None,
     query_repo: str | Path | None = None,
-    meta_commits: list[dict] | None = None,
 ) -> dict:
-    """按需运行三通道（通道1 总是运行；2/3 视后端可用性）。"""
+    """按需运行三个通道（独特字符串总是运行；基线扣除与广泛共享视后端可用性）。"""
     settings = settings or load_metadata_settings()
     summary = {"cross_language_filtered": drop_cross_language_pairs(data)}
     library_context = discover_library_context(query_repo)
@@ -427,19 +411,17 @@ def process_metadata(
     if baseline_matcher is not None:
         summary["baseline_derived"] = channel_baseline(
             data, baseline_matcher, settings, db_path=db_path)
-    if query_repo is not None and meta_commits is not None:
-        summary["commit_signal_hits"] = channel_commits(data, query_repo, meta_commits, settings)
     data["metadata_summary"] = summary
     return data
 
 
 def run_metadata(suspects_path: str | Path, *, db_path=DEFAULT_DB, output_dir=DEFAULT_OUTPUT_DIR,
-                 baseline_matcher=None, query_repo=None, meta_commits=None, settings=None) -> dict:
+                 baseline_matcher=None, query_repo=None, settings=None) -> dict:
     suspects_path = Path(suspects_path)
     data = json.loads(suspects_path.read_text(encoding="utf-8"))
     data = process_metadata(
         data, db_path, settings=settings, baseline_matcher=baseline_matcher,
-        query_repo=query_repo, meta_commits=meta_commits,
+        query_repo=query_repo,
     )
     stem = suspects_path.stem
     base = stem[:-3] if stem.endswith("_v2") else stem

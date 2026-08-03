@@ -24,7 +24,7 @@ from loguru import logger
 
 from src.normalize.store import DEFAULT_DB
 
-from .steps import STEPS, build_local_meta, local_ingest, tier_counts
+from .steps import STEPS, local_ingest, tier_counts
 
 DEFAULT_OUTPUT = "data/output"
 DEFAULT_QDRANT = "data/db/qdrant_local"
@@ -242,13 +242,6 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("[ai_detect] 已保存模型产物校验失败，不予复用：{}", exc)
 
-    meta_commits = []
-    if _should_run("ingest", args.resume_from):
-        meta_commits = timed("ingest", lambda: build_local_meta(repo_path))
-        logger.info("[ingest] {} | commits={}", repo_path, len(meta_commits))
-    else:
-        meta_commits = build_local_meta(repo_path)
-
     # 共享后端（按需懒加载）
     embedder = None
     vector_store = None          # 本地 Qdrant local 模式独占文件锁，全流程共用一个实例，
@@ -374,7 +367,6 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             from src.metadata.baseline import VectorBaselineMatcher
             # 复用 recall 步已建的 store（共用 Qdrant local 文件锁），避免 AlreadyLocked
             baseline_matcher = VectorBaselineMatcher(get_emb(), get_store())
-        # commit 信号通道已停用（git blame 逐函数分析过慢、对查重结论非必需）
         res = timed("metadata", lambda: run_metadata(
             v2_path, db_path=args.db, output_dir=out, baseline_matcher=baseline_matcher,
             query_repo=repo_path))
