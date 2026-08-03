@@ -1,4 +1,4 @@
-"""语义级对比报告：suspects.json → opencode 语义分析 → 直接产出 HTML。
+"""语义级对比报告：suspects.json → LLM 语义分析 → 直接产出 HTML。
 
 取代旧流程：
   review (逐对 LLM) → reviewed.json → report (Markdown→HTML)
@@ -21,13 +21,15 @@ import json
 import os
 import re
 import sqlite3
-import uuid
 from collections import Counter, defaultdict
 from pathlib import Path
 
 from loguru import logger
 
-from src.exact.identity import identity_can_rescue
+from src.exact.identity import (MIN_IDENTITY_SCORE,
+                                compare_function_identity_features,
+                                function_identity_features,
+                                identity_can_rescue)
 from src.fastpath.scan import (WHOLE_FILE_LINE_RATIO, WHOLE_FILE_SIM_RATIO,
                                aggregate_file_similarity)
 from src.metadata.baseline import (has_incremental_history_evidence,
@@ -47,34 +49,13 @@ from .upstream_baselines import (is_excluded_file_path, tag_upstream_baselines,
 
 DEFAULT_OUTPUT_DIR = "data/output"
 _SEMANTIC_PROMPT_VERSION = "semantic-cn-v4-cluster-complete-batched"
-_INNOVATION_PROMPT_VERSION = "innovation-map-cn-v4-complete"
+_INNOVATION_PROMPT_VERSION = "innovation-map-cn-v5-responsibility-gated"
 DEFAULT_FUNCTIONS_DB = Path(__file__).resolve().parents[2] / "data" / "db" / "functions.db"
 MIN_INNOVATION_REFERENCE_SCORE = 0.30
 
 # 子模块列表及其显示名称
 MODULES = ["sched", "mm", "fs", "trap", "driver", "arch", "other"]
 
-
-def _find_opencode() -> str:
-    """从 PATH 中找 opencode 可执行文件（兼容 Linux ~/.local/bin 与 Windows npm）。"""
-    import shutil
-    found = shutil.which("opencode")
-    if found:
-        return found
-    candidates = [
-        Path.home() / ".local" / "bin" / "opencode",
-        Path.home() / "AppData" / "Roaming" / "npm" / "opencode",
-        Path.home() / "AppData" / "Roaming" / "npm" / "opencode.cmd",
-    ]
-    for c in candidates:
-        try:
-            if c.exists():
-                return str(c)
-        except OSError:
-            # 受限运行环境可能允许读取项目目录，却拒绝探测用户目录。
-            # opencode 只是可选依赖，路径不可访问不应阻断 audit 等无关子命令。
-            continue
-    return "opencode"  # 最终兜底，报 FileNotFoundError 时捕获
 _MODULE_DISPLAY = {
     "sched":  "进程调度",
     "mm":     "内存管理",
@@ -167,9 +148,6 @@ def _clone_summary(candidate: dict) -> str:
     matched = int(candidate.get("matched_lines") or 0)
     total = int(candidate.get("query_lines") or 0)
     return f"{kind} · 覆盖目标函数 {coverage * 100:.1f}%（{matched}/{total} 行）"
-
-
-_OPENCODE = _find_opencode()
 
 
 # ─── 1. 统计：各子模块复制/原创百分比 ─────────────────────────────────────────
@@ -574,6 +552,65 @@ def _load_functions_by_id(db_path: str | Path | None, ids: set[int]) -> dict[int
     return rows
 
 
+def _innovation_name_is_specific(name: str) -> bool:
+    """函数名是否足以表达具体职责，而不是短、单词式工厂/包装器名称。"""
+    expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name or "")
+    tokens = [
+        token.lower() for token in re.split(r"[^A-Za-z0-9]+", expanded)
+        if token
+    ]
+    return len(tokens) >= 2 or any(len(token) >= 8 for token in tokens)
+
+
+def _innovation_reference_is_comparable(query: dict, reference: dict) -> bool:
+    """创新基线必须是同语言、同子系统且职责可对应的具体函数。
+
+    向量最近邻只能用于召回，不能单独证明两个函数适合作为创新前后的基线。这里使用
+    函数名、签名、行为调用和控制流做高精度门禁；对改名函数要求行为也有交集。宁可
+    不输出候选，也不把同一大类子系统中的邻居函数拼成创新对照。
+    """
+    query_code = str(query.get("raw_code") or "")
+    reference_code = str(reference.get("raw_code") or "")
+    if not query_code.strip() or not reference_code.strip():
+        return False
+
+    query_lang = str(query.get("lang") or "").strip().lower()
+    reference_lang = str(reference.get("lang") or "").strip().lower()
+    if not query_lang or not reference_lang or query_lang != reference_lang:
+        return False
+
+    query_module = str(query.get("module_tag") or "other")
+    reference_module = str(reference.get("module_tag") or "other")
+    query_module = query_module if query_module in MODULES else "other"
+    reference_module = reference_module if reference_module in MODULES else "other"
+    if query_module != reference_module:
+        return False
+
+    identity = compare_function_identity_features(
+        function_identity_features(str(query.get("func_name") or ""), query_code),
+        function_identity_features(
+            str(reference.get("func_name") or ""), reference_code),
+    )
+    if float(identity["score"]) < MIN_IDENTITY_SCORE:
+        return False
+
+    if bool(identity["exact_name"]):
+        # 对 new/init/run 这类短单词名称，名称相同本身不足以证明职责一致；还要有
+        # 可观察行为交集。具体的多词/长名称则允许实现发生较大变化，符合创新比较用途。
+        return bool(
+            _innovation_name_is_specific(str(query.get("func_name") or ""))
+            or float(identity["behavior"]) >= 0.25
+        )
+
+    # 改名比较比同名比较更容易把功能族邻居配在一起，必须同时满足名称语义、签名和
+    # 行为调用的最低交集。阈值来自通用身份特征，不依赖仓库、路径或具体函数名。
+    return bool(
+        float(identity["name"]) >= 0.25
+        and float(identity["signature"]) >= (1.0 / 3.0)
+        and float(identity["behavior"]) >= 0.25
+    )
+
+
 def build_innovation_candidates(
     recall: dict | None,
     suspects: list[dict],
@@ -634,11 +671,22 @@ def build_innovation_candidates(
                 continue
     hydrated = _load_functions_by_id(functions_db_path, all_ref_ids)
 
-    def same_language(query: dict, payload: dict, func_id: int) -> bool:
-        query_lang = str(query.get("lang") or "").lower()
-        ref_lang = str((hydrated.get(func_id) or {}).get("lang")
-                       or payload.get("lang") or "").lower()
-        return bool(query_lang and ref_lang and query_lang == ref_lang)
+    comparability_cache: dict[tuple[tuple, int], bool] = {}
+
+    def comparable(query: dict, payload: dict, func_id: int) -> bool:
+        cache_key = (_query_key(query), func_id)
+        if cache_key in comparability_cache:
+            return comparability_cache[cache_key]
+        row = hydrated.get(func_id) or {}
+        reference = {
+            "func_name": row.get("func_name") or payload.get("func_name", ""),
+            "module_tag": row.get("module_tag") or payload.get("module_tag", "other"),
+            "lang": row.get("lang") or payload.get("lang", ""),
+            "raw_code": row.get("raw_code") or payload.get("raw_code", ""),
+        }
+        accepted = _innovation_reference_is_comparable(query, reference)
+        comparability_cache[cache_key] = accepted
+        return accepted
 
     selected_ref_ids: dict[tuple, set[int]] = {}
     for _, item, _, mod in recall_items:
@@ -653,7 +701,7 @@ def build_innovation_candidates(
                 continue
             if payload.get("is_baseline") or match_library(payload.get("file_path")):
                 continue
-            if not same_language(q, payload, func_id):
+            if not comparable(q, payload, func_id):
                 continue
             repo = str(payload.get("repo_id") or "")
             priority = 1 if preferred_repo and repo == preferred_repo else 0
@@ -679,7 +727,7 @@ def build_innovation_candidates(
                 continue
             if func_id not in selected_ref_ids.get(_query_key(q), set()):
                 continue
-            if not same_language(q, payload, func_id):
+            if not comparable(q, payload, func_id):
                 continue
             repo = str(payload.get("repo_id") or "")
             priority = 1 if preferred_repo and repo == preferred_repo else 0
@@ -709,7 +757,9 @@ def build_innovation_candidates(
             "key": f"t{index:04d}",
             "module": mod,
             "module_display": _MODULE_DISPLAY.get(mod, mod),
-            "reference_repo": preferred_repo or (refs[0]["repo"] if refs else ""),
+            # 展示和提示中的参考 repo 必须来自最终通过职责门禁的具体参考函数；模块
+            # 热门 repo 只参与候选排序，不能覆盖实际绑定来源。
+            "reference_repo": refs[0]["repo"],
             "file": q.get("file_path", ""),
             "start": int(q.get("start_line") or 0),
             "end": int(q.get("end_line") or 0),
@@ -768,19 +818,25 @@ def _normalize_innovation_points(raw: object, candidates: list[dict]) -> list[di
         why_it_matters = str(item.get("why_it_matters") or "").strip()
         impact_scope = str(item.get("impact_scope") or "").strip()
         counterevidence = str(item.get("counterevidence") or "").strip()
-        if not all((targets, title, baseline, delta, why_it_matters,
+        if not all((targets, refs, title, baseline, delta, why_it_matters,
                     impact_scope, counterevidence)):
             continue
         # 只能引用与这些目标函数真实关联的 reference key，防止模型跨卡拼错来源。
         allowed_refs = {r["key"] for target in targets for r in target.get("references", [])}
         refs = [r for r in refs if r["key"] in allowed_refs]
+        selected_ref_keys = {r["key"] for r in refs}
+        if not refs or any(
+            not selected_ref_keys.intersection(
+                r["key"] for r in target.get("references", [])
+            )
+            for target in targets
+        ):
+            continue
         repo_counts = Counter(r["repo"] for r in refs if r.get("repo"))
         if not repo_counts:
             repo_counts.update(t.get("reference_repo", "") for t in targets if t.get("reference_repo"))
         confidence = str(item.get("confidence") or "medium").lower()
         if confidence not in ("high", "medium", "low"):
-            confidence = "medium"
-        if not refs and confidence == "high":
             confidence = "medium"
         if refs and not any((r.get("raw_code") or "").strip() for r in refs):
             confidence = "low"
@@ -1686,20 +1742,6 @@ def finalize_secondary_review_candidates(suspects: list[dict]) -> dict[str, int]
     return {"supplemental": supplemental, "dismissed": dismissed}
 
 
-# ─── 4. 调用 opencode ────────────────────────────────────────────────────────
-
-def _opencode_env() -> dict:
-    env = os.environ.copy()
-    env["OPENCODE_SESSION_ID"] = uuid.uuid4().hex
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
-    # 确保 npm 全局 bin 在 PATH 中（Windows）
-    npm_bin = str(Path.home() / "AppData" / "Roaming" / "npm")
-    if npm_bin not in env.get("PATH", ""):
-        sep = ";" if os.name == "nt" else ":"
-        env["PATH"] = npm_bin + sep + env.get("PATH", "")
-    return env
-
-
 def _cache_key(*parts: str) -> str:
     h = hashlib.sha1()
     for p in parts:
@@ -1820,7 +1862,7 @@ def run_semantic_analysis(
     """直接调用 DeepSeek API 进行语义分析，返回 HTML 片段。
 
     使用 config.toml 中的 api.key 和 api.base_url，按统一上下文预算并发分批完成全部功能簇，
-    替代 opencode CLI（opencode MCP 超时不稳定）。
+    直连 DeepSeek API（替代早期 opencode CLI 方案；opencode MCP 超时不稳定）。
     """
     work_dir.mkdir(parents=True, exist_ok=True)
     output_path = work_dir.resolve() / "semantic_analysis.html"
@@ -1982,10 +2024,13 @@ _INNOVATION_SYSTEM = """你是 OS 内核代码差异分析助手。你的任务�
 
 判断顺序：
 1. 先确认目标与参考是否属于可比较的同一职责；职责不同的最近邻不能作为创新基线。
+   两段代码必须存在相同的具体职责和可核验的共同机制锚点；仅处于同一子系统、名称近似、
+   都处理同一类系统调用或向量距离接近，均不足以建立基线。
 2. 比较数据结构、控制流、同步/并发、状态机、错误处理和跨函数协作；变量改名、代码增量、
    多几个 wrapper、调用成熟第三方库不算创新。
 3. 可以把同一机制的多个 target key 合成一个创新点，但不能把无关函数硬凑成“大创新”。
-4. 每个结论必须引用输入中真实存在的 target_keys；reference_keys 也只能引用输入 key。
+4. 每个结论必须引用输入中真实存在的 target_keys 和 reference_keys；没有具体参考函数时不得
+   输出相对创新。不得把只存在于目标代码中的锁、状态或风险反向描述成参考实现的问题。
 5. 输入不含项目文档，禁止根据项目自述下结论。证据不足时省略，或用 kind="存疑"、
    confidence="low" 明确标注。
 
@@ -2154,7 +2199,7 @@ def run_innovation_analysis(
 
 
 def _extract_html_from_text(text: str) -> str:
-    """从 opencode stdout 中提取 HTML 片段（agent 有时直接输出而非写文件）。"""
+    """从模型原始文本中提取 HTML 片段（模型有时直接输出 HTML 而非仅返回 JSON）。"""
     import re
     # 尝试匹配 ```html ... ``` 代码块
     m = re.search(r'```html\s*(.*?)```', text, re.DOTALL | re.IGNORECASE)
@@ -3288,7 +3333,7 @@ def _strip_addr_refs(fragment: str) -> str:
 
 
 def _extract_module_analysis(analysis_html: str, mod: str) -> str:
-    """从 opencode 产出的完整 HTML 中，尝试提取该模块的 <section> 片段。"""
+    """从语义分析产出的完整 HTML 中，尝试提取该模块的 <section> 片段。"""
     import re
     # 匹配 <section data-module="mod">...</section>
     pattern = re.compile(

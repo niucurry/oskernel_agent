@@ -5,7 +5,6 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 import pytest
-import shutil
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -66,15 +65,6 @@ def test_resolve_git_revision_reads_git_metadata_without_running_git(tmp_path):
     (git_dir / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
     (git_dir / "refs" / "heads" / "main").write_text("b" * 40 + "\n", encoding="utf-8")
     assert _resolve_git_revision(tmp_path) == "b" * 40
-
-def test_find_opencode_ignores_inaccessible_candidates(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda _name: None)
-
-    def denied(_path):
-        raise PermissionError("restricted user directory")
-
-    monkeypatch.setattr(Path, "exists", denied)
-    assert SC._find_opencode() == "opencode"
 
 
 def _sc_suspect(qfile, qfunc, repo, cfile, cfunc, tier, score, module="fs",
@@ -1368,7 +1358,8 @@ def test_innovation_candidates_bind_target_to_reference_code(tmp_path):
         )
         conn.execute(
             "INSERT INTO functions VALUES (7, '2025/ref-os', 'kernel/sched.rs', 20, 30, "
-            "'pick_next', 'sched', 'rust', 'fn pick_next(){ for t in tasks { run(t); } }')"
+            "'pick_next', 'sched', 'rust', "
+            "'fn pick_next(){ for t in tasks() { if ready(t) { age(t); run(t); } } }')"
         )
 
     recall = {
@@ -1376,7 +1367,7 @@ def test_innovation_candidates_bind_target_to_reference_code(tmp_path):
             "query": {
                 "file_path": "kernel/mlfq.rs", "start_line": 10, "end_line": 42,
                 "func_name": "pick_mlfq", "module_tag": "sched", "lang": "rust",
-                "raw_code": "fn pick_mlfq(){ loop { if ready() { age(); break; } } }",
+                "raw_code": "fn pick_mlfq(){ for t in tasks() { if ready(t) { age(t); run(t); } } }",
             },
             "candidates": [{
                 "id": 7, "score": 0.42,
@@ -1411,13 +1402,14 @@ def test_innovation_candidates_ignore_cross_language_reference(tmp_path):
             "INSERT INTO functions VALUES (?, ?, ?, 1, 10, ?, 'sched', ?, ?)",
             [
                 (7, "2025/c-ref", "kernel/sched.c", "pick_next", "c", "int pick_next(void){return 0;}"),
-                (8, "2025/rust-ref", "kernel/sched.rs", "pick_next", "rust", "fn pick_next(){}"),
+                (8, "2025/rust-ref", "kernel/sched.rs", "pick_next", "rust",
+                 "fn pick_next(){ for t in tasks() { run(t); } }"),
             ],
         )
     recall = {"results": [{
         "query": {"file_path": "kernel/new.rs", "start_line": 1, "end_line": 20,
-                  "func_name": "pick_new", "module_tag": "sched", "lang": "rust",
-                  "raw_code": "fn pick_new(){ loop {} }"},
+                  "func_name": "pick_next", "module_tag": "sched", "lang": "rust",
+                  "raw_code": "fn pick_next(){ for t in tasks() { run(t); } }"},
         "candidates": [
             {"id": 7, "score": 0.99, "payload": {"repo_id": "2025/c-ref", "file_path": "kernel/sched.c"}},
             {"id": 8, "score": 0.40, "payload": {"repo_id": "2025/rust-ref", "file_path": "kernel/sched.rs"}},
@@ -1428,6 +1420,58 @@ def test_innovation_candidates_ignore_cross_language_reference(tmp_path):
 
     assert candidates[0]["references"][0]["repo"] == "2025/rust-ref"
     assert candidates[0]["references"][0]["lang"] == "rust"
+
+
+def test_innovation_candidates_skip_higher_scored_family_neighbor(tmp_path):
+    """向量分更高的同功能族邻居不能压过职责可对应的具体参考函数。"""
+    db = tmp_path / "functions.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE functions (id INTEGER PRIMARY KEY, repo_id TEXT, file_path TEXT, "
+            "start_line INTEGER, end_line INTEGER, func_name TEXT, module_tag TEXT, lang TEXT, raw_code TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO functions VALUES (?, '2025/ref-os', ?, 1, 40, ?, 'sched', 'rust', ?)",
+            [
+                (7, "kernel/legacy_task.rs", "clone_task",
+                 "fn clone_task(flags: Flags) { legacy_queue(); allocate_task(); publish_tid(); }"),
+                (8, "kernel/process.rs", "clone_process",
+                 "fn clone_process(flags: Flags) { copy_address_space(); register_child(); }"),
+            ],
+        )
+    recall = {"results": [{
+        "query": {
+            "file_path": "kernel/process.rs", "start_line": 1, "end_line": 40,
+            "func_name": "clone_process", "module_tag": "sched", "lang": "rust",
+            "raw_code": (
+                "fn clone_process(flags: Flags) { meta_lock(); inner_lock(); "
+                "copy_address_space(); register_child(); }"
+            ),
+        },
+        "candidates": [
+            {"id": 7, "score": 0.82, "payload": {"repo_id": "2025/ref-os"}},
+            {"id": 8, "score": 0.55, "payload": {"repo_id": "2025/ref-os"}},
+        ],
+    }]}
+
+    candidates = SC.build_innovation_candidates(recall, [], functions_db_path=db)
+
+    assert len(candidates) == 1
+    assert candidates[0]["references"][0]["func"] == "clone_process"
+    assert candidates[0]["references"][0]["score"] == 0.55
+
+
+def test_innovation_comparability_rejects_unrelated_generic_name_and_module():
+    query = {
+        "func_name": "new", "module_tag": "sched", "lang": "rust",
+        "raw_code": "fn new() -> Self { Self { priority: 0, vruntime: 0 } }",
+    }
+    unrelated = {
+        "func_name": "new", "module_tag": "fs", "lang": "rust",
+        "raw_code": "fn new() -> Self { Self { block_size: 512, files: 0 } }",
+    }
+
+    assert not SC._innovation_reference_is_comparable(query, unrelated)
 
 
 def test_innovation_map_rejects_invented_keys_and_adds_complexity():
@@ -1468,6 +1512,29 @@ def test_innovation_map_rejects_invented_keys_and_adds_complexity():
     assert points[0]["references"][0]["key"] == "r0001"
     assert points[0]["complexity"]["code_lines"] == 33
     assert points[0]["complexity"]["branch_points"] >= 3
+
+
+def test_innovation_map_requires_reference_for_every_target():
+    candidates = [{
+        "key": "t0001", "module": "sched", "module_display": "进程调度",
+        "reference_repo": "2025/ref-os", "file": "kernel/process.rs",
+        "start": 1, "end": 20, "func": "clone_process", "lines": 20,
+        "raw_code": "fn clone_process() {}",
+        "references": [{
+            "key": "r0001", "repo": "2025/ref-os", "file": "kernel/process.rs",
+            "start": 1, "end": 20, "func": "clone_process", "score": 0.5,
+            "raw_code": "fn clone_process() {}",
+        }],
+    }]
+    raw = {"innovations": [{
+        "title": "没有绑定参考函数的结论", "kind": "机制改良",
+        "baseline": "参考实现较简单", "delta": "目标实现增加机制",
+        "why_it_matters": "提高稳定性", "impact_scope": "进程创建",
+        "counterevidence": "尚无运行时验证", "confidence": "medium",
+        "target_keys": ["t0001"], "reference_keys": [],
+    }]}
+
+    assert SC._normalize_innovation_points(raw, candidates) == []
 
 
 def test_innovation_complexity_uses_full_function_beyond_model_excerpt(tmp_path):
