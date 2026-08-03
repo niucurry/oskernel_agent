@@ -20,13 +20,11 @@ DEFAULT_REPOS_ROOT = "data/repos"
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m src.ingest",
-        description="从 GitLab 批量克隆历史作品并抓取元数据（_meta.json）。",
+        description="从 GitLab 批量克隆历史作品。",
     )
     p.add_argument("--config", default=DEFAULT_CONFIG, help=f"repos.yaml 路径（默认 {DEFAULT_CONFIG}）")
     p.add_argument("--repos-root", default=DEFAULT_REPOS_ROOT, help=f"克隆输出根目录（默认 {DEFAULT_REPOS_ROOT}）")
     p.add_argument("--force", action="store_true", help="强制重新克隆已存在的仓库")
-    p.add_argument("--gitlab-url", default=None, help="GitLab 实例地址（覆盖 GITLAB_URL 环境变量）")
-    p.add_argument("--no-commit-stats", action="store_true", help="跳过逐 commit 的增删行/变更文件数抓取（更快）")
     p.add_argument(
         "--init-template",
         action="store_true",
@@ -58,9 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         config_path,
         args.repos_root,
         token=token,
-        gitlab_url=args.gitlab_url,
         force=args.force,
-        fetch_commit_stats=not args.no_commit_stats,
     )
     return 0
 
