@@ -76,7 +76,13 @@ def normalize_repo(
 
         fns = extract_functions(text, f.lang, keep=keep, min_lines=min_lines)
         for fn in fns:
-            module_tag = classifier.classify(f.rel_path, f.lang, is_macro=fn.is_macro)
+            module_tag = classifier.classify(
+                f.rel_path,
+                f.lang,
+                is_macro=fn.is_macro,
+                func_name=fn.func_name,
+                raw_code=fn.raw_code,
+            )
             rec = FunctionRecord(
                 repo_id=repo_id,
                 file_path=report_path,

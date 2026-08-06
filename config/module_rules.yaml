@@ -1,21 +1,83 @@
-# 函数所属内核子系统的归类规则（src.normalize 使用）。
-# 按文件路径关键词启发式归类：自上而下逐条匹配，命中任一关键词即归该 tag；
-# 全不命中则归 default。
+# 函数所属内核子系统的通用归类规则（src.normalize 使用）。
 #
-# 特殊规则（在代码中处理，优先级最高）：
-#   - 汇编文件（.S/.asm）一律归 arch
-#   - Rust 宏定义（macro_definition）一律归 macro
+# 每条规则可以分别声明：
+#   path_keywords   文件/目录标识符；
+#   symbol_keywords 函数名标识符（优先级高于路径，适合 lib.rs 等聚合文件）；
+#   code_keywords   函数体中的职责锚点（低权重辅助，避免仅凭一个 API 名误分类）。
+#
+# 匹配严格遵循标识符边界，不能用任意子串。例如 ext 不能命中 context。
+# 规则是操作系统领域概念，不包含任何参赛队或单一仓库名称。
+# 汇编函数与 Rust 宏分别由代码优先归入 arch、macro。
 rules:
+  - tag: signal
+    path_keywords: [signal, signals, sigaction, sigproc]
+    symbol_keywords: [sigaction, sigprocmask, sigreturn, sendsignal, send_signal, handle_signal]
+    code_keywords: [sigset, siginfo, sigaction, sighup, sigkill]
+
+  - tag: ipc
+    path_keywords: [ipc, pipe, pipes, mailbox, msgqueue, message_queue, shm, shared_memory, eventfd]
+    symbol_keywords: [pipe, pipe2, eventfd, shmget, shmat, shmdt, msgget, msgsnd, msgrcv]
+    code_keywords: [pipefd, eventfd, shmget, msgqueue]
+
+  - tag: sync
+    path_keywords: [sync, lock, locks, mutex, semaphore, futex, spinlock, rwlock, waitqueue, wait_queue]
+    symbol_keywords: [lock, unlock, mutex, semaphore, futex, spin_lock, spin_unlock, wait_queue]
+    code_keywords: [mutex, semaphore, futex, spinlock, rwlock, atomicbool]
+
+  - tag: time
+    path_keywords: [time, timer, timers, clock, rtc]
+    symbol_keywords: [sleep, nanosleep, get_time, gettimeofday, clock_gettime, clock_settime, setitimer]
+    code_keywords: [timespec, timeval, gettimeofday, nanosleep, clock_gettime]
+
+  - tag: net
+    path_keywords: [net, network, socket, sockets, tcp, udp, ipv4, ipv6, ethernet]
+    symbol_keywords: [socket, bind, listen, accept, connect, sendto, recvfrom]
+    code_keywords: [sockaddr, socketaddr, tcpsocket, udpsocket, ethernetaddress]
+
+  - tag: syscall
+    path_keywords: [syscall, syscalls, uapi, abi]
+    symbol_keywords: [syscall, syscall_handler, syscall_dispatch, do_syscall]
+    code_keywords: [ecall, syscall_number, syscall_id]
+
   - tag: sched
-    keywords: [sched, task, process, thread]
+    path_keywords: [sched, scheduler, task, tasks, process, processes, thread, threads]
+    symbol_keywords: [schedule, scheduler, spawn, fork, clone_task, clone_process, switch_task]
+    code_keywords: [taskcontext, task_context, runqueue, run_queue, processcontrolblock,
+                    ru_utime, ru_stime, ru_maxrss, ru_nvcsw]
+
   - tag: mm
-    keywords: [mm, memory, heap, frame, page, alloc]
+    path_keywords: [mm, memory, heap, frame, frames, page, pages, paging, alloc, allocator]
+    symbol_keywords: [mmap, munmap, brk, sbrk, page_fault, alloc_page, dealloc_page]
+    code_keywords: [pagetable, page_table, pagefault, frameallocator, frame_allocator]
+
   - tag: fs
-    keywords: [fs, file, inode, vfs, ext, fat]
+    path_keywords: [fs, filesystem, file, files, inode, vfs, ext2, ext4, fat, fat32, procfs, devfs]
+    symbol_keywords: [path2abs, canonicalize_path, copy_file_range, statfs, mount, umount]
+    code_keywords: [f_bsize, f_blocks, st_mode, st_ino, st_nlink, st_size, dirent, superblock]
+
   - tag: trap
-    keywords: [trap, interrupt, exception, irq, syscall]
+    path_keywords: [trap, traps, interrupt, interrupts, exception, exceptions, irq]
+    symbol_keywords: [trap_handler, interrupt_handler, exception_handler, handle_irq]
+    code_keywords: [scause, sepc, stval, trapframe, trap_frame]
+
   - tag: driver
-    keywords: [driver, dev, uart, virtio, block]
+    path_keywords: [driver, drivers, device, devices, uart, virtio, block, pci, dma, gpio, serial]
+    symbol_keywords: [probe, remove_device, irq_handler]
+    code_keywords: [virtqueue, mmio, plic, pci_device]
+
+  - tag: security
+    path_keywords: [security, credential, credentials, capability, capabilities, permission, audit]
+    symbol_keywords: [check_permission, access_check, capable, audit]
+    code_keywords: [credentials, capability, access_control]
+
+  - tag: runtime
+    path_keywords: [runtime, utils, util, error, errors, errno, panic, logging, log, debug, backtrace]
+    symbol_keywords: [backtrace, panic_handler, errno, strerror]
+    code_keywords: [backtrace, stack_trace, panicinfo, errorcode]
+
   - tag: arch
-    keywords: [arch, riscv, boot, entry]
+    path_keywords: [arch, architecture, riscv, x86, aarch64, loongarch, boot, entry, hal]
+    symbol_keywords: [boot, start_kernel, context_switch]
+    code_keywords: [satp, sstatus, cr3, ttbr0]
+
 default: other

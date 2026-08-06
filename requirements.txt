@@ -14,6 +14,8 @@ pyyaml>=6.0
 loguru>=0.7
 python-dotenv>=1.0
 pytest>=8.0
+# 函数级 McCabe 圈复杂度、NLOC、token/参数计数（支持 Rust/C/C++ 等）
+lizard==1.23.0
 # Layer 2 向量召回（src.embed）
 # 注意：codet5p 的 trust_remote_code 模型仅兼容 transformers 4.x，勿升级到 5.x
 transformers>=4.40,<5

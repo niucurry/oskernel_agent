@@ -878,7 +878,8 @@ def test_review_group_prefers_completed_candidate_over_deferred_secondary():
     group = SC.collect_file_pairs(
         [deferred, reviewed], keep_tiers=("review", "weak"))[0]
     resolution = SC.finalize_secondary_review_candidates([deferred, reviewed])
-    stats = SC.compute_submodule_stats([deferred, reviewed], None)["fs"]
+    # 新分类器会纠正测试夹具中与 os/mm.rs 路径冲突的旧 fs 标签。
+    stats = SC.compute_submodule_stats([deferred, reviewed], None)["mm"]
     _toc, section = SC._review_section([group], None, "2024/new")
 
     assert group["review_verdict"] == "借鉴"
@@ -1126,6 +1127,50 @@ def test_similarity_clusters_aggregate_functions_into_one_feature_event():
     assert clusters[0]["source"] == "2023/ref"
 
 
+def test_report_refines_legacy_other_modules_without_database_rebuild():
+    suspects = [
+        _sc_suspect("os/src/signal/types.rs", "default_op", "2024/ref",
+                    "os/src/signal/types.rs", "default_op", "confirmed", .98,
+                    module="other", exact=20),
+        _sc_suspect("user/src/lib.rs", "get_time", "2024/ref",
+                    "user/src/lib.rs", "get_time", "confirmed", .97,
+                    module="other", exact=10),
+    ]
+    suspects[0]["query_func"]["raw_code"] = "fn default_op(){ SigSet::SIGHUP; SigSet::SIGKILL; }"
+    suspects[1]["query_func"]["raw_code"] = "fn get_time(){ let x: TimeVal; gettimeofday(); }"
+
+    changed = SC._refine_report_modules(suspects)
+    groups = SC.collect_file_pairs(suspects)
+
+    assert changed >= 2
+    assert {group["module"] for group in groups} == {"signal", "time"}
+
+
+def test_report_can_split_old_explicit_module_into_new_subsystem():
+    record = {
+        "file_path": "kernel/src/syscall/fs.rs", "func_name": "dispatch",
+        "module_tag": "fs", "lang": "rust", "raw_code": "fn dispatch() {}",
+    }
+    assert SC._module_for_record(record) == "syscall"
+
+
+def test_unknown_functions_do_not_collapse_into_one_other_cluster():
+    suspects = [
+        _sc_suspect("os/src/misc/a.rs", "alpha_helper", "2024/ref",
+                    "misc/a.rs", "alpha_helper", "confirmed", .98,
+                    module="other", exact=20),
+        _sc_suspect("os/src/misc/b.rs", "beta_helper", "2024/ref",
+                    "misc/b.rs", "beta_helper", "confirmed", .97,
+                    module="other", exact=20),
+    ]
+
+    clusters = SC.build_similarity_clusters(SC.collect_file_pairs(suspects))
+
+    assert len(clusters) == 2
+    assert len({cluster["feature_key"] for cluster in clusters}) == 2
+    assert all(cluster["function_count"] == 1 for cluster in clusters)
+
+
 def test_every_function_cluster_renders_its_own_semantic_explanation():
     suspects = [
         _sc_suspect("os/src/fs/inode.rs", "read_inode", "2023/ref", "inode.rs",
@@ -1248,6 +1293,10 @@ def test_generate_comparison_html_has_m2_elements():
     assert "候选禁止静默截断" not in html
     assert "自研/原创（函数）" not in html
     assert "各模块高置信同源函数数" in html             # tier 分布图
+    assert "整体结果分布（按全部解析函数，含复用库与基线衍生）" in html
+    assert "占全部解析函数比例" in html
+    assert "复用库（第三方库）" in html
+    assert "基线衍生" in html
     assert 'class="toc-card"' in html                  # 左侧目录统一卡片
     assert "评审结论" in html and "同源判断" in html and "合规复用" in html and "附录" in html
     assert "共同上游判断" in html
@@ -1266,6 +1315,38 @@ def test_generate_comparison_html_has_m2_elements():
     import re
     for blob in re.findall(r'<script type="application/json">(.*?)</script>', html, re.DOTALL):
         json.loads(blob)
+
+
+def test_overall_distribution_separates_reuse_baseline_and_unmatched_ratios():
+    rows = SC._overall_distribution_rows({
+        "confirmed": 4,
+        "review": 1,
+        "review_incomplete": 1,
+        "original": 5,
+        "library": 3,
+        "baseline": 2,
+        "upstream": 1,
+        "false_positive": 0,
+        "common": 1,
+    }, total=20)
+    by_key = {row["key"]: row for row in rows}
+
+    assert by_key["original"]["pct"] == 25.0
+    assert by_key["library"]["pct"] == 15.0
+    assert by_key["baseline"]["pct"] == 10.0
+    assert by_key["unclassified"] == {
+        "key": "unclassified", "label": "其他未归类", "color": "#cbd5e1",
+        "count": 2, "pct": 10.0,
+    }
+    assert sum(row["count"] for row in rows) == 20
+
+    table = SC._overall_distribution_table(rows, 20)
+    donut = SC._echarts_overall_donut(rows)
+    assert "暂未检出相似" in table and "25.0%" in table
+    assert "复用库（第三方库）" in table and "15.0%" in table
+    assert "基线衍生" in table and "10.0%" in table
+    assert '"value": 3, "name": "复用库（第三方库）"' in donut
+    assert '"value": 2, "name": "基线衍生"' in donut
 
 
 def test_ai_detect_section_rejects_model_failure_instead_of_rendering_placeholder():
@@ -1461,6 +1542,106 @@ def test_innovation_candidates_skip_higher_scored_family_neighbor(tmp_path):
     assert candidates[0]["references"][0]["score"] == 0.55
 
 
+def test_innovation_candidates_target_primary_repo_when_global_topk_misses_it(tmp_path):
+    db = tmp_path / "functions.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE functions (id INTEGER PRIMARY KEY, repo_id TEXT, file_path TEXT, "
+            "start_line INTEGER, end_line INTEGER, func_name TEXT, module_tag TEXT, lang TEXT, raw_code TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO functions VALUES (?, ?, 'kernel/process.rs', 1, 30, "
+            "'clone_process', 'sched', 'rust', ?)",
+            [
+                (7, "2025/secondary", "fn clone_process(){ copy_vm(); register_child(); }"),
+                (8, "2025/primary", "fn clone_process(){ copy_vm(); register_child(); audit(); }"),
+            ],
+        )
+    recall = {"results": [{
+        "query": {
+            "file_path": "kernel/process.rs", "start_line": 1, "end_line": 30,
+            "func_name": "clone_process", "module_tag": "sched", "lang": "rust",
+            "raw_code": "fn clone_process(){ copy_vm(); register_child(); secure(); }",
+        },
+        # 全库 Top-K 只有 secondary；primary 必须由定向仓库检索补回。
+        "candidates": [{
+            "id": 7, "score": 0.91,
+            "payload": {"repo_id": "2025/secondary", "file_path": "kernel/process.rs"},
+        }],
+    }]}
+    suspects = [_sc_suspect(
+        "kernel/base.rs", "schedule", "2025/primary", "kernel/base.rs", "schedule",
+        "confirmed", 0.95, module="sched", exact=12,
+    )]
+
+    candidates = SC.build_innovation_candidates(
+        recall, suspects, functions_db_path=db,
+    )
+
+    reference = candidates[0]["references"][0]
+    assert reference["repo"] == "2025/primary"
+    assert reference["selection_source"] == "主要参考仓库定向检索"
+    assert reference["score"] is None
+
+
+def test_innovation_candidate_pool_replenishes_after_early_targets_lack_baselines(tmp_path):
+    db = tmp_path / "functions.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE functions (id INTEGER PRIMARY KEY, repo_id TEXT, file_path TEXT, "
+            "start_line INTEGER, end_line INTEGER, func_name TEXT, module_tag TEXT, lang TEXT, raw_code TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO functions VALUES (9, '2025/ref-os', 'kernel/fifth.rs', 1, 60, "
+            "'fifth_candidate', 'sched', 'rust', 'fn fifth_candidate(){ schedule(); wake(); }')"
+        )
+    results = []
+    names = ("prepare_memory", "route_interrupt", "flush_inode", "probe_device",
+             "fifth_candidate")
+    for index, (lines, name) in enumerate(zip((100, 90, 80, 70, 60), names), start=1):
+        results.append({
+            "query": {
+                "file_path": f"kernel/{index}.rs", "start_line": 1, "end_line": lines,
+                "func_name": name, "module_tag": "sched", "lang": "rust",
+                "raw_code": f"fn {name}(){{ schedule(); wake(); }}",
+            },
+            "candidates": ([{"id": 9, "score": 0.5,
+                              "payload": {"repo_id": "2025/ref-os"}}]
+                           if index == 5 else []),
+        })
+
+    candidates = SC.build_innovation_candidates(
+        {"results": results}, [], functions_db_path=db,
+    )
+
+    assert [candidate["func"] for candidate in candidates] == ["fifth_candidate"]
+
+
+def test_targeted_reference_search_reads_legacy_module_for_new_category(tmp_path):
+    db = tmp_path / "functions.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE functions (id INTEGER PRIMARY KEY, repo_id TEXT, file_path TEXT, "
+            "start_line INTEGER, end_line INTEGER, func_name TEXT, module_tag TEXT, lang TEXT, raw_code TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO functions VALUES (9, '2025/ref-os', 'kernel/syscall/fs.rs', "
+            "1, 30, 'dispatch', 'fs', 'rust', 'fn dispatch(){ syscall_number(); }')"
+        )
+    query = {
+        "file_path": "kernel/syscall/fs.rs", "start_line": 1, "end_line": 30,
+        "func_name": "dispatch", "module_tag": "syscall", "lang": "rust",
+        "raw_code": "fn dispatch(){ syscall_number(); audit(); }",
+    }
+    recall_items = [(30, {"query": query}, {}, "syscall")]
+
+    found = SC._targeted_reference_ids(
+        db, recall_items, {"syscall": ["2025/ref-os"]},
+    )
+
+    assert found[SC._query_key(query)][0][0] == 9
+
+
 def test_innovation_comparability_rejects_unrelated_generic_name_and_module():
     query = {
         "func_name": "new", "module_tag": "sched", "lang": "rust",
@@ -1510,8 +1691,9 @@ def test_innovation_map_rejects_invented_keys_and_adds_complexity():
     assert len(points) == 1
     assert points[0]["targets"][0]["key"] == "t0001"
     assert points[0]["references"][0]["key"] == "r0001"
-    assert points[0]["complexity"]["code_lines"] == 33
-    assert points[0]["complexity"]["branch_points"] >= 3
+    assert points[0]["complexity"]["analyzed_functions"] == 1
+    assert points[0]["complexity"]["max_cyclomatic_complexity"] >= 3
+    assert points[0]["complexity"]["tool"] == "Lizard 1.23.0"
 
 
 def test_innovation_map_requires_reference_for_every_target():
@@ -1569,7 +1751,20 @@ def test_innovation_complexity_uses_full_function_beyond_model_excerpt(tmp_path)
 
     assert len(candidates[0]["raw_code"]) == len(query_code)
     assert len(candidates[0]["analysis_code"]) <= 12000
-    assert complexity["branch_points"] >= 2
+    assert complexity["max_cyclomatic_complexity"] >= 3
+    assert complexity["total_nloc"] == 184
+    assert complexity["unavailable_functions"] == 0
+
+
+def test_innovation_complexity_marks_unsupported_language_unavailable():
+    complexity = SC._innovation_complexity([{
+        "file": "arch/context.asm", "func": "switch_to", "lines": 4,
+        "raw_code": ".global switch_to\nswitch_to:\n  beq a0, a1, done\ndone:\n  ret",
+    }])
+
+    assert complexity["analyzed_functions"] == 0
+    assert complexity["unavailable_functions"] == 1
+    assert complexity["max_cyclomatic_complexity"] is None
 
 
 def test_generate_report_renders_innovation_code_map():
@@ -1582,9 +1777,17 @@ def test_generate_report_renders_innovation_code_map():
         "targets": [{"file": "kernel/mlfq.rs", "start": 10, "end": 42,
                      "func": "pick_mlfq", "lines": 33}],
         "references": [{"repo": "2025/ref-os", "file": "kernel/sched.rs",
-                        "start": 20, "end": 30, "func": "pick_next", "score": 0.42}],
-        "complexity": {"level": "中", "file_count": 1, "symbol_count": 1,
-                       "code_lines": 33, "branch_points": 4},
+                        "start": 20, "end": 30, "func": "pick_next", "score": 0.42,
+                        "identity_score": 0.78, "selection_source": "主要参考仓库定向检索"}],
+        "complexity": {
+            "method": "McCabe cyclomatic complexity", "tool": "Lizard 1.23.0",
+            "analyzed_functions": 1, "unavailable_functions": 0,
+            "max_cyclomatic_complexity": 4, "mean_cyclomatic_complexity": 4.0,
+            "total_nloc": 30, "total_token_count": 120, "max_parameter_count": 1,
+            "functions": [{"file": "kernel/mlfq.rs", "func": "pick_mlfq",
+                           "cyclomatic_complexity": 4, "nloc": 30,
+                           "token_count": 120, "parameter_count": 1}],
+        },
     }
     linker = GitLabLinker(
         {"2025/ref-os": "https://gitlab.example.com/history/ref-os"}, {},
@@ -1594,14 +1797,19 @@ def test_generate_report_renders_innovation_code_map():
     linker.mark_query_repo("2026/new")
     html = SC.generate_comparison_html(
         "2026/new", [], SC.compute_submodule_stats([], None), [], "", [],
-        innovation_points=[point],
+        innovation_points=[point], innovation_candidates=[{"key": "t0001"}],
         linker=linker,
         ai_detect_data=_actual_ai_model_result(),
     )
 
     assert 'id="sec-innovation"' in html
     assert "参考实现基线" in html and "本作品代码变化" in html
-    assert "实现复杂度（静态估算）" in html
+    assert "函数级代码度量" in html
+    assert "McCabe 圈复杂度" in html
+    assert "Lizard 1.23.0" in html
+    assert "McCabe CCN 4" in html
+    assert "自定义高/中/低分" in html
+    assert "1 组可比较代码基线 → 1 个候选创新" in html
     assert "调用/引用入口" in html
     assert "测试 / Benchmark 证据" not in html
     assert "建议验证" not in html

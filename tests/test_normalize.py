@@ -94,6 +94,40 @@ def test_classify_asm_is_arch_and_macro_overrides():
     assert clf.classify("os/src/sched/task.rs", "rust", is_macro=True) == ModuleTag.MACRO
 
 
+@pytest.mark.parametrize(("path", "func", "code", "expected"), [
+    ("os/src/signal/types.rs", "default_op", "SigSet::SIGHUP | SigSet::SIGKILL",
+     ModuleTag.SIGNAL),
+    ("os/src/ipc/pipe.rs", "pipe2", "pipefd", ModuleTag.IPC),
+    ("os/src/locks/mutex.rs", "lock", "Mutex::lock()", ModuleTag.SYNC),
+    ("user/src/lib.rs", "get_time", "TimeVal; gettimeofday()", ModuleTag.TIME),
+    ("net/socket/tcp.rs", "connect", "SockAddr", ModuleTag.NET),
+    ("kernel/syscalls/fs.rs", "dispatch", "syscall_number", ModuleTag.SYSCALL),
+    ("os/src/security/capability.rs", "capable", "access_control", ModuleTag.SECURITY),
+    ("os/src/utils/mod.rs", "backtrace", "stack_trace", ModuleTag.RUNTIME),
+])
+def test_classify_missing_kernel_subsystems(path, func, code, expected):
+    clf = load_classifier()
+    assert clf.classify(path, "rust", func_name=func, raw_code=code) == expected
+
+
+def test_classify_aggregate_file_by_function_responsibility():
+    clf = load_classifier()
+
+    assert clf.classify(
+        "user/src/lib.rs", "rust", func_name="sleep",
+        raw_code="fn sleep() { let req: Timespec; nanosleep(); }",
+    ) == ModuleTag.TIME
+    assert clf.classify(
+        "user/src/lib.rs", "rust", func_name="new",
+        raw_code="fn new() { Self { st_mode: 0, st_ino: 0, st_nlink: 1, st_size: 0 } }",
+    ) == ModuleTag.FS
+
+
+def test_classify_keywords_require_identifier_boundaries():
+    clf = load_classifier()
+    assert clf.classify("os/src/context.rs", "rust", func_name="restore") == ModuleTag.OTHER
+
+
 # ---------- 归一化核心：改变量名后必须完全一致 ----------
 
 def test_rename_invariance_rust():
