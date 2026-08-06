@@ -36,6 +36,7 @@ from src.metadata.baseline import (has_incremental_history_evidence,
                                    has_substantive_baseline_evidence,
                                    pair_line_evidence)
 from src.models import is_baseline_repo
+from src.normalize.classify import load_classifier
 from src.normalize.discovery import is_test_or_benchmark_path
 from src.retrieval_contract import (CONTRACT_VERSION, contract_errors,
                                     require_complete_contract)
@@ -49,22 +50,86 @@ from .upstream_baselines import (is_excluded_file_path, tag_upstream_baselines,
 
 DEFAULT_OUTPUT_DIR = "data/output"
 _SEMANTIC_PROMPT_VERSION = "semantic-cn-v4-cluster-complete-batched"
-_INNOVATION_PROMPT_VERSION = "innovation-map-cn-v5-responsibility-gated"
+_INNOVATION_PROMPT_VERSION = "innovation-map-cn-v6-targeted-reference"
 DEFAULT_FUNCTIONS_DB = Path(__file__).resolve().parents[2] / "data" / "db" / "functions.db"
 MIN_INNOVATION_REFERENCE_SCORE = 0.30
 
 # 子模块列表及其显示名称
-MODULES = ["sched", "mm", "fs", "trap", "driver", "arch", "other"]
+MODULES = [
+    "sched", "mm", "fs", "trap", "syscall", "signal", "ipc", "sync",
+    "time", "net", "driver", "security", "runtime", "arch", "macro", "other",
+]
 
 _MODULE_DISPLAY = {
     "sched":  "进程调度",
     "mm":     "内存管理",
     "fs":     "文件系统",
-    "trap":   "异常/系统调用",
+    "trap":   "异常与中断",
+    "syscall": "系统调用与用户 ABI",
+    "signal": "信号机制",
+    "ipc":    "进程间通信",
+    "sync":   "并发同步",
+    "time":   "时钟与定时器",
+    "net":    "网络协议栈",
     "driver": "设备驱动",
+    "security": "安全与权限",
+    "runtime": "内核运行时与诊断",
     "arch":   "硬件抽象",
+    "macro":  "宏与代码生成",
     "other":  "其他",
 }
+
+
+def _module_for_record(record: dict | None) -> str:
+    """读取并按需补正旧产物中的模块标签。
+
+    历史 functions.db / recall / suspects 只有早期七类标签。报告按新版通用分类器结合
+    路径、函数名和源码重新判断；能形成新结论时采用新标签，无法判断时保留仍然有效的
+    旧标签。因而升级规则后无需为了报告展示强制重建整个历史函数库。
+    """
+    record = record or {}
+    current = str(record.get("module_tag") or record.get("module") or "other")
+    if record.get("_module_tag_refined") and current in MODULES:
+        return current
+    try:
+        inferred = load_classifier().classify(
+            record.get("file_path") or record.get("file") or "",
+            str(record.get("lang") or ""),
+            func_name=record.get("func_name") or record.get("func") or "",
+            raw_code=record.get("raw_code") or record.get("code") or "",
+        ).value
+    except (FileNotFoundError, ValueError, TypeError):
+        inferred = "other"
+    if inferred in MODULES and inferred != "other":
+        return inferred
+    return current if current in MODULES else "other"
+
+
+def _refine_report_modules(suspects: list[dict], recall: dict | None = None) -> int:
+    """原地补正报告输入的旧模块标签，返回发生变化的函数记录数。"""
+    changed = 0
+
+    def refine(record: dict | None) -> None:
+        nonlocal changed
+        if not isinstance(record, dict):
+            return
+        old = str(record.get("module_tag") or "other")
+        new = _module_for_record(record)
+        if new != old:
+            record["module_tag"] = new
+            changed += 1
+        record["_module_tag_refined"] = True
+
+    for suspect in suspects:
+        refine(suspect.get("query_func"))
+        refine(suspect.get("candidate_func"))
+    if recall:
+        for item in recall.get("results", []):
+            refine(item.get("query"))
+            for candidate in item.get("candidates") or []:
+                payload = candidate.get("payload") or candidate
+                refine(payload)
+    return changed
 
 # 展示层 tier 命名映射：内部 tier 值保持 confirmed/review/weak 不变；模型失败状态另行统计，
 # 不通过 tier 名称伪装成“仍存疑”。
@@ -295,7 +360,7 @@ def common_code_stats(suspects: list[dict]) -> list[dict]:
         )
         f = funcs.setdefault(key, {
             "name": q.get("func_name", ""), "file": q.get("file_path", ""),
-            "start": q.get("start_line", 0), "module": q.get("module_tag", "other"), "repos": 0})
+            "start": q.get("start_line", 0), "module": _module_for_record(q), "repos": 0})
         f["repos"] = max(f["repos"], repos)
     out = list(funcs.values())
     out.sort(key=lambda x: -x["repos"])
@@ -324,7 +389,7 @@ def baseline_stats(suspects: list[dict]) -> list[dict]:
         key = _query_key(q)
         item = funcs.setdefault(key, {
             "name": q.get("func_name", ""), "file": q.get("file_path", ""),
-            "start": q.get("start_line", 0), "module": q.get("module_tag", "other"),
+            "start": q.get("start_line", 0), "module": _module_for_record(q),
             "baseline_repo": reference.get("repo_id", ""),
             "baseline_file": reference.get("file_path", ""),
             "baseline_start": reference.get("start_line", 0),
@@ -380,9 +445,7 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None, *,
             continue
         if tier not in ("confirmed", "review", "weak"):
             continue
-        mod = q.get("module_tag", "other")
-        if mod not in MODULES:
-            mod = "other"
+        mod = _module_for_record(q)
         if tier == "confirmed":
             category = "confirmed"
         elif s.get("review_verdict") in ("借鉴", "疑似", "规则保留"):
@@ -415,9 +478,7 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None, *,
             key = _query_key(q)
             if key in matched_keys:
                 continue
-            mod = q.get("module_tag", "other")
-            if mod not in MODULES:
-                mod = "other"
+            mod = _module_for_record(q)
             agg[mod]["original"] += 1
 
     result = {}
@@ -474,7 +535,7 @@ def _original_functions(recall: dict, suspects: list[dict], top_n: int | None = 
                 "file":    q.get("file_path", ""),
                 "start":   q.get("start_line", 0),
                 "end":     q.get("end_line", 0),
-                "module":  q.get("module_tag", "other"),
+                "module":  _module_for_record(q),
                 "max_sim": round(max_sim, 3),
                 "lines":   lines,
             })
@@ -484,11 +545,11 @@ def _original_functions(recall: dict, suspects: list[dict], top_n: int | None = 
 
 # ─── 1b. 相对参考 repo 的创新实现候选 ──────────────────────────────────────
 
-_BRANCH_RE = re.compile(r"\b(?:if|else\s+if|for|while|loop|match|switch|case|catch)\b|&&|\|\|")
 
-
-def _reference_repo_by_module(suspects: list[dict], recall: dict | None) -> dict[str, str]:
-    """按有效相似命中推断每个模块最主要的参考 repo；无命中时再用召回分数兜底。"""
+def _reference_repos_by_module(
+    suspects: list[dict], recall: dict | None, max_repos: int = 3,
+) -> dict[str, list[str]]:
+    """按有效命中生成模块参考仓库序列，并用全局主要仓库补足回退范围。"""
     counts: dict[str, Counter] = defaultdict(Counter)
     global_counts: Counter = Counter()
     for s in suspects:
@@ -499,8 +560,7 @@ def _reference_repo_by_module(suspects: list[dict], recall: dict | None) -> dict
         repo = str(c.get("repo_id") or "")
         if not repo:
             continue
-        mod = q.get("module_tag", "other")
-        mod = mod if mod in MODULES else "other"
+        mod = _module_for_record(q)
         weight = 3 if s.get("tier") == "confirmed" else 1
         counts[mod][repo] += weight
         global_counts[repo] += weight
@@ -509,8 +569,7 @@ def _reference_repo_by_module(suspects: list[dict], recall: dict | None) -> dict
     if recall:
         for item in recall.get("results", []):
             q = item.get("query") or {}
-            mod = q.get("module_tag", "other")
-            mod = mod if mod in MODULES else "other"
+            mod = _module_for_record(q)
             for candidate in (item.get("candidates") or [])[:3]:
                 payload = candidate.get("payload") or candidate
                 repo = str(payload.get("repo_id") or "")
@@ -521,11 +580,23 @@ def _reference_repo_by_module(suspects: list[dict], recall: dict | None) -> dict
                     counts[mod][repo] += score * 0.1
                     global_counts[repo] += score * 0.02
 
-    global_repo = global_counts.most_common(1)[0][0] if global_counts else ""
-    return {
-        mod: (counts[mod].most_common(1)[0][0] if counts[mod] else global_repo)
-        for mod in MODULES
-    }
+    global_repos = [repo for repo, _ in global_counts.most_common(max_repos)]
+    result: dict[str, list[str]] = {}
+    for mod in MODULES:
+        ordered = [repo for repo, _ in counts[mod].most_common(max_repos)]
+        for repo in global_repos:
+            if repo not in ordered:
+                ordered.append(repo)
+            if len(ordered) >= max_repos:
+                break
+        result[mod] = ordered[:max_repos]
+    return result
+
+
+def _reference_repo_by_module(suspects: list[dict], recall: dict | None) -> dict[str, str]:
+    """兼容旧调用：返回每个模块的首选参考仓库。"""
+    ranked = _reference_repos_by_module(suspects, recall, max_repos=3)
+    return {mod: (repos[0] if repos else "") for mod, repos in ranked.items()}
 
 
 def _load_functions_by_id(db_path: str | Path | None, ids: set[int]) -> dict[int, dict]:
@@ -552,17 +623,22 @@ def _load_functions_by_id(db_path: str | Path | None, ids: set[int]) -> dict[int
     return rows
 
 
-def _innovation_name_is_specific(name: str) -> bool:
-    """函数名是否足以表达具体职责，而不是短、单词式工厂/包装器名称。"""
+def _innovation_name_tokens(name: str) -> frozenset[str]:
+    """按 snake/camel case 提取可跨语言比较的函数名词元。"""
     expanded = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name or "")
-    tokens = [
+    return frozenset(
         token.lower() for token in re.split(r"[^A-Za-z0-9]+", expanded)
         if token
-    ]
+    )
+
+
+def _innovation_name_is_specific(name: str) -> bool:
+    """函数名是否足以表达具体职责，而不是短、单词式工厂/包装器名称。"""
+    tokens = _innovation_name_tokens(name)
     return len(tokens) >= 2 or any(len(token) >= 8 for token in tokens)
 
 
-def _innovation_reference_is_comparable(query: dict, reference: dict) -> bool:
+def _innovation_reference_comparability(query: dict, reference: dict) -> dict | None:
     """创新基线必须是同语言、同子系统且职责可对应的具体函数。
 
     向量最近邻只能用于召回，不能单独证明两个函数适合作为创新前后的基线。这里使用
@@ -572,19 +648,17 @@ def _innovation_reference_is_comparable(query: dict, reference: dict) -> bool:
     query_code = str(query.get("raw_code") or "")
     reference_code = str(reference.get("raw_code") or "")
     if not query_code.strip() or not reference_code.strip():
-        return False
+        return None
 
     query_lang = str(query.get("lang") or "").strip().lower()
     reference_lang = str(reference.get("lang") or "").strip().lower()
     if not query_lang or not reference_lang or query_lang != reference_lang:
-        return False
+        return None
 
-    query_module = str(query.get("module_tag") or "other")
-    reference_module = str(reference.get("module_tag") or "other")
-    query_module = query_module if query_module in MODULES else "other"
-    reference_module = reference_module if reference_module in MODULES else "other"
+    query_module = _module_for_record(query)
+    reference_module = _module_for_record(reference)
     if query_module != reference_module:
-        return False
+        return None
 
     identity = compare_function_identity_features(
         function_identity_features(str(query.get("func_name") or ""), query_code),
@@ -592,23 +666,116 @@ def _innovation_reference_is_comparable(query: dict, reference: dict) -> bool:
             str(reference.get("func_name") or ""), reference_code),
     )
     if float(identity["score"]) < MIN_IDENTITY_SCORE:
-        return False
+        return None
 
     if bool(identity["exact_name"]):
         # 对 new/init/run 这类短单词名称，名称相同本身不足以证明职责一致；还要有
         # 可观察行为交集。具体的多词/长名称则允许实现发生较大变化，符合创新比较用途。
-        return bool(
+        accepted = bool(
             _innovation_name_is_specific(str(query.get("func_name") or ""))
             or float(identity["behavior"]) >= 0.25
         )
+        return identity if accepted else None
 
     # 改名比较比同名比较更容易把功能族邻居配在一起，必须同时满足名称语义、签名和
     # 行为调用的最低交集。阈值来自通用身份特征，不依赖仓库、路径或具体函数名。
-    return bool(
+    accepted = bool(
         float(identity["name"]) >= 0.25
         and float(identity["signature"]) >= (1.0 / 3.0)
         and float(identity["behavior"]) >= 0.25
     )
+    return identity if accepted else None
+
+
+def _innovation_reference_is_comparable(query: dict, reference: dict) -> bool:
+    """供门禁与测试使用的布尔接口。"""
+    return _innovation_reference_comparability(query, reference) is not None
+
+
+def _targeted_reference_ids(
+    db_path: str | Path | None,
+    recall_items: list[tuple],
+    reference_repos: dict[str, list[str]],
+    per_repo_limit: int = 80,
+) -> dict[tuple, list[tuple[int, int]]]:
+    """在模块主要参考仓库内定向召回同名或名称身份兼容的函数 ID。
+
+    第一步只读取轻量元数据并按名称词元、函数规模排序，随后由调用方批量补齐源码并执行
+    严格职责门禁。这样既不会依赖全库 Top-K 是否碰巧包含主要仓库，也避免逐目标扫描整库源码。
+    """
+    path = Path(db_path or DEFAULT_FUNCTIONS_DB)
+    if not path.is_file() or not recall_items:
+        return {}
+    result: dict[tuple, list[tuple[int, int]]] = defaultdict(list)
+    metadata_cache: dict[tuple[str, str, str], list[tuple[int, str, int]]] = {}
+    try:
+        with sqlite3.connect(path) as conn:
+            for _, item, _, mod in recall_items:
+                query = item.get("query") or {}
+                query_key = _query_key(query)
+                query_name = str(query.get("func_name") or "")
+                query_tokens = _innovation_name_tokens(query_name)
+                query_lang = str(query.get("lang") or "").strip().lower()
+                query_lines = max(
+                    1,
+                    int(query.get("end_line") or 0)
+                    - int(query.get("start_line") or 0) + 1,
+                )
+                if not query_tokens or not query_lang:
+                    continue
+                for repo_rank, repo in enumerate(reference_repos.get(mod, [])):
+                    pool_key = (repo, mod, query_lang)
+                    rows = metadata_cache.get(pool_key)
+                    if rows is None:
+                        # 旧库只有七类标签；新类别在旧数据中可能位于 other，也可能被原
+                        # 路径优先规则吸收到邻近大类。先扩大轻量元数据池，源码水合后仍由
+                        # 新分类器和严格职责门禁逐函数过滤。
+                        legacy_tags = {
+                            "syscall": ("syscall", "other", "fs", "trap"),
+                            "signal": ("signal", "other", "trap"),
+                            "ipc": ("ipc", "other", "fs"),
+                            "sync": ("sync", "other", "sched"),
+                            "time": ("time", "other", "sched"),
+                            "net": ("net", "other", "driver"),
+                            "security": ("security", "other"),
+                            "runtime": ("runtime", "other"),
+                        }
+                        accepted_tags = legacy_tags.get(mod, (mod,))
+                        tag_placeholders = ",".join("?" for _ in accepted_tags)
+                        rows = [
+                            (int(row[0]), str(row[1] or ""), max(1, int(row[3]) - int(row[2]) + 1))
+                            for row in conn.execute(
+                                "SELECT id, func_name, start_line, end_line FROM functions "
+                                f"WHERE repo_id=? AND module_tag IN ({tag_placeholders}) "
+                                "AND lower(lang)=?",
+                                (repo, *accepted_tags, query_lang),
+                            )
+                        ]
+                        metadata_cache[pool_key] = rows
+                    ranked = []
+                    for func_id, func_name, ref_lines in rows:
+                        ref_tokens = _innovation_name_tokens(func_name)
+                        if not ref_tokens:
+                            continue
+                        exact_name = func_name == query_name
+                        name_overlap = len(query_tokens & ref_tokens) / len(query_tokens | ref_tokens)
+                        if not exact_name and name_overlap < 0.25:
+                            continue
+                        length_ratio = min(query_lines, ref_lines) / max(query_lines, ref_lines)
+                        ranked.append((
+                            0 if exact_name else 1,
+                            -name_overlap,
+                            -length_ratio,
+                            func_id,
+                        ))
+                    ranked.sort()
+                    result[query_key].extend(
+                        (entry[3], repo_rank) for entry in ranked[:per_repo_limit]
+                    )
+    except (OSError, sqlite3.Error) as exc:
+        logger.warning("[innovation] 主要参考仓库定向检索失败：{}", exc)
+        return {}
+    return dict(result)
 
 
 def build_innovation_candidates(
@@ -626,7 +793,7 @@ def build_innovation_candidates(
     """
     if not recall:
         return []
-    refs_by_mod = _reference_repo_by_module(suspects, recall)
+    refs_by_mod = _reference_repos_by_module(suspects, recall, max_repos=3)
     originals = _original_functions(
         recall, suspects, library_context=library_context)
     original_keys = {
@@ -645,23 +812,31 @@ def build_innovation_candidates(
         lines = max(0, int(q.get("end_line") or 0) - int(q.get("start_line") or 0) + 1)
         if lines < 5 or not (q.get("raw_code") or "").strip():
             continue
-        mod = q.get("module_tag", "other")
-        mod = mod if mod in MODULES else "other"
+        mod = _module_for_record(q)
         recall_items.append((lines, item, original_meta[key], mod))
     recall_items.sort(key=lambda x: -x[0])
+    # 先保留更宽的目标池再做定向参考检索；如果仍在检索前就截成 18×每模块 4，前几项
+    # 找不到合格基线时会让最终输入远少于上限。最终进入模型的代码对仍限制为 18×每模块 4。
+    target_pool_limit = max_candidates * 3
+    target_pool_per_module = 12
     balanced: list[tuple] = []
     per_module: Counter = Counter()
     for record in recall_items:
         mod = record[3]
-        if per_module[mod] >= 4:
+        if per_module[mod] >= target_pool_per_module:
             continue
         per_module[mod] += 1
         balanced.append(record)
-        if len(balanced) >= max_candidates:
+        if len(balanced) >= target_pool_limit:
             break
     recall_items = balanced
 
-    all_ref_ids: set[int] = set()
+    targeted_ids = _targeted_reference_ids(
+        functions_db_path, recall_items, refs_by_mod,
+    )
+    all_ref_ids: set[int] = {
+        func_id for entries in targeted_ids.values() for func_id, _ in entries
+    }
     for _, item, _, _ in recall_items:
         for candidate in item.get("candidates") or []:
             payload = candidate.get("payload") or candidate
@@ -671,73 +846,89 @@ def build_innovation_candidates(
                 continue
     hydrated = _load_functions_by_id(functions_db_path, all_ref_ids)
 
-    comparability_cache: dict[tuple[tuple, int], bool] = {}
+    comparability_cache: dict[tuple[tuple, int], dict | None] = {}
 
-    def comparable(query: dict, payload: dict, func_id: int) -> bool:
+    def comparability(query: dict, payload: dict, func_id: int) -> dict | None:
         cache_key = (_query_key(query), func_id)
         if cache_key in comparability_cache:
             return comparability_cache[cache_key]
         row = hydrated.get(func_id) or {}
         reference = {
             "func_name": row.get("func_name") or payload.get("func_name", ""),
+            "file_path": row.get("file_path") or payload.get("file_path", ""),
             "module_tag": row.get("module_tag") or payload.get("module_tag", "other"),
             "lang": row.get("lang") or payload.get("lang", ""),
             "raw_code": row.get("raw_code") or payload.get("raw_code", ""),
         }
-        accepted = _innovation_reference_is_comparable(query, reference)
-        comparability_cache[cache_key] = accepted
-        return accepted
-
-    selected_ref_ids: dict[tuple, set[int]] = {}
-    for _, item, _, mod in recall_items:
-        q = item.get("query") or {}
-        preferred_repo = refs_by_mod.get(mod, "")
-        candidates = []
-        for candidate in item.get("candidates") or []:
-            payload = candidate.get("payload") or candidate
-            try:
-                func_id = int(candidate.get("id") or payload.get("id"))
-            except (TypeError, ValueError):
-                continue
-            if payload.get("is_baseline") or match_library(payload.get("file_path")):
-                continue
-            if not comparable(q, payload, func_id):
-                continue
-            repo = str(payload.get("repo_id") or "")
-            priority = 1 if preferred_repo and repo == preferred_repo else 0
-            score = float(candidate.get("score") or 0.0)
-            if score < MIN_INNOVATION_REFERENCE_SCORE:
-                continue
-            candidates.append((score, priority, func_id, candidate, payload))
-        candidates.sort(key=lambda x: (-x[0], -x[1]))
-        selected_ref_ids[_query_key(q)] = {entry[2] for entry in candidates[:1]}
+        identity = _innovation_reference_comparability(query, reference)
+        comparability_cache[cache_key] = identity
+        return identity
 
     result: list[dict] = []
     reference_seq = 0
     for index, (_, item, meta, mod) in enumerate(recall_items, start=1):
         q = item.get("query") or {}
-        preferred_repo = refs_by_mod.get(mod, "")
+        query_key = _query_key(q)
+        repo_order = refs_by_mod.get(mod, [])
+        repo_rank = {repo: rank for rank, repo in enumerate(repo_order)}
         refs: list[dict] = []
-        candidates = []
+        candidate_by_id: dict[int, dict] = {}
         for candidate in item.get("candidates") or []:
             payload = candidate.get("payload") or candidate
             try:
                 func_id = int(candidate.get("id") or payload.get("id"))
             except (TypeError, ValueError):
                 continue
-            if func_id not in selected_ref_ids.get(_query_key(q), set()):
-                continue
-            if not comparable(q, payload, func_id):
-                continue
-            repo = str(payload.get("repo_id") or "")
-            priority = 1 if preferred_repo and repo == preferred_repo else 0
             score = float(candidate.get("score") or 0.0)
-            candidates.append((score, priority, func_id, candidate, payload))
-        candidates.sort(key=lambda x: (-x[0], -x[1]))
-        for score, _, func_id, _, payload in candidates[:1]:
-            row = hydrated.get(func_id, {})
-            ref_code = row.get("raw_code") or ""
+            if score < MIN_INNOVATION_REFERENCE_SCORE:
+                continue
+            candidate_by_id[func_id] = {
+                "payload": payload,
+                "vector_score": score,
+                "selection_source": "全库召回",
+            }
+        for func_id, _targeted_rank in targeted_ids.get(query_key, []):
+            row = hydrated.get(func_id) or {}
+            existing = candidate_by_id.setdefault(func_id, {
+                "payload": row,
+                "vector_score": None,
+                "selection_source": "主要参考仓库定向检索",
+            })
+            if existing["selection_source"] == "全库召回":
+                existing["selection_source"] = "全库召回＋定向检索"
+
+        ranked_candidates = []
+        for func_id, entry in candidate_by_id.items():
+            payload = entry["payload"]
+            row = hydrated.get(func_id) or {}
+            repo = str(row.get("repo_id") or payload.get("repo_id") or "")
+            file_path = str(row.get("file_path") or payload.get("file_path") or "")
+            if (not repo or is_baseline_repo(repo)
+                    or payload.get("is_baseline")
+                    or match_library(file_path)):
+                continue
+            identity = comparability(q, payload, func_id)
+            if identity is None:
+                continue
+            rank = repo_rank.get(repo, len(repo_order) + 1)
+            vector_score = entry.get("vector_score")
+            ranked_candidates.append((
+                rank,
+                0 if bool(identity.get("exact_name")) else 1,
+                -float(identity.get("score") or 0.0),
+                -float(vector_score or 0.0),
+                func_id,
+                entry,
+                identity,
+            ))
+        ranked_candidates.sort(key=lambda entry: entry[:5])
+        if ranked_candidates:
+            _, _, _, _, func_id, entry, identity = ranked_candidates[0]
+            payload = entry["payload"]
+            row = hydrated.get(func_id) or {}
+            ref_code = str(row.get("raw_code") or payload.get("raw_code") or "")
             reference_seq += 1
+            vector_score = entry.get("vector_score")
             refs.append({
                 "key": f"r{reference_seq:04d}",
                 "repo": row.get("repo_id") or payload.get("repo_id", ""),
@@ -746,7 +937,9 @@ def build_innovation_candidates(
                 "end": int(row.get("end_line") or payload.get("end_line") or 0),
                 "func": row.get("func_name") or payload.get("func_name", ""),
                 "lang": row.get("lang") or payload.get("lang", ""),
-                "score": round(score, 3),
+                "score": round(float(vector_score), 3) if vector_score is not None else None,
+                "identity_score": round(float(identity.get("score") or 0.0), 3),
+                "selection_source": entry.get("selection_source", "全库召回"),
                 "raw_code": ref_code,
                 "analysis_code": ref_code[:8000],
             })
@@ -770,28 +963,77 @@ def build_innovation_candidates(
             "analysis_code": query_code[:12000],
             "references": refs,
         })
-    return result
+    final: list[dict] = []
+    final_per_module: Counter = Counter()
+    for candidate in result:
+        module = candidate.get("module", "other")
+        if final_per_module[module] >= 4:
+            continue
+        final_per_module[module] += 1
+        final.append(candidate)
+        if len(final) >= max_candidates:
+            break
+    return final
 
 
 def _innovation_complexity(targets: list[dict]) -> dict:
-    files = {t["file"] for t in targets if t.get("file")}
-    code_lines = sum(max(0, int(t.get("lines") or 0)) for t in targets)
-    branches = sum(len(_BRANCH_RE.findall(t.get("raw_code") or "")) for t in targets)
-    symbol_count = len({(t.get("file"), t.get("func")) for t in targets})
-    score = round(
-        min(code_lines, 400) * 0.14
-        + min(branches, 40) * 0.9
-        + min(symbol_count, 10) * 3
-        + min(len(files), 6) * 4
-    )
-    score = max(0, min(100, score))
+    """使用 Lizard 的 McCabe 圈复杂度实现计算函数级标准度量。
+
+    不再把行数、正则命中的分支和文件数拼成自定义 0～100 分。Lizard 无法解析的语言或
+    语法明确记为 unavailable，不使用猜测值补齐。
+    """
+    import lizard
+
+    metrics = []
+    unavailable = []
+    for target in targets:
+        code = str(target.get("raw_code") or "")
+        file_path = str(target.get("file") or "snippet.rs")
+        func_name = str(target.get("func") or "")
+        if not code.strip():
+            unavailable.append({"file": file_path, "func": func_name, "reason": "缺少源码"})
+            continue
+        try:
+            analysis = lizard.analyze_file.analyze_source_code(file_path, code)
+            functions = list(analysis.function_list)
+        except Exception as exc:  # Lizard 对未知/不完整语法以不可用状态降级，不能阻断报告
+            unavailable.append({
+                "file": file_path, "func": func_name,
+                "reason": f"解析失败：{type(exc).__name__}",
+            })
+            continue
+        exact = [
+            function for function in functions
+            if function.name == func_name or function.name.endswith("::" + func_name)
+        ]
+        selected = max(exact or functions, key=lambda function: function.nloc, default=None)
+        if selected is None:
+            unavailable.append({"file": file_path, "func": func_name, "reason": "语言或语法未识别"})
+            continue
+        metrics.append({
+            "file": file_path,
+            "func": func_name,
+            "cyclomatic_complexity": int(selected.cyclomatic_complexity),
+            "nloc": int(selected.nloc),
+            "token_count": int(selected.token_count),
+            "parameter_count": len(selected.full_parameters),
+        })
+
+    ccn = [metric["cyclomatic_complexity"] for metric in metrics]
     return {
-        "level": "高" if score >= 60 else ("中" if score >= 30 else "低"),
-        "score": score,
-        "code_lines": code_lines,
-        "file_count": len(files),
-        "symbol_count": symbol_count,
-        "branch_points": branches,
+        "method": "McCabe cyclomatic complexity",
+        "tool": "Lizard 1.23.0",
+        "analyzed_functions": len(metrics),
+        "unavailable_functions": len(unavailable),
+        "max_cyclomatic_complexity": max(ccn, default=None),
+        "mean_cyclomatic_complexity": round(sum(ccn) / len(ccn), 2) if ccn else None,
+        "total_nloc": sum(metric["nloc"] for metric in metrics),
+        "total_token_count": sum(metric["token_count"] for metric in metrics),
+        "max_parameter_count": max(
+            (metric["parameter_count"] for metric in metrics), default=None,
+        ),
+        "functions": metrics,
+        "unavailable": unavailable,
     }
 
 
@@ -1311,9 +1553,7 @@ def collect_file_pairs(
         if tier in ("dismissed", "baseline_derived", "common_code") or _is_excluded_pair(s):
             continue
         q = s.get("query_func", {})
-        mod = q.get("module_tag", "other")
-        if mod not in _MODULE_DISPLAY:
-            mod = "other"
+        mod = _module_for_record(q)
         key = (mod, q.get("file_path", ""), q.get("func_name", ""), q.get("start_line", 0))
         g = groups.get(key)
         if g is None:
@@ -1436,9 +1676,7 @@ def collect_review_pairs(
         if tier in ("review", "weak") and not _review_evidence_basis(s):
             continue
         q = s.get("query_func") or {}
-        mod = q.get("module_tag", "other")
-        if mod not in _MODULE_DISPLAY:
-            mod = "other"
+        mod = _module_for_record(q)
         candidate = _candidate_from_suspect(s)
         group = {
             "module": mod,
@@ -2048,7 +2286,7 @@ _INNOVATION_SYSTEM = """你是 OS 内核代码差异分析助手。你的任务�
   "reference_keys":["r0001"]
 }]}
 
-输出 1–4 个最有实质性的条目；证据不足时可以返回空数组，不能凑数。每个自然语言字段不超过
+输出所有有实质代码差异且证据完整的条目，最多 8 个；证据不足时可以返回空数组，不能凑数。每个自然语言字段不超过
 160 个汉字，所有自然语言字段使用简体中文，必须结束全部 JSON 字符串并闭合对象。
 """
 
@@ -2315,47 +2553,110 @@ def _echarts_tier_distribution(submodule_stats: dict) -> str:
     )
 
 
-def _echarts_overall_donut(copy_pct: float, review_pct: float = 0.0,
-                           review_incomplete_pct: float = 0.0,
-                           original_pct: float | None = None,
-                           excluded_pct: float | None = None) -> str:
-    """整体同源/有效存疑/复核未完成/暂未检出/可解释复用环形图（按全部解析函数加权）。
+_OVERALL_DISTRIBUTION_META = (
+    ("confirmed", "高置信同源代码", "#ef4444"),
+    ("review", "模型复核难例", "#f59e0b"),
+    ("review_incomplete", "复核失败/未完成", "#94a3b8"),
+    ("original", "暂未检出相似", "#22c55e"),
+    ("library", "复用库（第三方库）", "#2563eb"),
+    ("baseline", "基线衍生", "#8b5cf6"),
+    ("baseline_unverified", "基线弱候选（待人工复核）", "#c084fc"),
+    ("upstream", "上游框架 / ABI 受限", "#0ea5e9"),
+    ("false_positive", "机械误报 / 内部复用", "#64748b"),
+    ("common", "公共样板代码", "#a16207"),
+    ("unclassified", "其他未归类", "#cbd5e1"),
+)
 
-    分母为本次解析函数总数：可解释复用（第三方库/上游/基线/样板/误报）也占一个扇区，
-    让评审看到全部函数的归属，而不是只看到“纳入统计”的部分。
+
+def _overall_distribution_rows(counts: dict, total: int) -> list[dict]:
+    """生成整体结果的互斥分类行；函数数和比例使用同一分母。
+
+    ``counts`` 中的类别由 ``compute_submodule_stats`` 与 ``_exclusion_totals`` 共同形成，
+    两者已按目标函数互斥。若旧产物仍有未覆盖函数，用“其他未归类”显式补齐，不能把差额
+    偷偷并入“暂未检出相似”。
     """
-    c = round(copy_pct, 1)
-    rv = round(review_pct, 1)
-    inc = round(review_incomplete_pct, 1)
-    ex = round(excluded_pct if excluded_pct is not None else 0.0, 1)
-    o = round(original_pct if original_pct is not None else max(0.0, 100 - c - rv - inc - ex), 1)
+    denominator = max(0, int(total or 0))
+    normalized = {
+        key: max(0, int(counts.get(key) or 0))
+        for key, _label, _color in _OVERALL_DISTRIBUTION_META
+        if key != "unclassified"
+    }
+    classified = sum(normalized.values())
+    if denominator < classified:
+        denominator = classified
+    normalized["unclassified"] = max(0, denominator - classified)
+    rows = []
+    for key, label, color in _OVERALL_DISTRIBUTION_META:
+        count = normalized.get(key, 0)
+        rows.append({
+            "key": key,
+            "label": label,
+            "color": color,
+            "count": count,
+            "pct": round(count / denominator * 100, 1) if denominator else 0.0,
+        })
+    return rows
+
+
+def _overall_distribution_table(rows: list[dict], total: int) -> str:
+    """整体结果的常显明细表；比例不再只藏在图表悬浮提示里。"""
+    required = {"confirmed", "original", "library", "baseline"}
+    visible = [row for row in rows if row["count"] > 0 or row["key"] in required]
+    body = "".join(
+        '<tr>'
+        '<td class="text-xs p-2 border-b">'
+        f'<span class="dot" style="background:{row["color"]}"></span>'
+        f'{html.escape(row["label"])}</td>'
+        f'<td class="text-xs text-right font-mono p-2 border-b">{row["count"]}</td>'
+        f'<td class="text-xs text-right font-mono p-2 border-b">{row["pct"]:.1f}%</td>'
+        '</tr>'
+        for row in visible
+    )
+    return (
+        '<div class="overflow-x-auto mt-2"><table class="w-full border-collapse">'
+        '<thead><tr class="bg-slate-50 text-slate-600">'
+        '<th class="text-left p-2 border-b">互斥归类</th>'
+        '<th class="text-right p-2 border-b">函数数</th>'
+        '<th class="text-right p-2 border-b">占全部解析函数比例</th>'
+        '</tr></thead><tbody>' + body + '</tbody>'
+        f'<tfoot><tr><td class="text-xs font-semibold p-2 border-t">合计</td>'
+        f'<td class="text-xs text-right font-mono p-2 border-t">{max(0, int(total or 0))}</td>'
+        f'<td class="text-xs text-right font-mono p-2 border-t">'
+        f'{"100.0%" if total else "0.0%"}</td>'
+        '</tr></tfoot></table></div>'
+    )
+
+
+def _echarts_overall_donut(rows: list[dict]) -> str:
+    """整体结果环形图：每种互斥归类独立成扇区，数据值使用函数数。"""
+    nonzero = [row for row in rows if row["count"] > 0]
+    confirmed = next((row for row in rows if row["key"] == "confirmed"), {
+        "pct": 0.0,
+    })
     option = {
         "title": {
-            "text": f"{c}%", "subtext": "高置信同源占全部解析函数",
+            "text": f'{confirmed["pct"]:.1f}%', "subtext": "高置信同源占全部解析函数",
             "left": "center", "top": "38%",
             "textAlign": "center",
             "textStyle": {"fontSize": 26, "fontWeight": "bold", "color": "#ef4444"},
             "subtextStyle": {"fontSize": 11, "color": "#64748b"},
         },
-        "tooltip": {"trigger": "item", "formatter": "{b}: {c}%"},
-        "legend": {"bottom": 0, "data": ["高置信同源代码"]
-                   + (["模型复核难例"] if rv else [])
-                   + (["复核失败/未完成"] if inc else [])
-                   + ["暂未检出相似"]
-                   + (["可解释复用/已排除"] if ex else [])},
+        "tooltip": {"trigger": "item", "formatter": "{b}: {c} 个（{d}%）"},
+        "legend": {"bottom": 0, "data": [row["label"] for row in nonzero]},
         "series": [{
             "name": "占比", "type": "pie", "radius": ["54%", "78%"],
             "center": ["50%", "44%"], "avoidLabelOverlap": False,
             "label": {"show": False}, "labelLine": {"show": False},
-            "data": [{"value": c, "name": "高置信同源代码", "itemStyle": {"color": "#ef4444"}}]
-                    + ([{"value": rv, "name": "模型复核难例", "itemStyle": {"color": "#f59e0b"}}] if rv else [])
-                    + ([{"value": inc, "name": "复核失败/未完成", "itemStyle": {"color": "#94a3b8"}}] if inc else [])
-                    + [{"value": o, "name": "暂未检出相似", "itemStyle": {"color": "#22c55e"}}]
-                    + ([{"value": ex, "name": "可解释复用/已排除", "itemStyle": {"color": "#64748b"}}] if ex else []),
+            "data": [
+                {"value": row["count"], "name": row["label"],
+                 "itemStyle": {"color": row["color"]}}
+                for row in nonzero
+            ],
         }],
     }
+    height = 230 + max(0, len(nonzero) - 4) * 12
     return (
-        '<div class="echarts-chart" style="height:230px">'
+        f'<div class="echarts-chart" style="height:{height}px">'
         f'<script type="application/json">{json.dumps(option, ensure_ascii=False)}</script>'
         '</div>'
     )
@@ -2398,7 +2699,7 @@ def _source_metrics(suspects: list[dict]) -> list[dict]:
         row = {
             "loc": _effective_similar_loc(s),
             "file": q.get("file_path", ""),
-            "module": q.get("module_tag", "other"),
+            "module": _module_for_record(q),
             "sim": _pair_sim(s),
         }
         current = by_repo[repo].get(key)
@@ -2480,12 +2781,20 @@ def _exclusion_totals(suspects: list[dict], recall: dict | None = None, *,
 
     优先级（从具体到泛化）：第三方库 > 上游框架/ABI > 上游基线衍生 > 跨架构误报 > 公共样板。
     """
-    _PRIO = ("library", "upstream", "baseline", "false_positive", "common")
+    _PRIO = ("library", "upstream", "baseline", "baseline_unverified",
+             "false_positive", "common")
 
     def _cat_of(s: dict) -> str | None:
         if s.get("reuse_library"):                    return "library"
         if s.get("upstream_vendored") or s.get("abi_constrained"): return "upstream"
-        if s.get("tier") == "baseline_derived":       return "baseline"
+        if s.get("tier") == "baseline_derived":
+            ev = s.get("evidence") or {}
+            # 只有真正通过基线源码复核（baseline_query_scope / baseline_source_substantive）
+            # 才计为「基线衍生」；其余弱候选仅按档位标记、未复核，单列「基线弱候选（待人工
+            # 复核）」，不能冒充已通过基线源码复核的排除项。
+            if ev.get("baseline_query_scope") or ev.get("baseline_source_substantive"):
+                return "baseline"
+            return "baseline_unverified"
         if s.get("false_positive") or s.get("internal_arch_dup"):
             return "false_positive"
         if _is_common_code(s):                     return "common"
@@ -2570,6 +2879,8 @@ def _reading_guide(query_repo_id: str, borrowed_n: int, review_n: int,
     excl_parts = []
     if excl.get("upstream"):  excl_parts.append(f"上游框架/ABI 受限 {excl['upstream']}")
     if excl.get("baseline"):  excl_parts.append(f"上游基线衍生 {excl['baseline']}")
+    if excl.get("baseline_unverified"):
+        excl_parts.append(f"基线弱候选（待人工复核）{excl['baseline_unverified']}")
     if excl.get("library"):   excl_parts.append(f"第三方库 {excl['library']}")
     if excl.get("common"):    excl_parts.append(f"公共样板 {excl['common']}")
     if excl.get("false_positive"): excl_parts.append(f"跨架构/样板误报 {excl['false_positive']}")
@@ -2640,16 +2951,27 @@ def _summary_card(
             for item in recall.get("results", [])
         })
 
-    # 加权总占比（按全部解析函数计，含可解释复用/已排除，保证 2094 = 各分类之和）
-    all_total = sum(st["total"] for st in submodule_stats.values()) or 1
+    # 整体占比按全部解析函数计，含复用与排除项；各目标函数只进入一个分类。
+    all_total = sum(st["total"] for st in submodule_stats.values())
     excl = _exclusion_totals(suspects, recall, library_context=library_context)
     excl_total = int(excl.get("total_excluded") or 0)
     full_total = recall_function_count if recall_function_count else (all_total + excl_total)
-    overall_copy_pct = round(borrowed_n / full_total * 100, 1)
-    overall_review_pct = round(review_n / full_total * 100, 1)
-    overall_incomplete_pct = round(review_incomplete_n / full_total * 100, 1)
-    overall_original_pct = round(original_n / full_total * 100, 1)
-    overall_excluded_pct = round(excl_total / full_total * 100, 1)
+    distribution_counts = {
+        "confirmed": borrowed_n,
+        "review": review_n,
+        "review_incomplete": review_incomplete_n,
+        "original": original_n,
+        "library": int(excl.get("library") or 0),
+        "baseline": int(excl.get("baseline") or 0),
+        "baseline_unverified": int(excl.get("baseline_unverified") or 0),
+        "upstream": int(excl.get("upstream") or 0),
+        "false_positive": int(excl.get("false_positive") or 0),
+        "common": int(excl.get("common") or 0),
+    }
+    # 防御旧产物中的统计口径不一致：图表分母不能小于互斥分类之和。
+    full_total = max(full_total, sum(distribution_counts.values()))
+    distribution_rows = _overall_distribution_rows(distribution_counts, full_total)
+    overall_copy_pct = round(borrowed_n / full_total * 100, 1) if full_total else 0.0
 
     # KPI 卡片（按函数；库复用 / 公共样板等可解释复用单独成卡，保证全部函数有归属）
     # 高置信同源与模型仍存疑明确分栏，避免把“已经过模型但模型拿不准”误读成尚未审核。
@@ -2662,7 +2984,13 @@ def _summary_card(
         + (_kpi(f"{review_failed_n}", "模型复核失败（函数）", "#64748b") if review_failed_n else "")
         + (_kpi(f"{review_pending_n}", "模型复核未完成（函数）", "#64748b") if review_pending_n else "")
         + _kpi(f"{original_n}", "暂未检出相似（函数）", "#16a34a")
-        + _kpi(f"{excl_total}", "可解释复用/已排除（函数）", "#64748b")
+        + _kpi(f'{excl.get("library", 0)}', "复用库（函数）", "#2563eb")
+        + _kpi(f'{excl.get("baseline", 0)}', "基线衍生·已复核（函数）", "#8b5cf6")
+        + (_kpi(
+            f'{excl.get("upstream", 0) + excl.get("false_positive", 0) + excl.get("common", 0)}',
+            "其他可解释排除（函数）", "#64748b",
+        ) if excl.get("upstream", 0) + excl.get("false_positive", 0) + excl.get("common", 0)
+           else "")
         + _kpi(f"{file_match_count}", "整文件相同（文件）", "#e11d48")
         + _kpi(f"{file_similar_count}", "整体相似文件（个）", "#d97706")
         + '</div>'
@@ -2670,21 +2998,21 @@ def _summary_card(
            f'对账：{full_total}（本次解析函数） = {borrowed_n} 高置信同源 + {review_n} 模型复核难例'
            f' + {review_incomplete_n} 复核失败/未完成 + {original_n} 暂未检出相似'
            f' + {excl_total} 可解释复用/已排除（第三方库 {excl.get("library", 0)}、'
-           f'基线衍生 {excl.get("baseline", 0)}、上游/ABI {excl.get("upstream", 0)}、'
-           f'机械误报 {excl.get("false_positive", 0)}、公共样板 {excl.get("common", 0)}）；'
+           f'基线衍生 {excl.get("baseline", 0)}、基线弱候选 {excl.get("baseline_unverified", 0)}、'
+           f'上游/ABI {excl.get("upstream", 0)}、机械误报 {excl.get("false_positive", 0)}、'
+           f'公共样板 {excl.get("common", 0)}）；'
            '每类清单见「合法复用与许可证合规」一节。</p>')
     )
 
     # 头部：环形图 + Top 历史匹配仓库，左右并排；不把相似关系表述为因果来源。
-    donut = _echarts_overall_donut(
-        overall_copy_pct, overall_review_pct, overall_incomplete_pct,
-        overall_original_pct, overall_excluded_pct)
+    donut = _echarts_overall_donut(distribution_rows)
+    distribution_table = _overall_distribution_table(distribution_rows, full_total)
     source_metrics = _source_metrics(suspects)
     top_src = _echarts_top_sources(source_metrics)
     head_charts = (
         '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 items-start">'
-        '<div><div class="chart-title">整体结果分布（按全部解析函数）</div>'
-        + donut + '</div>'
+        '<div><div class="chart-title">整体结果分布（按全部解析函数，含复用库与基线衍生）</div>'
+        + donut + distribution_table + '</div>'
         + ('<div><div class="chart-title">高置信历史匹配（按唯一目标函数，Top 8；不代表直接来源）</div>'
            + top_src + '</div>' if top_src else '<div></div>')
         + '</div>'
@@ -2713,10 +3041,12 @@ def _summary_card(
         '<div class="summary-heading"><div><span class="summary-eyebrow">REPORT OVERVIEW</span>'
         '<h2>总体结果</h2></div><span class="summary-repo">'
         f'{_ref_repo_anchor(linker, query_repo_id)}</span></div>'
-        '<p class="text-xs text-slate-500 mt-1 mb-0">下列数字为<b>扣除上游框架/库/规范受限代码后的待评估口径</b>；'
+        '<p class="text-xs text-slate-500 mt-1 mb-0">高置信同源与模型复核数字采用'
+        '<b>扣除上游框架/库/规范受限代码后的待评估口径</b>；'
         '「高置信同源代码」由确定性代码证据形成；模型结论只进入「复核难例」，不自动升为高置信；'
         '复核失败/未完成是流程状态，不是风险结论。'
-        '环形图与对账行按全部解析函数计；各模块分布图的分母为纳入统计函数，'
+        '整体分布图、分类明细表与对账行按全部解析函数计，并分别列出复用库、基线衍生等归属；'
+        '各模块分布图的分母为待评估函数，'
         '任何比例都不是赛事扣分比例。'
         '<b>需结合代码、来源披露和提交过程人工判断</b>。</p>'
         f'{_LEGEND_HTML}{kpis}{head_charts}{tier_chart}{pct_chart}'
@@ -3056,25 +3386,48 @@ def _chapter_heading(index: str, title: str, description: str) -> str:
 _FEATURE_LABELS = {
     "ext4": "Ext4 文件系统", "fat32": "FAT32 文件系统", "vfs": "虚拟文件系统",
     "inode": "Inode 与目录项", "page": "页与页缓存", "frame": "物理页帧",
-    "signal": "信号机制", "syscall": "系统调用", "trap": "异常与中断",
-    "task": "任务管理", "sched": "调度器", "timer": "时钟与定时器",
+    "path": "路径解析", "statfs": "文件系统统计", "signal": "信号机制",
+    "ipc": "进程间通信", "pipe": "管道通信", "futex": "Futex 同步",
+    "lock": "锁与同步", "syscall": "系统调用", "errno": "错误码与 ABI",
+    "error": "错误处理", "trap": "异常与中断", "task": "任务管理",
+    "process": "进程管理", "sched": "调度器", "timer": "时钟与定时器",
+    "clock": "时钟与计时", "time": "时钟与计时",
     "virtio": "VirtIO 驱动", "uart": "串口驱动", "block": "块设备",
-    "net": "网络栈", "fs": "文件系统", "mm": "内存管理",
+    "socket": "套接字", "tcp": "TCP 协议", "udp": "UDP 协议",
+    "net": "网络栈", "backtrace": "堆栈回溯", "debug": "调试与诊断",
+    "security": "安全与权限", "fs": "文件系统", "mm": "内存管理",
 }
-_MODULE_PRIORITY = {"sched": 1.0, "mm": 1.0, "fs": 1.0, "trap": .95,
-                    "driver": .8, "arch": .75, "other": .55}
+_MODULE_PRIORITY = {
+    "sched": 1.0, "mm": 1.0, "fs": 1.0, "trap": .95, "syscall": .95,
+    "signal": .9, "ipc": .9, "sync": .9, "time": .8, "net": .9,
+    "driver": .8, "security": .9, "runtime": .65, "arch": .75,
+    "macro": .5, "other": .45,
+}
 
 
 def _feature_label(group: dict) -> tuple[str, str]:
-    """从路径与函数名提取稳定的功能簇键；无法细分时回退子系统。"""
+    """从路径与函数名提取稳定的功能簇键。
+
+    无法识别具体功能时按函数位置生成独立兜底键，绝不能再把同一来源仓库下所有
+    ``other``（或同一宽泛模块）函数合并成一个语义簇。
+    """
     path = str(group.get("query_file") or "").replace("\\", "/").lower()
     func = str(group.get("query_func") or "").lower()
     words = [w for w in re.split(r"[^a-z0-9]+", path + "/" + func) if w]
     for token in _FEATURE_LABELS:
-        if token in words or token in path:
+        if token in words:
             return token, _FEATURE_LABELS[token]
     mod = group.get("module", "other")
-    return mod, _MODULE_DISPLAY.get(mod, mod)
+    location = "|".join((
+        path,
+        str(group.get("query_start") or 0),
+        func,
+    ))
+    key = f"{mod}:function:" + hashlib.sha1(
+        location.encode("utf-8", errors="replace")
+    ).hexdigest()[:12]
+    display = _MODULE_DISPLAY.get(mod, mod)
+    return key, f"{display} · {func or '未命名函数'}"
 
 
 def build_similarity_clusters(file_pairs: list[dict]) -> list[dict]:
@@ -3407,7 +3760,8 @@ def _innovation_runtime_evidence(point: dict, query_repo_path: Path | None) -> d
 
 
 def _innovation_section(points: list[dict], linker, query_repo_id: str,
-                        query_repo_path: Path | None = None) -> tuple[str, str]:
+                        query_repo_path: Path | None = None,
+                        comparison_candidate_count: int = 0) -> tuple[str, str]:
     """候选创新 → 参考基线 → 目标实现 → 调用/验证/反证的独立证据地图。"""
     if not points:
         body = (
@@ -3417,7 +3771,9 @@ def _innovation_section(points: list[dict], linker, query_repo_id: str,
         )
         section = _collapsible_html(
             "sec-innovation", "相对参考实现的候选创新", body, tone="innovation",
-            subtitle="代码差异候选，不把未命中或项目自述直接当作创新结论",
+            subtitle=(f"已形成 {comparison_candidate_count} 组可比较代码基线，未归纳出创新点"
+                      if comparison_candidate_count else
+                      "代码差异候选，不把未命中或项目自述直接当作创新结论"),
         )
         return _toc_link("sec-innovation", "相对参考实现的候选创新", "0", "zero"), section
 
@@ -3426,12 +3782,10 @@ def _innovation_section(points: list[dict], linker, query_repo_id: str,
     for index, point in enumerate(points, start=1):
         runtime = _innovation_runtime_evidence(point, query_repo_path)
         complexity = point.get("complexity") or {}
-        level = str(complexity.get("level") or "未知")
-        level_cls = {
-            "高": "bg-red-50 text-red-700 border-red-200",
-            "中": "bg-amber-50 text-amber-700 border-amber-200",
-            "低": "bg-green-50 text-green-700 border-green-200",
-        }.get(level, "bg-slate-50 text-slate-600 border-slate-200")
+        function_metrics = {
+            (str(metric.get("file") or ""), str(metric.get("func") or "")): metric
+            for metric in complexity.get("functions") or []
+        }
         confidence = confidence_labels.get(str(point.get("confidence") or "").lower(), "中")
 
         target_items = []
@@ -3440,9 +3794,17 @@ def _innovation_section(points: list[dict], linker, query_repo_id: str,
                 linker, query_repo_id, target.get("file", ""),
                 int(target.get("start") or 0), int(target.get("end") or 0),
             )
+            metric = function_metrics.get((
+                str(target.get("file") or ""), str(target.get("func") or ""),
+            ))
+            metric_suffix = (
+                f' · McCabe CCN {int(metric["cyclomatic_complexity"])}'
+                f' · NLOC {int(metric["nloc"])}'
+                if metric else ' · 复杂度工具未解析'
+            )
             target_items.append(
                 f'<li>{anchor} · <code>{html.escape(str(target.get("func") or ""))}</code>'
-                f' · {int(target.get("lines") or 0)} 行</li>'
+                f' · {int(target.get("lines") or 0)} 行{metric_suffix}</li>'
             )
 
         reference_items = []
@@ -3451,9 +3813,16 @@ def _innovation_section(points: list[dict], linker, query_repo_id: str,
                 linker, reference.get("repo", ""), reference.get("file", ""),
                 int(reference.get("start") or 0), int(reference.get("end") or 0),
             )
+            vector_score = reference.get("score")
+            vector_text = (
+                f' · 向量相似度 {float(vector_score):.3f}'
+                if vector_score is not None else ""
+            )
             reference_items.append(
                 f'<li>{anchor} · <code>{html.escape(str(reference.get("func") or ""))}</code>'
-                f' · 最近邻相似度 {float(reference.get("score") or 0.0):.3f}</li>'
+                f' · 职责一致度 {float(reference.get("identity_score") or 0.0):.3f}'
+                + vector_text
+                + f' · {html.escape(str(reference.get("selection_source") or "全库召回"))}</li>'
             )
 
         target_html = "".join(target_items) or '<li class="text-slate-400">无有效目标代码证据</li>'
@@ -3473,12 +3842,18 @@ def _innovation_section(points: list[dict], linker, query_repo_id: str,
         impact = html.escape(str(point.get("impact_scope") or auto_scope))
         counter = html.escape(str(point.get("counterevidence") or
                                   "静态代码差异与未命中不能单独证明能力、性能或原创性。"))
-        metric_text = (
-            f'{int(complexity.get("file_count") or 0)} 个文件 · '
-            f'{int(complexity.get("symbol_count") or 0)} 个函数 · '
-            f'{int(complexity.get("code_lines") or 0)} 行实现 · '
-            f'{int(complexity.get("branch_points") or 0)} 个控制流分支'
-        )
+        analyzed = int(complexity.get("analyzed_functions") or 0)
+        if analyzed:
+            metric_text = (
+                f'{analyzed} 个函数已解析 · '
+                f'McCabe CCN 最大 {int(complexity.get("max_cyclomatic_complexity") or 0)}、'
+                f'平均 {float(complexity.get("mean_cyclomatic_complexity") or 0.0):.2f} · '
+                f'NLOC 合计 {int(complexity.get("total_nloc") or 0)} · '
+                f'token 合计 {int(complexity.get("total_token_count") or 0)} · '
+                f'最大参数数 {int(complexity.get("max_parameter_count") or 0)}'
+            )
+        else:
+            metric_text = "当前目标语言或语法未被复杂度工具解析；未使用估算值替代"
         cards.append(f"""
 <article class="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/30 overflow-hidden">
   <div class="px-4 py-3 border-b border-emerald-100 bg-emerald-50 flex flex-wrap items-center gap-2">
@@ -3501,8 +3876,9 @@ def _innovation_section(points: list[dict], linker, query_repo_id: str,
     </div>
     <div class="mt-3 p-3 rounded bg-white border border-slate-200">
       <div class="flex flex-wrap items-center gap-2 mb-2 text-xs">
-        <b>实现复杂度（静态估算）</b>
-        <span class="px-2 py-0.5 rounded border {level_cls}">{html.escape(level)}</span>
+        <b>函数级代码度量</b>
+        <a class="file-jump" href="https://doi.org/10.1109/TSE.1976.233837" target="_blank" rel="noopener noreferrer">McCabe 圈复杂度</a>
+        · <a class="file-jump" href="https://github.com/terryyin/lizard" target="_blank" rel="noopener noreferrer">Lizard 1.23.0</a>
         <span class="text-slate-500">{html.escape(metric_text)}</span>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
@@ -3519,11 +3895,15 @@ def _innovation_section(points: list[dict], linker, query_repo_id: str,
         '<div class="mb-4 p-3 rounded bg-blue-50 border border-blue-200 text-xs text-blue-800">'
         '本节从“暂未形成有效相似命中”的函数出发，再与各模块主要参考 repo 的最近实现做代码级比较。'
         '<b>项目 README / 设计文档不作为独立创新证据</b>；“未命中”本身也不等于创新。'
-        '所有条目均为待人工确认的候选；复杂度只反映代码阅读与实现规模，不是质量评分或算法时间复杂度。</div>'
+        f'共形成 <b>{comparison_candidate_count}</b> 组通过职责门禁的目标—参考代码基线，模型归纳为 '
+        f'<b>{len(points)}</b> 个候选创新；两者数量不同不代表证据丢失。'
+        '复杂度使用 Lizard 实现的 McCabe 圈复杂度，并同时报告 NLOC、token 和参数数；'
+        '不再合成自定义高/中/低分，也不是算法时间复杂度。</div>'
     )
     section = _collapsible_html(
         "sec-innovation", "相对参考实现的候选创新", intro + "".join(cards),
-        tone="innovation", subtitle="基线、实现、调用入口和反证一一映射",
+        tone="innovation",
+        subtitle=f"{comparison_candidate_count} 组可比较代码基线 → {len(points)} 个候选创新",
     )
     return _toc_link("sec-innovation", "相对参考实现的候选创新",
                      str(len(points)), "original"), section
@@ -5209,6 +5589,8 @@ def _compliance_section(query_repo_path: Path | None, linker, query_repo_id: str
         ("机械误报", len(fp_funcs), "跨架构/模板汇编等已降级"),
         ("共同上游与 ABI", len(ub_funcs), "核验上游归属及修改义务"),
         ("基线衍生", len(base_funcs), "按比赛允许基线单列"),
+        ("基线弱候选（待人工复核）", int(exclusion.get("baseline_unverified") or 0),
+         "直接证据不足，需人工复核"),
     ]
     rows = "".join(
         f'<tr><td>{html.escape(name)}</td><td>{count}</td><td>{html.escape(action)}</td></tr>'
@@ -5248,6 +5630,7 @@ def generate_comparison_html(
     analysis_html: str,
     original_funcs: list[dict],
     innovation_points: list[dict] | None = None,
+    innovation_candidates: list[dict] | None = None,
     review_pairs: list[dict] | None = None,
     cleared_review_pairs: list[dict] | None = None,
     ai_detect_data: dict | None = None,
@@ -5298,7 +5681,8 @@ def generate_comparison_html(
         review_pairs or [], linker, query_repo_id, cleared_review_pairs or [])
     toc_files, sec_files = _file_level_section(file_matches, file_similar, linker, query_repo_id)
     toc_innovation, sec_innovation = _innovation_section(
-        innovation_points or [], linker, query_repo_id, query_repo_path)
+        innovation_points or [], linker, query_repo_id, query_repo_path,
+        comparison_candidate_count=len(innovation_candidates or []))
     toc_compliance, sec_compliance = _compliance_section(
         query_repo_path, linker, query_repo_id, suspects, lib_stats or [], cc_funcs or [],
         fp_funcs or [], ub_funcs or [], base_funcs or [], recall,
@@ -5428,6 +5812,12 @@ def run_semantic_compare(
             (suspect.get("candidate_func") or {}).get("file_path", ""))
     ]
     data["suspects"] = suspects
+    refined_suspect_modules = _refine_report_modules(suspects)
+    if refined_suspect_modules:
+        logger.info(
+            "[compare] 子系统分类补正 {} 条旧标签函数记录",
+            refined_suspect_modules,
+        )
     query_repo_id = data.get("query_repo_id") or suspects_path.stem.split("_suspects")[0]
     library_context = discover_library_context(query_repo_path)
     if library_context.integration_roots:
@@ -5451,6 +5841,12 @@ def run_semantic_compare(
     recall: dict | None = None
     if recall_path and Path(recall_path).exists():
         recall = json.loads(Path(recall_path).read_text(encoding="utf-8"))
+        refined_recall_modules = _refine_report_modules([], recall)
+        if refined_recall_modules:
+            logger.info(
+                "[compare] 召回产物子系统分类补正 {} 条旧标签函数记录",
+                refined_recall_modules,
+            )
     if require_complete_recall:
         if recall is None:
             raise RuntimeError("生成查重报告必须提供 recall 产物并通过完整性契约校验")
@@ -5679,6 +6075,7 @@ def run_semantic_compare(
         analysis_html   = analysis_html,
         original_funcs  = original_funcs,
         innovation_points = innovation_points,
+        innovation_candidates = innovation_candidates,
         review_pairs    = final_review_pairs,
         cleared_review_pairs = cleared_review_pairs,
         ai_detect_data  = ai_detect_data,
@@ -5714,6 +6111,7 @@ def run_semantic_compare(
         "submodule_stats":  submodule_stats,
         "original_funcs":   len(original_funcs),
         "innovation_points": len(innovation_points),
+        "innovation_comparison_candidates": len(innovation_candidates),
         "file_matches":     len(file_matches),
         "file_similar":     len(file_similar),
         "library_reuse_pairs": reuse_n,

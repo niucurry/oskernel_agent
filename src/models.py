@@ -32,17 +32,25 @@ def is_baseline_repo(repo_id: str) -> bool:
 class ModuleTag(str, Enum):
     """内核子系统标签，用于按模块分桶比对与报告分类。
 
-    在 CLAUDE.md 最初的 6 类（sched/mm/fs/trap/driver/other）之外，normalize 阶段额外引入：
-    - ARCH：架构/启动/汇编相关代码；
-    - MACRO：Rust 宏定义（macro_definition）单独成类。
+    除调度、内存、文件系统、异常、驱动与架构等核心大类外，还细分系统调用、信号、
+    IPC、同步、时间、网络、安全及运行时支持，避免不同职责都落入 other。Rust 宏定义
+    （macro_definition）单独成类。
     """
 
     SCHED = "sched"
     MM = "mm"
     FS = "fs"
     TRAP = "trap"
+    SYSCALL = "syscall"
+    SIGNAL = "signal"
+    IPC = "ipc"
+    SYNC = "sync"
+    TIME = "time"
+    NET = "net"
     DRIVER = "driver"
     ARCH = "arch"
+    SECURITY = "security"
+    RUNTIME = "runtime"
     MACRO = "macro"
     OTHER = "other"
 
