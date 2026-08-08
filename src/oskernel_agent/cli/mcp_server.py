@@ -550,21 +550,6 @@ def _make_tool_defs() -> list[types.Tool]:
                 "required": ["content"],
             },
         ),
-        types.Tool(
-            name="load_skill",
-            description=(
-                "按需取回某项技能的完整指引（系统提示词「可按需加载的技能」目录里列出的 name）。"
-                "仅在命中该技能的触发条件时调用，例如 reference_os 非空时取 reference-os-comparison。"
-                "不消耗工具调用预算。"
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "技能名（kebab-case），如 reference-os-comparison"},
-                },
-                "required": ["name"],
-            },
-        ),
     ]
 
 
@@ -591,11 +576,6 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
     if name in ("write_report", "write_to_file"):
         return _handle_write_report(arguments)
-
-    if name == "load_skill":
-        from ..prompts import skills
-        body = skills.get_skill_body(arguments.get("name", "").strip())
-        return [types.TextContent(type="text", text=body)]
 
     _step_count += 1
 

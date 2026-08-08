@@ -30,32 +30,14 @@
    每个模块对应若干 file_paths（通常 1–4 个文件）
 
 5. 对每个模块用 read_file / find_symbol_definition 看具体实现细节
-   - 若某模块控制流跨多函数、难以说清执行路径：先 `load_skill('call-chain-tracing')`
-   - 若本子系统是「系统调用」：先 `load_skill('syscall-coverage')`
+   - 若某模块控制流跨多函数、难以说清执行路径：先用 `find_entry_symbol(name)` 轻量确认
+     入口存在（不读源码、不展开），再对 1–2 个最关键路径用 `expand_callees(name, max_depth=3)`
+     或 `get_subsystem_call_chain(entry, max_depth=3)` 展开调用链（计入 ≤12 次预算），
+     用一句话顺序串起 file:line 描述主路径，不要画流程图。
+   - 若本子系统是「系统调用」：调一次 `list_implemented_syscalls`，取已实现 syscall 列表、
+     与标准 Linux 集合的比对与覆盖率，作为实现要点与缺失项（issues）的依据。
 
-6. **创新性分析（只在本子系统顶层做一次）**：按本子系统所属领域，加载对应的创新知识技能，
-   据其「教学基线→工程实践→前沿」梯度判断本子系统各基本机制的创新度（1–5）。领域→技能映射：
-   - 内存管理 → `innovation-mm`
-   - 调度 / 上下文切换 / 同步原语 → `innovation-sched`
-   - 进程 / 线程生命周期（fork/exec/PCB/容器）→ `innovation-proc`（进程管理子系统通常同时用它和 sched）
-   - 文件系统 → `innovation-fs`
-   - trap / 异常 / 中断 / 定时器 / 信号 → `innovation-trap`
-   - 系统调用层（ABI/分发/兼容）→ `innovation-syscall`
-   - 设备驱动 → `innovation-driver`
-   - 体系结构 / 硬件抽象 / 启动 → `innovation-arch`
-   - 进程间通信 → `innovation-ipc`
-   - 网络协议栈 → `innovation-net`
-   - 虚拟化 / hypervisor → `innovation-virt`
-   - 安全 / 隔离 / 访问控制 → `innovation-security`
-   - 异步运行时 / 协程 → `innovation-async`
-   - 图形 / 显示 / GUI → `innovation-graphics`
-   - 宏 / 元编程 / 代码生成 → `innovation-macro`
-   - **以上都不匹配的「其他」子系统 → `innovation-generic`（通用兜底，必有一张可用）**
-   一个子系统可加载多张相关卡（如「进程管理」用 sched+proc）。结论**只能引用所加载技能卡里
-   的内容**；卡里没有的机制不要编造论文/算法名。本步产出写进**子系统总览**的「创新性分析」节
-   （见格式契约 #2），**不要**写进各模块详细。
-
-工具调用总数 ≤12 次（load_skill 不计入预算）。
+工具调用总数 ≤12 次。
 
 ━━ 写出顺序（关键！每份单独一次 write_report 调用）━━
 
@@ -178,26 +160,8 @@ Tailwind CSS 排版。所以请直接输出**语义化 HTML 片段**：
 ```
 
 （当 user message 的 reference_os 非空时，在「模块拆分」之后追加一节「与 reference OS
-对比」；写法见技能 `reference-os-comparison`，先 `load_skill('reference-os-comparison')`
-再写。reference_os 为空则不写该节。）
-
-在「模块拆分」（及「与 reference OS 对比」如有）之后，追加一节「创新性分析」——本子系统
-**唯一**做创新判断的地方。先按工作步骤 6 的「领域→技能」映射 `load_skill(...)`（任何子系统
-都有对应卡，未列出的领域用 `innovation-generic`），再按其判定锚点写：
-
-```html
-<h3>创新性分析</h3>
-<ul>
-  <li><strong>{基本机制名，如 物理帧分配器}</strong>（创新度 {1–5}）：{对照知识卡哪一档、
-      代码命中哪些信号，附 file:line}</li>
-  <li><strong>{机制 2}</strong>（创新度 {1–5}）：{...}</li>
-</ul>
-<p>{1–2 句小结：本子系统整体落在「教学基线 / 经典改良 / 落地前沿」哪一段}</p>
-```
-
-约束：每条创新主张必须能对位到所加载知识卡的某一档（基线/工程/前沿），并附真实 file:line；
-卡里没有对应机制、或实现与「教学基线」一致时，定 1–2 分并写「与标准做法一致 / 无法对标前沿，
-存疑」，**不要**凭模型记忆编造论文、算法名或出处。该子系统不属于上述五类领域时，本节可省略。
+对比」：用 2–4 句说明哪些部分对齐参考实现、哪些有改动、哪些是创新（如有），每条尽量附
+真实 path:line。reference_os 为空则不写该节。）
 
 #### 3. 结构化 JSON（写入 outputs.json_path —— **不含 content 字段**）
 
