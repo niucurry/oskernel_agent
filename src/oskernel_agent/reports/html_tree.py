@@ -12,6 +12,9 @@ import json
 import re
 from pathlib import Path
 
+from finals.digests import description_digest_from_tree, description_priority_findings
+from finals.readability import concise_module_summary, explain_terms_in_html
+
 from ..report_quality import assert_report_complete
 from .html import (
     _BROKEN_PREFIX,
@@ -119,6 +122,16 @@ a.file-jump:hover { background: rgba(9, 105, 218, 0.08); }
 .severity-low    { color: rgb(234 179 8); }
 .severity-medium { color: rgb(249 115 22); }
 .severity-high   { color: rgb(220 38 38); }
+.severity-critical { color: rgb(153 27 27); font-weight: 700; }
+.finding-card { border-left: 3px solid rgb(249 115 22); padding: .65rem .8rem; background: rgb(255 247 237); }
+.finding-card.high, .finding-card.critical { border-left-color: rgb(220 38 38); background: rgb(254 242 242); }
+.detail-toggle > summary { cursor: pointer; color: rgb(71 85 105); font-size: .82rem; font-weight: 600; }
+.detail-toggle[open] > summary { margin-bottom: .75rem; }
+@media (prefers-color-scheme: dark) {
+  .finding-card { background: rgb(120 53 15 / .16); }
+  .finding-card.high, .finding-card.critical { background: rgb(127 29 29 / .16); }
+  .detail-toggle > summary { color: rgb(148 163 184); }
+}
 /* 正文标题压制：agent 写的 h1-h6 一律小于所在节点标题，避免下级标题比上级大。
    .node-content hN 特异性 (0,1,1) 高于 Tailwind prose 的 (0,1,0)，无论加载顺序都生效。 */
 .node-content h1, .node-content h2 { font-size: 0.95rem; font-weight: 700; margin: 0.7em 0 0.35em; line-height: 1.35; }
@@ -287,6 +300,65 @@ def _render_similarity(sim: dict, resolver) -> str:
 """
 
 
+def _render_priority_summary(tree_json: dict, resolver) -> str:
+    """决赛要求的首屏：先给结论和问题，细节再下钻。"""
+    digest = description_digest_from_tree(tree_json)
+    cards: list[str] = []
+    severity_text = {
+        "critical": "严重", "high": "高", "medium": "中", "low": "低", "info": "提示",
+    }
+    for item in description_priority_findings(digest, 8):
+        refs: list[str] = []
+        for evidence in item.evidence[:2]:
+            if not evidence.path:
+                continue
+            location = evidence.path + (f":{evidence.line}" if evidence.line else "")
+            refs.append(_resolve_path_anchor(location, resolver))
+        evidence_html = (
+            '<div class="text-xs text-slate-500 mt-1">证据：' + "、".join(refs) + '</div>'
+            if refs else ""
+        )
+        confidence = round(item.confidence * 100)
+        cards.append(
+            f'<li class="finding-card {item.severity} rounded">'
+            f'<div class="flex flex-wrap items-baseline gap-2"><strong>{_esc(item.title)}</strong>'
+            f'<span class="text-xs severity-{_esc(item.severity)}">风险：{_esc(severity_text[item.severity])}</span>'
+            f'<span class="text-xs text-slate-500">置信度 {confidence}%</span></div>'
+            f'<p class="text-sm mt-1">{_esc(item.detail)}</p>{evidence_html}</li>'
+        )
+    if not cards:
+        cards.append(
+            '<li class="finding-card rounded"><strong>未形成高置信问题</strong>'
+            '<p class="text-sm mt-1">当前源码分析没有形成可直接报告的高风险问题；'
+            '未提供的编译或运行日志不在此结论范围内。</p></li>'
+        )
+
+    metrics = digest.metrics
+    status_text = {
+        "passed": "通过", "failed": "失败", "unknown": "未能确认",
+        "not_provided": "未提供", "missing": "文件缺失", "skipped": "不适用",
+    }
+    build_status = status_text.get(str(metrics.get("build_log_status")), "未能确认")
+    run_status = status_text.get(str(metrics.get("run_log_status")), "未能确认")
+    coverage = (
+        f'编译日志：{build_status}；运行日志：{run_status}；'
+        f'硬编码扫描命中 {_esc(metrics.get("hardcode_signals", 0))} 条，'
+        f'AI 确认 {_esc(metrics.get("hardcode_confirmed", 0))} 条、'
+        f'疑似 {_esc(metrics.get("hardcode_suspected", 0))} 条、'
+        f'排除 {_esc(metrics.get("hardcode_cleared", 0))} 条。'
+    )
+    return f"""
+<section id="verdict" data-section-id="verdict" class="mb-6 p-6 rounded-lg border border-slate-300 dark:border-slate-700
+                             bg-white dark:bg-slate-800 shadow-sm">
+  <div class="text-xs font-semibold tracking-wider text-blue-700 dark:text-blue-300 mb-2">先看结论</div>
+  <h2 class="text-xl font-semibold mb-2">结论与问题</h2>
+  <p class="text-base leading-relaxed mb-4">{_esc(digest.conclusion)}</p>
+  <ol class="space-y-3">{"".join(cards)}</ol>
+  <p class="text-xs text-slate-500 mt-4">证据覆盖：{coverage}</p>
+</section>
+"""
+
+
 def _render_verdict(verdict: dict, resolver) -> str:
     score_total = int(verdict.get("score_total") or 0)
     cls = "score-green" if score_total >= 85 else \
@@ -330,11 +402,13 @@ def _render_verdict(verdict: dict, resolver) -> str:
         )
 
     return f"""
-<section id="verdict" data-section-id="verdict" class="mb-8 p-6 rounded-lg border border-slate-300 dark:border-slate-700
+<section id="evaluation" data-section-id="evaluation" class="mb-8 p-5 rounded-lg border border-slate-300 dark:border-slate-700
                              bg-white dark:bg-slate-800 shadow-sm">
-  <div class="flex items-baseline gap-3 mb-3">
+  <details class="detail-toggle">
+  <summary>展开评分与详细综合分析（综合分 {score_total}）</summary>
+  <div class="flex items-baseline gap-3 mb-3 mt-3">
     <span class="text-3xl font-bold {cls}">{score_total}</span>
-    <span class="text-lg italic text-slate-700 dark:text-slate-300">{one_line}</span>
+    <span class="text-base text-slate-700 dark:text-slate-300">{one_line}</span>
   </div>
   <table class="w-full text-sm mb-4">
     <thead><tr class="text-xs uppercase tracking-wider text-slate-500 border-b">
@@ -360,6 +434,7 @@ def _render_verdict(verdict: dict, resolver) -> str:
       <ul class="text-sm list-disc pl-5">{is_items or '<li class="text-slate-500">(无)</li>'}</ul>
     </div>
   </div>
+  </details>
 </section>
 """
 
@@ -373,6 +448,7 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
     assert_report_complete("", structured=tree_json)
     meta = tree_json.get("meta", {})
     verdict = tree_json.get("verdict", {}) or {}
+    priority_html = _render_priority_summary(tree_json, resolver)
     verdict_html = _render_verdict(verdict, resolver)
     similarity_html = _render_similarity(verdict.get("similarity") or {}, resolver)
 
@@ -404,16 +480,12 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
         tree_root, depth=0, resolver=resolver, anchor_ids=anchor_ids,
     )
 
-    toc_html = _render_toc(verdict_html, similarity_html, toc_subs)
+    toc_html = _render_toc(priority_html, similarity_html, toc_subs)
 
     title_safe = _esc(title)
-    language_warning = ""
     if meta.get("language_incomplete"):
-        language_warning = (
-            '<div role="alert" class="mb-5 rounded-lg border border-amber-300 '
-            'bg-amber-50 px-4 py-3 text-sm text-amber-900">'
-            '<b>中文化未完成：</b>部分内容未能完成中文化，可能仍含英文正文或标题。'
-            '请配置可用的 LLM API 后重跑，并在人工评审前复核。</div>'
+        raise RuntimeError(
+            "AI 生成内容仍有未完成中文化的正文或标题；拒绝生成需要人工修改的交付报告"
         )
     doc = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -433,12 +505,13 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
       <div class="text-sm text-slate-500">
         评估时间：{_esc(meta.get('ts',''))} · 源文件：{_esc(meta.get('indexed_files',0))} 个
       </div>
+      <div class="text-xs text-slate-500 mt-1">本报告由 AI 分析工具直接生成，生成流程不包含人工编辑步骤。</div>
     </header>
-    {language_warning}
+    {priority_html}
     {verdict_html}
     {similarity_html}
     <section id="tree" data-section-id="tree">
-      <h2 class="text-xl font-semibold mb-3">代码树（下层 = 中性描述）</h2>
+      <h2 class="text-xl font-semibold mb-3">模块摘要与证据</h2>
       <div class="tree-root rounded-lg border border-slate-200 dark:border-slate-700
                   bg-white dark:bg-slate-800 p-4">
         {tree_static_html}
@@ -451,6 +524,8 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
 </body>
 </html>
 """
+    # 最终 HTML 门禁：不再只依赖提示词，确保可见正文中的常见术语首次出现即解释。
+    doc = explain_terms_in_html(doc)
     # 产出前硬校验：每个目录项都必须精确定位到唯一锚点，否则抛错而非静默产出
     assert_toc_resolves(doc)
     assert_report_complete(doc, structured=tree_json)
@@ -465,7 +540,7 @@ def _render_toc(verdict_html: str, similarity_html: str,
     """
     items: list[str] = []
     if verdict_html.strip():
-        items.append('<a class="toc-link" href="#verdict">综合评判</a>')
+        items.append('<a class="toc-link" href="#verdict">结论与问题</a>')
     if similarity_html.strip():
         items.append('<a class="toc-link" href="#similarity">相似度分析</a>')
     items.append('<a class="toc-link" href="#tree">代码树</a>')
@@ -507,7 +582,10 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
     path = node.get("path", "")
     name = _esc(node.get("name") or path or "/")
     role = _esc(node.get("role", ""))
-    summary = _esc(node.get("summary", ""))
+    summary_text = concise_module_summary(
+        node.get("brief") or node.get("summary") or node.get("content") or ""
+    )
+    summary = linkify_html(_esc(summary_text), resolver)
     open_default = "true" if depth <= 1 else "false"
     node_key = path or "__root__"
 
@@ -531,27 +609,48 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
     body_parts: list[str] = []
     if summary:
         body_parts.append(
-            f'<div class="text-sm text-slate-700 dark:text-slate-300 mt-1 mb-2">'
+            f'<div class="module-analysis text-sm text-slate-700 dark:text-slate-300 mt-1 mb-2" '
+            f'data-analysis-chars="{len(summary_text)}">'
             f'{summary}</div>'
         )
 
-    # 详细叙述正文（subsystem / module 的 agent HTML 输出）——原样嵌入并链接化
+    # 决赛交付中，子系统和模块只保留不超过 300 字的分析及源码证据入口；
+    # LLM 的长正文不再嵌入报告，避免“折叠了但仍然交付大量文字”的形式合规。
     content = _strip_html_ids(_strip_diagrams(node.get("content") or ""))
-    if content.strip():
+    if content.strip() and typ not in {"subsystem", "module"}:
         body_parts.append(
-            f'<div class="node-content prose prose-sm dark:prose-invert max-w-none mt-1 mb-2">'
-            f'{linkify_html(content, resolver)}</div>'
+            f'<details class="detail-toggle mt-2 mb-2"><summary>展开详细证据</summary>'
+            f'<div class="node-content prose prose-sm dark:prose-invert max-w-none mt-1">'
+            f'{linkify_html(content, resolver)}</div></details>'
         )
 
-    # 本节点的 highlights / issues（subsystem 可能携带）——逐条列表，结构清晰
-    body_parts.append(_render_findings(
-        node.get("highlights") or [], resolver,
-        title="本节点亮点", color_cls="text-green-700 dark:text-green-400",
-        is_issue=False))
-    body_parts.append(_render_findings(
-        node.get("issues") or [], resolver,
-        title="本节点槽点", color_cls="text-red-700 dark:text-red-400",
-        is_issue=True))
+    if typ in {"subsystem", "module"}:
+        evidence_links: list[str] = []
+        for kind, items in (
+            ("实现", node.get("highlights") or []),
+            ("问题", node.get("issues") or []),
+        ):
+            for item in items:
+                path = str(item.get("path") or "") if isinstance(item, dict) else ""
+                if path:
+                    evidence_links.append(f'{kind}证据：{_resolve_path_anchor(path, resolver)}')
+                if len(evidence_links) >= 4:
+                    break
+            if len(evidence_links) >= 4:
+                break
+        if evidence_links:
+            body_parts.append(
+                '<div class="text-xs text-slate-500 mb-2">' + "；".join(evidence_links) + '</div>'
+            )
+    else:
+        body_parts.append(_render_findings(
+            node.get("highlights") or [], resolver,
+            title="本节点亮点", color_cls="text-green-700 dark:text-green-400",
+            is_issue=False))
+        body_parts.append(_render_findings(
+            node.get("issues") or [], resolver,
+            title="本节点槽点", color_cls="text-red-700 dark:text-red-400",
+            is_issue=True))
 
     # 任何带 children 的节点都递归渲染子树
     children = node.get("children") or []
@@ -594,7 +693,7 @@ def write_tree_html(out_path: Path, tree_json: dict,
     out_path.parent.mkdir(parents=True, exist_ok=True)
     html_text = render_tree_html(
         tree_json,
-        title=title or f"{tree_json.get('meta',{}).get('repo','?')} 代码树报告",
+        title=title or f"{tree_json.get('meta',{}).get('repo','?')} 作品描述报告",
         resolver=resolver,
     )
     out_path.write_text(html_text, encoding="utf-8")

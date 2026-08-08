@@ -2722,6 +2722,81 @@ def _source_metrics(suspects: list[dict]) -> list[dict]:
     return sorted(metrics, key=lambda x: (-x["functions"], -x["effective_loc"], x["repo"]))
 
 
+def select_closest_historical_repo(
+    suspects: list[dict], file_matches: list[dict] | None = None,
+) -> dict:
+    """选择决赛报告唯一的主对比作品。
+
+    主排序使用高置信同源的唯一目标函数数，其次为有效相似行、整文件相同数、
+    涉及文件和子系统数；没有 confirmed 时才回退到 review/weak 的唯一目标函数数。
+    """
+    rows = {row["repo"]: dict(row, exact_files=0) for row in _source_metrics(suspects)}
+    for match in file_matches or []:
+        seen: set[str] = set()
+        for candidate in match.get("matches") or []:
+            repo = str(candidate.get("repo_id") or "")
+            if not repo or repo in seen:
+                continue
+            seen.add(repo)
+            rows.setdefault(repo, {
+                "repo": repo, "functions": 0, "effective_loc": 0,
+                "files": 0, "modules": 0, "multi_repo_functions": 0,
+                "exact_files": 0,
+            })["exact_files"] += 1
+
+    if not rows:
+        fallback: dict[str, set[tuple]] = defaultdict(set)
+        for suspect in suspects:
+            if suspect.get("tier") not in ("review", "weak") or _is_excluded_pair(suspect):
+                continue
+            repo = str((suspect.get("candidate_func") or {}).get("repo_id") or "")
+            if repo:
+                fallback[repo].add(_query_key(suspect.get("query_func") or {}))
+        for repo, targets in fallback.items():
+            rows[repo] = {
+                "repo": repo, "functions": 0, "review_functions": len(targets),
+                "effective_loc": 0, "files": 0, "modules": 0,
+                "multi_repo_functions": 0, "exact_files": 0,
+            }
+    if not rows:
+        return {"repo": "", "functions": 0, "effective_loc": 0, "exact_files": 0}
+    return sorted(
+        rows.values(),
+        key=lambda row: (
+            -int(row.get("functions") or 0),
+            -int(row.get("effective_loc") or 0),
+            -int(row.get("exact_files") or 0),
+            -int(row.get("review_functions") or 0),
+            -int(row.get("files") or 0),
+            -int(row.get("modules") or 0),
+            str(row.get("repo") or ""),
+        ),
+    )[0]
+
+
+def _suspects_for_source(suspects: list[dict], repo_id: str) -> list[dict]:
+    if not repo_id:
+        return []
+    return [
+        suspect for suspect in suspects
+        if str((suspect.get("candidate_func") or {}).get("repo_id") or "") == repo_id
+    ]
+
+
+def _file_matches_for_source(file_matches: list[dict], repo_id: str) -> list[dict]:
+    if not repo_id:
+        return []
+    output: list[dict] = []
+    for match in file_matches:
+        candidates = [
+            item for item in match.get("matches") or []
+            if str(item.get("repo_id") or "") == repo_id
+        ]
+        if candidates:
+            output.append({**match, "matches": candidates})
+    return output
+
+
 def _echarts_top_sources(metrics: list[dict], top: int = 8) -> str:
     """Top 历史匹配仓库柱图：按唯一目标函数计数，不再按候选 pair 计数。"""
     order = metrics[:top]
@@ -5622,6 +5697,113 @@ def _compliance_section(query_repo_path: Path | None, linker, query_repo_id: str
                      str(unique_excluded), "excluded"), section
 
 
+def _finals_comparison_summary(digest, linker) -> str:
+    metrics = digest.metrics
+    closest = str(metrics.get("closest_source") or "未确定")
+    module_rows = "".join(
+        '<tr>'
+        f'<td><strong>{html.escape(module.name)}</strong></td>'
+        f'<td>{module.similarity_pct or 0:.1f}%</td>'
+        f'<td>{html.escape(module.summary)}</td>'
+        '</tr>'
+        for module in digest.modules
+    ) or '<tr><td colspan="3">没有形成可报告的模块级同源证据。</td></tr>'
+    findings = "".join(
+        '<li class="summary-alert ' + html.escape(item.severity) + '">'
+        f'<strong>{html.escape(item.title)}</strong>'
+        f'<span>置信度 {round(item.confidence * 100)}%</span>'
+        f'<p>{html.escape(item.detail)}</p></li>'
+        for item in digest.decision_findings(5)
+    ) or '<li class="summary-alert"><strong>未形成高风险结论</strong><p>当前证据不足以锁定同源代码。</p></li>'
+    return f"""
+<section id="summary" data-section-id="summary" class="summary-card">
+  <div class="summary-kicker">先看结论</div>
+  <h2>与 {_ref_repo_anchor(linker, closest)} 最接近</h2>
+  <p class="summary-lead">{html.escape(digest.conclusion)}</p>
+  <p class="section-intro"><b>整体比例口径：</b>高置信同源目标函数 ÷ 可比目标函数。
+  公共上游、第三方库、应用二进制接口（ABI）约束和机械误报均已扣除；该比例用于安排人工核查，
+  不等同于抄袭认定。</p>
+  <ul class="summary-alerts">{findings}</ul>
+  <div class="overflow-x-auto"><table><thead><tr><th>模块</th><th>高置信比例</th><th>结论</th></tr></thead>
+  <tbody>{module_rows}</tbody></table></div>
+</section>
+"""
+
+
+def generate_finals_comparison_html(
+    *,
+    query_repo_id: str,
+    closest_source: str,
+    suspects: list[dict],
+    submodule_stats: dict,
+    file_pairs: list[dict],
+    analysis_html: str,
+    review_pairs: list[dict],
+    cleared_review_pairs: list[dict],
+    ai_detect_data: dict | None,
+    query_repo_path: Path | None,
+    linker,
+    file_matches: list[dict],
+    file_similar: list[dict],
+    retrieval_contract: dict | None,
+    recall: dict | None,
+) -> tuple[str, object]:
+    """决赛版对比报告：只展示一个最近历史作品，先结论后证据。"""
+    from finals.digests import comparison_digest
+
+    digest = comparison_digest(
+        query_repo_id, closest_source, submodule_stats,
+        exact_file_matches=len(file_matches), ai_detect_data=ai_detect_data,
+    )
+    summary_html = _finals_comparison_summary(digest, linker)
+    _toc_lineage, sec_lineage = _lineage_section(query_repo_id, suspects, linker, recall)
+    _toc_clusters, sec_clusters = _cluster_section(
+        file_pairs, analysis_html, linker, query_repo_id)
+    _toc_review, sec_review = _review_section(
+        review_pairs, linker, query_repo_id, cleared_review_pairs)
+    _toc_files, sec_files = _file_level_section(
+        file_matches, file_similar, linker, query_repo_id)
+    _toc_ai, sec_ai = _ai_detect_section(ai_detect_data, linker, query_repo_id)
+
+    evidence_parts = [sec_lineage, sec_clusters, sec_review, sec_files]
+    evidence_html = "\n".join(part for part in evidence_parts if part)
+    method_status = _retrieval_status(retrieval_contract)
+    toc_html = (
+        '<div class="toc-card"><div class="toc-header"><span class="toc-kicker">FINAL REPORT</span>'
+        '<strong>报告目录</strong></div><div class="toc-scroll">'
+        + _toc_group("先看结论", [_toc_link("summary", "结论与模块排序")])
+        + _toc_group("最近作品证据", [_toc_link("closest-evidence", "同源代码证据")])
+        + _toc_group("辅助核查", [_toc_link("ai-signal", "AI 生成代码信号")])
+        + _toc_group("口径", [_toc_link("method", "方法与边界")])
+        + '</div></div>'
+    )
+    title = f"{html.escape(query_repo_id)} 对比分析报告"
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title>{_CDN_HEAD}{_STYLES}<style>
+.summary-alerts{{display:grid;gap:.65rem;list-style:none;padding:0;margin:1rem 0}}
+.summary-alert{{border-left:3px solid #f59e0b;background:#fffbeb;padding:.7rem .85rem;border-radius:.35rem}}
+.summary-alert.high,.summary-alert.critical{{border-left-color:#dc2626;background:#fef2f2}}
+.summary-alert>span{{float:right;color:#64748b;font-size:.72rem}}.summary-alert p{{margin:.25rem 0 0;font-size:.86rem}}
+</style></head><body><div class="layout"><nav class="toc">{toc_html}</nav><main class="main">
+<header class="report-header"><span class="report-kicker">ONE CLOSEST HISTORICAL WORK</span>
+<h1>{title}</h1><p>只围绕历史上最接近的一个作品展开，模块按高置信同源比例排序。</p></header>
+{summary_html}
+<section id="closest-evidence" data-section-id="closest-evidence">
+{_chapter_heading("02", "最近历史作品的证据", "先看模块结论；函数、文件和代码细节默认折叠，需要时再展开。")}
+{evidence_html}</section>
+<section id="ai-signal" data-section-id="ai-signal">
+{_chapter_heading("03", "AI 生成代码辅助信号", "仅检测未归入历史借鉴的函数；误报风险较高，不作单独认定。")}
+{sec_ai}</section>
+<section id="method" data-section-id="method" class="report-section section-neutral">
+{_chapter_heading("04", "方法与边界", "说明百分比口径和证据覆盖，避免把未命中误写成原创。")}
+<div class="section-intro"><p><b>主对比对象：</b>{_ref_repo_anchor(linker, closest_source)}</p>
+<p><b>召回状态：</b>{html.escape(method_status)}</p>
+<p>系统内部仍使用全部历史库完成召回和排除，但交付报告只展示最近作品；其他候选不进入评委正文。</p></div>
+</section>
+</main></div><a href="#summary" class="to-top" title="回到顶部">↑</a>{_INIT_SCRIPT}</body></html>""", digest
+
+
 def generate_comparison_html(
     query_repo_id: str,
     suspects: list[dict],
@@ -5976,10 +6158,22 @@ def run_semantic_compare(
         logger.info("[compare] 上游基线/ABI 降级：vendored 上游 {} / ABI 受限 {}（不计入借鉴，单列「上游基线/ABI 受限」节）",
                     ub_counts["upstream_vendored"], ub_counts["abi_constrained"])
 
+    # 决赛交付只围绕一个最近历史作品展开。内部仍用完整历史库完成召回、排除和
+    # 复核，但从这里开始把面向评委的统计与证据收敛到唯一主来源。
+    closest_source = select_closest_historical_repo(suspects, file_matches)
+    closest_repo = str(closest_source.get("repo") or "")
+    report_suspects = _suspects_for_source(suspects, closest_repo)
+    file_matches = _file_matches_for_source(file_matches, closest_repo)
+    logger.info(
+        "[compare] 决赛主对比作品：{}（高置信函数 {}，有效相似行 {}，整文件 {}）",
+        closest_repo or "未确定", closest_source.get("functions", 0),
+        closest_source.get("effective_loc", 0), closest_source.get("exact_files", 0),
+    )
+
     # 文件整体相似：用「已剔除嫌疑对」口径计算（vendored 上游 / ABI / 库复用 / 公共样板 /
     # 误报 不计入），这样 arceos/build.rs、macros.rs、C 库、examples 等脚手架文件不会被
     # 报为整体相似。file_matches（逐字节整文件相同）按路径口径剔除同类脚手架。
-    non_excluded = [s for s in suspects if not _is_excluded_pair(s)]
+    non_excluded = [s for s in report_suspects if not _is_excluded_pair(s)]
     file_similar = aggregate_file_similarity(non_excluded, recall, query_repo_path=query_repo_path)
     file_matches = [m for m in file_matches
                     if not match_library(m.get("query_file"), context=library_context)
@@ -5989,13 +6183,13 @@ def run_semantic_compare(
                     and not is_excluded_file_path(f.get("file_path", ""))]
 
     logger.info("[compare] 新作品 {}：{} 个嫌疑对（剔除库复用 {} / 上游基线 {} / ABI {} / 误报 {} / 内部复用 {}），整文件相同 {} 个，整体相似 {} 个",
-                query_repo_id, len(suspects), reuse_n, ub_counts["upstream_vendored"],
+                query_repo_id, len(report_suspects), reuse_n, ub_counts["upstream_vendored"],
                 ub_counts["abi_constrained"], sum(fp_counts.values()), dup_n,
                 len(file_matches), len(file_similar))
 
     # 统计采用复核后的档位与互斥复核状态：有效疑似、失败、真正未完成分开。
     submodule_stats = compute_submodule_stats(
-        suspects, recall, library_context=library_context)
+        report_suspects, recall, library_context=library_context)
     lib_stats       = reused_library_stats(
         suspects, recall, context=library_context)
     cc_funcs        = common_code_stats(suspects)
@@ -6004,10 +6198,10 @@ def run_semantic_compare(
     base_funcs      = baseline_stats(suspects)
     # confirmed 功能簇全量展示并全量进行语义分析；top_per_module 只限制每个簇在 prompt 中
     # 展开的成员映射数，超出统一上下文预算时自动分批，不能形成“有卡片、无说明”的报告。
-    file_pairs = collect_file_pairs(suspects)
-    final_review_pairs = collect_file_pairs(suspects, keep_tiers=("review", "weak"))
+    file_pairs = collect_file_pairs(report_suspects)
+    final_review_pairs = collect_file_pairs(report_suspects, keep_tiers=("review", "weak"))
     cleared_pair_keys = {
-        _suspect_pair_key(suspect) for suspect in suspects
+        _suspect_pair_key(suspect) for suspect in report_suspects
         if suspect.get("tier") == "dismissed"
         and suspect.get("dismiss_reason") == "review_非借鉴"
     }
@@ -6034,16 +6228,11 @@ def run_semantic_compare(
     original_funcs  = _original_functions(
         recall, suspects, library_context=library_context) if recall else []
 
-    # 独立创新实现地图：从暂未命中函数出发，绑定各模块主要参考 repo 的最近实现后再做
-    # 代码级归纳。文档不进入该输入，“未命中”也不会直接升级为创新结论。
-    innovation_candidates = build_innovation_candidates(
-        recall, suspects, functions_db_path=functions_db_path,
-        library_context=library_context)
+    # 决赛对比报告不再展开“候选创新”和全部未命中函数；这些内部数据仍用于召回
+    # 完整性校验，但不会占用评委正文或额外触发创新归纳模型调用。
+    innovation_candidates: list[dict] = []
     semantic_enabled = not skip_opencode and global_semantic_analysis
-    innovation_points = run_innovation_analysis(
-        query_repo_id, innovation_candidates, work_dir,
-        skip_llm=not semantic_enabled,
-    )
+    innovation_points: list[dict] = []
 
     analysis_html = ""
     if semantic_enabled and llm_pairs:
@@ -6067,30 +6256,22 @@ def run_semantic_compare(
     )
 
     # 生成 HTML
-    html_text = generate_comparison_html(
-        query_repo_id   = query_repo_id,
-        suspects        = suspects,
-        submodule_stats = submodule_stats,
-        file_pairs      = file_pairs,
-        analysis_html   = analysis_html,
-        original_funcs  = original_funcs,
-        innovation_points = innovation_points,
-        innovation_candidates = innovation_candidates,
-        review_pairs    = final_review_pairs,
-        cleared_review_pairs = cleared_review_pairs,
-        ai_detect_data  = ai_detect_data,
-        query_repo_path = Path(query_repo_path).resolve() if query_repo_path else None,
-        linker          = linker,
-        file_matches    = file_matches,
-        file_similar    = file_similar,
-        lib_stats       = lib_stats,
-        cc_funcs        = cc_funcs,
-        base_funcs      = base_funcs,
-        fp_funcs        = fp_funcs,
-        ub_funcs        = ub_funcs,
-        retrieval_contract = recall.get("retrieval_contract") if recall else None,
-        recall          = recall,
-        library_context = library_context,
+    html_text, finals_digest = generate_finals_comparison_html(
+        query_repo_id=query_repo_id,
+        closest_source=closest_repo,
+        suspects=report_suspects,
+        submodule_stats=submodule_stats,
+        file_pairs=file_pairs,
+        analysis_html=analysis_html,
+        review_pairs=final_review_pairs,
+        cleared_review_pairs=cleared_review_pairs,
+        ai_detect_data=ai_detect_data,
+        query_repo_path=Path(query_repo_path).resolve() if query_repo_path else None,
+        linker=linker,
+        file_matches=file_matches,
+        file_similar=file_similar,
+        retrieval_contract=recall.get("retrieval_contract") if recall else None,
+        recall=recall,
     )
 
     # 档位标签统一（高置信同源代码 / 模型复核难例 / 暂未检出相似），避免各处叫法不一
@@ -6102,11 +6283,18 @@ def run_semantic_compare(
     safe_id  = query_repo_id.replace("/", "_")
     out_path = out_dir / f"{safe_id}_comparison.html"
     out_path.write_text(html_text, encoding="utf-8")
+    digest_path = out_dir / f"{safe_id}_comparison.digest.json"
+    digest_path.write_text(
+        json.dumps(finals_digest.model_dump(mode="json"), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     logger.info("[compare] HTML 报告 → {}", out_path)
 
     return {
         "html_path":        str(out_path),
+        "digest_path":      str(digest_path),
         "query_repo_id":    query_repo_id,
+        "closest_source":   closest_repo,
         "total_suspects":   len(suspects),
         "submodule_stats":  submodule_stats,
         "original_funcs":   len(original_funcs),

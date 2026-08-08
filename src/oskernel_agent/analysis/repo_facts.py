@@ -195,7 +195,14 @@ def _probe_reference_overlap(repo_path: Path, ref_name: str | None) -> dict:
     }
 
 
-def build_repo_facts(repo_path: Path, repo_name: str, ts: str) -> dict:
+def build_repo_facts(
+    repo_path: Path,
+    repo_name: str,
+    ts: str,
+    *,
+    build_log: str | Path | None = None,
+    run_log: str | Path | None = None,
+) -> dict:
     """采集项目级共享事实档案，5 个分会话共用同一口径。"""
     repo_path = Path(repo_path).resolve()
     structure = _build_structure(repo_path)
@@ -205,6 +212,8 @@ def build_repo_facts(repo_path: Path, repo_name: str, ts: str) -> dict:
 
     standard_count, std_list = _probe_standard_syscalls(repo_path)
     ref_data = _probe_reference_overlap(repo_path, ref_os)
+
+    from finals.integrity import collect_integrity_facts
 
     return {
         "meta": {
@@ -227,6 +236,9 @@ def build_repo_facts(repo_path: Path, repo_name: str, ts: str) -> dict:
         "key_files":   _probe_key_files(repo_path),
         "smp":         _probe_smp(repo_path),
         "commits":     summarize_commits(str(repo_path)),
+        "integrity":   collect_integrity_facts(
+            repo_path, build_log=build_log, run_log=run_log,
+        ),
         "profile_lite": {
             "primary_lang":  profile.get("primary_lang"),
             "kernel_type":   profile.get("kernel_type"),

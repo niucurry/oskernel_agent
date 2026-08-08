@@ -18,7 +18,7 @@ oskernel-setup = "oskernel_agent.cli.setup_opencode:setup"
 where = ["src"]
 # 仅打包既有的 oskernel_agent；查重引擎模块通过 `python -m src.<module>` 源码运行，
 # 不作为已安装包，避免与 src.* 导入路径冲突。
-include = ["oskernel_agent*"]
+include = ["oskernel_agent*", "finals*"]
 
 [tool.setuptools.package-data]
 "oskernel_agent.prompts" = ["templates/*.md"]

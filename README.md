@@ -299,20 +299,25 @@ PYTHON_BIN=../.venv/Scripts/python.exe   # Windows 可选；不填会自动找�
 
 ### 生成报告
 
-前端当前支持两类报告：
+前端按评委阅读顺序提供决赛四件套：
 
-- `comparison`：查重对比报告，调用 `python -m src.pipeline --baselines`。默认运行 AI 检测模型，并把本次模型产物写入报告；不会读取仓库披露文件来代替模型判断。
-- `description`：项目描述报告，调用 `agent.py --repo-path ... --output ...`，依赖 OpenCode 和 `oskernel_agent` MCP。
+- `summary`：一页 A4 PDF 摘要，自动汇总另外三份报告；无超链接，正文不小于 10.5 磅。
+- `description`：作品描述报告，问题和结论在前；四类硬编码候选必须经 AI 逐条复核，模块分析不超过 300 字。缺少事实扫描、AI 复核或中文化未完成时拒绝交付；调用 `agent.py --repo-path ... --output ...`。
+- `development`：开发过程报告，从 Git 历史归纳阶段、关键提交和大规模提交线索。
+- `comparison`：对比分析报告，只展示最接近的一份历史作品。调用 `python -m src.pipeline --baselines`，AI 代码检测作为辅助信息并入该报告。
 
-页面可以对单个作品选择报告类型生成，也可以批量生成缺失报告。生成过程中可在任务列表查看日志；报告完成后从作品详情页直接打开。
+页面可以对单个作品选择报告类型生成，也可以批量生成缺失报告。选择 `summary` 时会自动补齐三份上游报告及其摘要数据。生成过程中可在任务列表查看日志；报告完成后默认先打开一页摘要。
 
 ### 运行产物目录
 
 - `frontend/data/app.sqlite`：前端本地数据库。
 - `frontend/reports/<repo_id>/`：每个作品的报告目录。
 - `frontend/reports/<repo_id>/_repos/`：前端流水线克隆的新作品仓库。
-- `frontend/reports/<repo_id>/comparison.html`：查重报告入口。
+- `frontend/reports/<repo_id>/summary.pdf`：一页评审摘要入口。
 - `frontend/reports/<repo_id>/description.html`：描述报告入口。
+- `frontend/reports/<repo_id>/development.html`：开发过程报告入口。
+- `frontend/reports/<repo_id>/comparison.html`：对比分析报告入口。
+- `frontend/reports/<repo_id>/*.digest.json`：生成摘要所需的结构化事实，不作为独立报告展示。
 
 这些产物默认不提交到 Git。需要迁移或备份时，直接拷贝 `frontend/data/` 和 `frontend/reports/` 即可。
 
@@ -347,7 +352,7 @@ npm run build
 
 ## 七、批量出报告（run_batch）
 
-给作品清单（`作品.txt`，JSON 数组，含 `队伍编号` / `Fork地址`）里的全部作品批量生成 描述+对比 两份报告：
+给作品清单（`作品.txt`，JSON 数组，含 `队伍编号` / `Fork地址`）里的全部作品批量生成决赛四件套：
 
 先在本地 `.env` 配置批处理凭据（真实值禁止提交）：
 
@@ -360,10 +365,11 @@ BATCH_FALLBACK_LLM_API_KEY=<备用凭据>
 
 ```bash
 python run_batch.py
-# → data/output/<队伍编号>/<队伍编号>_{description,comparison}.html
+# → <队伍编号>_summary.pdf
+# → <队伍编号>_{description,development,comparison}.html
 ```
 
-- 逐作品串行，两份 HTML 均已存在则跳过（**断点续跑**）；
+- 逐作品串行，四份报告及摘要数据均已存在则跳过（**断点续跑**）；
 - 检测到 API key 欠费/限额时，自动切换已配置且不同于主凭据的备用 key（并自动完成上面的"三件套"）；
 - 巨型仓库对比超时可调 `BATCH_CMP_TIMEOUT`（秒，默认 3600）。
 
@@ -375,7 +381,8 @@ python run_batch.py
 
 1. **唯一生成路径**：对比报告只有 `src/report/semantic_compare.py` 一条渲染路径
    （`python -m src.pipeline` 与 `python -m src.report compare` 走同一个函数）；
-   描述报告只有 `agent.py`（`oskernel_agent` 树状流水线）一条路径。旧的 Markdown
+   描述报告只有 `agent.py`（`oskernel_agent` 树状流水线）一条路径；开发过程和摘要统一由
+   `python -m finals` 生成。旧的 Markdown
    报告流程（`src.report.generate` / `src.review` LLM 逐对复核）已删除。
 2. **写盘前强制归一**：档位命名（高置信同源代码 / 模型复核后仍存疑 / 复核失败或未完成 / 暂未检出相似）由
    `src/report/label_normalize.py` 在 HTML 写盘前统一（`semantic_compare` 内接线，幂等）；

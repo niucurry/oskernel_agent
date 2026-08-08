@@ -50,15 +50,17 @@ const statusLabels = {
 };
 
 const reportOptions = [
-  { kind: "comparison", label: "查重报告" },
-  { kind: "description", label: "描述报告" }
+  { kind: "summary", label: "一页摘要" },
+  { kind: "description", label: "作品描述" },
+  { kind: "development", label: "开发过程" },
+  { kind: "comparison", label: "对比分析" }
 ];
 
 const reportKindLabels = Object.fromEntries(reportOptions.map((option) => [option.kind, option.label]));
 
 const years = computed(() => summary.value.years?.map((item) => item.year).filter(Boolean) || []);
 const selectedReportTypes = ref(reportOptions.map((option) => option.kind));
-const activeReportKind = ref("comparison");
+const activeReportKind = ref("summary");
 const selectedReports = computed(() => selected.value?.reports || []);
 const selectedReportChoices = computed(() => {
   const seen = new Set();
@@ -109,7 +111,7 @@ function setActiveReportKind(kind) {
 
 function syncActiveReportKind(reports = []) {
   const available = reports.map((report) => report.kind);
-  activeReportKind.value = available.includes("comparison") ? "comparison" : (available[0] || "comparison");
+  activeReportKind.value = available.includes("summary") ? "summary" : (available[0] || "summary");
 }
 
 function jobLogTail(log) {

@@ -115,20 +115,27 @@ def _env_disabled(name: str) -> bool:
 # 树状报告主入口
 
 def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
-                   cli_depth: int = 3) -> Path | None:
+                   cli_depth: int = 3, *, build_log: str | None = None,
+                   run_log: str | None = None) -> Path | None:
     """自底向上构建 tree.json，并产出终端打印 + HTML 报告。"""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # 1. 采集共享事实档案
-    facts: dict | None = None
-    if not _env_disabled("AGENT_NO_FACTS"):
-        try:
-            from ..analysis.repo_facts import build_repo_facts
-            print("\n[预处理] 采集项目级共享事实档案 ...")
-            facts = build_repo_facts(repo_path, repo_name, ts)
-        except Exception as e:
-            print(f"[警告] 事实档案构建失败：{e}（继续）", file=sys.stderr)
-            facts = None
+    if _env_disabled("AGENT_NO_FACTS"):
+        print("[错误] 决赛作品描述报告必须采集完整事实与硬编码线索，不能禁用 facts", file=sys.stderr)
+        return None
+    try:
+        from ..analysis.repo_facts import build_repo_facts
+        print("\n[预处理] 采集项目级共享事实档案 ...")
+        facts = build_repo_facts(
+            repo_path, repo_name, ts, build_log=build_log, run_log=run_log,
+        )
+    except Exception as e:
+        print(f"[错误] 事实档案构建失败：{e}", file=sys.stderr)
+        return None
+    if not isinstance(facts.get("integrity"), dict):
+        print("[错误] 事实档案缺少编译、运行与硬编码检查结果", file=sys.stderr)
+        return None
 
     # 2. 自底向上构建 tree
     from ..pipeline.tree_builder import build_tree, write_tree_json
@@ -146,6 +153,17 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
     tree_json_path = out_html.with_suffix(".tree.json")
     write_tree_json(tree, tree_json_path)
     print(f"[tree] tree.json → {tree_json_path}")
+
+    # 决赛四件套共享的短摘要；后续摘要 PDF 直接消费该结构化产物，
+    # 不再从冗长 HTML 反向猜测结论。
+    try:
+        from finals.digests import description_digest_from_tree, write_digest
+        digest_path = out_html.with_suffix(".digest.json")
+        write_digest(digest_path, description_digest_from_tree(tree))
+        print(f"[tree] 决赛摘要数据 → {digest_path}")
+    except Exception as e:
+        print(f"[错误] 决赛摘要数据生成失败：{e}", file=sys.stderr)
+        return None
 
     # 4. 终端打印
     try:
@@ -188,6 +206,8 @@ def main() -> None:
     parser.add_argument("--output", "-o")
     parser.add_argument("--depth", type=int, default=3,
                         help="终端树打印的最大下钻层数（默认 3）")
+    parser.add_argument("--build-log", help="可选：正式编译日志，用于问题前置与证据提取")
+    parser.add_argument("--run-log", help="可选：正式运行日志，用于问题前置与证据提取")
 
     args = parser.parse_args()
 
@@ -202,8 +222,11 @@ def main() -> None:
         output_file = str(reports_dir / f"{repo_name_a}_{ts}.html")
 
     print(f"[agent] 报告将写入：{output_file}")
-    _run_tree_mode(repo_path_a, repo_name_a, output_file,
-                    cli_depth=args.depth)
+    result = _run_tree_mode(repo_path_a, repo_name_a, output_file,
+                            cli_depth=args.depth, build_log=args.build_log,
+                            run_log=args.run_log)
+    if result is None:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

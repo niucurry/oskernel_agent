@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
-"""批量为 作品.txt 里的 50 个作品生成 描述报告 + 对比报告。
+"""批量为 作品.txt 里的作品生成决赛四件套。
 
-每个作品的两份报告归档到 data/output/<队伍编号>/：
+每个作品的四份报告归档到 data/output/<队伍编号>/：
+    <队伍编号>_summary.pdf
     <队伍编号>_description.html
+    <队伍编号>_development.html
     <队伍编号>_comparison.html
 
 特性：
-- 可断点续跑：两份 HTML 都已存在则跳过该作品。
+- 可断点续跑：四份报告及摘要所需数据都已存在则跳过该作品。
 - 逐个作品串行（显存/磁盘友好），每步落盘日志到 data/output/_batch/。
 - API key 额度不足时自动切换到备用 key（改写 config.toml + .env + 重跑 setup_opencode）。
 """
@@ -188,15 +190,24 @@ def free_gb() -> float:
 
 
 def backup_reports(team_id: str, final_dir: Path) -> None:
-    """把生成好的两份 HTML 立刻拷到持久备份区，磁盘清理/误删也不丢成果。"""
+    """把生成好的报告和摘要数据立刻拷到持久备份区。"""
     REPORTS_BAK.mkdir(parents=True, exist_ok=True)
-    for suf in ("comparison", "description"):
-        src = final_dir / f"{team_id}_{suf}.html"
+    names = [
+        f"{team_id}_summary.pdf",
+        f"{team_id}_description.html",
+        f"{team_id}_development.html",
+        f"{team_id}_comparison.html",
+        f"{team_id}_description.digest.json",
+        f"{team_id}_development.digest.json",
+        f"{team_id}_comparison.digest.json",
+    ]
+    for name in names:
+        src = final_dir / name
         if src.exists():
             try:
-                shutil.copy2(src, REPORTS_BAK / f"{team_id}_{suf}.html")
+                shutil.copy2(src, REPORTS_BAK / name)
             except OSError as e:
-                log(f"  备份 {suf} 失败：{e}")
+                log(f"  备份 {name} 失败：{e}")
 
 
 def cleanup_team(repo_name: str) -> None:
@@ -269,14 +280,21 @@ def do_comparison(team_id: str, url: str, final_dir: Path, logfile: Path) -> tup
     # 归档 HTML：pipeline 落到 data/output/<repo_name>/<repo_name>_comparison.html
     src_html = OUT / repo_name / f"{repo_name}_comparison.html"
     dst = final_dir / f"{team_id}_comparison.html"
+    dst_digest = final_dir / f"{team_id}_comparison.digest.json"
     if src_html.exists():
         shutil.copy2(src_html, dst)
-        return True, body
+        src_digest = OUT / repo_name / f"{repo_name}_comparison.digest.json"
+        if src_digest.exists():
+            shutil.copy2(src_digest, dst_digest)
+        return ok and dst.exists() and dst_digest.exists(), body
     # 兜底：直接落在 output 根
     alt = OUT / f"{repo_name}_comparison.html"
     if alt.exists():
         shutil.copy2(alt, dst)
-        return True, body
+        alt_digest = OUT / f"{repo_name}_comparison.digest.json"
+        if alt_digest.exists():
+            shutil.copy2(alt_digest, dst_digest)
+        return ok and dst.exists() and dst_digest.exists(), body
     return False, body
 
 
@@ -290,7 +308,33 @@ def do_description(team_id: str, url: str, final_dir: Path, logfile: Path) -> tu
         src_arg = ["--url", url + ".git"]
     cmd = [PY, "agent.py", *src_arg, "-o", str(dst)]
     ok, body = run_step("描述报告", cmd, logfile, timeout=2400)
-    return dst.exists(), body
+    digest = dst.with_suffix(".digest.json")
+    return ok and dst.exists() and digest.exists(), body
+
+
+def do_development(team_id: str, url: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
+    repo_name = fork_to_repo_name(url)
+    cloned = REPOS / repo_name
+    dst = final_dir / f"{team_id}_development.html"
+    cmd = [
+        PY, "-m", "finals", "development",
+        "--repo", str(cloned), "--repo-id", team_id, "--output", str(dst),
+    ]
+    ok, body = run_step("开发过程报告", cmd, logfile, timeout=600)
+    return ok and dst.exists() and dst.with_suffix(".digest.json").exists(), body
+
+
+def do_summary(team_id: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
+    dst = final_dir / f"{team_id}_summary.pdf"
+    cmd = [
+        PY, "-m", "finals", "summary",
+        "--description-digest", str(final_dir / f"{team_id}_description.digest.json"),
+        "--development-digest", str(final_dir / f"{team_id}_development.digest.json"),
+        "--comparison-digest", str(final_dir / f"{team_id}_comparison.digest.json"),
+        "--repo-id", team_id, "--output", str(dst),
+    ]
+    ok, body = run_step("一页摘要", cmd, logfile, timeout=180)
+    return ok and dst.exists(), body
 
 
 def main() -> None:
@@ -316,13 +360,23 @@ def main() -> None:
         final_dir = OUT / team_id
         final_dir.mkdir(parents=True, exist_ok=True)
         cmp_html = final_dir / f"{team_id}_comparison.html"
+        cmp_digest = final_dir / f"{team_id}_comparison.digest.json"
         desc_html = final_dir / f"{team_id}_description.html"
+        desc_digest = final_dir / f"{team_id}_description.digest.json"
+        dev_html = final_dir / f"{team_id}_development.html"
+        dev_digest = final_dir / f"{team_id}_development.digest.json"
+        summary_pdf = final_dir / f"{team_id}_summary.pdf"
 
         tstate = st["teams"].setdefault(team_id, {})
 
-        if cmp_html.exists() and desc_html.exists():
+        expected = (
+            cmp_html, cmp_digest, desc_html, desc_digest,
+            dev_html, dev_digest, summary_pdf,
+        )
+        if all(path.exists() for path in expected):
             log(f"[{idx}/{total}] {team_id} 已完成，跳过")
-            tstate["comparison"] = tstate["description"] = "done"
+            for kind in ("comparison", "description", "development", "summary"):
+                tstate[kind] = "done"
             save_state(st)
             continue
 
@@ -334,18 +388,20 @@ def main() -> None:
 
         log(f"[{idx}/{total}] {team_id}  {url}  (剩余 {fg:.1f}GB)")
 
-        # ---- 预克隆（带重试）：让对比/描述两步复用同一份仓库 ----
+        # ---- 预克隆（带重试）：让对比、描述、开发过程三步复用同一份仓库 ----
         repo_name = fork_to_repo_name(url)
-        need_any = (not cmp_html.exists()) or (not desc_html.exists())
+        need_any = any(not path.exists() for path in expected)
         if need_any and not ensure_clone(url, repo_name):
             log(f"  克隆最终失败，跳过 {team_id}（下次重跑会再试）")
-            tstate.setdefault("comparison", "failed")
-            tstate.setdefault("description", "failed")
+            tstate["comparison"] = "done" if cmp_html.exists() and cmp_digest.exists() else "failed"
+            tstate["description"] = "done" if desc_html.exists() and desc_digest.exists() else "failed"
+            tstate["development"] = "done" if dev_html.exists() and dev_digest.exists() else "failed"
+            tstate["summary"] = "done" if summary_pdf.exists() else "failed"
             save_state(st)
             continue
 
         # ---- 对比报告 ----
-        if not cmp_html.exists():
+        if not cmp_html.exists() or not cmp_digest.exists():
             lf = LOGDIR / f"{team_id}_comparison.log"
             ok, body = do_comparison(team_id, url, final_dir, lf)
             if not ok and quota_exhausted(body) and st["key"] == "primary":
@@ -357,7 +413,7 @@ def main() -> None:
             save_state(st)
 
         # ---- 描述报告 ----
-        if not desc_html.exists():
+        if not desc_html.exists() or not desc_digest.exists():
             lf = LOGDIR / f"{team_id}_description.log"
             ok, body = do_description(team_id, url, final_dir, lf)
             if not ok and quota_exhausted(body) and st["key"] == "primary":
@@ -368,15 +424,50 @@ def main() -> None:
             log(f"  描述报告 {'成功' if ok else '失败'}")
             save_state(st)
 
+        # ---- 开发过程报告 ----
+        if not dev_html.exists() or not dev_digest.exists():
+            lf = LOGDIR / f"{team_id}_development.log"
+            ok, _body = do_development(team_id, url, final_dir, lf)
+            tstate["development"] = "done" if ok else "failed"
+            log(f"  开发过程报告 {'成功' if ok else '失败'}")
+            save_state(st)
+
+        # ---- 一页摘要：必须消费三份报告各自的结构化摘要 ----
+        if not summary_pdf.exists():
+            inputs = (cmp_digest, desc_digest, dev_digest)
+            if all(path.exists() for path in inputs):
+                lf = LOGDIR / f"{team_id}_summary.log"
+                ok, _body = do_summary(team_id, final_dir, lf)
+            else:
+                ok = False
+                missing = "、".join(path.name for path in inputs if not path.exists())
+                log(f"  一页摘要未生成，缺少：{missing}")
+            tstate["summary"] = "done" if ok else "failed"
+            log(f"  一页摘要 {'成功' if ok else '失败'}")
+            save_state(st)
+
+        readiness = {
+            "comparison": cmp_html.exists() and cmp_digest.exists(),
+            "description": desc_html.exists() and desc_digest.exists(),
+            "development": dev_html.exists() and dev_digest.exists(),
+            "summary": summary_pdf.exists(),
+        }
+        for kind, ready in readiness.items():
+            tstate[kind] = "done" if ready else "failed"
+        save_state(st)
+
         # ---- 立即备份成果 + 清理克隆/中间产物（省磁盘、防丢失）----
         backup_reports(team_id, final_dir)
         cleanup_team(repo_name)
 
         log(f"[{idx}/{total}] {team_id} 处理完毕 "
-            f"(cmp={tstate.get('comparison')}, desc={tstate.get('description')}, 剩余 {free_gb():.1f}GB)")
+            f"(summary={tstate.get('summary')}, desc={tstate.get('description')}, "
+            f"dev={tstate.get('development')}, cmp={tstate.get('comparison')}, "
+            f"剩余 {free_gb():.1f}GB)")
 
     done = sum(1 for t in st["teams"].values()
-               if t.get("comparison") == "done" and t.get("description") == "done")
+               if all(t.get(kind) == "done" for kind in
+                      ("summary", "description", "development", "comparison")))
     log(f"==== 批处理结束：{done}/{total} 完整完成 ====")
 
 

@@ -356,9 +356,14 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
 
     # 填子系统字段（子系统/模块不打分，评分只在顶层 VERDICT）
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
+    from finals.readability import concise_module_summary
+
     subsys_node["role"]       = parsed.get("role", subsys_node["name"])
     subsys_node["summary"]    = parsed.get("summary", "")
     subsys_node["content"]    = parsed.get("content", "")
+    subsys_node["brief"]      = concise_module_summary(
+        parsed.get("summary") or parsed.get("content") or subsys_node["name"]
+    )
     subsys_node["highlights"] = parsed.get("highlights", [])
     subsys_node["issues"]     = parsed.get("issues", [])
     # 把 modules 转成 children
@@ -372,6 +377,9 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
             "name":       m.get("name", f"模块 {slot}"),
             "path":       f"{subsys_node['path']}/m{slot:03d}",
             "summary":    m.get("summary", ""),
+            "brief":      concise_module_summary(
+                m.get("summary") or m.get("content") or m.get("name", f"模块 {slot}")
+            ),
             "file_paths": m.get("file_paths", []),
             "content":    m.get("content", ""),
         })
@@ -436,9 +444,13 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         "六维雷达图由最终渲染器根据 JSON 评分自动生成；文件引用写纯文本 path:line（自动变链接）。\n\n"
         "工作步骤：\n"
         "1. 不要调用 initialize_analysis；工具会根据 repo_path 自动初始化\n"
-        "2. 必要时 compare_with_reference_os(facts.meta.reference_os) "
-        "/ search_code 验证关键判断\n"
-        "3. 工具调用 ≤5 次\n\n"
+        "2. 必须逐条复核 facts.integrity.hardcode.findings，并主动搜索四类实现："
+        "按测试名/ELF 名分支、针对测试的 cache 替换、直接打印预期输出、修改脚本旁路失败。"
+        "规则命中不是作弊结论；结合上下文给 confirmed/suspected/cleared，说明实现方法、影响和依据。\n"
+        "3. 对设计不完整或不合理的问题，必须说明具体模块、性能/正确性影响、真实 path:line；"
+        "若某种不合理设计会对特定测试有利，也要明确写出获益条件。\n"
+        "4. 必要时 compare_with_reference_os(facts.meta.reference_os) / read_file / search_code 验证关键判断\n"
+        "5. 工具调用 ≤5 次；其余判断可使用 findings 已附的代码摘录，但不得跳过任何扫描线索\n\n"
         "**写出顺序**：\n"
         "  a. 详细评判 HTML 片段（不含图表）→ 写到 outputs.content_path\n"
         "  b. 结构化 JSON → 写到 outputs.json_path\n\n"
@@ -449,11 +461,20 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         '    each {"name":"...","score":int,"reason":"..."}],\n'
         '  "highlights":[{"path":"...","quote":"..."}],\n'
         '  "issues":[{"path":"...","severity":"low|medium|high","quote":"..."}],\n'
+        '  "hardcode_reviews":[{\n'
+        '    "signal_id":"原 signal_id；AI 主动发现时用 ai-new-N",\n'
+        '    "category":"四类方法之一","path":"真实相对路径","line":int,\n'
+        '    "status":"confirmed|suspected|cleared",\n'
+        '    "method":"具体作弊或获益方法；cleared 时写未构成原因",\n'
+        '    "reason":"结合代码上下文的中文判断","confidence":0到100,\n'
+        '    "excerpt":"不超过200字的关键代码摘录"\n'
+        '  }],\n'
         '  "one_line":"... ≤40 字"\n'
         '}\n\n'
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
         "写入前做最后一次语言自检：若任何标题、段落、表格单元格或 JSON 描述仍是英文，"
         "先改写成简体中文再调用写入工具；不要输出英文版后等待后续翻译。"
+        "hardcode_reviews 必须覆盖每个原 signal_id；即使结论为 cleared 也不能省略。"
     )
 
 
@@ -463,6 +484,7 @@ def _verdict_fallback() -> dict:
         "dimensions": [],
         "highlights": [],
         "issues":     [],
+        "hardcode_reviews": [],
         "similarity": {},
         "one_line":   "",
         "_error":     "verdict_fallback",
@@ -548,6 +570,52 @@ def _validate_verdict_result(parsed: dict) -> None:
             raise RuntimeError(f"顶层评判 {name} 缺少评分理由")
 
 
+def _validate_hardcode_reviews(parsed: dict, facts: dict | None) -> None:
+    """确保每条规则线索都经过 AI 复核，且结论能回到真实代码位置。"""
+    signals = ((((facts or {}).get("integrity") or {}).get("hardcode") or {})
+               .get("findings") or [])
+    reviews = parsed.get("hardcode_reviews") or []
+    if not isinstance(reviews, list):
+        raise RuntimeError("顶层评判 hardcode_reviews 格式无效")
+
+    by_id: dict[str, dict] = {}
+    for item in reviews:
+        if not isinstance(item, dict):
+            raise RuntimeError("顶层评判包含无效的硬编码复核项")
+        signal_id = str(item.get("signal_id") or "").strip()
+        if not signal_id or signal_id in by_id:
+            raise RuntimeError("硬编码复核项缺少唯一 signal_id")
+        if item.get("status") not in {"confirmed", "suspected", "cleared"}:
+            raise RuntimeError(f"硬编码复核 {signal_id} 的 status 无效")
+        if not str(item.get("path") or "").strip() or not item.get("line"):
+            raise RuntimeError(f"硬编码复核 {signal_id} 缺少真实 path:line")
+        if not str(item.get("method") or "").strip() or not str(item.get("reason") or "").strip():
+            raise RuntimeError(f"硬编码复核 {signal_id} 缺少方法或分析")
+        try:
+            confidence = float(item.get("confidence"))
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"硬编码复核 {signal_id} 缺少置信度") from exc
+        if not 0 <= confidence <= 100:
+            raise RuntimeError(f"硬编码复核 {signal_id} 的置信度不在 0–100")
+        by_id[signal_id] = item
+
+    missing: list[str] = []
+    for signal in signals:
+        signal_id = str(signal.get("signal_id") or (
+            f"{signal.get('path')}:{signal.get('line')}:{signal.get('category')}"
+        ))
+        review = by_id.get(signal_id)
+        if review is None:
+            missing.append(signal_id)
+            continue
+        if str(review.get("path")) != str(signal.get("path")):
+            raise RuntimeError(f"硬编码复核 {signal_id} 的路径与扫描证据不一致")
+        if int(review.get("line") or 0) != int(signal.get("line") or 0):
+            raise RuntimeError(f"硬编码复核 {signal_id} 的行号与扫描证据不一致")
+    if missing:
+        raise RuntimeError("以下硬编码线索未经 AI 复核：" + "、".join(missing[:6]))
+
+
 def _collect_subsys_summaries(tree_root: dict) -> list[dict]:
     out = []
     for c in tree_root.get("children", []):
@@ -605,12 +673,14 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
         task,
         schema_hint='{"score_total":int,"dimensions":[...6 items...],'
                     '"highlights":[...],"issues":[...],'
+                    '"hardcode_reviews":[{signal_id,category,path,line,status,method,reason,confidence,excerpt}],'
                     '"similarity":{reference_os:str,overlap_pct:int,level:str,'
                     'summary:str,borrowed:[...],original:[...]},'
                     '"one_line":str}',
         timeout=600,
     )
     _validate_verdict_result(parsed)
+    _validate_hardcode_reviews(parsed, facts)
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
     # 归一化评分：维度统一到 0–100，总分=维度加权平均（覆盖 LLM 自填值）
     return _normalize_verdict(parsed)

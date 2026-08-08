@@ -434,14 +434,19 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
             ai_detect_path  = report_ai_detect_path,
             functions_db_path = args.db,
         ))
+        comparison_digest_path = Path(res["digest_path"])
 
         # 清理大体积流水线中间产物；保留最终报告与内容寻址模型缓存，使相同代码的
         # 重复测试无需再次请求模型。源码或 prompt 改变时缓存键会自动失效。
         final_html = _finalize_comparison_output(
             out, repo_name, Path(res["html_path"]), res["query_repo_id"],
             filematch_path, recall_path, suspects_path, v2_path, final_path,
+            comparison_digest_path,
             *([ai_detect_path] if args.ai_detect else []),
-            preserve_paths=((ai_detect_path,) if args.ai_detect else ()),
+            preserve_paths=(
+                *((ai_detect_path,) if args.ai_detect else ()),
+                comparison_digest_path,
+            ),
         )
         pipeline_finished_at = datetime.now().astimezone()
         total_elapsed = time.perf_counter() - pipeline_perf_started
