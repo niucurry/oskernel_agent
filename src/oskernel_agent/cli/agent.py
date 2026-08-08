@@ -217,7 +217,7 @@ def main() -> None:
         output_file = str(Path(args.output).resolve())
     else:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        reports_dir = Path(config.data.get("reports_dir", "./data/reports")).resolve()
+        reports_dir = Path(config.data.get("reports_dir", "./data/output")).resolve()
         reports_dir.mkdir(parents=True, exist_ok=True)
         output_file = str(reports_dir / f"{repo_name_a}_{ts}.html")
 

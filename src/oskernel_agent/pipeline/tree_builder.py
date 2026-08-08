@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -330,6 +331,15 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
 
     from .lang_guard import language_output_complete
 
+    def _delivery_complete(parsed: dict) -> bool:
+        if not language_output_complete(parsed):
+            return False
+        try:
+            _validate_subsys_result(parsed, subsys_node["name"])
+        except RuntimeError:
+            return False
+        return True
+
     task = BatchTask(
         batch_id=f"subsys-{_safe_filename_part(subsys_node['name'])}",
         agent_name="os-kernel-subsys",
@@ -342,7 +352,7 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
         fallback=_subsys_fallback(subsys_node),
         repo_path=repo_path,
         enrich=_enrich,
-        cache_validator=language_output_complete,
+        cache_validator=_delivery_complete,
     )
     parsed = run_batch_task(
         task,
@@ -356,7 +366,7 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
 
     # 填子系统字段（子系统/模块不打分，评分只在顶层 VERDICT）
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
-    from finals.readability import concise_module_summary
+    from finals.readability import concise_module_summary, explain_terms_on_first_use
 
     subsys_node["role"]       = parsed.get("role", subsys_node["name"])
     subsys_node["summary"]    = parsed.get("summary", "")
@@ -372,17 +382,62 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
         slot = int(m.get("slot") or i)
         if not (1 <= slot <= MAX_MODULES_PER_SUBSYS):
             continue
+        module_paths = _normalize_adjacent_module_paths(
+            m.get("file_paths", []), repo_path
+        )
+        module_summary = _normalize_module_content_paths(
+            m.get("summary", ""), module_paths
+        )
+        module_content = _normalize_module_content_paths(
+            m.get("content", ""), module_paths
+        )
         subsys_node["children"].append({
             "type":       "module",
-            "name":       m.get("name", f"模块 {slot}"),
-            "path":       f"{subsys_node['path']}/m{slot:03d}",
-            "summary":    m.get("summary", ""),
-            "brief":      concise_module_summary(
-                m.get("summary") or m.get("content") or m.get("name", f"模块 {slot}")
+            "name":       explain_terms_on_first_use(
+                m.get("name", f"模块 {slot}")
             ),
-            "file_paths": m.get("file_paths", []),
-            "content":    m.get("content", ""),
+            "path":       f"{subsys_node['path']}/m{slot:03d}",
+            "summary":    module_summary,
+            "brief":      concise_module_summary(
+                module_summary or module_content or m.get("name", f"模块 {slot}")
+            ),
+            "file_paths": module_paths,
+            "content":    module_content,
         })
+
+
+def _normalize_adjacent_module_paths(paths: list, repo_path: Path) -> list[str]:
+    """把模型省略目录的相邻文件名补成仓库内真实路径。"""
+    normalized: list[str] = []
+    for value in paths or []:
+        raw = str(value or "").strip().replace("\\", "/")
+        if not raw:
+            continue
+        candidate = raw
+        if "/" not in raw and normalized:
+            parent = Path(normalized[-1]).parent
+            adjacent = (parent / raw).as_posix()
+            if (repo_path / Path(adjacent)).exists():
+                candidate = adjacent
+        normalized.append(candidate)
+    return normalized
+
+
+def _normalize_module_content_paths(content: str, paths: list[str]) -> str:
+    """用模块真实文件列表补全正文中的裸 ``文件名:行号``。"""
+    by_name: dict[str, list[str]] = {}
+    for path in paths:
+        by_name.setdefault(Path(path).name, []).append(path)
+    normalized = str(content or "")
+    for name, candidates in by_name.items():
+        if len(candidates) != 1 or "/" not in candidates[0]:
+            continue
+        normalized = re.sub(
+            rf"(?<![/\\A-Za-z0-9_.-]){re.escape(name)}(?=$|[^A-Za-z0-9_.-])",
+            candidates[0],
+            normalized,
+        )
+    return normalized
 
 
 def run_subsys_stage(tree_root: dict, repo_path: Path,
@@ -655,6 +710,16 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
 
     from .lang_guard import language_output_complete
 
+    def _delivery_complete(parsed: dict) -> bool:
+        if not language_output_complete(parsed):
+            return False
+        try:
+            _validate_verdict_result(parsed)
+            _validate_hardcode_reviews(parsed, facts)
+        except RuntimeError:
+            return False
+        return True
+
     task = BatchTask(
         batch_id="verdict",
         agent_name="os-kernel-verdict",
@@ -667,7 +732,7 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
         fallback=_verdict_fallback(),
         repo_path=repo_path or Path("."),
         enrich=_enrich,
-        cache_validator=language_output_complete,
+        cache_validator=_delivery_complete,
     )
     parsed = run_batch_task(
         task,
@@ -733,7 +798,7 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
     """构建完整 tree.json（按 OS 子系统分层）。"""
     repo_path = Path(repo_path).resolve()
     out_dir = output_dir or (
-        Path(config.data.get("reports_dir", "./data/reports")).resolve()
+        Path(config.data.get("reports_dir", "./data/output")).resolve()
         / f"{repo_name}_{ts}_tree"
     )
     out_dir.mkdir(parents=True, exist_ok=True)

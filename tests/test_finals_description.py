@@ -116,6 +116,9 @@ def test_description_html_is_problem_first_and_module_text_is_bounded():
     assert "模块详细证据" not in rendered and "子系统详细证据" not in rendered
     assert all(int(value) <= 300 for value in re.findall(r'data-analysis-chars="(\d+)"', rendered))
     assert "编译日志：失败；运行日志：未提供" in rendered
+    assert "修改测试脚本绕过失败用例" in rendered
+    assert "展开逐条硬编码复核（1 条）" in rendered
+    assert "src/main.c:7" in rendered and "确认问题" in rendered
     assert "生成流程不包含人工编辑步骤" in rendered
     assert "虚拟文件系统（VFS）" in rendered
     assert '<section id="evaluation"' in rendered

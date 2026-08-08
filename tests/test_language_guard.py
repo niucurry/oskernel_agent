@@ -29,6 +29,14 @@ def test_chinese_sentence_may_keep_technical_terms_in_english():
     assert lang_guard.needs_translation(html) is False
 
 
+def test_bare_paths_and_identifier_lists_are_not_english_prose():
+    html = (
+        "<table><tr><td>os/src/fs/vfs.rs, fs_info.rs, mount.rs</td></tr></table>"
+        "<p>支持 epoll 系列(epoll_create1/ctl/pwait)、poll(ppoll)、select(pselect6)。</p>"
+    )
+    assert lang_guard.needs_translation(html) is False
+
+
 def test_english_generated_module_title_is_not_cache_eligible():
     payload = {
         "summary": "本子系统负责进程生命周期管理。",

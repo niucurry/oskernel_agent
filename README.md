@@ -216,7 +216,7 @@ top-k 的补充通道，当前保证全局汉明距离不超过 15 的归一化�
 文件、行号、函数名和子系统，方便评委定位核查，同时明确不能把这份清单直接当作原创证明。
 
 ```bash
-# 全量检查历史库与 reports_by_work_id；退出码 0 才表示全部有效
+# 全量检查历史库与 data/output；退出码 0 才表示全部有效
 python -m src.report audit
 # 详细清单：data/output/recall_completeness_audit.json
 ```
@@ -295,7 +295,7 @@ PYTHON_BIN=../.venv/Scripts/python.exe   # Windows 可选；不填会自动找�
 - `队伍名称`
 - `仓库地址`
 
-导入后会根据仓库地址生成稳定的 `repo_xxxxxxxx` ID，并写入 `frontend/data/app.sqlite`。如果 `frontend/reports/<repo_id>/` 下已有报告，后端会自动同步并标记为可用。
+导入后会根据仓库地址生成稳定的 `repo_xxxxxxxx` ID，并写入 `frontend/data/app.sqlite`。如果 `data/output/<repo_id>/` 下已有报告，后端会自动同步并标记为可用。
 
 ### 生成报告
 
@@ -311,16 +311,15 @@ PYTHON_BIN=../.venv/Scripts/python.exe   # Windows 可选；不填会自动找�
 ### 运行产物目录
 
 - `frontend/data/app.sqlite`：前端本地数据库。
-- `frontend/reports/<repo_id>/`：每个作品的报告目录。
-- `frontend/reports/<repo_id>/_repos/`：前端流水线克隆的新作品仓库。
-- `frontend/reports/<repo_id>/summary.pdf`：一页评审摘要入口。
-- `frontend/reports/<repo_id>/description.html`：描述报告入口。
-- `frontend/reports/<repo_id>/development.html`：开发过程报告入口。
-- `frontend/reports/<repo_id>/development.ai.json`：开发过程报告的 AI 原始结构化结论，供审计使用，不作为独立报告展示。
-- `frontend/reports/<repo_id>/comparison.html`：对比分析报告入口。
-- `frontend/reports/<repo_id>/*.digest.json`：生成摘要所需的结构化事实，不作为独立报告展示。
+- `data/output/<repo_id>/`：每个作品唯一的正式报告目录。
+- `data/output/<repo_id>/summary.pdf`：一页评审摘要入口。
+- `data/output/<repo_id>/description.html`：描述报告入口。
+- `data/output/<repo_id>/development.html`：开发过程报告入口。
+- `data/output/<repo_id>/comparison.html`：对比分析报告入口。
 
-这些产物默认不提交到 Git。需要迁移或备份时，直接拷贝 `frontend/data/` 和 `frontend/reports/` 即可。
+生成期间会临时产生仓库克隆、结构化摘要、AI 原始结果和工作目录；任务成功后自动清理，正式报告目录最终只保留以上四个文件。若只生成部分报告，也只保留已生成的正式 HTML/PDF，不保留中间文件。
+
+这些产物位于 `.gitignore` 已覆盖的 `data/` 目录，不提交到 Git。需要迁移或备份时，拷贝 `frontend/data/` 和 `data/output/` 即可。
 
 ### 常用调参
 
@@ -370,8 +369,8 @@ FINALS_MIN_COMMITS=
 
 ```bash
 python run_batch.py
-# → <队伍编号>_summary.pdf
-# → <队伍编号>_{description,development,comparison}.html
+# → data/output/<队伍编号>/summary.pdf
+# → data/output/<队伍编号>/{description,development,comparison}.html
 ```
 
 - 逐作品串行，四份报告及摘要数据均已存在则跳过（**断点续跑**）；

@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { findPython, PROJECT_ROOT } from "./config.js";
 import { nowIso } from "./db.js";
 import {
+  cleanupReportDirectory,
   findExistingReports,
   hasReportKinds,
   normalizeReportKinds,
@@ -199,6 +200,7 @@ export class PipelineQueue {
     const existing = await syncExistingReports(this.db, repoId);
     const id = jobId();
     if (hasReportKinds(existing, requestedKinds)) {
+      await cleanupReportDirectory(repoId);
       await this.createJob(id, repoId, "skipped", `所选报告已存在，直接使用本地报告：${requestedKinds.join(", ")}`);
       return this.db.get("SELECT * FROM jobs WHERE id = ?", [id]);
     }
@@ -447,6 +449,7 @@ export class PipelineQueue {
     const missingKinds = ["comparison", "description", "development", "summary"]
       .filter((kind) => missingSet.has(kind));
     if (!missingKinds.length) {
+      await cleanupReportDirectory(repo.id);
       await this.updateJob(id, { status: "skipped", log: "所选报告已存在，直接使用本地报告。", finished_at: nowIso() });
       return;
     }
@@ -515,15 +518,18 @@ export class PipelineQueue {
         cloneTarget = path.join(reposDir, `${repoName}_${Date.now()}`);
       }
       const cloneArgs = [
-        "clone",
-        "-c",
-        "core.protectNTFS=false",
-        "--depth",
-        "200",
+        "-X",
+        "utf8",
+        "-m",
+        "src.ingest.clone_cli",
+        "--repo",
         repo.repo_url,
-        cloneTarget
+        "--dest",
+        cloneTarget,
+        "--depth",
+        "200"
       ];
-      const result = await this.runProcess(id, "clone", "git", cloneArgs, log, commandLines);
+      const result = await this.runProcess(id, "clone", python, cloneArgs, log, commandLines);
       log = result.log;
       commandLines = result.commandLines;
 
@@ -662,6 +668,7 @@ export class PipelineQueue {
       return;
     }
 
+    await cleanupReportDirectory(repo.id);
     await this.updateJob(id, { status: "succeeded", log, finished_at: nowIso() });
   }
 }

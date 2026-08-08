@@ -18,7 +18,8 @@ else:
     _cfg = {
         "api": {"key": "", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
         "data": {"repos_dir": "./data/historical_repos",
-                 "metadata_dir": "./data/metadata", "cache_dir": "./data/cache"},
+                 "metadata_dir": "./data/metadata", "cache_dir": "./data/cache",
+                 "reports_dir": "./data/output"},
         "target": {"repo_id": ""},
         "engine": {"rust_analyzer_timeout": 120, "clangd_timeout": 60,
                    "max_call_depth": 3, "max_steps": 30,

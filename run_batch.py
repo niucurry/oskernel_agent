@@ -2,10 +2,10 @@
 """批量为 作品.txt 里的作品生成决赛四件套。
 
 每个作品的四份报告归档到 data/output/<队伍编号>/：
-    <队伍编号>_summary.pdf
-    <队伍编号>_description.html
-    <队伍编号>_development.html
-    <队伍编号>_comparison.html
+    summary.pdf
+    description.html
+    development.html
+    comparison.html
 
 特性：
 - 可断点续跑：四份报告及摘要所需数据都已存在则跳过该作品。
@@ -23,6 +23,9 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+from finals.cleanup import cleanup_report_directory, remove_directory
+from src.ingest.cloner import clone_repo
 
 ROOT = Path(__file__).resolve().parent
 # 跨平台定位 venv 解释器：优先当前解释器（激活 venv 后即为 venv python），
@@ -177,7 +180,6 @@ def quota_exhausted(body: str) -> bool:
     return any(tok in body for tok in QUOTA_TOKENS)
 
 
-REPORTS_BAK = LOGDIR / "reports_bak"      # 报告持久备份（防再次误删/清盘丢失）
 MIN_FREE_GB = 3.0                         # 剩余空间低于此值即中止，避免撑爆磁盘
 
 
@@ -189,35 +191,39 @@ def free_gb() -> float:
     return shutil.disk_usage(ROOT).free / (1024 ** 3)
 
 
-def backup_reports(team_id: str, final_dir: Path) -> None:
-    """把生成好的报告和摘要数据立刻拷到持久备份区。"""
-    REPORTS_BAK.mkdir(parents=True, exist_ok=True)
-    names = [
-        f"{team_id}_summary.pdf",
-        f"{team_id}_description.html",
-        f"{team_id}_development.html",
-        f"{team_id}_development.ai.json",
-        f"{team_id}_comparison.html",
-        f"{team_id}_description.digest.json",
-        f"{team_id}_development.digest.json",
-        f"{team_id}_comparison.digest.json",
-    ]
-    for name in names:
-        src = final_dir / name
-        if src.exists():
-            try:
-                shutil.copy2(src, REPORTS_BAK / name)
-            except OSError as e:
-                log(f"  备份 {name} 失败：{e}")
+def deliverable_paths(team_id: str, final_dir: Path) -> tuple[Path, ...]:
+    """决赛最终交付物；结构化数据和模型工作文件均不是报告。"""
+    return (
+        final_dir / "summary.pdf",
+        final_dir / "description.html",
+        final_dir / "development.html",
+        final_dir / "comparison.html",
+    )
 
 
-def cleanup_team(repo_name: str) -> None:
+def cleanup_final_dir(team_id: str, final_dir: Path) -> None:
+    """四份报告齐全后删除该队伍目录中的所有中间产物。"""
+    resolved = final_dir.resolve()
+    if resolved.name != team_id:
+        raise ValueError(f"拒绝清理非队伍输出目录：{resolved}")
+    cleanup_report_directory(
+        resolved,
+        (path.name for path in deliverable_paths(team_id, resolved)),
+        output_root=OUT,
+    )
+
+
+def cleanup_team(repo_name: str, *, final_dir: Path | None = None) -> None:
     """删掉该队伍的克隆 + 遗留中间产物，控制峰值磁盘占用。"""
-    shutil.rmtree(REPOS / repo_name, ignore_errors=True)
+    remove_directory(REPOS / repo_name)
     for p in OUT.glob(f"{repo_name}_*"):        # 遗留的 *_recall/_suspects*.json 等
         if p.is_file():
             p.unlink(missing_ok=True)
-    shutil.rmtree(OUT / repo_name, ignore_errors=True)  # 流水线归档子目录（HTML 已入 team 目录）
+    pipeline_dir = OUT / repo_name
+    # 仓库名可能与队伍编号相同，此时 pipeline_dir 就是正式报告目录。
+    # 正式目录已由 cleanup_final_dir 精确清理，绝不能再次整目录删除。
+    if final_dir is None or pipeline_dir.resolve() != final_dir.resolve():
+        remove_directory(pipeline_dir)
 
 
 _SRC_EXTS = {".rs", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp",
@@ -246,19 +252,10 @@ def ensure_clone(url: str, repo_name: str, retries: int = 4) -> bool:
         return True
     REPOS.mkdir(parents=True, exist_ok=True)
     for i in range(1, retries + 1):
-        if dest.exists():
-            shutil.rmtree(dest, ignore_errors=True)
         try:
-            subprocess.run(
-                ["git",
-                 # 传输低于 1KB/s 持续 60s 才判卡住（放宽，避免大仓库被误中止）
-                 "-c", "http.lowSpeedLimit=1024", "-c", "http.lowSpeedTime=60",
-                 "clone", "-c", "core.protectNTFS=false", "--depth", "200",
-                 url + ".git", str(dest)],
-                cwd=ROOT, check=True, capture_output=True, text=True, timeout=600,
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-            log(f"  克隆失败（第 {i}/{retries} 次）：{getattr(e, 'stderr', e) or e}")
+            clone_repo(url + ".git", dest, depth=200)
+        except Exception as exc:  # noqa: BLE001 - 网络、Git 与文件系统错误均可重试
+            log(f"  克隆失败（第 {i}/{retries} 次）：{exc}")
             time.sleep(min(10 * i, 40))
             continue
         # git 成功还不够：校验工作区真有源码，否则视为截断，重试
@@ -280,8 +277,8 @@ def do_comparison(team_id: str, url: str, final_dir: Path, logfile: Path) -> tup
     ok, body = run_step("对比报告", cmd, logfile, timeout=cmp_timeout)
     # 归档 HTML：pipeline 落到 data/output/<repo_name>/<repo_name>_comparison.html
     src_html = OUT / repo_name / f"{repo_name}_comparison.html"
-    dst = final_dir / f"{team_id}_comparison.html"
-    dst_digest = final_dir / f"{team_id}_comparison.digest.json"
+    dst = final_dir / "comparison.html"
+    dst_digest = final_dir / "comparison.digest.json"
     if src_html.exists():
         shutil.copy2(src_html, dst)
         src_digest = OUT / repo_name / f"{repo_name}_comparison.digest.json"
@@ -302,7 +299,7 @@ def do_comparison(team_id: str, url: str, final_dir: Path, logfile: Path) -> tup
 def do_description(team_id: str, url: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
     repo_name = fork_to_repo_name(url)
     cloned = REPOS / repo_name  # 对比报告已克隆
-    dst = final_dir / f"{team_id}_description.html"
+    dst = final_dir / "description.html"
     if cloned.exists():
         src_arg = ["--repo-path", str(cloned)]
     else:
@@ -316,7 +313,7 @@ def do_description(team_id: str, url: str, final_dir: Path, logfile: Path) -> tu
 def do_development(team_id: str, url: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
     repo_name = fork_to_repo_name(url)
     cloned = REPOS / repo_name
-    dst = final_dir / f"{team_id}_development.html"
+    dst = final_dir / "development.html"
     cmd = [
         PY, "-m", "finals", "development",
         "--repo", str(cloned), "--repo-id", team_id, "--output", str(dst),
@@ -329,12 +326,12 @@ def do_development(team_id: str, url: str, final_dir: Path, logfile: Path) -> tu
 
 
 def do_summary(team_id: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
-    dst = final_dir / f"{team_id}_summary.pdf"
+    dst = final_dir / "summary.pdf"
     cmd = [
         PY, "-m", "finals", "summary",
-        "--description-digest", str(final_dir / f"{team_id}_description.digest.json"),
-        "--development-digest", str(final_dir / f"{team_id}_development.digest.json"),
-        "--comparison-digest", str(final_dir / f"{team_id}_comparison.digest.json"),
+        "--description-digest", str(final_dir / "description.digest.json"),
+        "--development-digest", str(final_dir / "development.digest.json"),
+        "--comparison-digest", str(final_dir / "comparison.digest.json"),
         "--repo-id", team_id, "--output", str(dst),
     ]
     ok, body = run_step("一页摘要", cmd, logfile, timeout=180)
@@ -363,21 +360,20 @@ def main() -> None:
         url = entry["Fork地址"]
         final_dir = OUT / team_id
         final_dir.mkdir(parents=True, exist_ok=True)
-        cmp_html = final_dir / f"{team_id}_comparison.html"
-        cmp_digest = final_dir / f"{team_id}_comparison.digest.json"
-        desc_html = final_dir / f"{team_id}_description.html"
-        desc_digest = final_dir / f"{team_id}_description.digest.json"
-        dev_html = final_dir / f"{team_id}_development.html"
-        dev_digest = final_dir / f"{team_id}_development.digest.json"
-        summary_pdf = final_dir / f"{team_id}_summary.pdf"
+        cmp_html = final_dir / "comparison.html"
+        cmp_digest = final_dir / "comparison.digest.json"
+        desc_html = final_dir / "description.html"
+        desc_digest = final_dir / "description.digest.json"
+        dev_html = final_dir / "development.html"
+        dev_digest = final_dir / "development.digest.json"
+        summary_pdf = final_dir / "summary.pdf"
 
         tstate = st["teams"].setdefault(team_id, {})
 
-        expected = (
-            cmp_html, cmp_digest, desc_html, desc_digest,
-            dev_html, dev_digest, summary_pdf,
-        )
-        if all(path.exists() for path in expected):
+        deliverables = deliverable_paths(team_id, final_dir)
+        if all(path.exists() for path in deliverables):
+            cleanup_final_dir(team_id, final_dir)
+            cleanup_team(fork_to_repo_name(url), final_dir=final_dir)
             log(f"[{idx}/{total}] {team_id} 已完成，跳过")
             for kind in ("comparison", "description", "development", "summary"):
                 tstate[kind] = "done"
@@ -394,7 +390,7 @@ def main() -> None:
 
         # ---- 预克隆（带重试）：让对比、描述、开发过程三步复用同一份仓库 ----
         repo_name = fork_to_repo_name(url)
-        need_any = any(not path.exists() for path in expected)
+        need_any = any(not path.exists() for path in deliverables)
         if need_any and not ensure_clone(url, repo_name):
             log(f"  克隆最终失败，跳过 {team_id}（下次重跑会再试）")
             tstate["comparison"] = "done" if cmp_html.exists() and cmp_digest.exists() else "failed"
@@ -460,9 +456,10 @@ def main() -> None:
             tstate[kind] = "done" if ready else "failed"
         save_state(st)
 
-        # ---- 立即备份成果 + 清理克隆/中间产物（省磁盘、防丢失）----
-        backup_reports(team_id, final_dir)
-        cleanup_team(repo_name)
+        # ---- 成功后正式目录只保留四份报告，再清理克隆/流水线中间目录 ----
+        if all(readiness.values()):
+            cleanup_final_dir(team_id, final_dir)
+        cleanup_team(repo_name, final_dir=final_dir)
 
         log(f"[{idx}/{total}] {team_id} 处理完毕 "
             f"(summary={tstate.get('summary')}, desc={tstate.get('description')}, "

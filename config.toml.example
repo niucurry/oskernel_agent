@@ -8,6 +8,7 @@ base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 repos_dir    = "./data/historical_repos"
 metadata_dir = "./data/metadata"
 cache_dir    = "./data/cache"   # 持久化符号索引 / FTS5 数据库（按仓库 hash 分文件）
+reports_dir  = "./data/output"  # 四份正式报告统一输出到 data/output/<作品编号>/
 
 [target]
 # 可选：填写后 python agent.py 不带参数时使用此仓库；留空则要求命令行传入 --repo-id / --repo-path / --url

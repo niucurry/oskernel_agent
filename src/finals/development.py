@@ -120,6 +120,24 @@ def _short_text(value: object, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
+def _humanize_ai_text(value: object, limit: int) -> str:
+    """把结构化状态码改成评委可直接阅读的中文，不改变分析判断。"""
+    text = _short_text(value, limit)
+    text = re.sub(r"(?<![A-Za-z])dismiss(?![A-Za-z])", "排除", text, flags=re.I)
+    text = re.sub(r"(?<![A-Za-z])report(?![A-Za-z])", "列为问题", text, flags=re.I)
+    return text
+
+
+def _remove_repeated_stage_facts(value: str) -> str:
+    """删除 AI 结论开头会由程序紧接着复算展示的日期和提交次数。"""
+    return re.sub(
+        r"^(?:阶段覆盖\s*)?\d{4}-\d{2}-\d{2}\s*(?:至|到|-)\s*"
+        r"\d{4}-\d{2}-\d{2}\s*[，,；;]?\s*共\s*(?:约\s*)?\d+\s*次提交\s*[。；;]?\s*",
+        "",
+        value,
+    ).strip()
+
+
 def _top_commit_files(commit: dict, limit: int = 4) -> list[dict]:
     rows = []
     for item in commit.get("files") or []:
@@ -245,11 +263,18 @@ def _resolve_sha(value: object, commits: list[dict]) -> tuple[str, int]:
     raw = str(value or "").strip().lower()
     if len(raw) < 7 or not re.fullmatch(r"[0-9a-f]+", raw):
         raise RuntimeError(f"AI 返回了无效提交标识：{value!r}")
-    matches = [
-        (str(commit["sha"]), index)
-        for index, commit in enumerate(commits)
-        if str(commit["sha"]).lower().startswith(raw)
-    ]
+    def find(prefix: str) -> list[tuple[str, int]]:
+        return [
+            (str(commit["sha"]), index)
+            for index, commit in enumerate(commits)
+            if str(commit["sha"]).lower().startswith(prefix)
+        ]
+
+    matches = find(raw)
+    # timeline 明确只提供 12 位 SHA。模型偶尔会擅自补齐不存在的后缀；仅当原始
+    # 12 位前缀能唯一映射到真实提交时，丢弃补齐部分并使用 Git 中的完整 SHA。
+    if not matches and len(raw) > 12:
+        matches = find(raw[:12])
     if len(matches) != 1:
         raise RuntimeError(f"AI 返回的提交标识不存在或不唯一：{raw}")
     return matches[0]
@@ -273,7 +298,7 @@ def validate_ai_development_result(
     """拒绝缺证据、虚构提交或时间范围不连续的 AI 输出。"""
     if not isinstance(result, dict) or result.get("_error"):
         raise RuntimeError("开发过程 AI 分析失败，拒绝生成确定性模板报告")
-    conclusion = _short_text(result.get("conclusion"), 240)
+    conclusion = _humanize_ai_text(result.get("conclusion"), 240)
     if not conclusion:
         raise RuntimeError("开发过程 AI 分析缺少总体结论")
 
@@ -300,8 +325,8 @@ def validate_ai_development_result(
             raise RuntimeError(f"问题候选 {candidate_id} 的 status 无效")
         if candidate.get("must_report") and status != "report":
             raise RuntimeError(f"客观问题 {candidate_id} 不允许被 AI 忽略")
-        title = _short_text(issue.get("title"), 80)
-        analysis = _short_text(issue.get("analysis"), 180)
+        title = _humanize_ai_text(issue.get("title"), 80)
+        analysis = _humanize_ai_text(issue.get("analysis"), 180)
         if not title or not analysis:
             raise RuntimeError(f"问题候选 {candidate_id} 缺少标题或分析")
         severity = str(issue.get("severity") or "")
@@ -343,51 +368,65 @@ def validate_ai_development_result(
     if not commits and raw_stages:
         raise RuntimeError("没有提交时 AI 不得生成开发阶段")
 
-    stages: list[dict] = []
-    expected_start = 0
+    prepared_stages: list[dict] = []
+    previous_start = -1
     for number, stage in enumerate(raw_stages, start=1):
         if not isinstance(stage, dict):
             raise RuntimeError(f"第 {number} 个开发阶段不是对象")
-        name = _short_text(stage.get("name"), 60)
-        stage_conclusion = _short_text(stage.get("conclusion"), 180)
-        reason = _short_text(stage.get("reason"), 180)
+        name = _humanize_ai_text(stage.get("name"), 60)
+        name = re.sub(r"^阶段\s*[一二三四五六七八九十0-9]+\s*[：:、.\-]?\s*", "", name)
+        stage_conclusion = _humanize_ai_text(stage.get("conclusion"), 180)
+        stage_conclusion = _remove_repeated_stage_facts(stage_conclusion)
+        reason = _humanize_ai_text(stage.get("reason"), 180)
         if not name or not stage_conclusion or not reason:
             raise RuntimeError(f"第 {number} 个开发阶段缺少名称、结论或划分依据")
         start_sha, start_index = _resolve_sha(stage.get("start_sha"), commits)
-        end_sha, end_index = _resolve_sha(stage.get("end_sha"), commits)
-        if start_index != expected_start or end_index < start_index:
-            raise RuntimeError(f"第 {number} 个开发阶段与前一阶段存在空缺、重叠或倒序")
+        if number == 1 and start_index != 0:
+            raise RuntimeError("第 1 个开发阶段必须从首个可见提交开始")
+        if start_index <= previous_start:
+            raise RuntimeError("AI 给出的开发阶段起点必须严格递增")
         confidence = _confidence(stage.get("confidence"), f"第 {number} 个开发阶段")
-        key_shas: list[str] = []
         raw_keys = stage.get("key_shas") or []
-        if not isinstance(raw_keys, list) or not 1 <= len(raw_keys) <= _MAX_KEY_COMMITS:
+        if not isinstance(raw_keys, list) or not raw_keys:
             raise RuntimeError(
                 f"第 {number} 个开发阶段必须提供 1 至 {_MAX_KEY_COMMITS} 个关键提交"
             )
+        key_candidates: list[tuple[str, int]] = []
         for raw_sha in raw_keys:
             sha, commit_index = _resolve_sha(raw_sha, commits)
-            if not start_index <= commit_index <= end_index:
-                raise RuntimeError(f"第 {number} 个开发阶段的关键提交超出阶段范围")
-            if sha not in key_shas:
-                key_shas.append(sha)
-        if not key_shas:
-            raise RuntimeError(f"第 {number} 个开发阶段没有有效关键提交")
-        stages.append(
+            if not any(item[0] == sha for item in key_candidates):
+                key_candidates.append((sha, commit_index))
+        prepared_stages.append(
             {
                 "name": name,
                 "conclusion": stage_conclusion,
                 "reason": reason,
                 "confidence": confidence,
                 "start_sha": start_sha,
-                "end_sha": end_sha,
                 "start_index": start_index,
-                "end_index": end_index,
-                "key_shas": key_shas,
+                "key_candidates": key_candidates,
             }
         )
-        expected_start = end_index + 1
-    if commits and expected_start != len(commits):
-        raise RuntimeError("AI 的开发阶段没有覆盖全部可见提交")
+        previous_start = start_index
+
+    stages: list[dict] = []
+    for index, stage in enumerate(prepared_stages):
+        end_index = (
+            prepared_stages[index + 1]["start_index"] - 1
+            if index + 1 < len(prepared_stages)
+            else len(commits) - 1
+        )
+        key_shas = [
+            sha
+            for sha, commit_index in stage.pop("key_candidates")
+            if stage["start_index"] <= commit_index <= end_index
+        ][:_MAX_KEY_COMMITS]
+        if not key_shas:
+            raise RuntimeError(f"第 {index + 1} 个开发阶段没有范围内的有效关键提交")
+        stage["end_index"] = end_index
+        stage["end_sha"] = str(commits[end_index]["sha"])
+        stage["key_shas"] = key_shas
+        stages.append(stage)
 
     return {"conclusion": conclusion, "issues": reviews, "stages": stages}
 
@@ -493,7 +532,7 @@ def analyze_history(
                 name=f"阶段 {stage['number']}：{stage['name']}",
                 summary=concise_module_summary(
                     f"{stage['conclusion']} {stage['start']} 至 {stage['end']}，"
-                    f"{stage['commit_count']} 次提交，变更 {stage['loc']} LOC。"
+                    f"{stage['commit_count']} 次提交，代码变更行数（LOC）为 {stage['loc']}。"
                 ),
                 evidence_count=len(stage["key_commits"]),
             )
@@ -643,27 +682,42 @@ def run_ai_development_analysis(
     repo_id: str,
     evidence: dict,
     output_path: Path,
+    commits: list[dict] | None = None,
 ) -> dict:
     """要求专用 AI agent 只基于给定 Git 证据输出结构化判断。"""
     ai_path = output_path.with_suffix(".ai.json")
+    evidence_path = output_path.with_suffix(".evidence.json")
+    evidence_path.write_text(
+        json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     schema_hint = (
         '{"conclusion":str,"issues":[{"candidate_id":str,'
         '"status":"report|dismiss","title":str,"analysis":str,'
         '"severity":"info|low|medium|high|critical","confidence":0-100,'
         '"commit_shas":[str]}],"stages":[{"name":str,"conclusion":str,'
-        '"reason":str,"confidence":0-100,"start_sha":str,"end_sha":str,'
+        '"reason":str,"confidence":0-100,"start_sha":str,'
         '"key_shas":[str]}]}'
     )
     request = (
-        "请分析下面的 Git 证据，逐一复核问题候选，并按时间连续区间归纳开发阶段。"
+        "请分析随消息附加的 development evidence JSON，逐一复核问题候选，并按时间连续区间归纳开发阶段。"
         "只能使用输入事实，不得编造提交、日期、LOC 或文件。所有候选必须恰好复核一次；"
         "阶段必须覆盖全部 timeline，不能重叠或留空。\n"
         f"repo_id: {repo_id}\n"
-        f"evidence_json: {json.dumps(evidence, ensure_ascii=False, separators=(',', ':'))}\n"
+        f"evidence_file: {evidence_path.resolve()}\n"
         f"expected_schema: {schema_hint}\n"
         f"output_path: {ai_path.resolve()}\n"
         "只调用 write_report；content 为合法 JSON 字符串，output_path 必须使用上面的绝对路径。"
     )
+
+    def _delivery_complete(value: dict) -> bool:
+        if commits is None:
+            return True
+        try:
+            validate_ai_development_result(value, evidence, commits)
+        except RuntimeError:
+            return False
+        return True
+
     task = BatchTask(
         batch_id=f"development-{re.sub(r'[^A-Za-z0-9_.-]+', '-', repo_id)[:80]}",
         agent_name="os-kernel-development",
@@ -674,6 +728,8 @@ def run_ai_development_analysis(
         cache_enabled=False,
         fallback={},
         repo_path=repo,
+        input_files=(evidence_path,),
+        cache_validator=_delivery_complete,
     )
     return run_batch_task(task, schema_hint=schema_hint, timeout=600)
 
@@ -693,7 +749,7 @@ def generate_development_report(
         commits, shallow=shallow, min_commits=min_commits
     )
     ai_result = run_ai_development_analysis(
-        repo, repo_id or repo.name, evidence, output
+        repo, repo_id or repo.name, evidence, output, commits
     )
     analysis = analyze_history(
         repo_id or repo.name,
@@ -712,6 +768,7 @@ def generate_development_report(
         "html_path": str(output),
         "digest_path": str(digest_path),
         "ai_path": str(output.with_suffix(".ai.json")),
+        "evidence_path": str(output.with_suffix(".evidence.json")),
         "commit_count": len(commits),
         "stage_count": len(analysis["stages"]),
     }

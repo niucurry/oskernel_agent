@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import io
 import os
+import re
 from pathlib import Path
 
 from pypdf import PdfReader
@@ -230,6 +231,14 @@ def _styles(font: str, bold: str, *, detail_limit: int) -> dict[str, ParagraphSt
     }
 
 
+def _has_distinct_detail(title: str, detail: str) -> bool:
+    """Avoid repeating a finding title as an identical second line."""
+    def normalized(value: str) -> str:
+        return re.sub(r"[\s，。；：、,.!?！？:;]+", "", value).casefold()
+
+    return bool(normalized(detail)) and normalized(detail) != normalized(title)
+
+
 def _story(
     digests: dict[str, ReportDigest],
     repo_id: str,
@@ -266,15 +275,17 @@ def _story(
     for index, finding in enumerate(findings, start=1):
         detail = clip_at_sentence(explain_terms_on_first_use(finding.detail), detail_limit)
         title = explain_terms_on_first_use(finding.title)
-        story.append(KeepTogether([
+        blocks = [
             Paragraph(
                 f'<font color="{severity_color[finding.severity]}"><b>{index}. {_safe(title)}</b></font>'
                 f'　<font color="#667085">置信度 {round(finding.confidence * 100)}%</font>',
                 style["body"],
             ),
-            Paragraph(_safe(detail), style["body"]),
-            Spacer(1, 3),
-        ]))
+        ]
+        if _has_distinct_detail(title, detail):
+            blocks.append(Paragraph(_safe(detail), style["body"]))
+        blocks.append(Spacer(1, 3))
+        story.append(KeepTogether(blocks))
 
     story.extend([Paragraph("三份报告速览", style["section"])])
     rows = [
