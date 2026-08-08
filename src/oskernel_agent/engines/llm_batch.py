@@ -63,6 +63,7 @@ def _find_opencode() -> str:
 
 _OPENCODE = _find_opencode()
 _DEFAULT_CONCURRENCY = 4
+_WINDOWS_SAFE_MESSAGE_LIMIT = 20_000
 _OPENCODE_RUN_LOCK = threading.Lock()
 _OPENCODE_ISOLATION_RUN_ID = f"{os.getpid()}-{uuid.uuid4().hex}"
 _OPENCODE_DATA_ROOT: Path | None = None
@@ -294,6 +295,8 @@ class BatchTask:
     # 缓存准入校验。用于拒绝结构合法但不满足交付约束（如残留英文正文）的结果；
     # 同时会校验旧缓存，避免一次异常输出被长期复用。
     cache_validator: Callable[[dict], bool] | None = None
+    # 大体积只读输入通过 OpenCode --file 附加，避免 Windows 命令行 32767 字符上限。
+    input_files: tuple[Path, ...] = ()
 
 
 _print_lock = threading.Lock()
@@ -315,6 +318,31 @@ def _tail_text(text: str, limit: int = 2000) -> str:
 def _opencode_message(text: str) -> str:
     # OpenCode 1.17.x on Windows drops or truncates multiline positional messages.
     return re.sub(r"[\r\n]+", " ", text).strip()
+
+
+def _opencode_command(task: BatchTask) -> list[str]:
+    """构造不会超过 Windows CreateProcess 长度上限的 OpenCode 命令。"""
+    message = _opencode_message(task.user_request)
+    input_files = [Path(path).resolve() for path in task.input_files]
+    if len(message) > _WINDOWS_SAFE_MESSAGE_LIMIT:
+        safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", task.batch_id)[:80] or "batch"
+        prompt_path = task.output_path.parent / f".{safe_id}.prompt.txt"
+        prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        prompt_path.write_text(task.user_request, encoding="utf-8")
+        input_files.append(prompt_path.resolve())
+        message = (
+            "任务说明过长，已作为文本附件随消息提供。请完整读取附件中的任务说明和输入数据，"
+            "严格按其中要求调用 write_report，不得省略任何部分。"
+        )
+        _log(
+            f"[llm_batch] {task.batch_id} 超长任务改用附件："
+            f"{len(task.user_request)} 字符"
+        )
+
+    cmd = [_OPENCODE, "run", "--agent", task.agent_name, message]
+    for input_file in input_files:
+        cmd.extend(["--file", str(input_file)])
+    return cmd
 
 
 def _iter_json_objects(text: str):
@@ -455,11 +483,7 @@ def _materialize_stdout_writes(task: BatchTask, stdout: str) -> bool:
 
 def _run_opencode_once(task: BatchTask, timeout: int) -> tuple[bool, str]:
     """跑一次 OpenCode 子进程。返回 (是否产生了 output_path 文件, stdout)。"""
-    cmd = [
-        _OPENCODE, "run",
-        "--agent", task.agent_name,
-        _opencode_message(task.user_request),
-    ]
+    cmd = _opencode_command(task)
     try:
         with _opencode_run_guard():
             proc = subprocess.run(
@@ -575,12 +599,29 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
         parsed = dict(task.fallback)
         parsed["_error"] = "llm_batch_failed"
 
-    # 增补正文后再入缓存：保证缓存命中时正文（含图表）不丢失
-    if task.enrich is not None:
+    def enrich_result(value: dict) -> dict:
+        if task.enrich is None:
+            return value
         try:
-            parsed = task.enrich(parsed)
+            return task.enrich(value)
         except Exception as e:
             _log(f"[llm_batch] {task.batch_id} enrich 失败：{e}")
+            return value
+
+    # 增补正文后再做交付校验：保证缺正文、残留英文等语义不完整结果也会自动重试。
+    parsed = enrich_result(parsed)
+    delivery_valid = task.cache_validator is None or task.cache_validator(parsed)
+    if not parsed.get("_error") and not delivery_valid:
+        _log(f"[llm_batch] {task.batch_id} 未通过交付校验，重试 1 次")
+        if task.output_path.exists():
+            try:
+                task.output_path.unlink()
+            except OSError:
+                pass
+        ok2, _ = _run_opencode_once(task, timeout)
+        retried = _parse_json_file(task.output_path) if ok2 else None
+        if retried is not None:
+            parsed = enrich_result(retried)
 
     # 只缓存成功结果：带 _error 的兜底**不写缓存**，否则一次瞬时失败（超时/限流/
     # 子进程异常）会被永久冻住，后续每次跑都命中空结果而不再重试。不缓存则下次自愈。

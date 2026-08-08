@@ -8,6 +8,7 @@ from finals.development import (
     analyze_history,
     build_development_evidence,
     render_development_html,
+    run_ai_development_analysis,
     validate_ai_development_result,
 )
 
@@ -125,9 +126,9 @@ def test_ai_stage_ranges_must_cover_real_commits_without_gaps():
     commits = _history()
     evidence = build_development_evidence(commits)
     result = _ai_result(commits, evidence)
-    result["stages"][1]["start_sha"] = commits[2]["sha"][:12]
+    result["stages"][1]["start_sha"] = commits[0]["sha"][:12]
 
-    with pytest.raises(RuntimeError, match="空缺、重叠或倒序"):
+    with pytest.raises(RuntimeError, match="起点必须严格递增"):
         validate_ai_development_result(result, evidence, commits)
 
 
@@ -139,6 +140,27 @@ def test_ai_cannot_reference_a_fabricated_commit():
 
     with pytest.raises(RuntimeError, match="不存在或不唯一"):
         validate_ai_development_result(result, evidence, commits)
+
+
+def test_ai_extra_key_commits_are_limited_without_changing_their_order():
+    commits = _history()
+    evidence = build_development_evidence(commits)
+    result = _ai_result(commits, evidence)
+    result["stages"][1]["name"] = "阶段二：文件系统"
+    result["stages"][1]["key_shas"] = [
+        commits[1]["sha"][:12],
+        commits[2]["sha"][:12],
+        commits[1]["sha"][:12],
+        commits[2]["sha"][:12],
+    ]
+
+    validated = validate_ai_development_result(result, evidence, commits)
+
+    assert validated["stages"][1]["name"] == "文件系统"
+    assert validated["stages"][1]["key_shas"] == [
+        commits[1]["sha"],
+        commits[2]["sha"],
+    ]
 
 
 def test_development_html_puts_ai_findings_first_and_shows_exact_evidence():
@@ -153,3 +175,25 @@ def test_development_html_puts_ai_findings_first_and_shows_exact_evidence():
     assert "大规模提交口径" in rendered
     assert "kernel/fs/inode.c</code>（1300 LOC）" in rendered
     assert "虚拟文件系统（VFS）" in rendered
+
+
+def test_large_development_evidence_is_attached_instead_of_put_on_command_line(
+    tmp_path, monkeypatch
+):
+    captured = {}
+
+    def fake_run(task, schema_hint="", timeout=0):
+        captured["task"] = task
+        return {"conclusion": "完成", "issues": [], "stages": []}
+
+    monkeypatch.setattr("finals.development.run_batch_task", fake_run)
+    evidence = {"timeline": [{"subject": "x" * 1000}] * 100}
+    output = tmp_path / "development.html"
+
+    run_ai_development_analysis(tmp_path, "demo", evidence, output)
+
+    task = captured["task"]
+    assert len(task.user_request) < 4000
+    assert task.input_files == (output.with_suffix(".evidence.json"),)
+    assert task.input_files[0].exists()
+    assert "x" * 1000 not in task.user_request

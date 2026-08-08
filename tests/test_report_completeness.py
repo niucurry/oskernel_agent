@@ -155,6 +155,31 @@ def test_subsystem_validation_rejects_missing_module_content():
         tree_builder._validate_subsys_result(parsed, "内存管理")
 
 
+def test_bare_module_filename_is_resolved_next_to_previous_real_path(tmp_path):
+    module_dir = tmp_path / "os" / "src" / "task"
+    module_dir.mkdir(parents=True)
+    (module_dir / "processor.rs").write_text("", encoding="utf-8")
+    (module_dir / "mod.rs").write_text("", encoding="utf-8")
+
+    result = tree_builder._normalize_adjacent_module_paths(
+        ["os/src/task/processor.rs", "mod.rs"], tmp_path
+    )
+
+    assert result == ["os/src/task/processor.rs", "os/src/task/mod.rs"]
+
+
+def test_bare_file_line_in_module_content_uses_real_module_path():
+    result = tree_builder._normalize_module_content_paths(
+        "调用 suspend_current（mod.rs:65）后切换任务。",
+        ["os/src/task/processor.rs", "os/src/task/mod.rs"],
+    )
+
+    assert "os/src/task/mod.rs:65" in result
+    assert tree_builder._normalize_module_content_paths(
+        "通过 mod.rs 统一导出。", ["os/src/drivers/net.rs", "os/src/drivers/mod.rs"]
+    ) == "通过 os/src/drivers/mod.rs 统一导出。"
+
+
 def test_verdict_validation_rejects_fixed_or_missing_dimensions():
     parsed = {
         "content": "<p>总体分析。</p>",

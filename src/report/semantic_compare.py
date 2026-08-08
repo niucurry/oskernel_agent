@@ -5769,7 +5769,7 @@ def generate_finals_comparison_html(
     evidence_html = "\n".join(part for part in evidence_parts if part)
     method_status = _retrieval_status(retrieval_contract)
     toc_html = (
-        '<div class="toc-card"><div class="toc-header"><span class="toc-kicker">FINAL REPORT</span>'
+        '<div class="toc-card"><div class="toc-header"><span class="toc-kicker">最终报告</span>'
         '<strong>报告目录</strong></div><div class="toc-scroll">'
         + _toc_group("先看结论", [_toc_link("summary", "结论与模块排序")])
         + _toc_group("最近作品证据", [_toc_link("closest-evidence", "同源代码证据")])
@@ -5786,7 +5786,7 @@ def generate_finals_comparison_html(
 .summary-alert.high,.summary-alert.critical{{border-left-color:#dc2626;background:#fef2f2}}
 .summary-alert>span{{float:right;color:#64748b;font-size:.72rem}}.summary-alert p{{margin:.25rem 0 0;font-size:.86rem}}
 </style></head><body><div class="layout"><nav class="toc">{toc_html}</nav><main class="main">
-<header class="report-header"><span class="report-kicker">ONE CLOSEST HISTORICAL WORK</span>
+<header class="report-header"><span class="report-kicker">唯一最接近历史作品</span>
 <h1>{title}</h1><p>只围绕历史上最接近的一个作品展开，模块按高置信同源比例排序。</p></header>
 {summary_html}
 <section id="closest-evidence" data-section-id="closest-evidence">

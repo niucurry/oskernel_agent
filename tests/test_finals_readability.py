@@ -29,6 +29,12 @@ def test_common_term_is_explained_only_once():
     assert not readability_errors(text)
 
 
+def test_competition_report_terms_are_defined_on_first_use():
+    text = explain_terms_on_first_use("vendor 依赖引入后开展 LTP 测试。")
+    assert "仓库内置第三方（vendor）依赖" in text
+    assert "Linux 测试项目（LTP）" in text
+
+
 def test_html_term_gate_ignores_code_and_defines_first_visible_use():
     source = "<html><head><title>COW</title></head><body><nav>COW</nav><code>COW</code><p>COW 缺页。</p><p>COW 复用。</p></body></html>"
     rendered = explain_terms_in_html(source)

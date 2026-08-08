@@ -31,6 +31,11 @@ _CODE_SPAN = re.compile(r"<code\b[^>]*>.*?</code>", re.I | re.S)
 _TAG = re.compile(r"<[^>]+>")
 _URL = re.compile(r"https?://\S+")
 _FILELINE = re.compile(r"[\w./\\-]+\.[A-Za-z0-9]+:\d+(?:-\d+)?")
+_FILEPATH = re.compile(r"(?:[A-Za-z0-9_.-]+[/\\])+(?:[A-Za-z0-9_.-]+)?")
+_FILENAME = re.compile(r"\b[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:rs|c|cc|cpp|h|hpp|s|asm|py|sh|ld|toml|yaml|yml|json|md)\b", re.I)
+_PAREN_IDENT_LIST = re.compile(
+    r"\([A-Za-z_][A-Za-z0-9_]*(?:\s*[/,]\s*[A-Za-z_][A-Za-z0-9_]*)*\)"
+)
 # 标识符：snake_case / camelCase / 带 :: 或紧跟 ( 的 token
 _IDENT = re.compile(
     r"[A-Za-z_][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+"          # snake_case
@@ -55,6 +60,9 @@ def _strip_noise(s: str) -> str:
     t = _TAG.sub(" ", t)
     t = _URL.sub(" ", t)
     t = _FILELINE.sub(" ", t)
+    t = _FILEPATH.sub(" ", t)
+    t = _FILENAME.sub(" ", t)
+    t = _PAREN_IDENT_LIST.sub(" ", t)
     t = _IDENT.sub(" ", t)
     return t
 

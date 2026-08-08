@@ -13,7 +13,7 @@ from src.retrieval_contract import CONTRACT_VERSION
 from .label_normalize import residual_legacy
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_REPORTS_ROOT = PROJECT_ROOT / "reports_by_work_id"
+DEFAULT_REPORTS_ROOT = PROJECT_ROOT / "data/output"
 DEFAULT_AUDIT_OUTPUT = PROJECT_ROOT / "data/output/recall_completeness_audit.json"
 
 

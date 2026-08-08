@@ -18,6 +18,7 @@ agent 现在**直接产出 HTML**（不再写 Markdown），所以本模块不�
 from __future__ import annotations
 
 import html
+import json
 import re
 from collections import Counter
 from pathlib import Path
@@ -299,6 +300,22 @@ def make_file_link_resolver(
     roots = [Path(r).resolve() for r in repo_roots]
     web_bases = list(repo_web_bases) if repo_web_bases else []
     web_bases += [None] * (len(roots) - len(web_bases))
+    path_maps: list[dict[str, str]] = []
+    reverse_path_maps: list[dict[str, str]] = []
+    for root in roots:
+        mapping: dict[str, str] = {}
+        mapping_file = root / ".codex_windows_path_map.json"
+        if mapping_file.is_file():
+            try:
+                raw_mapping = json.loads(mapping_file.read_text(encoding="utf-8"))
+                mapping = {
+                    str(safe).replace("\\", "/"): str(original).replace("\\", "/")
+                    for safe, original in raw_mapping.items()
+                }
+            except (OSError, json.JSONDecodeError, AttributeError):
+                mapping = {}
+        path_maps.append(mapping)
+        reverse_path_maps.append({original: safe for safe, original in mapping.items()})
 
     # 后缀匹配索引按需懒建（仅在精确/剥前缀都失败时才付出遍历成本）
     index_cache: dict[str, dict[str, list[str]]] = {}
@@ -337,6 +354,7 @@ def make_file_link_resolver(
         if base:
             try:
                 rel = candidate.resolve().relative_to(roots[ri]).as_posix()
+                rel = path_maps[ri].get(rel, rel)
                 return _build_remote_url(base, rel, line)
             except (OSError, ValueError):
                 pass
@@ -363,6 +381,11 @@ def make_file_link_resolver(
             cand = root / filepath
             if cand.exists():
                 return cand, ri
+            mapped = reverse_path_maps[ri].get(Path(filepath).as_posix())
+            if mapped:
+                cand = root / mapped
+                if cand.exists():
+                    return cand, ri
         parts = p.parts
         for strip in range(1, len(parts)):
             suffix = Path(*parts[strip:])

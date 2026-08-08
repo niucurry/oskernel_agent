@@ -319,12 +319,18 @@ def _render_priority_summary(tree_json: dict, resolver) -> str:
             if refs else ""
         )
         confidence = round(item.confidence * 100)
+        normalized_title = re.sub(r"[\s，。；：、,.!?！？:;]+", "", item.title).casefold()
+        normalized_detail = re.sub(r"[\s，。；：、,.!?！？:;]+", "", item.detail).casefold()
+        detail_html = (
+            f'<p class="text-sm mt-1">{_esc(item.detail)}</p>'
+            if normalized_detail and normalized_detail != normalized_title else ""
+        )
         cards.append(
             f'<li class="finding-card {item.severity} rounded">'
             f'<div class="flex flex-wrap items-baseline gap-2"><strong>{_esc(item.title)}</strong>'
             f'<span class="text-xs severity-{_esc(item.severity)}">风险：{_esc(severity_text[item.severity])}</span>'
             f'<span class="text-xs text-slate-500">置信度 {confidence}%</span></div>'
-            f'<p class="text-sm mt-1">{_esc(item.detail)}</p>{evidence_html}</li>'
+            f'{detail_html}{evidence_html}</li>'
         )
     if not cards:
         cards.append(
@@ -347,6 +353,10 @@ def _render_priority_summary(tree_json: dict, resolver) -> str:
         f'疑似 {_esc(metrics.get("hardcode_suspected", 0))} 条、'
         f'排除 {_esc(metrics.get("hardcode_cleared", 0))} 条。'
     )
+    hardcode_scope = (
+        "硬编码专项检查范围：按测试名或被加载的 ELF 文件名分支、针对测试的不合理缓存替换策略、"
+        "直接打印预期输出、修改测试脚本绕过失败用例。"
+    )
     return f"""
 <section id="verdict" data-section-id="verdict" class="mb-6 p-6 rounded-lg border border-slate-300 dark:border-slate-700
                              bg-white dark:bg-slate-800 shadow-sm">
@@ -355,8 +365,40 @@ def _render_priority_summary(tree_json: dict, resolver) -> str:
   <p class="text-base leading-relaxed mb-4">{_esc(digest.conclusion)}</p>
   <ol class="space-y-3">{"".join(cards)}</ol>
   <p class="text-xs text-slate-500 mt-4">证据覆盖：{coverage}</p>
+  <p class="text-xs text-slate-500 mt-1">{_esc(hardcode_scope)}</p>
 </section>
 """
+
+
+def _render_hardcode_reviews(verdict: dict, resolver) -> str:
+    reviews = verdict.get("hardcode_reviews") or []
+    if not reviews:
+        return ""
+    status_text = {
+        "confirmed": "确认问题",
+        "suspected": "疑似问题",
+        "cleared": "已排除",
+    }
+    items: list[str] = []
+    for review in reviews:
+        location = str(review.get("path") or "")
+        if review.get("line"):
+            location += f':{int(review["line"])}'
+        evidence = _resolve_path_anchor(location, resolver) if location else "无路径"
+        status = status_text.get(str(review.get("status") or ""), "待复核")
+        confidence = round(float(review.get("confidence") or 0))
+        items.append(
+            '<li class="py-2 border-b border-slate-200 dark:border-slate-700">'
+            f'<div><strong>{_esc(review.get("category") or "未分类线索")}</strong> · '
+            f'{_esc(status)} · 置信度 {confidence}%</div>'
+            f'<div class="text-xs mt-1">证据：{evidence}</div>'
+            f'<p class="text-sm mt-1">{_esc(review.get("reason") or review.get("method") or "未提供判断理由")}</p>'
+            '</li>'
+        )
+    return (
+        '<details class="detail-toggle mt-4"><summary>展开逐条硬编码复核'
+        f'（{len(reviews)} 条）</summary><ol class="mt-2">{"".join(items)}</ol></details>'
+    )
 
 
 def _render_verdict(verdict: dict, resolver) -> str:
@@ -390,6 +432,7 @@ def _render_verdict(verdict: dict, resolver) -> str:
     )
 
     radar_html = _render_verdict_radar(verdict)
+    hardcode_html = _render_hardcode_reviews(verdict, resolver)
 
     # verdict 详细正文（agent 直出的 HTML）——剥离架构图和 LLM 手写图表后嵌入并链接化。
     # 雷达图统一由结构化 dimensions 确定性生成，避免模型写出占位 0 分或尺度错误。
@@ -420,16 +463,17 @@ def _render_verdict(verdict: dict, resolver) -> str:
   </table>
   {radar_html}
   {content_html}
+  {hardcode_html}
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
     <div>
       <div class="text-xs uppercase tracking-wider text-green-700 dark:text-green-400 mb-2">
-        亮点 highlights
+        亮点
       </div>
       <ul class="text-sm list-disc pl-5">{hi_items or '<li class="text-slate-500">(无)</li>'}</ul>
     </div>
     <div>
       <div class="text-xs uppercase tracking-wider text-red-700 dark:text-red-400 mb-2">
-        槽点 issues
+        问题
       </div>
       <ul class="text-sm list-disc pl-5">{is_items or '<li class="text-slate-500">(无)</li>'}</ul>
     </div>

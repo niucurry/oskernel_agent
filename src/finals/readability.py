@@ -22,6 +22,7 @@ _EMPTY_PHRASES = (
 )
 
 _TERMS = {
+    "LOC": "代码变更行数（LOC）",
     "COW": "写时复制（Copy-on-Write，COW）",
     "VFS": "虚拟文件系统（VFS）",
     "ELF": "可执行与可链接格式（ELF）",
@@ -29,7 +30,29 @@ _TERMS = {
     "ABI": "应用二进制接口（ABI）",
     "SMP": "对称多处理（SMP）",
     "TLB": "地址转换后备缓冲器（TLB）",
+    "IRQ": "中断请求（IRQ）",
+    "LTP": "Linux 测试项目（LTP）",
+    "FFI": "外部函数接口（FFI）",
+    "MMIO": "内存映射输入输出（MMIO）",
+    "PCI": "外设组件互连（PCI）",
+    "CMA": "连续内存分配器（CMA）",
+    "UML": "统一建模语言（UML）",
+    "futex": "快速用户态互斥量（futex）",
+    "syscall": "系统调用（syscall）",
+    "vendor": "仓库内置第三方（vendor）",
 }
+
+
+def _tidy_term_expansions(text: str) -> str:
+    for expansion in _TERMS.values():
+        escaped = re.escape(expansion)
+        text = re.sub(
+            rf"(?<=[\u3400-\u9fff，。；：、])\s+{escaped}", expansion, text
+        )
+        text = re.sub(
+            rf"{escaped}\s+(?=[\u3400-\u9fff，。；：、])", expansion, text
+        )
+    return text.replace("（IRQ）中断", "（IRQ）").replace("（LTP）测试", "（LTP）")
 
 
 def html_to_text(value: str) -> str:
@@ -72,7 +95,7 @@ def explain_terms_on_first_use(value: str) -> str:
             continue
         text = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])",
                       expansion, text, count=1)
-    return text
+    return _tidy_term_expansions(text)
 
 
 def explain_terms_in_html(value: str) -> str:
@@ -120,7 +143,7 @@ def explain_terms_in_html(value: str) -> str:
                 continue
             text = text[:term_match.start()] + expansion + text[term_match.end():]
             defined.add(term)
-        output.append(text)
+        output.append(_tidy_term_expansions(text))
     return "".join(output)
 
 

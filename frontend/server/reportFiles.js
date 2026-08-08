@@ -7,10 +7,31 @@ import { nowIso } from "./db.js";
 // 顺序也是评委默认阅读顺序：先看一页摘要，再按需下钻。
 export const REPORT_KINDS = ["summary", "description", "development", "comparison"];
 
+export const FINAL_REPORT_NAMES = new Set([
+  "summary.pdf",
+  "description.html",
+  "development.html",
+  "comparison.html"
+]);
+
 const REPORT_KIND_ORDER = new Map(REPORT_KINDS.map((kind, index) => [kind, index]));
 
 export function reportDir(repoId) {
   return path.join(REPORTS_DIR, repoId);
+}
+
+export async function cleanupReportDirectory(repoId) {
+  const dir = reportDir(repoId);
+  const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (entry.isFile() && FINAL_REPORT_NAMES.has(entry.name)) continue;
+    await fs.rm(path.join(dir, entry.name), {
+      recursive: true,
+      force: true,
+      maxRetries: 4,
+      retryDelay: 100
+    });
+  }
 }
 
 export function relativeToFrontend(absPath) {

@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit = sub.add_parser("audit", help="审计历史库覆盖与全部交付比较报告的有效性")
     audit.add_argument("--db", default=str(PROJECT_ROOT / "data/db/functions.db"))
     audit.add_argument("--config", default=str(PROJECT_ROOT / "config/repos.yaml"))
-    audit.add_argument("--reports", default=str(PROJECT_ROOT / "reports_by_work_id"))
+    audit.add_argument("--reports", default=str(PROJECT_ROOT / "data/output"))
     audit.add_argument(
         "--output", default=str(PROJECT_ROOT / "data/output/recall_completeness_audit.json"))
     return p

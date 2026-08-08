@@ -10,10 +10,16 @@ from finals.summary_pdf import (
     BODY_FONT_SIZE,
     SummaryPdfError,
     _combined_findings,
+    _has_distinct_detail,
     _overview_lines,
     generate_summary_pdf,
     load_digests,
 )
+
+
+def test_summary_omits_a_detail_that_only_repeats_the_title():
+    assert not _has_distinct_detail("多核支持尚未启用", "多核支持尚未启用。")
+    assert _has_distinct_detail("存在同源代码", "高置信同源函数比例为 13.3%。")
 
 
 def _write(tmp_path, digest: ReportDigest):
