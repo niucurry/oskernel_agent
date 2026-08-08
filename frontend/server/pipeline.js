@@ -139,6 +139,16 @@ async function findGeneratedComparisonHtml(repoId) {
   return withStat[0].absPath;
 }
 
+async function findGeneratedComparisonDigest(repoId) {
+  const candidates = await findFilesBySuffix(reportDir(repoId), "_comparison.digest.json");
+  if (!candidates.length) return null;
+  const withStat = await Promise.all(
+    candidates.map(async (absPath) => ({ absPath, mtime: (await fs.stat(absPath)).mtimeMs }))
+  );
+  withStat.sort((a, b) => b.mtime - a.mtime);
+  return withStat[0].absPath;
+}
+
 async function pathExists(target) {
   try {
     await fs.access(target);
@@ -414,7 +424,28 @@ export class PipelineQueue {
     });
 
     let existing = await syncExistingReports(this.db, repo.id);
-    const missingKinds = requestedKinds.filter((kind) => !hasReportKinds(existing, [kind]));
+    const summaryRequested = requestedKinds.includes("summary");
+    const requiredKinds = summaryRequested
+      ? ["comparison", "description", "development", "summary"]
+      : requestedKinds;
+    const missingSet = new Set(
+      requiredKinds.filter((kind) => !hasReportKinds(existing, [kind]))
+    );
+    const digestPaths = {
+      comparison: path.join(reportDir(repo.id), "comparison.digest.json"),
+      description: path.join(reportDir(repo.id), "description.digest.json"),
+      development: path.join(reportDir(repo.id), "development.digest.json")
+    };
+    if (summaryRequested) {
+      for (const kind of ["comparison", "description", "development"]) {
+        if (!(await pathExists(digestPaths[kind]))) missingSet.add(kind);
+      }
+      if (["comparison", "description", "development"].some((kind) => missingSet.has(kind))) {
+        missingSet.add("summary");
+      }
+    }
+    const missingKinds = ["comparison", "description", "development", "summary"]
+      .filter((kind) => missingSet.has(kind));
     if (!missingKinds.length) {
       await this.updateJob(id, { status: "skipped", log: "所选报告已存在，直接使用本地报告。", finished_at: nowIso() });
       return;
@@ -461,11 +492,19 @@ export class PipelineQueue {
       }
 
       const canonical = await promoteReport(repo.id, generated, "comparison.html");
+      const generatedDigest = await findGeneratedComparisonDigest(repo.id);
+      if (!generatedDigest) {
+        const error = "对比流水线完成但未发现摘要数据";
+        await this.setRepoStatus(repo.id, "failed", error);
+        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
+        return;
+      }
+      await promoteReport(repo.id, generatedDigest, "comparison.digest.json");
       await registerReport(this.db, repo.id, canonical, "pipeline", "comparison");
       existing = await syncExistingReports(this.db, repo.id);
     }
 
-    const needsLocalRepo = missingKinds.includes("description");
+    const needsLocalRepo = missingKinds.includes("description") || missingKinds.includes("development");
     let clonedRepoPath = needsLocalRepo ? await findClonedRepoPath(repo.id) : null;
     if (needsLocalRepo && !clonedRepoPath) {
       const reposDir = path.join(reportDir(repo.id), "_repos");
@@ -516,14 +555,99 @@ export class PipelineQueue {
 
       if (!this.db.get("SELECT id FROM jobs WHERE id = ?", [id])) return;
 
-      if (result.exitCode !== 0) {
-        const error = failureMessage(log, result.exitCode);
+      if (result.exitCode !== 0 || !(await pathExists(digestPaths.description))) {
+        const error = result.exitCode !== 0
+          ? failureMessage(log, result.exitCode)
+          : "作品描述报告完成但未发现摘要数据";
         await this.setRepoStatus(repo.id, "failed", error);
         await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
         return;
       }
 
       await registerReport(this.db, repo.id, descriptionPath, "pipeline", "description");
+      existing = await syncExistingReports(this.db, repo.id);
+    }
+
+    if (missingKinds.includes("development")) {
+      const developmentPath = path.join(reportDir(repo.id), "development.html");
+      const developmentArgs = [
+        "-X",
+        "utf8",
+        "-m",
+        "finals",
+        "development",
+        "--repo",
+        clonedRepoPath,
+        "--repo-id",
+        repo.id,
+        "--output",
+        developmentPath
+      ];
+      const result = await this.runProcess(id, "development", python, developmentArgs, log, commandLines);
+      log = result.log;
+      commandLines = result.commandLines;
+
+      if (!this.db.get("SELECT id FROM jobs WHERE id = ?", [id])) return;
+
+      if (result.exitCode !== 0 || !(await pathExists(digestPaths.development))) {
+        const error = result.exitCode !== 0
+          ? failureMessage(log, result.exitCode)
+          : "开发过程报告完成但未发现摘要数据";
+        await this.setRepoStatus(repo.id, "failed", error);
+        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
+        return;
+      }
+
+      await registerReport(this.db, repo.id, developmentPath, "pipeline", "development");
+      existing = await syncExistingReports(this.db, repo.id);
+    }
+
+    if (missingKinds.includes("summary")) {
+      const unavailable = [];
+      for (const [kind, digestPath] of Object.entries(digestPaths)) {
+        if (!(await pathExists(digestPath))) unavailable.push(kind);
+      }
+      if (unavailable.length) {
+        const error = `无法生成摘要，缺少上游数据：${unavailable.join(", ")}`;
+        await this.setRepoStatus(repo.id, "failed", error);
+        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
+        return;
+      }
+
+      const summaryPath = path.join(reportDir(repo.id), "summary.pdf");
+      const summaryArgs = [
+        "-X",
+        "utf8",
+        "-m",
+        "finals",
+        "summary",
+        "--description-digest",
+        digestPaths.description,
+        "--development-digest",
+        digestPaths.development,
+        "--comparison-digest",
+        digestPaths.comparison,
+        "--repo-id",
+        repo.id,
+        "--output",
+        summaryPath
+      ];
+      const result = await this.runProcess(id, "summary", python, summaryArgs, log, commandLines);
+      log = result.log;
+      commandLines = result.commandLines;
+
+      if (!this.db.get("SELECT id FROM jobs WHERE id = ?", [id])) return;
+
+      if (result.exitCode !== 0 || !(await pathExists(summaryPath))) {
+        const error = result.exitCode !== 0
+          ? failureMessage(log, result.exitCode)
+          : "摘要生成完成但未发现 PDF";
+        await this.setRepoStatus(repo.id, "failed", error);
+        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
+        return;
+      }
+
+      await registerReport(this.db, repo.id, summaryPath, "pipeline", "summary");
       existing = await syncExistingReports(this.db, repo.id);
     }
 

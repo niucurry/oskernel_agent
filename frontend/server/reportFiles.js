@@ -3,8 +3,9 @@ import path from "node:path";
 import { REPORTS_DIR, FRONTEND_ROOT } from "./config.js";
 import { nowIso } from "./db.js";
 
-// AI 生成代码检测已并入对比报告（第六章），不再作为独立报告类型。
-export const REPORT_KINDS = ["comparison", "description"];
+// AI 生成代码检测并入对比报告，不再作为独立交付物。
+// 顺序也是评委默认阅读顺序：先看一页摘要，再按需下钻。
+export const REPORT_KINDS = ["summary", "description", "development", "comparison"];
 
 const REPORT_KIND_ORDER = new Map(REPORT_KINDS.map((kind, index) => [kind, index]));
 
@@ -27,7 +28,9 @@ export function reportUrl(repoId, reportPath) {
 
 function reportKindFromName(fileName) {
   const name = fileName.toLowerCase();
+  if (name.includes("summary")) return "summary";
   if (name.includes("description") || name.includes("tree")) return "description";
+  if (name.includes("development")) return "development";
   return "comparison";
 }
 
@@ -82,7 +85,7 @@ export async function findExistingReports(repoId) {
   try {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     const reports = entries
-      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".html"))
+      .filter((entry) => entry.isFile() && /\.(?:html|pdf)$/i.test(entry.name))
       .map((entry) => ({
         fileName: entry.name,
         absPath: path.join(dir, entry.name),
@@ -105,15 +108,22 @@ export async function promoteReport(repoId, sourcePath, targetName = "comparison
 }
 
 export async function registerReport(database, repoId, absPath, source = "local", kind = null) {
-  const html = await fs.readFile(absPath, "utf8");
   const fileName = path.basename(absPath);
+  const reportKind = kind || reportKindFromName(fileName);
+  const isPdf = path.extname(fileName).toLowerCase() === ".pdf";
+  const html = isPdf ? "" : await fs.readFile(absPath, "utf8");
   const relPath = relativeToFrontend(absPath);
   const relToRepo = path.relative(reportDir(repoId), absPath).replaceAll(path.sep, "/");
   const url = reportUrl(repoId, relToRepo);
-  const title = htmlTitle(html, `${repoId} report`);
-  const text = htmlText(html);
+  const fallbackTitles = {
+    summary: `${repoId} 决赛评审摘要`,
+    description: `${repoId} 作品描述报告`,
+    development: `${repoId} 开发过程分析报告`,
+    comparison: `${repoId} 对比分析报告`
+  };
+  const title = isPdf ? fallbackTitles[reportKind] : htmlTitle(html, fallbackTitles[reportKind]);
+  const text = isPdf ? "" : htmlText(html);
   const createdAt = nowIso();
-  const reportKind = kind || reportKindFromName(fileName);
 
   database.db.run(
     `INSERT INTO reports (repo_id, kind, report_path, report_url, title, content_text, source, created_at)
@@ -131,7 +141,10 @@ export async function registerReport(database, repoId, absPath, source = "local"
   const current = database.get(
     `SELECT report_url FROM reports
      WHERE repo_id = ?
-     ORDER BY CASE kind WHEN 'comparison' THEN 0 WHEN 'description' THEN 1 ELSE 2 END, created_at DESC
+     ORDER BY CASE kind
+       WHEN 'summary' THEN 0 WHEN 'description' THEN 1
+       WHEN 'development' THEN 2 WHEN 'comparison' THEN 3 ELSE 4 END,
+       created_at DESC
      LIMIT 1`,
     [repoId]
   );

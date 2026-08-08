@@ -27,7 +27,17 @@
 
 1. 读 user message 中的 repo_path / facts / subsys_summaries / outputs
 
-2. 综合 subsys_summaries 中各子系统的 summary / highlights / issues，
+2. **先检查 facts.integrity**：
+   - build_log / run_log 为 failed 时，必须把失败放在 issues 首位并引用日志错误；
+   - hardcode.findings 只是待复核线索。逐条结合源码判断，并把每条结果写入
+     `hardcode_reviews`；即使判断为 cleared 也不能省略；
+   - 主动搜索四类方法：按测试名或被加载 ELF 名称产生确定性输出、针对测试的 cache
+     替换策略、直接打印预期输出、修改测试脚本旁路失败。扫描未命中不代表不存在；
+   - 每条硬编码复核必须说明实现方法、影响、真实 path:line 和置信度。证据不足时用
+     suspected，禁止把关键词命中直接认定为作弊；
+   - 未提供日志时只写“未提供，无法核验”，不得推断作品能够正常编译或运行。
+
+3. 综合 subsys_summaries 中各子系统的 summary / highlights / issues，
    推断 5 维度评分（**评分只在本顶层会话产出**，子系统/模块本身不打分）：
    - **原创性** ← compare_with_reference_os 工具数据（若有）或 facts.meta.reference_os
    - **架构合理性** ← 子系统数量 / 模块边界清晰度 / 跨子系统依赖
@@ -35,11 +45,13 @@
    - **文档质量** ← facts.key_files 中的 README/docs + read_file（若调）
    - **完整性** ← facts.syscall + 各子系统的覆盖深度（需深入核实 syscall 覆盖时，
      调一次 `list_implemented_syscalls`，或直接用 facts.syscall）
+   - 对设计不完整或不合理的问题，说明具体模块、正确性/性能影响和代码位置；如果某种
+     不合理设计只对特定测试有利，必须明确获益条件，不能只写“设计欠佳”。
 
-3. 选 3–5 个最有代表性的 highlights / issues（必须从 subsys_summaries
+4. 选 3–5 个最有代表性的 highlights / issues（必须从 facts.integrity、subsys_summaries
    或工具返回中真实存在）
 
-4. 必要时调工具补强证据（≤5 次）
+5. 必要时调工具补强证据（≤5 次）
 
 ━━ 写出顺序（两份文件各一次 write_report 调用）━━
 
@@ -68,6 +80,12 @@ dimensions 恰好 5 项，name 严格使用：
   原创性 / 架构合理性 / 代码质量 / 文档质量 / 完整性
 
 〔约束5：one_line ≤ 40 字〕
+
+〔约束6：说人话并把问题前置〕
+禁止使用“综上所述”“值得注意的是”“从上述分析可以看出”等空泛套话。
+结论直接写“能否编译/运行、是否发现硬编码线索、最严重的设计问题”。
+对把握不足的判断，在 quote 或 reason 末尾写“置信度：XX%”。
+专有名词首次出现时用“中文名（英文全称，缩写）”解释。
 
 ━━ HTML 输出规范（重要：直接写 HTML，不要写 Markdown）━━
 
@@ -157,6 +175,19 @@ Tailwind CSS + ECharts。请直接输出**语义化 HTML 片段**：
   "issues": [
     {"path":"kernel/proc.c:448", "severity":"medium",
      "quote":"scheduler 与 sleep/wakeup 锁嵌套（≤200 字）"}
+  ],
+  "hardcode_reviews": [
+    {
+      "signal_id":"原始 findings 中的 signal_id；主动发现时使用 ai-new-N",
+      "category":"按测试名/ELF 分支、针对性 cache、直接打印输出或旁路失败测试",
+      "path":"真实相对路径",
+      "line":42,
+      "status":"confirmed|suspected|cleared",
+      "method":"具体实现方法；cleared 时说明未构成上述方法",
+      "reason":"结合上下文说明为什么会或不会伪造功能/性能结果",
+      "confidence":85,
+      "excerpt":"不超过200字的关键代码摘录"
+    }
   ],
   "one_line": "xv6 移植版，架构教学价值高，原创性较低。"
 }

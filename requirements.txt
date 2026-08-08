@@ -6,6 +6,8 @@ tree-sitter-c==0.24.1
 tree-sitter-rust==0.24.2
 mcp[cli]>=1.0.0
 rich>=13.0
+reportlab>=4.0
+pypdf>=5.0
 
 # --- 查重引擎（feature/clone-detection-engine） ---
 pydantic>=2.6
