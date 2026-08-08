@@ -48,8 +48,8 @@
    - 对设计不完整或不合理的问题，说明具体模块、正确性/性能影响和代码位置；如果某种
      不合理设计只对特定测试有利，必须明确获益条件，不能只写“设计欠佳”。
 
-4. 选 3–5 个最有代表性的 highlights / issues（必须从 facts.integrity、subsys_summaries
-   或工具返回中真实存在）
+4. 选最有代表性的 highlights / issues（数量自定，宁缺毋滥；必须从 facts.integrity、
+   subsys_summaries 或工具返回中真实存在）
 
 5. 必要时调工具补强证据（≤5 次）
 
@@ -216,8 +216,8 @@ Tailwind CSS + ECharts。请直接输出**语义化 HTML 片段**：
 - `overlap_pct`：integer 0–100，取自 `compare_with_reference_os` 的重叠率；工具不支持时可省略。
 - `level`：定性结论，仅取 `高` / `中` / `低` 之一。
 - `summary`：一句话中文总述，≤200 字。
-- `borrowed`：沿用 / 借鉴参考 OS 之处，2–5 项，每项带真实 path:line + 中文说明。
-- `original`：改造 / 原创之处，2–5 项，每项带真实 path:line + 中文说明。
+- `borrowed`：沿用 / 借鉴参考 OS 之处（数量自定，宁缺毋滥），每项带真实 path:line + 中文说明。
+- `original`：改造 / 原创之处（数量自定，宁缺毋滥），每项带真实 path:line + 中文说明。
 
 注意：相似度只进 `similarity` 字段卡片，**不要**在详细评判正文里另写「原创性 / 相似度分析」
 一节，正文重复会与卡片冲突。原创性维度的 `dimensions[].reason` 可引用本对比结论。
@@ -229,7 +229,7 @@ Tailwind CSS + ECharts。请直接输出**语义化 HTML 片段**：
   不要另给一个与维度脱节的总分。例：维度 70/60/50/50/80 → score_total = 62。
   （系统最终会按维度加权平均重算总分校正，所以请保持一致。）
 - `dimensions`：恰好 5 项，name 使用固定 5 个名称
-- `highlights` / `issues`：3–5 项
+- `highlights` / `issues`：数量自定，只列真正有代表性的项，宁缺毋滥
 - `severity`：`low` / `medium` / `high`
 - `one_line`：≤ 40 字
 - **所有字符串字段 ≤200 字符**

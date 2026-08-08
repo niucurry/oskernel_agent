@@ -569,13 +569,16 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
     # initialize_analysis 和 write_report 不参与步数/去重统计
     if name == "initialize_analysis":
-        return await _handle_initialize(arguments)
+        res = await _handle_initialize(arguments)
+        return res
 
     if name == "validate_refs":
-        return _handle_validate_refs(arguments)
+        res = _handle_validate_refs(arguments)
+        return res
 
     if name in ("write_report", "write_to_file"):
-        return _handle_write_report(arguments)
+        res = _handle_write_report(arguments)
+        return res
 
     _step_count += 1
 
