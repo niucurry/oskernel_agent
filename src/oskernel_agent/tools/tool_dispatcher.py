@@ -7,7 +7,7 @@ ToolDispatcher：将 engine + level2_index + repo_path + profile + structure 聚
   T3  find_symbol_references      查找引用位置（按子系统分组 + 调用密度分析）
   T4  list_implemented_syscalls   多策略扫描 syscall 实现情况
   T5  get_subsystem_call_chain    树形渲染调用链（带位置信息 + 外部函数标注）
-  T6  compare_with_reference_os   代码级相似度比对（有指纹库时）/ 函数名比对（降级）
+  T6  compare_with_reference_os   代码级指纹比对（指纹库异常时自动重建）
 """
 
 import os
@@ -16,7 +16,6 @@ from collections import defaultdict
 from pathlib import Path
 
 from .reference_db import ReferenceOSDatabase, compute_similarity
-from .tool_handlers import compare_with_reference_os as _name_based_compare
 
 # T4 模块级常量
 
@@ -592,22 +591,13 @@ class ToolDispatcher:
     # T6: compare_with_reference_os
 
     def compare_with_reference_os(self, reference_name: str) -> str:
-        # 引擎尚未就绪时直接降级，避免 _LazyEngine._wait() 阻塞整个请求超时
-        if not getattr(self.engine, "is_ready", lambda: True)():
-            return (
-                "[注意] 语义引擎尚未就绪，改用函数名集合比对（精度较低，引擎就绪后可重试）。\n\n"
-                + _name_based_compare(self.repo_path, reference_name)
-            )
-        # 优先使用代码级指纹库
-        if self.ref_database.is_available(reference_name):
-            return self._compare_with_db(reference_name)
-        # 降级：函数名集合比对
-        return _name_based_compare(self.repo_path, reference_name)
+        # 正式原创性判断禁止退化成函数名集合重叠。指纹库缺失、损坏或内容不完整时，
+        # load_or_rebuild 会先从固定参考源码版本自动重建；只有重建成功后才继续比较。
+        ref_db = self.ref_database.load_or_rebuild(reference_name)
+        return self._compare_with_db(reference_name, ref_db)
 
-    def _compare_with_db(self, reference_name: str) -> str:
-        ref_db = self.ref_database.load(reference_name)
-        if not ref_db:
-            return f"[错误] 参考 OS '{reference_name}' 的指纹库为空，请重新构建。"
+    def _compare_with_db(self, reference_name: str, ref_db: dict | None = None) -> str:
+        ref_db = ref_db or self.ref_database.load_or_rebuild(reference_name)
 
         # 获取当前仓库函数
         current_funcs: dict[str, dict] = {}

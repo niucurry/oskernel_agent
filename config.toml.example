@@ -9,6 +9,9 @@ repos_dir    = "./data/historical_repos"
 metadata_dir = "./data/metadata"
 cache_dir    = "./data/cache"   # 持久化符号索引 / FTS5 数据库（按仓库 hash 分文件）
 reports_dir  = "./data/output"  # 四份正式报告统一输出到 data/output/<作品编号>/
+reference_db_dir = "./reference_db"  # 参考 OS 代码指纹；缺失或损坏时自动重建
+reference_sources_config = "./config/reference_sources.yaml"
+reference_sources_dir = "./data/reference_sources"  # 自动拉取的固定版本源码缓存
 
 [target]
 # 可选：填写后 python agent.py 不带参数时使用此仓库；留空则要求命令行传入 --repo-id / --repo-path / --url

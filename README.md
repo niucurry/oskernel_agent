@@ -87,6 +87,9 @@ base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"  # 阿里云百�
 [data]
 repos_dir    = "./data/historical_repos"
 metadata_dir = "./data/metadata"
+reference_db_dir = "./reference_db"
+reference_sources_config = "./config/reference_sources.yaml"
+reference_sources_dir = "./data/reference_sources"
 
 [target]
 repo_id = ""                  # 可选：填写后 python agent.py 不带参数即分析此仓库
@@ -118,7 +121,9 @@ GITLAB_TOKEN=<你的 token>           # 私有仓库克隆需要，公开仓库�
 
 ## 三、描述报告（基本命令）
 
-自底向上分析单个仓库，产出树状 HTML 报告：
+自底向上分析单个仓库，产出树状 HTML 报告。参考 OS 相似度只使用代码指纹；
+指纹库缺失、JSON 损坏或结构不完整时，系统会按 `config/reference_sources.yaml`
+固定的源码版本自动重建，禁止退化为函数名集合重叠率：
 
 ```bash
 python agent.py --url https://gitlab.example.com/group/repo.git   # 远程，自动克隆
@@ -423,7 +428,7 @@ python -m src.report audit
 
 | 脚本 | 用途 |
 |---|---|
-| `scripts/build_reference_db.py` | 离线构建参考 OS 指纹库 |
+| `scripts/build_reference_db.py` | 主动重建参考 OS 指纹库（正式流程也会在异常时自动重建） |
 | `scripts/crawl_oscomp.py` | 从公开竞赛资料采集历史作品元数据 |
 | `scripts/extract_hisrepo_metadata.py` | 从赛事详情页提取历史仓库元数据 |
 | `scripts/stitch_fragments.py` | LLM 分片已完成但总报告中断时，离线恢复 tree.json/HTML |
