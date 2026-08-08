@@ -210,7 +210,7 @@ def setup() -> None:
     ):
         existing["agent"].pop(stale, None)
 
-    # 树状管道：注册 3 个产出会话 + 1 个 JSON 修复兜底
+    # 报告管道：注册子系统、总评、开发过程会话和 JSON 修复兜底
     from ..prompts.builder import SessionType, SESSION_AGENT_NAMES
     for session_type in SessionType:
         agent_name = SESSION_AGENT_NAMES[session_type]

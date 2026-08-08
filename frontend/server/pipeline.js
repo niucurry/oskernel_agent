@@ -583,6 +583,10 @@ export class PipelineQueue {
         "--output",
         developmentPath
       ];
+      const minimumCommits = String(process.env.FINALS_MIN_COMMITS || "").trim();
+      if (minimumCommits) {
+        developmentArgs.push("--min-commits", minimumCommits);
+      }
       const result = await this.runProcess(id, "development", python, developmentArgs, log, commandLines);
       log = result.log;
       commandLines = result.commandLines;

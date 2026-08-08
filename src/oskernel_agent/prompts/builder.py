@@ -20,6 +20,7 @@ class SessionType(str, Enum):
     """树状管道的会话类型。"""
     SUBSYS      = "subsys"
     VERDICT     = "verdict"
+    DEVELOPMENT = "development"
     JSON_REPAIR = "json_repair"
 
 
@@ -43,6 +44,10 @@ _SESSION_TASK_DESC: dict[SessionType, str] = {
         "综合产出顶层评判性结论："
         "5 维度评分（原创性 / 架构合理性 / 代码质量 / 文档质量 / 完整性）+ "
         "亮点 / 槽点 + 一句话总评。"
+    ),
+    SessionType.DEVELOPMENT: (
+        "只依据用户消息提供的 Git 提交证据，复核开发过程问题候选并归纳连续开发阶段。"
+        "不得编造提交、日期、代码行数或文件；问题判断和阶段结论必须给出依据与置信度。"
     ),
     SessionType.JSON_REPAIR: (
         "把损坏的 LLM 输出文本修复成合法 JSON，并通过 write_report 写入指定路径。"
@@ -122,6 +127,7 @@ _SESSION_CONFIG: "dict[SessionType, tuple[str, str]]" = _load_session_prompts()
 SESSION_AGENT_NAMES: dict[SessionType, str] = {
     SessionType.SUBSYS:      "os-kernel-subsys",
     SessionType.VERDICT:     "os-kernel-verdict",
+    SessionType.DEVELOPMENT: "os-kernel-development",
     SessionType.JSON_REPAIR: "os-kernel-json-repair",
 }
 
