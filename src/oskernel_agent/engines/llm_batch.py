@@ -268,10 +268,21 @@ def cache_write(cache_dir: Path, key: str, data: dict) -> None:
     if cache_disabled():
         return
     cache_dir.mkdir(parents=True, exist_ok=True)
-    (cache_dir / f"{key}.json").write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    target = cache_dir / f"{key}.json"
+    # 原子写：先写临时文件再 os.replace，避免并发覆盖/崩溃留下半个 JSON。
+    tmp = cache_dir / f".{key}.{os.getpid()}.tmp"
+    try:
+        tmp.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        os.replace(tmp, target)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
 
 
 # OpenCode 调用

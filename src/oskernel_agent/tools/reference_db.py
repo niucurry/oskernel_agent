@@ -62,9 +62,9 @@ def compute_similarity(code_a: str, code_b: str) -> float:
     norm_a = normalize_code(code_a)
     norm_b = normalize_code(code_b)
 
-    if not norm_a and not norm_b:
-        return 1.0
     if not norm_a or not norm_b:
+        # 任一侧归一化后为空（空函数体/纯注释/纯宏占位）时无法判定相似度。
+        # 返回 0.0，避免空壳函数被误判为"疑似直接继承"（identical >90%）。
         return 0.0
 
     # 指标 1：字符级编辑距离（长代码截断）
