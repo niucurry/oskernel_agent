@@ -196,6 +196,7 @@ def backup_reports(team_id: str, final_dir: Path) -> None:
         f"{team_id}_summary.pdf",
         f"{team_id}_description.html",
         f"{team_id}_development.html",
+        f"{team_id}_development.ai.json",
         f"{team_id}_comparison.html",
         f"{team_id}_description.digest.json",
         f"{team_id}_development.digest.json",
@@ -320,6 +321,9 @@ def do_development(team_id: str, url: str, final_dir: Path, logfile: Path) -> tu
         PY, "-m", "finals", "development",
         "--repo", str(cloned), "--repo-id", team_id, "--output", str(dst),
     ]
+    minimum_commits = os.environ.get("FINALS_MIN_COMMITS", "").strip()
+    if minimum_commits:
+        cmd.extend(["--min-commits", minimum_commits])
     ok, body = run_step("开发过程报告", cmd, logfile, timeout=600)
     return ok and dst.exists() and dst.with_suffix(".digest.json").exists(), body
 

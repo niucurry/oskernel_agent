@@ -410,7 +410,9 @@ def _materialize_stdout_writes(task: BatchTask, stdout: str) -> bool:
             wrote = _safe_tool_write(task, path, content) or wrote
             continue
 
-        if any(k in obj for k in ("modules", "dimensions", "score_total", "summary")):
+        if any(k in obj for k in (
+            "modules", "dimensions", "score_total", "summary", "stages"
+        )):
             wrote = _safe_tool_write(
                 task,
                 str(task.output_path),

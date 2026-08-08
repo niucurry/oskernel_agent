@@ -15,6 +15,12 @@ def build_parser() -> argparse.ArgumentParser:
     development.add_argument("--repo", required=True, help="本地 Git 仓库路径")
     development.add_argument("--repo-id", default="")
     development.add_argument("--output", required=True, help="输出 HTML 路径")
+    development.add_argument(
+        "--min-commits",
+        type=int,
+        default=None,
+        help="比赛章程规定的最低提交次数；不传则不判断提交缺失",
+    )
     summary = commands.add_parser("summary", help="生成一页 A4 决赛摘要 PDF")
     summary.add_argument("--description-digest", required=True)
     summary.add_argument("--development-digest", required=True)
@@ -29,7 +35,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "development":
         from .development import generate_development_report
         result = generate_development_report(
-            Path(args.repo), Path(args.output), repo_id=args.repo_id or None,
+            Path(args.repo),
+            Path(args.output),
+            repo_id=args.repo_id or None,
+            min_commits=args.min_commits,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0

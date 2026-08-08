@@ -303,7 +303,7 @@ PYTHON_BIN=../.venv/Scripts/python.exe   # Windows 可选；不填会自动找�
 
 - `summary`：一页 A4 PDF 摘要，自动汇总另外三份报告；无超链接，正文不小于 10.5 磅。
 - `description`：作品描述报告，问题和结论在前；四类硬编码候选必须经 AI 逐条复核，模块分析不超过 300 字。缺少事实扫描、AI 复核或中文化未完成时拒绝交付；调用 `agent.py --repo-path ... --output ...`。
-- `development`：开发过程报告，从 Git 历史归纳阶段、关键提交和大规模提交线索。
+- `development`：开发过程报告。程序从 Git 计算提交数、日期、LOC 和文件；专用 AI 结合这些证据复核问题、归纳阶段并给出置信度。AI 输出引用虚假提交、阶段漏项或分析失败时拒绝交付。
 - `comparison`：对比分析报告，只展示最接近的一份历史作品。调用 `python -m src.pipeline --baselines`，AI 代码检测作为辅助信息并入该报告。
 
 页面可以对单个作品选择报告类型生成，也可以批量生成缺失报告。选择 `summary` 时会自动补齐三份上游报告及其摘要数据。生成过程中可在任务列表查看日志；报告完成后默认先打开一页摘要。
@@ -316,6 +316,7 @@ PYTHON_BIN=../.venv/Scripts/python.exe   # Windows 可选；不填会自动找�
 - `frontend/reports/<repo_id>/summary.pdf`：一页评审摘要入口。
 - `frontend/reports/<repo_id>/description.html`：描述报告入口。
 - `frontend/reports/<repo_id>/development.html`：开发过程报告入口。
+- `frontend/reports/<repo_id>/development.ai.json`：开发过程报告的 AI 原始结构化结论，供审计使用，不作为独立报告展示。
 - `frontend/reports/<repo_id>/comparison.html`：对比分析报告入口。
 - `frontend/reports/<repo_id>/*.digest.json`：生成摘要所需的结构化事实，不作为独立报告展示。
 
@@ -330,6 +331,8 @@ AGENT_SUBSYS_CONCURRENCY=10
 AGENT_LLM_CONCURRENCY=10
 AGENT_OPENCODE_ISOLATED_DATA=1
 AGENT_TREE_NO_CACHE=1
+# 按当届比赛章程填写；不设置时，开发过程报告不会自行认定“提交缺失”。
+FINALS_MIN_COMMITS=<章程规定值>
 ```
 
 AI 检测使用 GPU 时建议显式限制批量和扰动次数，避免显存峰值过高：
@@ -359,6 +362,8 @@ npm run build
 ```dotenv
 BATCH_PRIMARY_LLM_API_KEY=<主凭据>
 BATCH_FALLBACK_LLM_API_KEY=<备用凭据>
+# 可选：必须使用当届章程的真实最低提交次数；未知时留空。
+FINALS_MIN_COMMITS=
 ```
 
 批处理启动时会把当前槽位同步为 `LLM_API_KEY`；缺少当前槽位、或主备值相同都会给出不包含凭据值的配置错误。
@@ -384,6 +389,8 @@ python run_batch.py
    描述报告只有 `agent.py`（`oskernel_agent` 树状流水线）一条路径；开发过程和摘要统一由
    `python -m finals` 生成。旧的 Markdown
    报告流程（`src.report.generate` / `src.review` LLM 逐对复核）已删除。
+   开发过程报告由专用 AI 生成问题判断和阶段结论，程序只复算 Git 事实并执行证据校验，
+   不存在关键词规则生成最终阶段的兜底路径。
 2. **写盘前强制归一**：档位命名（高置信同源代码 / 模型复核后仍存疑 / 复核失败或未完成 / 暂未检出相似）由
    `src/report/label_normalize.py` 在 HTML 写盘前统一（`semantic_compare` 内接线，幂等）；
    描述报告的英文正文/标题、代码摘录型点评由 `pipeline/lang_guard.py` 在渲染前中文化
