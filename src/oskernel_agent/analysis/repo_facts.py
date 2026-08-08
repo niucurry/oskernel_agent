@@ -43,8 +43,8 @@ def _probe_standard_syscalls(repo_path: Path) -> tuple[int, list[str]]:
     不调用 ToolDispatcher（那个要 engine + level2_index 太重），仅做正则扫描。
     与 list_implemented_syscalls 的 function_name 策略对齐。
     """
-    func_c = re.compile(r"^\s*(?:static\s+)?(?:int|long|isize_t|ssize_t|void|"
-                        r"u?int\d+_t)\s+(\w+)\s*\(", re.M)
+    func_c = re.compile(r"^\s*(?:static\s+)?(?:unsigned\s+)?(?:int|long|isize_t|ssize_t|"
+                        r"size_t|void|u?int\d+_t|u?int\d+|uintptr_t|usize|char|bool)\s+(\w+)\s*\(", re.M)
     func_rs = re.compile(r"^\s*(?:pub\s+)?fn\s+(\w+)\s*\(", re.M)
     skip = {"vendor", "third_party", "target", ".git", "node_modules"}
 

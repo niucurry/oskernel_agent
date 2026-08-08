@@ -669,23 +669,16 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
         )
 
     if typ in {"subsystem", "module"}:
-        evidence_links: list[str] = []
-        for kind, items in (
-            ("实现", node.get("highlights") or []),
-            ("问题", node.get("issues") or []),
-        ):
-            for item in items:
-                path = str(item.get("path") or "") if isinstance(item, dict) else ""
-                if path:
-                    evidence_links.append(f'{kind}证据：{_resolve_path_anchor(path, resolver)}')
-                if len(evidence_links) >= 4:
-                    break
-            if len(evidence_links) >= 4:
-                break
-        if evidence_links:
-            body_parts.append(
-                '<div class="text-xs text-slate-500 mb-2">' + "；".join(evidence_links) + '</div>'
-            )
+        # 之前只渲染路径、累计 4 条截断，quote/severity 全丢。改回与顶层节点
+        # 一致的 _render_findings：逐条输出 路径 + severity 徽章 + 评判语。
+        body_parts.append(_render_findings(
+            node.get("highlights") or [], resolver,
+            title="本节点亮点", color_cls="text-green-700 dark:text-green-400",
+            is_issue=False))
+        body_parts.append(_render_findings(
+            node.get("issues") or [], resolver,
+            title="本节点槽点", color_cls="text-red-700 dark:text-red-400",
+            is_issue=True))
     else:
         body_parts.append(_render_findings(
             node.get("highlights") or [], resolver,

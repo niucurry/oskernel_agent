@@ -619,8 +619,10 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
     _consecutive_dup_count = 0
 
-    # 幻觉扩展检测：curr 是某个已失败符号的后缀变体
-    base = _suffix_base(sym)
+    # 幻觉扩展检测：curr 是某个已失败符号的后缀变体。
+    # 先确认 sym 在源码里是否真实存在——若真实存在则是误伤，不能算幻觉。
+    sym_real = _symbol_exists_on_disk(sym)
+    base = None if sym_real else _suffix_base(sym)
     if base is not None:
         _hallucination_count += 1
         _failed_symbols.add(sym)
@@ -656,12 +658,11 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     except Exception as exc:
         return [types.TextContent(type="text", text=f"[工具执行错误] {name}: {exc}")]
 
-    if _is_not_found(result):
-        if sym:
-            _failed_symbols.add(sym)
-        result_str = f"符号 {sym!r} 在代码库中不存在。"
-    else:
-        result_str = str(result)
+    if _is_not_found(result) and sym:
+        # 记录失败符号供幻觉检测用；但保留工具原始返回值，它通常带
+        # "可能原因/建议用 read_file"等防止 LLM 继续瞎猜的提示，不能整体替换。
+        _failed_symbols.add(sym)
+    result_str = str(result)
 
     _queried_cache.add(cache_key)
     _queried_results[cache_key] = result_str
@@ -950,6 +951,38 @@ def _suffix_base(curr: str | None) -> str | None:
         if len(curr) > len(base) and curr.startswith(base + "_"):
             return base
     return None
+
+
+def _symbol_exists_on_disk(sym: str | None) -> bool:
+    """在非跳过目录的源码文件里粗扫符号名是否真实存在，用于幻觉检测防误伤。
+
+    只做行级子串扫描（速度优先），不做语义解析；找不到才返回 False。
+    """
+    if not sym:
+        return False
+    repo_path = os.environ.get("OSKERNEL_AGENT_REPO_PATH", "").strip()
+    if not repo_path:
+        return False
+    skip = {"vendor", "third_party", "target", ".git", "node_modules"}
+    root = Path(repo_path)
+    try:
+        for src in root.rglob("*"):
+            if not src.is_file():
+                continue
+            if src.suffix not in {".rs", ".c", ".h"}:
+                continue
+            if any(p in skip for p in src.relative_to(root).parts):
+                continue
+            try:
+                with open(src, "r", encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        if sym in line:
+                            return True
+            except OSError:
+                continue
+    except OSError:
+        return False
+    return False
 
 
 # 入口

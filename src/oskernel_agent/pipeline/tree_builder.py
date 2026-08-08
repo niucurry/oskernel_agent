@@ -679,6 +679,11 @@ def _ensure_reference_database(facts: dict | None) -> None:
     ).load_or_rebuild(reference_os)
 
 
+def _norm_path(p: str) -> str:
+    """硬编码复核路径归一化：统一分隔符、去 ./、忽略大小写。"""
+    return p.replace("\\", "/").replace("./", "").strip("/").lower()
+
+
 def _validate_hardcode_reviews(parsed: dict, facts: dict | None) -> None:
     """确保每条规则线索都经过 AI 复核，且结论能回到真实代码位置。"""
     signals = ((((facts or {}).get("integrity") or {}).get("hardcode") or {})
@@ -717,9 +722,11 @@ def _validate_hardcode_reviews(parsed: dict, facts: dict | None) -> None:
         if review is None:
             missing.append(signal_id)
             continue
-        if str(review.get("path")) != str(signal.get("path")):
+        # 位置容错：路径归一化（去 ./、统一正反斜杠、忽略大小写）后比较，
+        # 行号允许 ±2 行偏差。LLM 复核时行号/路径写法差一点不应中止整份报告。
+        if _norm_path(str(review.get("path") or "")) != _norm_path(str(signal.get("path") or "")):
             raise RuntimeError(f"硬编码复核 {signal_id} 的路径与扫描证据不一致")
-        if int(review.get("line") or 0) != int(signal.get("line") or 0):
+        if abs(int(review.get("line") or 0) - int(signal.get("line") or 0)) > 2:
             raise RuntimeError(f"硬编码复核 {signal_id} 的行号与扫描证据不一致")
     if missing:
         raise RuntimeError("以下硬编码线索未经 AI 复核：" + "、".join(missing[:6]))
