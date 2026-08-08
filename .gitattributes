@@ -1,0 +1,39 @@
+# 统一换行符：仓库内一律存 LF，checkout 时按系统自动转换。
+# 避免 Windows(CRLF) / Linux·macOS(LF) 混用导致整文件被误判改动。
+* text=auto
+
+# 文本类型显式指定，统一按 LF 存储
+*.py    text eol=lf
+*.sh    text eol=lf
+*.md    text eol=lf
+*.toml  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.js    text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.txt   text eol=lf
+*.cfg   text eol=lf
+*.ini   text eol=lf
+
+# 可执行脚本：保留可执行位（默认基于文件名判断，这里显式声明）
+*.sh    text eol=lf
+
+# 二进制文件：禁止 Git 做换行/文本合并，避免损坏
+*.pptx  binary
+*.docx  binary
+*.xlsx  binary
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.db    binary
+*.sqlite binary
+
+# 虚拟环境 / 缓存产物：不参与行尾归一化（通常已被 .gitignore 忽略，这里兜底）
+.venv/**          -text
+__pycache__/**    -text
+*.pyc             -text
