@@ -15,9 +15,13 @@
 - 验证关键 highlight 的代码位置：read_file(path, start, end)
 - 关键质量信号：search_code("TODO|FIXME|unimplemented")
 
-**相似度分析（`similarity` 字段）：** 当 `facts.meta.reference_os` 非空时，先调用
-`load_skill('reference-os-comparison')` 取回详细指引（含 compare_with_reference_os
-用法与 `similarity` 字段契约）再执行；为空则跳过、不填 similarity。
+**相似度分析（`similarity` 字段）：** 当 `facts.meta.reference_os` 非空时：
+- 若该 OS 属于工具支持集合（rcore-tutorial-v3 / rcore-tutorial-v2 / xv6-riscv / ucore），
+  调一次 `compare_with_reference_os(facts.meta.reference_os)`，用其重叠率 / 重叠函数 /
+  独有函数填 similarity（`overlap_pct` 取重叠率）；
+- 否则**不要调该工具**，基于 `facts.syscall.ref_*` 与子系统证据**定性**填 similarity，
+  `overlap_pct` 可省略。
+为空则跳过、不填 similarity。`similarity` 字段契约见文末「输出格式契约」第 2 节。
 
 ━━ 工作步骤 ━━
 
@@ -30,7 +34,7 @@
    - **代码质量** ← 各子系统的 issues + search_code 标记数（若调）
    - **文档质量** ← facts.key_files 中的 README/docs + read_file（若调）
    - **完整性** ← facts.syscall + 各子系统的覆盖深度（需深入核实 syscall 覆盖时，
-     先 `load_skill('syscall-coverage')`）
+     调一次 `list_implemented_syscalls`，或直接用 facts.syscall）
 
 3. 选 3–5 个最有代表性的 highlights / issues（必须从 subsys_summaries
    或工具返回中真实存在）
@@ -158,9 +162,34 @@ Tailwind CSS + ECharts。请直接输出**语义化 HTML 片段**：
 }
 ```
 
-（当 facts.meta.reference_os 非空时，JSON 中还需并列一个 `similarity` 字段；其完整
-契约见技能 `reference-os-comparison`，先 `load_skill('reference-os-comparison')` 再填。
-reference_os 为空时省略 similarity。）
+（当 facts.meta.reference_os 非空时，JSON 中还需并列一个 `similarity` 字段；reference_os
+为空时省略。）`similarity` 字段契约：
+
+```json
+"similarity": {
+  "reference_os": "ucore",
+  "overlap_pct": 45,
+  "level": "中",
+  "summary": "框架层沿用 ucore，调度与文件系统有显著改造（≤200 字）",
+  "borrowed": [
+    {"path":"kernel/proc.c:42", "quote":"do_fork 流程与 ucore 基本一致"}
+  ],
+  "original": [
+    {"path":"sched/cfs.c:10", "quote":"新增 CFS 调度器，ucore 无此实现"}
+  ]
+}
+```
+
+字段约束：
+- `reference_os`：取自 `facts.meta.reference_os`。
+- `overlap_pct`：integer 0–100，取自 `compare_with_reference_os` 的重叠率；工具不支持时可省略。
+- `level`：定性结论，仅取 `高` / `中` / `低` 之一。
+- `summary`：一句话中文总述，≤200 字。
+- `borrowed`：沿用 / 借鉴参考 OS 之处，2–5 项，每项带真实 path:line + 中文说明。
+- `original`：改造 / 原创之处，2–5 项，每项带真实 path:line + 中文说明。
+
+注意：相似度只进 `similarity` 字段卡片，**不要**在详细评判正文里另写「原创性 / 相似度分析」
+一节，正文重复会与卡片冲突。原创性维度的 `dimensions[].reason` 可引用本对比结论。
 
 字段约束：
 - `dimensions[].score`：integer **0–100**（满分 100，不是 0–10！）。尺度锚点：
