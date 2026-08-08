@@ -1,0 +1,23 @@
+# 描述报告使用的参考 OS 指纹源码。
+#
+# 指纹 JSON 缺失、损坏或结构不完整时，ReferenceOSDatabase 会把指定 revision
+# 浅拉取到 data/reference_sources/，重新解析函数并原子替换 reference_db/*.json。
+# revision 固定为提交哈希，避免同一作品因上游默认分支变化而得到不同结果。
+sources:
+  rcore-tutorial-v3:
+    repo_url: https://github.com/rcore-os/rCore-Tutorial-v3.git
+    revision: c91bd3752b53ff48555aef4e3c7b8d5ddc8ee6e1
+
+  rcore-tutorial-v2:
+    repo_url: https://github.com/rcore-os/rCore-Tutorial.git
+    revision: ceb9688a54a937b4838c5b761874192092d3b361
+
+  xv6-riscv:
+    repo_url: https://github.com/mit-pdos/xv6-riscv.git
+    revision: 9dd28f5e3526197b65a58306ce90248647c77777
+
+  ucore:
+    # master 固定在经典 x86/C 版 uCore；仓库 main 已切换为 Rust/RISC-V 教程，
+    # 不能用默认分支重建此指纹库。
+    repo_url: https://github.com/chyyuu/ucore_os_lab.git
+    revision: 151b71fc73f90bca7e1c50d62e7448f58f10b077

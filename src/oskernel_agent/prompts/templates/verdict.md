@@ -15,12 +15,10 @@
 - 验证关键 highlight 的代码位置：read_file(path, start, end)
 - 关键质量信号：search_code("TODO|FIXME|unimplemented")
 
-**相似度分析（`similarity` 字段）：** 当 `facts.meta.reference_os` 非空时：
-- 若该 OS 属于工具支持集合（rcore-tutorial-v3 / rcore-tutorial-v2 / xv6-riscv / ucore），
-  调一次 `compare_with_reference_os(facts.meta.reference_os)`，用其重叠率 / 重叠函数 /
-  独有函数填 similarity（`overlap_pct` 取重叠率）；
-- 否则**不要调该工具**，基于 `facts.syscall.ref_*` 与子系统证据**定性**填 similarity，
-  `overlap_pct` 可省略。
+**相似度分析（`similarity` 字段）：** 当 `facts.meta.reference_os` 非空时，必须调用一次
+`compare_with_reference_os(facts.meta.reference_os)`，并且只能使用代码指纹比对结果填写
+similarity（`overlap_pct` 取代码综合相似度）。指纹库缺失或损坏时工具会自动重建；若工具
+最终仍返回错误，本次顶层评判不得继续生成，严禁改用函数名集合、接口名重叠或主观估算降级。
 为空则跳过、不填 similarity。`similarity` 字段契约见文末「输出格式契约」第 2 节。
 
 ━━ 工作步骤 ━━
@@ -39,7 +37,8 @@
 
 3. 综合 subsys_summaries 中各子系统的 summary / highlights / issues，
    推断 5 维度评分（**评分只在本顶层会话产出**，子系统/模块本身不打分）：
-   - **原创性** ← compare_with_reference_os 工具数据（若有）或 facts.meta.reference_os
+   - **原创性** ← compare_with_reference_os 的代码指纹结果 + 有源码证据的独立增量；
+     `facts.meta.reference_os` 只标识候选基础系统，不能单独作为评分依据
    - **架构合理性** ← 子系统数量 / 模块边界清晰度 / 跨子系统依赖
    - **代码质量** ← 各子系统的 issues + search_code 标记数（若调）
    - **文档质量** ← facts.key_files 中的 README/docs + read_file（若调）
@@ -213,7 +212,7 @@ Tailwind CSS + ECharts。请直接输出**语义化 HTML 片段**：
 
 字段约束：
 - `reference_os`：取自 `facts.meta.reference_os`。
-- `overlap_pct`：integer 0–100，取自 `compare_with_reference_os` 的重叠率；工具不支持时可省略。
+- `overlap_pct`：integer 0–100，取自 `compare_with_reference_os` 的代码综合相似度；不得省略或估算。
 - `level`：定性结论，仅取 `高` / `中` / `低` 之一。
 - `summary`：一句话中文总述，≤200 字。
 - `borrowed`：沿用 / 借鉴参考 OS 之处（数量自定，宁缺毋滥），每项带真实 path:line + 中文说明。

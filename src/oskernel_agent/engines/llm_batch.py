@@ -430,22 +430,36 @@ def _materialize_stdout_writes(task: BatchTask, stdout: str) -> bool:
         return False
 
     wrote = False
+    clean = _ANSI_RE.sub("", stdout or "")
 
-    for obj in _iter_json_objects(stdout):
-        params = _tool_params_from_json(obj)
+    # 优先：整段 stdout 就是一个顶层 JSON 对象（报告对象）。只有这个"顶层对象"
+    # 才允许写回 task.output_path；嵌套 dict 绝不写回报告路径，避免污染已落盘报告。
+    try:
+        top = json.loads(clean)
+    except json.JSONDecodeError:
+        top = None
+    if isinstance(top, dict):
+        params = _tool_params_from_json(top)
         if params is not None:
             path, content = params
             wrote = _safe_tool_write(task, path, content) or wrote
-            continue
-
-        if any(k in obj for k in (
+        elif any(k in top for k in (
             "modules", "dimensions", "score_total", "summary", "stages"
         )):
             wrote = _safe_tool_write(
                 task,
                 str(task.output_path),
-                json.dumps(obj, ensure_ascii=False, indent=2),
+                json.dumps(top, ensure_ascii=False, indent=2),
             ) or wrote
+
+    # 扫描嵌套 JSON：只认带显式 output_path 的工具调用，不再把嵌套 magic-key 对象写盘。
+    for obj in _iter_json_objects(stdout):
+        if obj is top:
+            continue
+        params = _tool_params_from_json(obj)
+        if params is not None:
+            path, content = params
+            wrote = _safe_tool_write(task, path, content) or wrote
 
     for m in re.finditer(
         r"<(?P<tag>write_report|write_to_file|WriteToFile)\b[^>]*>"

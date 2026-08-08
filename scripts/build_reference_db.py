@@ -2,7 +2,8 @@
 离线构建参考 OS 代码指纹库。
 
 对每个参考 OS 运行一次，生成 reference_db/<name>.json。
-之后 compare_with_reference_os 工具会自动使用代码级相似度，而不再降级到函数名比对。
+正常运行无需手工调用：compare_with_reference_os 会校验指纹库，并在缺失或损坏时
+根据 config/reference_sources.yaml 自动重建。本脚本仅用于主动重建或开发调试。
 
 用法：
   python scripts/build_reference_db.py \\

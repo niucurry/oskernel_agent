@@ -564,7 +564,22 @@ def _normalize_verdict(parsed: dict) -> dict:
             raw_scores.append(None)
 
     present = [s for s in raw_scores if s is not None]
-    scale = 10 if present and max(present) <= 10 else 1
+    # 尺度判定：不要仅凭"所有维度分≤10"就猜成 0–10 制——那会把 0–100 制里
+    # 真实拿低分的差作品 ×10 抬成高分。用 LLM 自填的 score_total 判别：
+    #   - 总分更接近 均值×10（0–10 制下总分≈维度均值×10）→ 判为 0–10 制，×10；
+    #   - 总分更接近裸均值（0–100 制真实低分）→ 保持 0–100 原样，不放大。
+    # 无总分可判时退回旧启发式（≤10 视为 0–10 制）。
+    scale = 1
+    if present and max(present) <= 10:
+        try:
+            total_v = float(parsed.get("score_total"))
+        except (TypeError, ValueError):
+            total_v = None
+        if total_v is not None:
+            mean = sum(present) / len(present)
+            scale = 10 if abs(total_v - mean * 10) <= abs(total_v - mean) else 1
+        else:
+            scale = 10
     by_name: dict[str, dict] = {}
     for d, raw in zip(dims, raw_scores):
         if raw is None:
@@ -623,6 +638,45 @@ def _validate_verdict_result(parsed: dict) -> None:
             raise RuntimeError(f"顶层评判 {name} 缺少有效分数") from exc
         if not str(item.get("reason") or "").strip():
             raise RuntimeError(f"顶层评判 {name} 缺少评分理由")
+
+
+def _validate_similarity_result(parsed: dict, facts: dict | None) -> None:
+    """识别到参考 OS 时必须交付代码指纹结果，禁止函数名或主观估算降级。"""
+    reference_os = str(((facts or {}).get("meta") or {}).get("reference_os") or "").strip()
+    if not reference_os:
+        return
+    similarity = parsed.get("similarity")
+    if not isinstance(similarity, dict):
+        raise RuntimeError("顶层评判缺少参考 OS 代码指纹比对结果")
+    if str(similarity.get("reference_os") or "").strip() != reference_os:
+        raise RuntimeError("顶层评判的参考 OS 与事实档案不一致")
+    try:
+        overlap_pct = float(similarity.get("overlap_pct"))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("顶层评判缺少代码指纹综合相似度") from exc
+    if not 0 <= overlap_pct <= 100:
+        raise RuntimeError("顶层评判的代码指纹综合相似度不在 0–100")
+    if not str(similarity.get("summary") or "").strip():
+        raise RuntimeError("顶层评判缺少代码指纹比对摘要")
+
+
+def _ensure_reference_database(facts: dict | None) -> None:
+    """在启动顶层 AI 评判前校验指纹库；异常时先自动重建。"""
+    reference_os = str(((facts or {}).get("meta") or {}).get("reference_os") or "").strip()
+    if not reference_os:
+        return
+    from .. import config as agent_config
+    from ..tools.reference_db import ReferenceOSDatabase
+
+    ReferenceOSDatabase(
+        agent_config.data.get("reference_db_dir", "reference_db"),
+        source_config=agent_config.data.get(
+            "reference_sources_config", "config/reference_sources.yaml"
+        ),
+        source_cache_dir=agent_config.data.get(
+            "reference_sources_dir", "data/reference_sources"
+        ),
+    ).load_or_rebuild(reference_os)
 
 
 def _validate_hardcode_reviews(parsed: dict, facts: dict | None) -> None:
@@ -693,6 +747,8 @@ def _collect_subsys_summaries(tree_root: dict) -> list[dict]:
 def run_verdict_stage(tree_root: dict, facts: dict | None,
                        work_dir: Path,
                        repo_path: Path | None = None) -> dict:
+    # 指纹库故障必须在顶层模型开始评分前修复，避免模型看不到工具结果后自行估算原创性。
+    _ensure_reference_database(facts)
     outputs = {
         "json_path":    str(work_dir / "verdict.json"),
         "content_path": str(work_dir / "verdict.content.md"),
@@ -715,6 +771,7 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
             return False
         try:
             _validate_verdict_result(parsed)
+            _validate_similarity_result(parsed, facts)
             _validate_hardcode_reviews(parsed, facts)
         except RuntimeError:
             return False
@@ -745,6 +802,7 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
         timeout=600,
     )
     _validate_verdict_result(parsed)
+    _validate_similarity_result(parsed, facts)
     _validate_hardcode_reviews(parsed, facts)
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
     # 归一化评分：维度统一到 0–100，总分=维度加权平均（覆盖 LLM 自填值）

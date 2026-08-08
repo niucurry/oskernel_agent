@@ -10,7 +10,6 @@ from pathlib import Path
 
 from ..parsers.code_parser import build_profile
 from ..tools.tool_dispatcher import _STANDARD_SYSCALLS
-from ..tools.tool_handlers import _REFERENCE_OS_FUNCS, _extract_repo_funcs
 from ..cli.fetch_repo import summarize_commits
 from ..cli.agent import _build_structure
 
@@ -180,21 +179,6 @@ def _probe_smp(repo_path: Path) -> dict:
     }
 
 
-def _probe_reference_overlap(repo_path: Path, ref_name: str | None) -> dict:
-    """复用 tool_handlers._extract_repo_funcs + _REFERENCE_OS_FUNCS。"""
-    if not ref_name or ref_name not in _REFERENCE_OS_FUNCS:
-        return {"ref_overlap": 0, "ref_unique_total": 0, "ref_name_used": None}
-    ref_funcs = _REFERENCE_OS_FUNCS[ref_name]
-    repo_funcs = _extract_repo_funcs(str(repo_path))
-    overlap = repo_funcs & ref_funcs
-    unique = repo_funcs - ref_funcs
-    return {
-        "ref_overlap":      len(overlap),
-        "ref_unique_total": len(overlap) + len(unique),
-        "ref_name_used":    ref_name,
-    }
-
-
 def build_repo_facts(
     repo_path: Path,
     repo_name: str,
@@ -211,7 +195,6 @@ def build_repo_facts(
     ref_os = profile.get("reference_os") or None
 
     standard_count, std_list = _probe_standard_syscalls(repo_path)
-    ref_data = _probe_reference_overlap(repo_path, ref_os)
 
     from finals.integrity import collect_integrity_facts
 
@@ -227,10 +210,9 @@ def build_repo_facts(
             "standard_count":   standard_count,
             "standard_total":   len(_STANDARD_SYSCALLS),
             "standard_implemented": std_list,
-            **ref_data,
             "source_note": (
                 "standard_count 来自仓库内 sys_*/syscall_* 函数定义正则扫描；"
-                "ref_* 来自 tool_handlers.compare_with_reference_os 同款函数集对比"
+                "该计数只描述接口覆盖，不参与原创性判断"
             ),
         },
         "key_files":   _probe_key_files(repo_path),
