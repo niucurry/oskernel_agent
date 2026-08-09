@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from src.report import libraries as LIB
+from oskernel_agent.comparison.report import libraries as LIB
 
 
 def test_ambiguous_riscv_segment_requires_dependency_context():

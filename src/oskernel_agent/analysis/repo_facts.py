@@ -196,7 +196,7 @@ def build_repo_facts(
 
     standard_count, std_list = _probe_standard_syscalls(repo_path)
 
-    from finals.integrity import collect_integrity_facts
+    from oskernel_agent.finals.integrity import collect_integrity_facts
 
     return {
         "meta": {

@@ -10,12 +10,9 @@
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
-from oskernel_agent.pipeline.tree_builder import (  # noqa: E402
+from oskernel_agent.pipeline.tree_builder import (
     MAX_MODULES_PER_SUBSYS,
     SCHEMA_VERSION,
     _SUBSYS_DISPLAY_ORDER,
@@ -24,7 +21,7 @@ from oskernel_agent.pipeline.tree_builder import (  # noqa: E402
     _safe_filename_part,
     write_tree_json,
 )
-from oskernel_agent.reports.html_tree import write_tree_html  # noqa: E402
+from oskernel_agent.reports.html_tree import write_tree_html
 
 
 def _build_subsys_node(name: str, work_dir: Path) -> dict | None:

@@ -140,8 +140,8 @@ def _get_client():
     _client_ready = True
     try:
         try:
-            # 源码流水线入口（python -m src.pipeline）。
-            from src.oskernel_agent import config as _cfg
+            # 源码流水线入口（python -m oskernel_agent.comparison.pipeline）。
+            from oskernel_agent import config as _cfg
         except ModuleNotFoundError:
             # 安装后的 ``oskernel-agent`` 控制台入口。
             from oskernel_agent import config as _cfg
@@ -186,7 +186,7 @@ def _translate(s: str, model: str, retries: int = 3) -> str:
                 _cache[h] = out
                 return out
             last_err = "模型返回内容仍未通过中文校验"
-        except Exception as e:  # noqa: BLE001（限流/超时 → 退避重试）
+        except Exception as e:  # 限流或超时时退避重试
             last_err = e
             time.sleep(min(3 * i, 15))
     print(f"[lang_guard] 翻译失败（{retries} 次后保留原文）：{last_err}", file=sys.stderr)

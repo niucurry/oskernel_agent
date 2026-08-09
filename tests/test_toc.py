@@ -8,20 +8,15 @@
 无第三方依赖，标准库 unittest，可直接 `python -m unittest discover tests` 运行。
 """
 import re
-import sys
 import unittest
-from pathlib import Path
 
-# 让 `oskernel_agent` 可导入（无需安装）
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from oskernel_agent.reports.html import (  # noqa: E402
+from oskernel_agent.reports.html import (
     TocIntegrityError,
     assert_toc_resolves,
     find_toc_locate_problems,
 )
-from oskernel_agent.reports.html_tree import render_tree_html  # noqa: E402
-from oskernel_agent.report_quality import IncompleteReportError  # noqa: E402
+from oskernel_agent.reports.html_tree import render_tree_html
+from oskernel_agent.report_quality import IncompleteReportError
 
 
 def _sample_tree() -> dict:

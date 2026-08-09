@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from finals.development import (
+from oskernel_agent.finals.development import (
     analyze_history,
     build_development_evidence,
     render_development_html,
@@ -14,8 +14,8 @@ from finals.development import (
 
 
 def test_development_cli_default_keeps_only_html(tmp_path, monkeypatch):
-    import finals.__main__ as cli
-    import finals.development as development
+    import oskernel_agent.finals.__main__ as cli
+    import oskernel_agent.finals.development as development
 
     output = tmp_path / "development.html"
 
@@ -240,7 +240,7 @@ def test_large_development_evidence_is_attached_instead_of_put_on_command_line(
         captured["task"] = task
         return {"conclusion": "完成", "issues": [], "stages": []}
 
-    monkeypatch.setattr("finals.development.run_batch_task", fake_run)
+    monkeypatch.setattr("oskernel_agent.finals.development.run_batch_task", fake_run)
     evidence = {"timeline": [{"subject": "x" * 1000}] * 100}
     output = tmp_path / "development.html"
 

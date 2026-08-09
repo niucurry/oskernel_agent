@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from src.report import gitlab_links as GL
-from src.report import semantic_compare as SC
+from oskernel_agent.comparison.report import gitlab_links as GL
+from oskernel_agent.comparison.report import semantic_compare as SC
 
 
 def test_query_repo_info_uses_command_scoped_safe_directory(tmp_path, monkeypatch):

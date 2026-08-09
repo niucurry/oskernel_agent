@@ -1,4 +1,4 @@
-"""src.ai_detect 测试：抽取桥接 + 检测编排（mock LogRankProvider，不加载真实模型）+ 报告章六。
+"""oskernel_agent.comparison.ai_detect 测试：抽取桥接 + 检测编排（mock LogRankProvider，不加载真实模型）+ 报告章六。
 
 设计与项目约定一致：模块在无真实模型时用注入的 mock 独立可测。
 """
@@ -9,11 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from src.ai_detect.extract import extract_blocks
-from src.ai_detect.runner import run_ai_detect
-from src.ai_detect.settings import AIDetectSettings, load_ai_detect_settings
-from src.ai_detect.vendor.ai_code_detector.models import Language
-from src.pipeline.__main__ import build_parser
+from oskernel_agent.comparison.ai_detect.extract import extract_blocks
+from oskernel_agent.comparison.ai_detect.runner import run_ai_detect
+from oskernel_agent.comparison.ai_detect.settings import AIDetectSettings, load_ai_detect_settings
+from oskernel_agent.comparison.ai_detect.vendor.ai_code_detector.models import Language
+from oskernel_agent.comparison.pipeline.__main__ import build_parser
 
 
 # ---------- mock provider ----------
@@ -206,5 +206,5 @@ def test_pipeline_runs_ai_model_by_default_and_allows_explicit_skip():
         ["--repo", "demo", "--skip-ai-detect"]).ai_detect is False
 
 
-# 说明：旧 Markdown 报告（src.report.generate）的「章六」拼装已随旧流程一并移除；
+# 说明：旧 Markdown 报告（oskernel_agent.comparison.report.generate）的「章六」拼装已随旧流程一并移除；
 # AI 检测章节现由 semantic_compare 直接渲染进对比报告 HTML，测试见 test_report.py。

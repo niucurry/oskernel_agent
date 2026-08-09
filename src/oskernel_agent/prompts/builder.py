@@ -122,7 +122,7 @@ def _load_session_prompts() -> "dict[SessionType, tuple[str, str]]":
 _SESSION_CONFIG: "dict[SessionType, tuple[str, str]]" = _load_session_prompts()
 
 
-# 多会话模式的公共元数据（供 agent.py 和 setup_opencode.py 共用）
+# 多会话模式的公共元数据（供正式 CLI 与 OpenCode 注册器共用）
 
 SESSION_AGENT_NAMES: dict[SessionType, str] = {
     SessionType.SUBSYS:      "os-kernel-subsys",
@@ -203,7 +203,7 @@ def detect_crate_roles(repo_path: str, profile: dict) -> dict | None:
     return roles or None
 
 
-# 任务描述查询（供 setup_opencode.py 用）
+# 任务描述查询（供 OpenCode 注册器使用）
 
 def get_task_desc(session_type: SessionType) -> str:
     return _SESSION_TASK_DESC[session_type]
@@ -276,7 +276,7 @@ def format_engine_section(engine_info: dict) -> str:
     limitations = engine_info.get("limitations", [])
     limit_text = ""
     if limitations:
-        limit_lines = "\n".join(f"  {l}" for l in limitations)
+        limit_lines = "\n".join(f"  {limitation}" for limitation in limitations)
         limit_text = f"\n\n精度限制（你基于工具结果做判断时必须注意）：\n{limit_lines}"
     return (
         f"{_BAR}\n"

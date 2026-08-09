@@ -4,8 +4,8 @@ import re
 
 import pytest
 
-from finals.digests import description_digest_from_tree
-from finals.integrity import analyze_log, scan_hardcode_signals, scan_reproducibility
+from oskernel_agent.finals.digests import description_digest_from_tree
+from oskernel_agent.finals.integrity import analyze_log, scan_hardcode_signals, scan_reproducibility
 from oskernel_agent.parsers.code_parser import classify_files_by_content
 from oskernel_agent.engines.path_c import TreeSitterEngine
 from oskernel_agent.pipeline.tree_builder import (

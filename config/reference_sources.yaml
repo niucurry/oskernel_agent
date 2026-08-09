@@ -1,7 +1,7 @@
 # 描述报告使用的参考 OS 指纹源码。
 #
 # 指纹 JSON 缺失、损坏或结构不完整时，ReferenceOSDatabase 会把指定 revision
-# 浅拉取到 data/reference_sources/，重新解析函数并原子替换 reference_db/*.json。
+# 浅拉取到 data/reference_sources/，重新解析函数并原子替换 resources/reference_db/*.json。
 # revision 固定为提交哈希，避免同一作品因上游默认分支变化而得到不同结果。
 sources:
   rcore-tutorial-v3:

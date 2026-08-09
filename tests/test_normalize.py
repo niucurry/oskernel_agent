@@ -1,4 +1,4 @@
-"""src.normalize 单元测试：发现/归类/切分/归一化/落盘 端到端。"""
+"""oskernel_agent.comparison.normalize 单元测试：发现/归类/切分/归一化/落盘 端到端。"""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from src.models import ModuleTag
-from src.normalize.classify import load_classifier
-from src.normalize.discovery import discover_files, is_test_or_benchmark_path
-from src.normalize.extract import extract_functions
-from src.normalize.normalizer import normalize_asm, normalize_snippet
-from src.normalize.runner import normalize_repo
-from src.normalize.store import FunctionStore
+from oskernel_agent.comparison.models import ModuleTag
+from oskernel_agent.comparison.normalize.classify import load_classifier
+from oskernel_agent.comparison.normalize.discovery import discover_files, is_test_or_benchmark_path
+from oskernel_agent.comparison.normalize.extract import extract_functions
+from oskernel_agent.comparison.normalize.normalizer import normalize_asm, normalize_snippet
+from oskernel_agent.comparison.normalize.runner import normalize_repo
+from oskernel_agent.comparison.normalize.store import FunctionStore
 
 REPO = Path(__file__).parent / "fixtures" / "sample_repo"
 

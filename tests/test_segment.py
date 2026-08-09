@@ -1,4 +1,4 @@
-"""src.segment 测试：分段器、重打分/升降级逻辑、覆盖率（真克隆 vs 主题相似）。"""
+"""oskernel_agent.comparison.segment 测试：分段器、重打分/升降级逻辑、覆盖率（真克隆 vs 主题相似）。"""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import src.segment.verify as segment_verify
-from src.normalize.segmenter import segment_function
-from src.segment.verify import (_raw_line_similarity, _rescore, _retier,
+import oskernel_agent.comparison.segment.verify as segment_verify
+from oskernel_agent.comparison.normalize.segmenter import segment_function
+from oskernel_agent.comparison.segment.verify import (_raw_line_similarity, _rescore, _retier,
                                 _select_segment_targets, run_segment,
                                 verify_segments)
 
@@ -89,7 +89,7 @@ def _suspect(qcode, ccode, tier="review", final=0.5, vec=0.8):
 
 @pytest.fixture(scope="module")
 def embedder():
-    from src.embed.embedder import get_embedder
+    from oskernel_agent.comparison.embed.embedder import get_embedder
     try:
         return get_embedder(show_progress=False)
     except Exception as exc:

@@ -8,7 +8,7 @@ OS 内核代码分析智能体 — 自底向上树状报告管道
   4. 终端打印（rich.tree） + HTML 渲染（reports/html_tree）
 
 注意：本管道**不调用 MCP 工具**。所有事实（路径、符号、源码片段）在 user message
-里直接注入到 DIR / VERDICT 两个会话。MCP server 由 setup_opencode.py 注册，
+里直接注入到 DIR / VERDICT 两个会话。MCP server 由 oskernel-setup 注册，
 DIR / VERDICT agent 可按需调用工具（read_file / find_symbol_definition 等）。
 """
 
@@ -114,7 +114,7 @@ def _env_disabled(name: str) -> bool:
 
 def _cleanup_tree_intermediates(output_file: str) -> None:
     """删除描述报告的结构化摘要、树和模型工作目录，仅保留 HTML。"""
-    from finals.cleanup import remove_directory
+    from oskernel_agent.finals.cleanup import remove_directory
 
     out_html = Path(output_file)
     if out_html.suffix.lower() != ".html":
@@ -178,7 +178,7 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
     # 决赛四件套共享的短摘要；后续摘要 PDF 直接消费该结构化产物，
     # 不再从冗长 HTML 反向猜测结论。
     try:
-        from finals.digests import description_digest_from_tree, write_digest
+        from oskernel_agent.finals.digests import description_digest_from_tree, write_digest
         digest_path = out_html.with_suffix(".digest.json")
         write_digest(digest_path, description_digest_from_tree(tree))
         print(f"[tree] 决赛摘要数据 → {digest_path}")

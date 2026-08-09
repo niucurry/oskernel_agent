@@ -13,7 +13,7 @@ default:
   image: python:3.12
   before_script:
     - python -m pip install -U pip
-    - pip install -r requirements.txt
+    - pip install -e ".[dev]"
 
 unit-tests:
   stage: test
@@ -27,9 +27,9 @@ eval-regression:
     HF_HOME: "$CI_PROJECT_DIR/.hf-cache"
   script:
     - git clone --depth 1 https://github.com/rcore-os/rCore-Tutorial-v3 data/repos/rcore/v3
-    - python -m src.normalize --repo data/repos/rcore/v3 --repo-id rcore/v3 --db data/db/functions.db
-    - python -m src.embed --qdrant-path data/db/qdrant_local build --all --db data/db/functions.db
-    - python -m src.simhash --idf data/db/idf.json --index data/db/simhash_index.pkl build --db data/db/functions.db
+    - python -m oskernel_agent.comparison.normalize --repo data/repos/rcore/v3 --repo-id rcore/v3 --db data/db/functions.db
+    - python -m oskernel_agent.comparison.embed --qdrant-path data/db/qdrant_local build --all --db data/db/functions.db
+    - python -m oskernel_agent.comparison.simhash --idf data/db/idf.json --index data/db/simhash_index.pkl build --db data/db/functions.db
     - python -m tests.evaluation.synthesize --per-class 15 --out tests/fixtures/eval_set.json
     # T1/T2 最终召回 < 0.95 或 T3 < 0.80 → 失败
     - python -m tests.evaluation.run --check

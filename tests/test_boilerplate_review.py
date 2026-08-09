@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-from src.report import upstream_baselines as UB
-from src.report import semantic_compare as SC
+from oskernel_agent.comparison.report import upstream_baselines as UB
+from oskernel_agent.comparison.report import semantic_compare as SC
 
 
 def _q(fp, fn, lang="rust", start=10, module="arch", code="fn f(){}"):

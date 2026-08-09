@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-import run_batch
+from oskernel_agent.cli import batch as run_batch
 
 
 def _write_reports(root: Path, team_id: str) -> Path:

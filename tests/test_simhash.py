@@ -1,4 +1,4 @@
-"""src.simhash 测试：汉明距离性质、IDF、分段索引、建库、向量库 id 过滤。"""
+"""oskernel_agent.comparison.simhash 测试：汉明距离性质、IDF、分段索引、建库、向量库 id 过滤。"""
 
 from __future__ import annotations
 
@@ -9,16 +9,16 @@ from statistics import mean
 
 import numpy as np
 
-from src.embed.vector_store import VectorStore
-from src.normalize.extract import extract_functions
-from src.normalize.runner import normalize_repo
-from src.normalize.store import FunctionStore
-from src.models import FunctionRecord, ModuleTag
-from src.normalize.normalizer import normalize_snippet
-from src.simhash.build import SimHashQuery, build_index, compute_idf
-from src.simhash.code_index import CodeSimHashQuery, build_code_index
-from src.simhash.index import SegmentedIndex
-from src.simhash.simhash import SimHasher, hamming
+from oskernel_agent.comparison.embed.vector_store import VectorStore
+from oskernel_agent.comparison.normalize.extract import extract_functions
+from oskernel_agent.comparison.normalize.runner import normalize_repo
+from oskernel_agent.comparison.normalize.store import FunctionStore
+from oskernel_agent.comparison.models import FunctionRecord, ModuleTag
+from oskernel_agent.comparison.normalize.normalizer import normalize_snippet
+from oskernel_agent.comparison.simhash.build import SimHashQuery, build_index, compute_idf
+from oskernel_agent.comparison.simhash.code_index import CodeSimHashQuery, build_code_index
+from oskernel_agent.comparison.simhash.index import SegmentedIndex
+from oskernel_agent.comparison.simhash.simhash import SimHasher, hamming
 
 REPO = Path(__file__).parent / "fixtures" / "sample_repo"
 
@@ -112,7 +112,8 @@ def test_multiprobe_guarantees_recall_within_15_bits():
     changed = original
     for bit in flips:
         changed ^= 1 << bit
-    idx = SegmentedIndex(); idx.add(42, original)
+    idx = SegmentedIndex()
+    idx.add(42, original)
     assert 42 in idx.query_multiprobe(changed, bits_per_segment=3)
 
 
@@ -140,7 +141,8 @@ def test_code_simhash_recalls_renamed_function_with_local_additions(tmp_path):
             func_name="run_tasks", module_tag=ModuleTag.SCHED, lang="rust",
             raw_code=old, normalized_code=normalized,
         )
-        fid = store.add_function(rec, []); store.conn.commit()
+        fid = store.add_function(rec, [])
+        store.conn.commit()
     index_path = tmp_path / "code.idx"
     build_code_index(db, index_path)
     query = CodeSimHashQuery(index_path, db_path=db)

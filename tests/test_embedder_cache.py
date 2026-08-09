@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.embed.embedder import BaseEmbedder, CachingEmbedder
+from oskernel_agent.comparison.embed.embedder import BaseEmbedder, CachingEmbedder
 
 
 class _CountingEmbedder(BaseEmbedder):

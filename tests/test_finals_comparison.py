@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from finals.digests import comparison_digest
-from src.report import semantic_compare as SC
+from oskernel_agent.finals.digests import comparison_digest
+from oskernel_agent.comparison.report import semantic_compare as SC
 
 
 def _suspect(repo: str, name: str, module: str = "fs", sim: float = .98) -> dict:

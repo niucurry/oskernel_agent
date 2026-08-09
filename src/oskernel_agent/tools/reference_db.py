@@ -21,8 +21,8 @@ from pathlib import Path
 
 import yaml
 
+from oskernel_agent.paths import PROJECT_ROOT
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SOURCE_CONFIG = PROJECT_ROOT / "config/reference_sources.yaml"
 DEFAULT_SOURCE_CACHE = PROJECT_ROOT / "data/reference_sources"
 

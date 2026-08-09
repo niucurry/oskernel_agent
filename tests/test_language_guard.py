@@ -1,5 +1,5 @@
-from src.oskernel_agent.pipeline import lang_guard
-from src.oskernel_agent.reports.html_tree import render_tree_html
+from oskernel_agent.pipeline import lang_guard
+from oskernel_agent.reports.html_tree import render_tree_html
 import pytest
 
 def test_untranslated_english_is_marked_incomplete(monkeypatch):

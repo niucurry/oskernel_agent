@@ -1,4 +1,4 @@
-# Python 3.12+
+# Python 3.11+
 openai==2.32.0
 gitpython==3.1.46
 tree-sitter==0.25.2
@@ -15,22 +15,21 @@ python-gitlab>=4.4
 pyyaml>=6.0
 loguru>=0.7
 python-dotenv>=1.0
-pytest>=8.0
 # 函数级 McCabe 圈复杂度、NLOC、token/参数计数（支持 Rust/C/C++ 等）
 lizard==1.23.0
-# Layer 2 向量召回（src.embed）
+# Layer 2 向量召回（oskernel_agent.comparison.embed）
 # 注意：codet5p 的 trust_remote_code 模型仅兼容 transformers 4.x，勿升级到 5.x
 transformers>=4.40,<5
 torch>=2.0
 numpy>=1.24
 qdrant-client>=1.7
-faiss-cpu>=1.7          # FAISS HNSW 向量检索（src.embed.faiss_store，recall 步必需）
+faiss-cpu>=1.7          # FAISS HNSW 向量检索（oskernel_agent.comparison.embed.faiss_store，recall 步必需）
 tqdm>=4.66
-# Layer 1 SimHash 粗筛（src.simhash）
+# Layer 1 SimHash 粗筛（oskernel_agent.comparison.simhash）
 xxhash>=3.4
-# Layer 3 分段向量验证（src.segment）
+# Layer 3 分段向量验证（oskernel_agent.comparison.segment）
 scipy>=1.10
-# AI 生成代码检测（src.ai_detect / DetectCodeGPT）：复用 torch/transformers/numpy/scipy/pydantic，无新增硬依赖。
+# AI 生成代码检测（oskernel_agent.comparison.ai_detect / DetectCodeGPT）：复用 torch/transformers/numpy/scipy/pydantic，无新增硬依赖。
 # 真正加载参考模型（CodeLlama 等，建议宿主机 GPU）时另需手动装：pip install "accelerate>=0.27"
 # （VM 无模型时该步骤优雅跳过，不阻塞流水线）。
-# 注意：不安装 tree-sitter-languages —— 与本仓库 tree-sitter==0.25.2 冲突，桥接层改用 src.normalize 解析。
+# 注意：不安装 tree-sitter-languages —— 与本仓库 tree-sitter==0.25.2 冲突，桥接层改用 oskernel_agent.comparison.normalize 解析。

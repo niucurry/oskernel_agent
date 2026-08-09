@@ -14,7 +14,7 @@
      + 写子系统总览 .md + 写各模块 .md + 写结构化 JSON
   C. VERDICT：综合所有子系统摘要 + repo_facts → 顶层评判
 
-调用方：cli/agent.py:_run_tree_mode
+调用方：oskernel_agent.cli.agent:_run_tree_mode
 """
 
 from __future__ import annotations
@@ -383,7 +383,6 @@ def _validate_subsys_result(
 def _process_one_subsys(subsys_node: dict, repo_path: Path,
                          work_dir: Path, facts: dict | None) -> None:
     """处理一个子系统节点：跑 LLM、读回所有 .md、填充节点与模块子节点。"""
-    files     = subsys_node["files"]
     outputs   = _build_subsys_outputs(subsys_node, work_dir)
     out_path  = Path(outputs["json_path"])
     module_paths = outputs["module_paths"]
@@ -447,7 +446,7 @@ def _apply_subsys_result(subsys_node: dict, parsed: dict, repo_path: Path) -> No
 
     # 填子系统字段（子系统/模块不打分，评分只在顶层 VERDICT）
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
-    from finals.readability import concise_module_summary, explain_terms_on_first_use
+    from oskernel_agent.finals.readability import concise_module_summary, explain_terms_on_first_use
 
     subsys_node["role"]       = parsed.get("role", subsys_node["name"])
     subsys_node["summary"]    = parsed.get("summary", "")
@@ -897,7 +896,7 @@ def _ensure_reference_database(facts: dict | None) -> None:
     from ..tools.reference_db import ReferenceOSDatabase
 
     ReferenceOSDatabase(
-        agent_config.data.get("reference_db_dir", "reference_db"),
+        agent_config.data.get("reference_db_dir", "resources/reference_db"),
         source_config=agent_config.data.get(
             "reference_sources_config", "config/reference_sources.yaml"
         ),
@@ -1056,7 +1055,7 @@ def _validate_hardcode_reviews(
     if not isinstance(reviews, list):
         raise RuntimeError("顶层评判 hardcode_reviews 格式无效")
 
-    from finals.integrity import REQUIRED_HARDCODE_CATEGORIES
+    from oskernel_agent.finals.integrity import REQUIRED_HARDCODE_CATEGORIES
 
     by_signal_id = {
         str(signal.get("signal_id") or (
@@ -1248,7 +1247,7 @@ def repair_verdict_similarity(
     )
     dispatcher = ToolDispatcher(
         engine, None, str(repo_path), {"primary_lang": engine_lang},
-        ref_db_dir=agent_config.data.get("reference_db_dir", "reference_db"),
+        ref_db_dir=agent_config.data.get("reference_db_dir", "resources/reference_db"),
     )
     comparison = dispatcher.compare_with_reference_os(reference_os)
     salient_lines = [
@@ -1445,7 +1444,7 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     # A. 按子系统枚举
-    print(f"\n[tree] 按 OS 子系统归类源文件 ...")
+    print("\n[tree] 按 OS 子系统归类源文件 ...")
     tree_root, file_count = enumerate_subsystems(repo_path)
     print(f"[tree] 命中 {file_count} 个源文件，"
           f"{len(tree_root['children'])} 个子系统：" +
@@ -1458,7 +1457,7 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
     run_subsys_stage(tree_root, repo_path, out_dir, facts)
 
     # C. VERDICT 综合
-    print(f"[tree] VERDICT 阶段 ...")
+    print("[tree] VERDICT 阶段 ...")
     verdict = run_verdict_stage(tree_root, facts, out_dir, repo_path)
 
     result = {

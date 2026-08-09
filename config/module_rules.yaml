@@ -1,4 +1,4 @@
-# 函数所属内核子系统的通用归类规则（src.normalize 使用）。
+# 函数所属内核子系统的通用归类规则（oskernel_agent.comparison.normalize 使用）。
 #
 # 每条规则可以分别声明：
 #   path_keywords   文件/目录标识符；

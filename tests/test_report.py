@@ -1,4 +1,4 @@
-"""src.report / src.pipeline 测试：语义对比报告 + 漏斗/resume。"""
+"""oskernel_agent.comparison.report / oskernel_agent.comparison.pipeline 测试：语义对比报告 + 漏斗/resume。"""
 
 from __future__ import annotations
 
@@ -6,17 +6,16 @@ from copy import deepcopy
 import json
 import pytest
 import sqlite3
-from pathlib import Path
 from types import SimpleNamespace
 
-from src.pipeline.__main__ import (_finalize_comparison_output,
+from oskernel_agent.comparison.pipeline.__main__ import (_finalize_comparison_output,
                                    _resolve_git_revision,
                                    _restore_semantic_cache)
-from src.pipeline.steps import STEPS, tier_counts
-from src.report import semantic_compare as SC
-from src.report.audit import audit_reports
-from src.report.label_normalize import normalize_labels
-from src.retrieval_contract import build_retrieval_contract
+from oskernel_agent.comparison.pipeline.steps import STEPS, tier_counts
+from oskernel_agent.comparison.report import semantic_compare as SC
+from oskernel_agent.comparison.report.audit import audit_reports
+from oskernel_agent.comparison.report.label_normalize import normalize_labels
+from oskernel_agent.comparison.retrieval_contract import build_retrieval_contract
 
 
 # ---------- 语义对比报告（M2：U1-U8 + 文件级） ----------
@@ -309,7 +308,7 @@ def test_review_one_forces_json_mode_and_retries_invalid_role_output():
 
 
 def test_review_judgment_submits_identical_code_pair_only_once(monkeypatch, tmp_path):
-    from src.oskernel_agent import config as cfg
+    from oskernel_agent import config as cfg
 
     query_code = "fn shared() { common_step(); }"
     ref_code = "fn shared() { common_step(); }"
@@ -952,7 +951,7 @@ def test_independent_strong_secondary_is_selected_for_bounded_fallback_review():
 
 def test_review_judgment_hydrates_cached_deferred_pairs_without_model_calls(
         monkeypatch, tmp_path):
-    from src.oskernel_agent import config as cfg
+    from oskernel_agent import config as cfg
 
     query_code = "fn shared() { common(); target_step(); }"
 
@@ -1768,7 +1767,7 @@ def test_innovation_complexity_marks_unsupported_language_unavailable():
 
 
 def test_generate_report_renders_innovation_code_map():
-    from src.report.gitlab_links import GitLabLinker
+    from oskernel_agent.comparison.report.gitlab_links import GitLabLinker
 
     point = {
         "title": "多级反馈队列与老化", "kind": "机制改良", "confidence": "high",

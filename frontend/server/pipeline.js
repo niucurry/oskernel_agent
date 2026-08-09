@@ -123,7 +123,7 @@ async function findFilesBySuffix(dir, suffix, skipDirs = new Set(["_repos", "nod
 }
 
 async function findGeneratedComparisonHtml(repoId) {
-  // 查重流水线（src.pipeline 的 _finalize_comparison_output）会把最终报告归档到
+  // 查重流水线会把最终报告归档到
   //   <output-dir>/<仓库名>/<仓库名>_comparison.html
   // 的子目录，而不是直接放在 output-dir 顶层，所以这里递归查找 *_comparison.html，
   // 取最新的一个（promoteReport 随后会拷贝为顶层 comparison.html）。
@@ -476,7 +476,7 @@ export class PipelineQueue {
         "-X",
         "utf8",
         "-m",
-        "src.pipeline",
+        "oskernel_agent.comparison.pipeline",
         "--repo",
         repo.repo_url,
         "--output-dir",
@@ -535,7 +535,7 @@ export class PipelineQueue {
         "-X",
         "utf8",
         "-m",
-        "src.ingest.clone_cli",
+        "oskernel_agent.comparison.ingest.clone_cli",
         "--repo",
         repo.repo_url,
         "--dest",
@@ -563,7 +563,8 @@ export class PipelineQueue {
       const descriptionArgs = [
         "-X",
         "utf8",
-        "agent.py",
+        "-m",
+        "oskernel_agent.cli.agent",
         "--repo-path",
         clonedRepoPath,
         "--output",
@@ -595,7 +596,7 @@ export class PipelineQueue {
         "-X",
         "utf8",
         "-m",
-        "finals",
+        "oskernel_agent.finals",
         "development",
         "--repo",
         clonedRepoPath,
@@ -645,7 +646,7 @@ export class PipelineQueue {
         "-X",
         "utf8",
         "-m",
-        "finals",
+        "oskernel_agent.finals",
         "summary",
         "--description-digest",
         digestPaths.description,

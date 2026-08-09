@@ -1,4 +1,4 @@
-"""src.embed 测试：嵌入语义、建库/检索（内存 Qdrant）。
+"""oskernel_agent.comparison.embed 测试：嵌入语义、建库/检索（内存 Qdrant）。
 
 需要真实加载 codet5p 模型（首次会联网下载，之后走本地缓存）。
 """
@@ -11,13 +11,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.embed.build import build_index
-from src.embed.embedder import get_embedder
-from src.embed.query import print_report, query_repo
-from src.embed.vector_store import VectorStore
-from src.normalize.normalizer import normalize_snippet
-from src.normalize.runner import normalize_repo
-from src.normalize.store import FunctionStore
+from oskernel_agent.comparison.embed.build import build_index
+from oskernel_agent.comparison.embed.embedder import get_embedder
+from oskernel_agent.comparison.embed.query import print_report, query_repo
+from oskernel_agent.comparison.embed.vector_store import VectorStore
+from oskernel_agent.comparison.normalize.normalizer import normalize_snippet
+from oskernel_agent.comparison.normalize.runner import normalize_repo
+from oskernel_agent.comparison.normalize.store import FunctionStore
 
 REPO = Path(__file__).parent / "fixtures" / "sample_repo"
 

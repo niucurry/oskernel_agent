@@ -1,6 +1,5 @@
 import os
 import argparse
-from pathlib import Path
 from collections import Counter
 from git import Repo
 

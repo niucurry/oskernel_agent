@@ -1,16 +1,16 @@
-"""src.metadata 测试：独特字符串过滤/召回、基线双侧扣除。"""
+"""oskernel_agent.comparison.metadata 测试：独特字符串过滤/召回、基线双侧扣除。"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from src.metadata.baseline import is_baseline_derived
-from src.metadata.config import MetadataSettings
-from src.metadata.runner import (channel_baseline, channel_common_code,
+from oskernel_agent.comparison.metadata.baseline import is_baseline_derived
+from oskernel_agent.comparison.metadata.config import MetadataSettings
+from oskernel_agent.comparison.metadata.runner import (channel_baseline, channel_common_code,
                                  channel_unique_strings, process_metadata)
-from src.metadata.strings import build_reverse_index, string_hits_for_func
-from src.models import FunctionRecord, is_baseline_repo
-from src.normalize.store import FunctionStore
+from oskernel_agent.comparison.metadata.strings import build_reverse_index, string_hits_for_func
+from oskernel_agent.comparison.models import FunctionRecord, is_baseline_repo
+from oskernel_agent.comparison.normalize.store import FunctionStore
 
 SETTINGS = MetadataSettings()
 
