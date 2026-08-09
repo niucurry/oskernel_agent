@@ -42,7 +42,7 @@ _SESSION_TASK_DESC: dict[SessionType, str] = {
     SessionType.VERDICT: (
         "基于仓库根目录摘要 + repo_facts + 一级子系统摘要，"
         "综合产出顶层评判性结论："
-        "5 维度评分（原创性 / 架构合理性 / 代码质量 / 文档质量 / 完整性）+ "
+        "6 维度评分（原创性 / 架构合理性 / 代码质量 / 文档质量 / 完整性 / 功能性）+ "
         "亮点 / 槽点 + 一句话总评。"
     ),
     SessionType.DEVELOPMENT: (
@@ -75,9 +75,9 @@ LAYER_2_CONSTRAINTS = """
     stack、bootstrap、trait、impl、enum、struct、typedef
   - 工具 / 库 / 协议 / 标准名：xv6、rCore、Linux、POSIX、RISC-V、LoongArch、
     Cargo、ctags、LSP、Mermaid、ECharts
-反面示例（禁止）：把 syscall 翻成"系统调用"、把 page table 翻成"页表"、
-                  把 trait 翻成"特征"、把 scheduler 翻成"调度器"。
-正面示例：本目录实现 syscall 分发（kernel/trap.c:42），ecall 触发后
+上述术语首次出现时必须先给中文解释，同时保留英文原文；禁止只翻译后丢掉原词。
+反面示例（禁止）：只写"系统调用"而不保留 syscall，或直接使用未解释的 page table。
+正面示例：本目录实现系统调用（syscall）分发（kernel/trap.c:42），ecall 触发后
           通过 scause 路由到对应 handler。
 写入文件前必须逐项自检：除上述技术词、代码标识符、路径和专有名词外，所有自然语言
 叙述均应是完整的简体中文句子；发现英文标题或英文句子时，先自行改写成中文再写出。

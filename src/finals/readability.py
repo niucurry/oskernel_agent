@@ -22,6 +22,7 @@ _EMPTY_PHRASES = (
 )
 
 _TERMS = {
+    "OS": "操作系统（Operating System，OS）",
     "LOC": "代码变更行数（LOC）",
     "COW": "写时复制（Copy-on-Write，COW）",
     "VFS": "虚拟文件系统（VFS）",
@@ -34,11 +35,29 @@ _TERMS = {
     "LTP": "Linux 测试项目（LTP）",
     "FFI": "外部函数接口（FFI）",
     "MMIO": "内存映射输入输出（MMIO）",
+    "MMU": "内存管理单元（MMU）",
+    "DMA": "直接内存访问（DMA）",
+    "TTY": "终端设备（TTY）",
+    "PID": "进程标识符（PID）",
+    "ASID": "地址空间标识符（ASID）",
+    "SBI": "监管者二进制接口（SBI）",
+    "CSR": "控制与状态寄存器（CSR）",
     "PCI": "外设组件互连（PCI）",
     "CMA": "连续内存分配器（CMA）",
     "UML": "统一建模语言（UML）",
     "futex": "快速用户态互斥量（futex）",
     "syscall": "系统调用（syscall）",
+    "page table": "页表（page table）",
+    "page fault": "缺页异常（page fault）",
+    "context switch": "上下文切换（context switch）",
+    "scheduler": "调度器（scheduler）",
+    "cache": "缓存（cache）",
+    "trap": "陷阱与异常入口（trap）",
+    "inode": "索引节点（inode）",
+    "mutex": "互斥锁（mutex）",
+    "semaphore": "信号量（semaphore）",
+    "heap": "堆（heap）",
+    "stack": "栈（stack）",
     "vendor": "仓库内置第三方（vendor）",
 }
 
@@ -148,7 +167,11 @@ def explain_terms_in_html(value: str) -> str:
 
 
 def concise_module_summary(value: str) -> str:
-    return explain_terms_on_first_use(clip_at_sentence(value, MODULE_SUMMARY_LIMIT))
+    # 先解释术语再限长；反过来会让补入的中文全称把已截到 300 字的摘要再次撑长。
+    plain = remove_ai_filler(html_to_text(value))
+    return clip_at_sentence(
+        explain_terms_on_first_use(plain), MODULE_SUMMARY_LIMIT,
+    )
 
 
 def readability_errors(value: str, *, max_chars: int | None = None) -> list[str]:
@@ -161,8 +184,10 @@ def readability_errors(value: str, *, max_chars: int | None = None) -> list[str]
         if phrase in text:
             errors.append(f"包含空泛模板语：{phrase.rstrip('，')}")
     for term, expansion in _TERMS.items():
-        first = text.find(term)
-        if first >= 0 and expansion not in text[: first + len(expansion) + 8]:
+        match = re.search(
+            rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])", text,
+        )
+        if match and expansion not in text[: match.start() + len(expansion) + 8]:
             errors.append(f"术语 {term} 首次出现时未解释")
     if re.search(r"[。！？][。！？]+", text):
         errors.append("存在重复句末标点")
