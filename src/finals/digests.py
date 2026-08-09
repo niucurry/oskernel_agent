@@ -20,6 +20,39 @@ DESCRIPTION_SUBSYSTEM_ORDER = (
     "系统调用", "硬件抽象", "其他",
 )
 
+GENERIC_DESCRIPTION_SUBSYSTEMS = {"其他", "其他模块", "未分类", "基础设施"}
+
+
+def description_review_sections(tree: dict) -> list[tuple[str, dict, dict | None]]:
+    """返回评委报告的并列分析维度，并把笼统“其他”拆成真实子模块。"""
+    root = tree.get("tree") or {}
+    top_nodes = [
+        node for node in (root.get("children") or []) if isinstance(node, dict)
+    ]
+    by_name = {str(node.get("name") or ""): node for node in top_nodes}
+    ordered = [by_name[name] for name in DESCRIPTION_SUBSYSTEM_ORDER if name in by_name]
+    ordered.extend(
+        node for node in top_nodes
+        if str(node.get("name") or "") not in DESCRIPTION_SUBSYSTEM_ORDER
+    )
+
+    sections: list[tuple[str, dict, dict | None]] = []
+    used_names: set[str] = set()
+    for node in ordered:
+        name = str(node.get("name") or "未命名模块")
+        children = [
+            child for child in (node.get("children") or []) if isinstance(child, dict)
+        ]
+        candidates = children if name in GENERIC_DESCRIPTION_SUBSYSTEMS and children else [node]
+        for candidate in candidates:
+            candidate_name = str(candidate.get("name") or name)
+            display_name = candidate_name
+            if display_name in used_names:
+                display_name = f"{name} · {candidate_name}"
+            used_names.add(display_name)
+            sections.append((display_name, candidate, node if candidate is not node else None))
+    return sections
+
 
 def _path_ref(value: str) -> EvidenceRef:
     text = str(value or "")
@@ -154,7 +187,7 @@ def normalize_description_claim(value: str, path: str, facts: dict) -> str:
 
 
 def _description_priority_key(item: Finding) -> tuple[int, int, float]:
-    """按评委决策价值排序，而不是按标题字典序或泛化“性能问题”排序。"""
+    """先按严重级别，再在同级内按评委决策价值排序。"""
     rank = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
     text = f"{item.title} {item.detail}"
     if item.title in {"编译失败", "运行失败", "编译日志缺失", "运行日志缺失"}:
@@ -178,7 +211,7 @@ def _description_priority_key(item: Finding) -> tuple[int, int, float]:
         group = 6
     else:
         group = 7
-    return group, -rank[item.severity], -item.confidence
+    return -rank[item.severity], group, -item.confidence
 
 
 def description_priority_findings(
@@ -312,28 +345,20 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             ))
 
     modules: list[ModuleDigest] = []
-    subsystems_by_name = {
-        str(subsystem.get("name") or ""): subsystem
-        for subsystem in ((tree.get("tree") or {}).get("children") or [])
-        if isinstance(subsystem, dict)
-    }
-    ordered_names = [name for name in DESCRIPTION_SUBSYSTEM_ORDER if name in subsystems_by_name]
-    ordered_names.extend(
-        name for name in subsystems_by_name if name not in DESCRIPTION_SUBSYSTEM_ORDER
-    )
-    for name in ordered_names:
-        subsystem = subsystems_by_name.get(name)
-        if not subsystem:
-            continue
+    for name, subsystem, _parent in description_review_sections(tree):
         summary = normalize_description_claim(str(
             subsystem.get("brief") or subsystem.get("summary")
             or subsystem.get("content") or "未形成模块摘要。"
         ), "", facts)
+        children = [
+            child for child in (subsystem.get("children") or []) if isinstance(child, dict)
+        ]
         modules.append(ModuleDigest(
             name=name,
             summary=clip_at_sentence(explain_terms_on_first_use(str(summary)), 160),
             evidence_count=(
                 len(subsystem.get("highlights") or []) + len(subsystem.get("issues") or [])
+                + sum(len(child.get("file_paths") or []) for child in children)
             ),
         ))
 
@@ -398,6 +423,7 @@ def comparison_digest(
     *,
     exact_file_matches: int = 0,
     ai_detect_data: dict | None = None,
+    closest_institution: str = "",
 ) -> ReportDigest:
     """生成“只对比一个最近历史作品”的短摘要。"""
     modules: list[ModuleDigest] = []
@@ -422,8 +448,19 @@ def comparison_digest(
     modules.sort(key=lambda item: (-(item.similarity_pct or 0), -item.evidence_count, item.name))
     overall = round(confirmed / total * 100, 1) if total else 0.0
     source_text = closest_source or "未形成可靠的最近历史作品"
+    closest_year = ""
+    closest_team = ""
+    if closest_source and "/" in closest_source:
+        closest_year, closest_team = closest_source.split("/", 1)
+    identity = source_text
+    if closest_year and closest_team:
+        identity = (
+            f"{closest_year} 年来自 {closest_institution} 的 {closest_team} 队作品"
+            if closest_institution else
+            f"{closest_year} 年 {closest_team} 队作品"
+        )
     conclusion = (
-        f"与 {source_text} 最接近；按可比函数口径，{confirmed}/{total} 个函数形成"
+        f"与 {identity}最接近；按可比函数口径，{confirmed}/{total} 个函数形成"
         f"高置信同源证据，整体比例 {overall}%。"
         if closest_source else
         "当前证据不足以确定唯一的最近历史作品。"
@@ -466,10 +503,13 @@ def comparison_digest(
         kind="comparison",
         conclusion=conclusion[:240],
         confidence=0.95 if closest_source else 0.55,
-        findings=findings[:8],
-        modules=modules[:32],
+        findings=findings,
+        modules=modules,
         metrics={
             "closest_source": closest_source,
+            "closest_year": closest_year,
+            "closest_team": closest_team,
+            "closest_institution": closest_institution,
             "overall_similarity_pct": overall,
             "confirmed_functions": confirmed,
             "review_functions": review,

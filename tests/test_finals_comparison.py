@@ -51,6 +51,7 @@ def test_comparison_digest_sorts_modules_and_states_percentage_basis():
     assert digest.metrics["overall_similarity_pct"] == 33.3
     assert [module.name for module in digest.modules] == ["文件系统", "内存管理"]
     assert "2/4" in digest.modules[0].summary
+    assert "2025 年 A 队作品" in digest.conclusion
 
 
 def test_finals_comparison_html_has_one_source_and_no_top_five_noise():
@@ -74,7 +75,12 @@ def test_finals_comparison_html_has_one_source_and_no_top_five_noise():
         }, query_repo_path=None,
         linker=None, file_matches=[], file_similar=[], retrieval_contract=None, recall=None,
     )
-    assert "与 2025/A 最接近" in rendered
+    assert "经 AI 分析，与 2025/A 最接近" in rendered
+    assert "2025 年 · A 队 · 学校信息未提供" in rendered
+    assert "完全由人工智能（AI）工具生成 · 参赛队不得修改" in rendered
+    assert "实现依据" in rendered
+    assert 'href="#sec-clusters">高置信证据</a>' in rendered
+    assert 'id="sec-lineage"' in rendered and 'x-data="{open: false}"' in rendered
     assert "Top 8" not in rendered
     assert ">候选创新<" not in rendered
     assert "其他候选不进入评委正文" in rendered

@@ -197,12 +197,38 @@ def test_development_html_puts_ai_findings_first_and_shows_exact_evidence():
     analysis = analyze_history("demo", commits, _ai_result(commits, evidence))
     rendered = render_development_html(analysis)
 
-    assert rendered.index("AI 结论与问题") < rendered.index("AI 归纳的提交阶段")
+    assert rendered.index("经 AI 分析，该作品存在以下问题") < rendered.index("提交历史与开发阶段")
     assert "完全由人工智能（AI）工具生成" in rendered
     assert "章程最低提交次数未配置" in rendered
     assert "大规模提交口径" in rendered
     assert "kernel/fs/inode.c</code>（1300 LOC）" in rendered
     assert "虚拟文件系统（VFS）" in rendered
+    assert rendered.index("关键提交") < rendered.index("kernel/fs/inode.c")
+
+
+def test_development_keeps_all_stage_files_and_links_commit_evidence():
+    commits = _history()
+    for index in range(8):
+        commits[2]["files"].append({
+            "path": f"kernel/extra/{index}.c",
+            "additions": 10 + index,
+            "deletions": 0,
+        })
+        commits[2]["additions"] += 10 + index
+    evidence = build_development_evidence(commits)
+    analysis = analyze_history(
+        "demo",
+        commits,
+        _ai_result(commits, evidence),
+        repository_url="https://gitlab.example/team/demo",
+    )
+
+    rendered = render_development_html(analysis)
+
+    assert "其余 4 个涉及文件" in rendered
+    assert "kernel/extra/0.c" in rendered
+    assert "kernel/extra/7.c" in rendered
+    assert f'https://gitlab.example/team/demo/-/commit/{commits[1]["sha"]}' in rendered
 
 
 def test_large_development_evidence_is_attached_instead_of_put_on_command_line(
