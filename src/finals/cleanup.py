@@ -51,3 +51,54 @@ def cleanup_report_directory(
         else:
             child.unlink()
     return removed
+
+
+def cleanup_report_sidecars(
+    report_dir: str | Path,
+    deliverable_names: Iterable[str],
+    *,
+    output_root: str | Path,
+) -> list[str]:
+    """保留当前已生成的正式报告，删除同目录中的所有非报告产物。"""
+    directory = Path(report_dir).resolve()
+    root = Path(output_root).resolve()
+    if directory.parent != root:
+        raise ValueError(f"拒绝清理输出根目录之外的路径：{directory}")
+
+    keep = {str(name) for name in deliverable_names}
+    if len(keep) != 4 or any(Path(name).name != name for name in keep):
+        raise ValueError("交付文件名必须是四个不含目录的文件名")
+
+    removed: list[str] = []
+    for child in directory.iterdir():
+        if child.is_file() and child.name in keep:
+            continue
+        removed.append(child.name)
+        if child.is_dir():
+            remove_directory(child)
+        else:
+            child.unlink()
+    return removed
+
+
+def purge_report_directory(
+    report_dir: str | Path,
+    *,
+    output_root: str | Path,
+) -> list[str]:
+    """清空一个经过边界校验的队伍目录，用于事务式发布或失败回滚。"""
+    directory = Path(report_dir).resolve()
+    root = Path(output_root).resolve()
+    if directory.parent != root:
+        raise ValueError(f"拒绝清理输出根目录之外的路径：{directory}")
+    if not directory.exists():
+        return []
+
+    removed: list[str] = []
+    for child in directory.iterdir():
+        removed.append(child.name)
+        if child.is_dir():
+            remove_directory(child)
+        else:
+            child.unlink()
+    return removed

@@ -11,6 +11,7 @@ from pathlib import Path
 
 _ALWAYS_SKIP_DIRS = {".git", ".venv", "node_modules"}
 _GENERATED_DIRS = {"target", "build", "dist"}
+_DEPENDENCY_DIRS = {"vendor", "third_party", "thirdparty", "external"}
 _SOURCE_SUFFIXES = {
     ".c", ".h", ".cc", ".cpp", ".rs", ".s", ".py", ".sh", ".bash",
     ".ps1", ".bat", ".cmd", ".cmake",
@@ -30,8 +31,12 @@ _SIGNALS = (
     (
         "按测试名或 ELF 名称分支",
         re.compile(
-            r"(?:strcmp|strstr|contains|starts_with|ends_with|match|if)"
-            r"[\s\S]{0,280}(?:test(?:case)?|ltp|benchmark|busybox|\.elf)",
+            r"(?:strcmp|strstr)\s*\([^\n]{0,160}[\"'][^\"'\n]*"
+            r"(?:test(?:case)?|ltp|benchmark|busybox|\.elf)[^\"'\n]*[\"']|"
+            r"(?:contains|starts_with|ends_with)\s*\(\s*[\"'][^\"'\n]*"
+            r"(?:test(?:case)?|ltp|benchmark|busybox|\.elf)[^\"'\n]*[\"']|"
+            r"(?:if|match)[^\n]{0,200}[\"'][^\"'\n]*"
+            r"(?:test(?:case)?|ltp|benchmark|busybox|\.elf)[^\"'\n]*[\"']",
             re.I,
         ),
         0.72,
@@ -40,7 +45,8 @@ _SIGNALS = (
     (
         "脚本强制忽略失败",
         re.compile(
-            r"(?:\|\|\s*(?:true\b|:\s*(?:#.*)?$|exit\s+0\b)|set\s+\+e\b|"
+            r"(?:(?:pytest|ctest|cargo\s+test|make\s+test|\./[^\n ]*test[^\n ]*)"
+            r"[^\n]{0,160}\|\|\s*(?:true\b|:\s*(?:#.*)?$|exit\s+0\b)|"
             r"(?:pytest|ctest|cargo\s+test|make\s+test)[^\n]{0,160}"
             r"(?:--deselect|--exclude|--ignore|--skip|\s-E\s|grep\s+-v)|"
             r"(?:sed|perl)[^\n]{0,120}(?:test|case)[^\n]{0,120}(?:delete|remove|skip|#))",
@@ -53,8 +59,8 @@ _SIGNALS = (
         "疑似写死测试结果",
         re.compile(
             r"(?:printf|puts|print|println!|panic!)\s*\([^\n]{0,180}"
-            r"(?:all tests passed|test passed|success|score\s*[:=]|benchmark|"
-            r"expected(?:\s+output)?|golden\s+output)",
+            r"(?:all tests passed|test passed|\bsuccess\b|\bscore\s*[:=]|\bbenchmark\b|"
+            r"\bexpected\b(?:\s+output)?|golden\s+output)",
             re.I,
         ),
         0.62,
@@ -82,6 +88,15 @@ _SUCCESS_RE = re.compile(
 )
 _TEST_SCRIPT_PATH_RE = re.compile(r"(?:^|[/_.-])(?:test|tests|grade|grader|judge|eval|case)", re.I)
 _EARLY_SUCCESS_EXIT_RE = re.compile(r"^\s*exit\s+0\b", re.I | re.M)
+_PATH_LOCAL_FAILURE_BYPASS_RE = re.compile(
+    r"\|\|\s*(?:true\b|:\s*(?:#.*)?$|exit\s+0\b)|^\s*set\s+\+e\b",
+    re.I | re.M,
+)
+_ROOT_DOCKER_BUILD_RE = re.compile(
+    r"\b(?:docker|podman)\s+build\b(?![^\n]*(?:\s-f\s|\s--file(?:=|\s)))"
+    r"[^\n]*\s\.\s*(?:#.*)?$",
+    re.I,
+)
 
 
 def _relative(path: Path, root: Path) -> str:
@@ -145,7 +160,7 @@ def scan_hardcode_signals(repo_path: str | Path, *, limit: int = 20) -> dict:
         except ValueError:
             continue
         folded_parts = {part.casefold() for part in rel_parts}
-        if folded_parts & _ALWAYS_SKIP_DIRS:
+        if folded_parts & (_ALWAYS_SKIP_DIRS | _DEPENDENCY_DIRS):
             continue
         suffix = path.suffix.casefold()
         script_like = suffix in _SCRIPT_SUFFIXES or path.name.casefold() in _SCRIPT_NAMES
@@ -182,6 +197,24 @@ def scan_hardcode_signals(repo_path: str | Path, *, limit: int = 20) -> dict:
         # “测试脚本一开始就成功退出”无法仅靠通用 `|| true` 规则发现。只在测试/评测
         # 语义路径下补充低置信候选，交给 AI 结合完整脚本判断是否旁路失败用例。
         if script_like and _TEST_SCRIPT_PATH_RE.search(_relative(path, root)):
+            for match in _PATH_LOCAL_FAILURE_BYPASS_RE.finditer(text):
+                line_no = text.count("\n", 0, match.start()) + 1
+                title = "脚本强制忽略失败"
+                signal_id = f"{_relative(path, root)}:{line_no}:{title}"
+                if signal_id in candidate_ids:
+                    continue
+                candidate_ids.add(signal_id)
+                candidates[title].append({
+                    "signal_id": signal_id,
+                    "category": title,
+                    "path": _relative(path, root),
+                    "line": line_no,
+                    "excerpt": " ".join(lines[line_no - 1].split())[:280] if lines else "",
+                    "confidence": 0.54,
+                    "analysis": (
+                        "测试或评测脚本显式吞掉命令失败；需核对是否会旁路正式失败用例。"
+                    ),
+                })
             for match in _EARLY_SUCCESS_EXIT_RE.finditer(text):
                 line_no = text.count("\n", 0, match.start()) + 1
                 if line_no > 20:
@@ -228,7 +261,100 @@ def scan_hardcode_signals(repo_path: str | Path, *, limit: int = 20) -> dict:
             category: {"scanned": True, "matches": len(candidates[category])}
             for category in REQUIRED_HARDCODE_CATEGORIES
         },
+        "excluded_dependency_dirs": sorted(_DEPENDENCY_DIRS),
         "findings": findings,
+    }
+
+
+def scan_reproducibility(repo_path: str | Path) -> dict:
+    """检查仓库声明的容器构建入口能否定位到实际 Dockerfile。
+
+    这里只报告可确定的配置事实，不尝试把“配置存在”外推成“作品能够编译”。
+    最常见且会直接阻断自动评测复现的问题，是 Makefile 在仓库根执行
+    ``docker build .``，而 Dockerfile 实际只放在子目录中。
+    """
+    root = Path(repo_path).resolve()
+    dockerfiles = sorted(
+        (
+            path for path in root.rglob("*")
+            if path.is_file()
+            and path.name.casefold() in {"dockerfile", "containerfile"}
+            and not ({part.casefold() for part in path.relative_to(root).parts}
+                     & _ALWAYS_SKIP_DIRS)
+        ),
+        key=lambda path: path.as_posix().casefold(),
+    )
+    root_files = [path for path in dockerfiles if path.parent == root]
+    nested_files = [path for path in dockerfiles if path.parent != root]
+
+    root_build_commands: list[dict] = []
+    for script in sorted(root.iterdir(), key=lambda path: path.name.casefold()):
+        if not script.is_file() or script.name.casefold() not in _SCRIPT_NAMES:
+            continue
+        try:
+            text = script.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            if _ROOT_DOCKER_BUILD_RE.search(line):
+                root_build_commands.append({
+                    "path": _relative(script, root),
+                    "line": line_no,
+                    "excerpt": " ".join(line.split())[:280],
+                })
+
+    evidence = list(root_build_commands[:2])
+    if root_build_commands and not root_files:
+        if nested_files:
+            nested = nested_files[0]
+            evidence.append({
+                "path": _relative(nested, root),
+                "line": 1,
+                "excerpt": "Dockerfile 位于子目录，而声明的构建命令使用仓库根上下文。",
+            })
+        return {
+            "status": "warning",
+            "summary": (
+                "容器构建入口在仓库根执行 docker build .，但根目录没有 Dockerfile；"
+                + (f"现有 {_relative(nested_files[0], root)} 不会被该命令自动采用。"
+                   if nested_files else "该入口会在读取 Dockerfile 前失败。")
+            ),
+            "evidence": evidence,
+            "dockerfiles": [_relative(path, root) for path in dockerfiles],
+        }
+
+    if root_files:
+        evidence.append({
+            "path": _relative(root_files[0], root),
+            "line": 1,
+            "excerpt": "仓库根目录提供容器构建文件。",
+        })
+        return {
+            "status": "configured",
+            "summary": "仓库根目录提供 Dockerfile；是否可成功构建仍须以实际日志为准。",
+            "evidence": evidence[:3],
+            "dockerfiles": [_relative(path, root) for path in dockerfiles],
+        }
+
+    if nested_files:
+        nested = nested_files[0]
+        return {
+            "status": "partial",
+            "summary": (
+                f"仅在子目录发现 {_relative(nested, root)}；未发现可自动核验的根目录容器构建入口。"
+            ),
+            "evidence": [{
+                "path": _relative(nested, root), "line": 1,
+                "excerpt": "容器构建文件位于子目录。",
+            }],
+            "dockerfiles": [_relative(path, root) for path in dockerfiles],
+        }
+
+    return {
+        "status": "missing",
+        "summary": "未发现 Dockerfile 或 Containerfile，自动评测环境的复现条件无法核验。",
+        "evidence": [],
+        "dockerfiles": [],
     }
 
 
@@ -246,6 +372,7 @@ def collect_integrity_facts(
         "build_log": analyze_log(build_log, kind="build"),
         "run_log": analyze_log(run_log, kind="run"),
         "hardcode": scan_hardcode_signals(repo_path, limit=signal_limit),
+        "reproducibility": scan_reproducibility(repo_path),
         "interpretation": (
             "硬编码扫描仅提供待复核线索；只有结合完整源码、正式日志和评测环境后，"
             "才能判断是否构成针对测试的作弊实现。"

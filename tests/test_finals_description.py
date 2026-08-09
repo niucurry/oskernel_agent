@@ -5,14 +5,18 @@ import re
 import pytest
 
 from finals.digests import description_digest_from_tree
-from finals.integrity import analyze_log, scan_hardcode_signals
+from finals.integrity import analyze_log, scan_hardcode_signals, scan_reproducibility
 from oskernel_agent.parsers.code_parser import classify_files_by_content
+from oskernel_agent.engines.path_c import TreeSitterEngine
 from oskernel_agent.pipeline.tree_builder import (
+    _fallback_subsystem_for_path,
+    _normalize_verdict_content_paths,
     _validate_hardcode_reviews,
     _validate_verdict_integrity_conclusion,
 )
 from oskernel_agent.report_quality import IncompleteReportError
 from oskernel_agent.reports.html_tree import render_tree_html, write_tree_html
+from oskernel_agent.cli.agent import _cleanup_tree_intermediates
 
 
 def _tree() -> dict:
@@ -62,6 +66,20 @@ def _tree() -> dict:
             }],
         },
     }
+
+
+def test_description_cli_cleanup_keeps_only_html(tmp_path):
+    output = tmp_path / "description.html"
+    output.write_text("<html></html>", encoding="utf-8")
+    output.with_suffix(".tree.json").write_text("{}", encoding="utf-8")
+    output.with_suffix(".digest.json").write_text("{}", encoding="utf-8")
+    work = tmp_path / "description_tree_work"
+    work.mkdir()
+    (work / "verdict.json").write_text("{}", encoding="utf-8")
+
+    _cleanup_tree_intermediates(str(output))
+
+    assert {path.name for path in tmp_path.iterdir()} == {"description.html"}
 
 
 def test_log_failure_is_extracted(tmp_path):
@@ -150,6 +168,23 @@ def test_early_success_exit_in_test_script_is_a_review_candidate(tmp_path):
     )
 
 
+def test_root_docker_build_without_root_dockerfile_is_a_reproducibility_risk(tmp_path):
+    (tmp_path / "Makefile").write_text(
+        "build_docker:\n\tdocker build -t demo .\n", encoding="utf-8"
+    )
+    nested = tmp_path / "ci" / "Dockerfile"
+    nested.parent.mkdir()
+    nested.write_text("FROM scratch\n", encoding="utf-8")
+
+    result = scan_reproducibility(tmp_path)
+
+    assert result["status"] == "warning"
+    assert "根目录没有 Dockerfile" in result["summary"]
+    assert {(item["path"], item["line"]) for item in result["evidence"]} == {
+        ("Makefile", 2), ("ci/Dockerfile", 1),
+    }
+
+
 def test_startup_code_is_classified_as_required_startup_module(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
@@ -160,6 +195,32 @@ def test_startup_code_is_classified_as_required_startup_module(tmp_path):
     result = classify_files_by_content(str(tmp_path), ["src"])
     assert result["启动模块"][0]["file"].replace("\\", "/") == "src/boot.S"
     assert result["启动模块"][0]["is_primary"] is True
+
+
+@pytest.mark.parametrize(("path", "expected"), [
+    ("os/src/mm/address.rs", "内存管理"),
+    ("os/src/task/scheduler.rs", "进程管理"),
+    ("fs/src/ext4/layout.rs", "文件系统"),
+    ("os/src/drivers/block.rs", "设备管理"),
+    ("os/src/syscall/mod.rs", "系统调用"),
+    ("os/src/arch/riscv/address.rs", "硬件抽象"),
+])
+def test_unclassified_files_use_unambiguous_path_fallback(path, expected):
+    assert _fallback_subsystem_for_path(path) == expected
+
+
+def test_path_fallback_does_not_guess_generic_source_files():
+    assert _fallback_subsystem_for_path("os/src/utils.rs") is None
+
+
+def test_tree_sitter_uses_byte_offsets_after_chinese_comments(tmp_path):
+    (tmp_path / "main.rs").write_text(
+        "// 中文注释会让 UTF-8 字节偏移大于字符偏移\nfn real_name() {}\n",
+        encoding="utf-8",
+    )
+    engine = TreeSitterEngine(str(tmp_path), "rust")
+    assert "real_name" in engine._func_index
+    assert engine._func_index["real_name"]["body"] == "fn real_name() {}"
 
 
 def test_description_digest_puts_runtime_and_hardcode_first():
@@ -174,19 +235,64 @@ def test_description_digest_puts_runtime_and_hardcode_first():
 
 def test_description_html_is_problem_first_and_module_text_is_bounded():
     rendered = render_tree_html(_tree())
-    assert rendered.index("结论与问题") < rendered.index("模块摘要与证据")
-    assert "置信度 95%" in rendered
-    assert rendered.index("编译失败") < rendered.index("AI 复核硬编码问题")
+    assert rendered.index('<section id="verdict"') < rendered.index('<section id="modules"')
+    assert "最多 5" not in rendered and "不设数量上限" in rendered
+    assert rendered.index("真实可用性") < rendered.index("模块概览")
     assert "根据被加载的测试" in rendered
     assert "模块详细证据" not in rendered and "子系统详细证据" not in rendered
-    assert all(int(value) <= 300 for value in re.findall(r'data-analysis-chars="(\d+)"', rendered))
-    assert "编译日志：失败；运行日志：未提供" in rendered
-    assert "修改测试脚本绕过失败用例" in rendered
-    assert "展开逐条硬编码复核（1 条）" in rendered
+    assert rendered.count('data-subsystem="') == 1
+    assert all(int(value) <= 180 for value in re.findall(r'data-analysis-chars="(\d+)"', rendered))
+    assert "构建</strong>" in rendered and "失败" in rendered
+    assert "启动 / 运行" in rendered and "未提供" in rendered
+    assert "修改测试脚本旁路失败" in rendered
     assert "src/main.c:7" in rendered and "确认问题" in rendered
-    assert "生成流程不包含人工编辑步骤" in rendered
-    assert "虚拟文件系统（VFS）" in rendered
-    assert '<section id="evaluation"' in rendered
+    assert "参赛队未参与修改" in rendered
+    assert '<section id="evaluation"' not in rendered
+    assert "tree-node" not in rendered
+
+
+def test_description_has_no_problem_count_cap_and_keeps_every_serious_issue():
+    tree = _tree()
+    tree["verdict"]["issues"] = [
+        {
+            "path": f"src/issue_{index}.c:{index}",
+            "severity": "medium",
+            "quote": f"第 {index} 个会影响正确性的独立问题。",
+            "confidence": 90,
+        }
+        for index in range(1, 10)
+    ]
+    rendered = render_tree_html(tree)
+    assert rendered.count('data-main-finding="') == 9
+    assert "第 9 个会影响正确性的独立问题" in rendered
+
+
+def test_description_renders_every_top_level_subsystem_not_only_five():
+    tree = _tree()
+    names = ["启动模块", "内存管理", "进程管理", "文件系统", "设备管理", "系统调用", "硬件抽象", "其他"]
+    tree["tree"]["children"] = [
+        {"type": "subsystem", "name": name, "summary": f"{name}静态摘要。", "children": []}
+        for name in names
+    ]
+    rendered = render_tree_html(tree)
+    assert rendered.count('data-subsystem="') == len(names)
+    assert all(f'data-subsystem="{name}"' in rendered for name in names)
+
+
+def test_syscall_count_is_labeled_as_a_static_signal_and_never_overclaims():
+    tree = _tree()
+    tree["facts"]["syscall"] = {"standard_count": 48, "standard_total": 60}
+    tree["verdict"]["issues"] = [{
+        "path": "src/syscall/mod.rs:20",
+        "severity": "low",
+        "quote": "当前覆盖 49/60 项标准系统调用，尚有 11 项未实现。",
+        "confidence": 90,
+    }]
+    tree["tree"]["children"][0]["summary"] = "实现 Linux 标准系统调用约 49/60 项。"
+    rendered = render_tree_html(tree)
+    assert "49/60" not in rendered
+    assert "48/60 个标准系统调用名称" in rendered
+    assert "不代表语义可用或测试通过" in rendered
 
 
 def test_every_scanner_signal_requires_structured_ai_review():
@@ -235,6 +341,29 @@ def test_one_line_conclusion_must_match_each_integrity_status():
         _validate_verdict_integrity_conclusion(parsed, facts)
 
 
+def test_one_line_accepts_equivalent_no_cheating_conclusion():
+    parsed = {
+        "one_line": "编译日志未提供，运行日志未提供；硬编码线索均已复核，无作弊。",
+        "hardcode_reviews": [{"status": "cleared"}],
+    }
+    facts = {
+        "integrity": {
+            "build_log": {"status": "not_provided"},
+            "run_log": {"status": "not_provided"},
+        }
+    }
+    _validate_verdict_integrity_conclusion(parsed, facts)
+
+
+def test_verdict_content_uses_full_path_from_structured_evidence():
+    parsed = {
+        "issues": [{"path": "os/src/arch/loongarch64/paging.rs:8"}],
+        "content": "<li>分页常量见 paging.rs:8。</li>",
+    }
+    _normalize_verdict_content_paths(parsed)
+    assert "os/src/arch/loongarch64/paging.rs:8" in parsed["content"]
+
+
 def test_description_delivery_rejects_broken_source_links(tmp_path):
     tree = _tree()
     tree["facts"]["integrity"]["build_log"] = {"status": "not_provided"}
@@ -244,3 +373,23 @@ def test_description_delivery_rejects_broken_source_links(tmp_path):
     # src/mm.c 故意不存在：问题证据不得被渲染成看似可点击的伪链接。
     with pytest.raises(IncompleteReportError, match="无法回溯到源码"):
         write_tree_html(tmp_path / "description.html", tree, repo_roots=[repo])
+
+
+def test_description_links_use_target_repository_metadata(tmp_path):
+    tree = _tree()
+    tree["meta"]["repository_url"] = "https://gitlab.example.com/contest/cosmos"
+    tree["meta"]["repository_ref"] = "deadbeef"
+    tree["facts"]["integrity"]["build_log"] = {"status": "not_provided"}
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "main.c").write_text("\n" * 7, encoding="utf-8")
+    (repo / "src" / "mm.c").write_text("\n" * 9, encoding="utf-8")
+
+    output, broken = write_tree_html(
+        tmp_path / "description.html", tree, repo_roots=[repo]
+    )
+
+    rendered = output.read_text(encoding="utf-8")
+    assert not broken
+    assert "https://gitlab.example.com/contest/cosmos/-/blob/deadbeef/" in rendered
+    assert "report/generator" not in rendered

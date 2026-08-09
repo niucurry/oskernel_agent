@@ -21,6 +21,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="比赛章程规定的最低提交次数；不传则不判断提交缺失",
     )
+    development.add_argument(
+        "--keep-intermediates", action="store_true", help=argparse.SUPPRESS
+    )
     summary = commands.add_parser("summary", help="生成一页 A4 决赛摘要 PDF")
     summary.add_argument("--description-digest", required=True)
     summary.add_argument("--development-digest", required=True)
@@ -40,6 +43,11 @@ def main(argv: list[str] | None = None) -> int:
             repo_id=args.repo_id or None,
             min_commits=args.min_commits,
         )
+        if not args.keep_intermediates:
+            for key in ("digest_path", "ai_path", "evidence_path"):
+                Path(result[key]).unlink(missing_ok=True)
+                result.pop(key, None)
+            result["intermediates_removed"] = True
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     if args.command == "summary":

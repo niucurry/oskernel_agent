@@ -1,8 +1,8 @@
 """目录(TOC)定位准确性的回归测试。
 
-保证「系统生成的报告里，每个目录项点击后都能精确定位到对应节点」这一性质不被破坏：
-  - 渲染器为子系统/模块挂的锚点 id 与目录项 href 一一对应；
-  - 锚点确实落在对应的 tree-node 上；
+保证「系统生成的速读报告里，每个目录项点击后都能精确定位」这一性质不被破坏：
+  - 目录只保留结论、可用性、硬编码和全部一级模块概览；
+  - 子系统/子模块不再生成目录项，避免主阅读路径膨胀；
   - 产出前的硬校验能识别「断链 / 重复 id」这类定位错乱。
 
 无第三方依赖，标准库 unittest，可直接 `python -m unittest discover tests` 运行。
@@ -61,19 +61,14 @@ class TocLocateAccuracy(unittest.TestCase):
         self.assertEqual(find_toc_locate_problems(self.html), [])
 
     def test_expected_anchors_present(self):
-        """评判 / 代码树 / 各子系统 / 各模块都进了目录。"""
+        """速读版四个决策区块都进入目录。"""
         hrefs = set(_HREF_RE.findall(self.html))
-        for expected in {"verdict", "tree", "subsys-0", "subsys-1",
-                         "subsys-0-0", "subsys-0-1"}:
-            self.assertIn(expected, hrefs)
+        self.assertEqual(hrefs, {"verdict", "usability", "hardcode", "modules"})
 
-    def test_anchor_sits_on_tree_node(self):
-        """子系统/模块锚点必须挂在 tree-node 上，点击才会定位到该节点。"""
-        for anchor in ("subsys-0", "subsys-0-1", "subsys-1"):
-            self.assertRegex(
-                self.html,
-                rf'<div class="tree-node mb-1" id="{anchor}" data-section-id="{anchor}"',
-            )
+    def test_child_modules_are_not_toc_or_tree_nodes(self):
+        self.assertNotIn("subsys-", self.html)
+        self.assertNotIn("tree-node", self.html)
+        self.assertNotIn("页表</span>", self.html)
 
     def test_no_duplicate_anchor_ids(self):
         ids = _ID_RE.findall(self.html)
@@ -81,8 +76,10 @@ class TocLocateAccuracy(unittest.TestCase):
         self.assertEqual(dups, set(), f"锚点 id 重复会导致定位错乱: {dups}")
 
     def test_toc_never_empty(self):
-        """真实报告至少含「代码树」目录项，不会产出无从导航的空目录。"""
-        self.assertIn("tree", set(_HREF_RE.findall(self.html)))
+        """真实报告至少含结论和模块入口，不会产出空目录。"""
+        hrefs = set(_HREF_RE.findall(self.html))
+        self.assertIn("verdict", hrefs)
+        self.assertIn("modules", hrefs)
 
 
 class AggregationFailureRejected(unittest.TestCase):

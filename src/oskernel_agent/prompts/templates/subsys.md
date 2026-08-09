@@ -35,7 +35,9 @@
      或 `get_subsystem_call_chain(entry, max_depth=3)` 展开调用链（计入 ≤12 次预算），
      用一句话顺序串起 file:line 描述主路径，不要画流程图。
    - 若本子系统是「系统调用」：调一次 `list_implemented_syscalls`，取已实现 syscall 列表、
-     与标准 Linux 集合的比对与覆盖率，作为实现要点与缺失项（issues）的依据。
+     与标准 Linux 集合的比对，作为接口线索与缺失项（issues）的依据。若工具结果与
+     user message 的 syscall_facts 不一致，必须明确两种统计口径；静态计数不得写成
+     “功能可用”“兼容”或“测试通过”。
    - 主动检查设计完整性与合理性：未实现的主路径、固定容量/静态内存分配、只在特定
      测试规模下有利的捷径、固定或针对测试的 cache 替换。发现问题时必须说明正常场景
      下的正确性或性能影响；若对特定测试有利，也要写出获益条件和真实 file:line。
@@ -91,13 +93,15 @@ JSON 中不要出现 score 字段。
 〔约束4：JSON 的 summary 字段保持中性〕
 不含评判词；评判性内容放进 highlights / issues 字段或 content .md 中。
 
-〔约束5：模块文件覆盖完备〕
-所有传入的 files 应在 modules[*].file_paths 中至少出现一次（除非该文件
-经分析后判定与本子系统主线无关，可在 content .md 中说明）。
+〔约束5：模块文件路径必须真实〕
+modules[*].file_paths 只能填写相对仓库根的、实际存在的源文件，严禁填写目录、
+通配符或虚构路径。files 是候选索引，无须逐一覆盖；每个模块选 1–4 个最具代表性的
+真实文件即可。写 JSON 前逐项核对这些路径均可由 read_file 打开。
 
-〔约束6：评委摘要控制在 300 字以内〕
-每个模块 HTML 正文最多 300 个中文字符，只保留职责、主路径、关键设计和最重要问题；
-文件清单与关键函数合并为紧凑列表，详细源码通过 file:line 链接下钻，不复制大段代码。
+〔约束6：内部证据摘要控制在 160 字以内〕
+最终评委报告不会逐模块展示正文；模块 HTML 只作为 AI 内部证据记录，每份最多 160 个
+中文字符，只保留职责、一个关键设计和一个最重要问题。不要输出文件清单、关键函数清单
+或背景介绍，详细源码通过 file:line 链接下钻，不复制代码。
 禁止“综上所述”“值得注意的是”等模板句。COW、VFS、ELF、IPC、ABI、SMP 等术语
 首次出现时先给中文解释。证据不足的判断必须写明置信度。
 
@@ -125,23 +129,8 @@ Tailwind CSS 排版。所以请直接输出**语义化 HTML 片段**：
 报告树里已经显示了模块名，**正文不要再写模块名大标题**，直接从“职责”开始。
 
 ```html
-<p><strong>职责</strong>：{1 句话定位}（如有主要入口附 file:line，如 kernel/proc.c:120）</p>
-
-<p><strong>包含文件</strong>：</p>
-<ul>
-  <li><code>file1.c</code> — 角色简述</li>
-  <li><code>file2.c</code> — 角色简述</li>
-</ul>
-
-<p><strong>关键函数</strong>：</p>
-<ul>
-  <li><code>funcA</code>（file:line）：{1 句描述，基于 find_symbol_definition 实际返回}</li>
-  <li><code>funcB</code>（file:line）：{...}</li>
-</ul>
-
-<p><strong>实现要点</strong>：{1–2 个短段，每条技术声明附 file:line；整个片段不超过 300 字}</p>
-
-<p><strong>置信度</strong>：高 / 中 / 低</p>
+<p><strong>实现</strong>：{一句话，附一个代表位置 file:line}</p>
+<p><strong>主要限制</strong>：{没有则写“未形成高置信限制”，有则附 file:line}</p>
 ```
 
 #### 2. 子系统总览 HTML 片段（写入 outputs.content_path）

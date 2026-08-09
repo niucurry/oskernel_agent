@@ -165,7 +165,7 @@ _FILEREF_EXTS = (
 )
 _FILEREF_RE = re.compile(
     rf"([A-Za-z0-9_./\-]+\.(?:{_FILEREF_EXTS}))"
-    rf"(?:(?::|#L)(\d+)(?:-L?(\d+))?)?"
+    rf"(?![A-Za-z0-9_])(?:(?::|#L)(\d+)(?:-L?(\d+))?)?"
 )
 # 整段（允许前后空白）恰好是一个 file:line 引用 —— 用于判定 <code>path:line</code>
 _FILEREF_FULL = re.compile(rf"^\s*{_FILEREF_RE.pattern}\s*$")
@@ -218,6 +218,10 @@ def linkify_html(fragment: str, resolver: LinkResolver | None = None) -> str:
     def _code_sub(m: re.Match) -> str:
         fm = _FILEREF_FULL.match(m.group(1))
         if fm:
+            # 无目录且无行号的裸文件名通常只是正文术语；报告契约要求证据写完整
+            # path:line，不应为这种文字猜测链接并制造断链。
+            if "/" not in fm.group(1) and "\\" not in fm.group(1) and not fm.group(2):
+                return _stash(m.group(0))
             url = resolver(fm.group(1), fm.group(2))
             if url:
                 return _stash(_wrap_anchor(m.group(0), url))
@@ -235,6 +239,8 @@ def linkify_html(fragment: str, resolver: LinkResolver | None = None) -> str:
     text = _ANY_TAG_RE.sub(_stash_tag, text)
 
     def _bare_sub(m: re.Match) -> str:
+        if "/" not in m.group(1) and "\\" not in m.group(1) and not m.group(2):
+            return m.group(0)
         url = resolver(m.group(1), m.group(2))
         if not url:
             return m.group(0)
@@ -319,6 +325,7 @@ def make_file_link_resolver(
 
     # 后缀匹配索引按需懒建（仅在精确/剥前缀都失败时才付出遍历成本）
     index_cache: dict[str, dict[str, list[str]]] = {}
+    line_count_cache: dict[Path, int] = {}
 
     def _suffix_unique_match(filepath: str) -> tuple[Path, int] | None:
         """在仓库里找路径以 filepath 结尾（按段对齐）的文件；仅唯一命中时返回。
@@ -364,6 +371,30 @@ def make_file_link_resolver(
             abs_path = str(candidate)
         return _build_local_url(abs_path, line)
 
+    def _line_is_valid(candidate: Path, line: str | None) -> bool:
+        if not line:
+            return True
+        numbers = [int(value) for value in re.findall(r"\d+", str(line))]
+        if not numbers or any(value < 1 for value in numbers):
+            return False
+        try:
+            resolved = candidate.resolve()
+            if resolved not in line_count_cache:
+                with resolved.open("rb") as handle:
+                    count = sum(chunk.count(b"\n") for chunk in iter(
+                        lambda: handle.read(1024 * 1024), b""
+                    ))
+                # 非空且无末尾换行的单行文件也有第 1 行。
+                if resolved.stat().st_size:
+                    with resolved.open("rb") as handle:
+                        handle.seek(-1, 2)
+                        count += int(handle.read(1) != b"\n")
+                line_count_cache[resolved] = count
+            count = line_count_cache[resolved]
+        except OSError:
+            return False
+        return numbers == sorted(numbers) and numbers[-1] <= count
+
     def _find(filepath: str) -> tuple[Path, int] | None:
         p = Path(filepath)
         if p.is_absolute():
@@ -400,7 +431,12 @@ def make_file_link_resolver(
         found = _find(filepath)
         if found is not None:
             candidate, ri = found
-            return _build_url(candidate, ri, line)
+            url = _build_url(candidate, ri, line)
+            if _line_is_valid(candidate, line):
+                return url
+            if broken_paths is not None:
+                broken_paths.add(f"{filepath}:{line}")
+            return _BROKEN_PREFIX + url
 
         if broken_paths is not None:
             broken_paths.add(filepath)
@@ -427,11 +463,23 @@ def derive_repo_web_base(root: Path) -> str | None:
         try:
             r = subprocess.run(
                 ["git", "-C", str(root), *args],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=10,
             )
             return r.stdout.strip() if r.returncode == 0 else ""
         except Exception:
             return ""
+
+    # ``git -C`` 默认会向父目录寻找 .git。分析的是下载归档时，这会错误继承
+    # 报告生成器自身仓库的 remote，进而让全部证据链接指向另一个项目。
+    top_level = _git("rev-parse", "--show-toplevel")
+    if not top_level:
+        return None
+    try:
+        if Path(top_level).resolve() != Path(root).resolve():
+            return None
+    except OSError:
+        return None
 
     remote = _git("remote", "get-url", "origin")
     if not remote:
@@ -452,3 +500,29 @@ def derive_repo_web_base(root: Path) -> str | None:
     if "github.com" in url:
         return f"{url}/blob/{ref}"
     return f"{url}/-/blob/{ref}"
+
+
+def repository_url_to_web_base(repository_url: str, ref: str = "main") -> str | None:
+    """用报告元数据中的目标仓库 URL 构造稳定源码链接基址。"""
+    url = str(repository_url or "").strip()
+    if not url:
+        return None
+    if url.startswith("git@"):
+        host, _, path = url[4:].partition(":")
+        url = f"https://{host}/{path}"
+    elif url.startswith("ssh://"):
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        if not parsed.hostname:
+            return None
+        url = f"https://{parsed.hostname}{parsed.path}"
+    if url.endswith(".git"):
+        url = url[:-4]
+    url = url.rstrip("/")
+    if not re.match(r"^https?://", url, re.I):
+        return None
+    from urllib.parse import quote
+    safe_ref = quote(str(ref or "main"), safe="/")
+    if "github.com" in url.casefold():
+        return f"{url}/blob/{safe_ref}"
+    return f"{url}/-/blob/{safe_ref}"

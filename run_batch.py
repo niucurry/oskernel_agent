@@ -8,8 +8,8 @@
     comparison.html
 
 特性：
-- 可断点续跑：四份报告及摘要所需数据都已存在则跳过该作品。
-- 逐个作品串行（显存/磁盘友好），每步落盘日志到 data/output/_batch/。
+- 事务式发布：临时区内四份报告全部成功后，才一次性发布到正式目录。
+- 逐个作品串行（显存/磁盘友好），运行日志和摘要数据在进程结束时删除。
 - API key 额度不足时自动切换到备用 key（改写 config.toml + .env + 重跑 setup_opencode）。
 """
 from __future__ import annotations
@@ -20,11 +20,12 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
 
-from finals.cleanup import cleanup_report_directory, remove_directory
+from finals.cleanup import cleanup_report_directory, purge_report_directory, remove_directory
 from src.ingest.cloner import clone_repo
 
 ROOT = Path(__file__).resolve().parent
@@ -56,12 +57,10 @@ QUOTA_TOKENS = [
     "Throttling.User", "402", "401 ", "authentication_error",
 ]
 
-LOGDIR.mkdir(parents=True, exist_ok=True)
-
-
 def log(msg: str) -> None:
     line = f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}"
     print(line, flush=True)
+    LOGDIR.mkdir(parents=True, exist_ok=True)
     with PROGRESS.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
 
@@ -73,6 +72,7 @@ def load_state() -> dict:
 
 
 def save_state(st: dict) -> None:
+    LOGDIR.mkdir(parents=True, exist_ok=True)
     STATE.write_text(json.dumps(st, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -162,6 +162,7 @@ def child_env() -> dict:
 
 def run_step(name: str, cmd: list[str], logfile: Path, timeout: int) -> tuple[bool, str]:
     log(f"  {name}: {' '.join(cmd)}")
+    logfile.parent.mkdir(parents=True, exist_ok=True)
     with logfile.open("w", encoding="utf-8", errors="replace") as lf:
         lf.write(f"# {name}\n# {' '.join(cmd)}\n# start {datetime.now()}\n\n")
         lf.flush()
@@ -211,6 +212,48 @@ def cleanup_final_dir(team_id: str, final_dir: Path) -> None:
         (path.name for path in deliverable_paths(team_id, resolved)),
         output_root=OUT,
     )
+
+
+def purge_final_dir(team_id: str, final_dir: Path) -> None:
+    """清空未完成或发布失败的队伍目录，不让半成品和中间产物留在交付区。"""
+    resolved = final_dir.resolve()
+    if resolved.name != team_id:
+        raise ValueError(f"拒绝清理非队伍输出目录：{resolved}")
+    purge_report_directory(resolved, output_root=OUT)
+
+
+def publish_final_reports(team_id: str, staging_dir: Path, final_dir: Path) -> None:
+    """仅当临时区四份报告齐全时发布，并保证正式目录恰好只有四个文件。"""
+    staged = deliverable_paths(team_id, staging_dir)
+    missing = [path.name for path in staged if not path.is_file()]
+    if missing:
+        raise RuntimeError(f"拒绝发布不完整报告，缺少：{'、'.join(missing)}")
+
+    final_dir.mkdir(parents=True, exist_ok=True)
+    purge_final_dir(team_id, final_dir)
+    try:
+        for source, destination in zip(staged, deliverable_paths(team_id, final_dir)):
+            shutil.copy2(source, destination)
+        cleanup_final_dir(team_id, final_dir)
+    except Exception:
+        purge_final_dir(team_id, final_dir)
+        raise
+
+
+def cleanup_batch_runtime() -> None:
+    """删除日志、断点状态和克隆目录；它们都不是四份正式报告。"""
+    remove_directory(LOGDIR)
+    remove_directory(REPOS)
+    (OUT / "recall_completeness_audit.json").unlink(missing_ok=True)
+
+
+def remove_empty_final_dir(team_id: str, final_dir: Path) -> None:
+    """失败后不留下空队伍目录，同时拒绝操作正式输出根之外的路径。"""
+    resolved = final_dir.resolve()
+    if resolved.name != team_id or resolved.parent != OUT.resolve():
+        raise ValueError(f"拒绝清理非队伍输出目录：{resolved}")
+    if resolved.is_dir() and not any(resolved.iterdir()):
+        resolved.rmdir()
 
 
 def cleanup_team(repo_name: str, *, final_dir: Path | None = None) -> None:
@@ -268,7 +311,7 @@ def ensure_clone(url: str, repo_name: str, retries: int = 4) -> bool:
     return (dest / ".git").exists()
 
 
-def do_comparison(team_id: str, url: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
+def do_comparison(team_id: str, url: str, work_dir: Path, logfile: Path) -> tuple[bool, str]:
     repo_name = fork_to_repo_name(url)
     cmd = [PY, "-m", "src.pipeline", "--repo", url + ".git", "--baselines"]
     if os.environ.get("BATCH_ENABLE_AI_DETECT", "").strip().lower() in {"1", "true", "yes"}:
@@ -277,8 +320,8 @@ def do_comparison(team_id: str, url: str, final_dir: Path, logfile: Path) -> tup
     ok, body = run_step("对比报告", cmd, logfile, timeout=cmp_timeout)
     # 归档 HTML：pipeline 落到 data/output/<repo_name>/<repo_name>_comparison.html
     src_html = OUT / repo_name / f"{repo_name}_comparison.html"
-    dst = final_dir / "comparison.html"
-    dst_digest = final_dir / "comparison.digest.json"
+    dst = work_dir / "comparison.html"
+    dst_digest = work_dir / "comparison.digest.json"
     if src_html.exists():
         shutil.copy2(src_html, dst)
         src_digest = OUT / repo_name / f"{repo_name}_comparison.digest.json"
@@ -296,27 +339,32 @@ def do_comparison(team_id: str, url: str, final_dir: Path, logfile: Path) -> tup
     return False, body
 
 
-def do_description(team_id: str, url: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
+def do_description(team_id: str, url: str, work_dir: Path, logfile: Path) -> tuple[bool, str]:
     repo_name = fork_to_repo_name(url)
     cloned = REPOS / repo_name  # 对比报告已克隆
-    dst = final_dir / "description.html"
+    dst = work_dir / "description.html"
     if cloned.exists():
         src_arg = ["--repo-path", str(cloned)]
     else:
         src_arg = ["--url", url + ".git"]
-    cmd = [PY, "agent.py", *src_arg, "-o", str(dst)]
+    cmd = [
+        PY, "agent.py", *src_arg, "-o", str(dst),
+        "--team-id", team_id, "--repository-url", url,
+        "--keep-intermediates",
+    ]
     ok, body = run_step("描述报告", cmd, logfile, timeout=2400)
     digest = dst.with_suffix(".digest.json")
     return ok and dst.exists() and digest.exists(), body
 
 
-def do_development(team_id: str, url: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
+def do_development(team_id: str, url: str, work_dir: Path, logfile: Path) -> tuple[bool, str]:
     repo_name = fork_to_repo_name(url)
     cloned = REPOS / repo_name
-    dst = final_dir / "development.html"
+    dst = work_dir / "development.html"
     cmd = [
         PY, "-m", "finals", "development",
         "--repo", str(cloned), "--repo-id", team_id, "--output", str(dst),
+        "--keep-intermediates",
     ]
     minimum_commits = os.environ.get("FINALS_MIN_COMMITS", "").strip()
     if minimum_commits:
@@ -325,13 +373,13 @@ def do_development(team_id: str, url: str, final_dir: Path, logfile: Path) -> tu
     return ok and dst.exists() and dst.with_suffix(".digest.json").exists(), body
 
 
-def do_summary(team_id: str, final_dir: Path, logfile: Path) -> tuple[bool, str]:
-    dst = final_dir / "summary.pdf"
+def do_summary(team_id: str, work_dir: Path, logfile: Path) -> tuple[bool, str]:
+    dst = work_dir / "summary.pdf"
     cmd = [
         PY, "-m", "finals", "summary",
-        "--description-digest", str(final_dir / "description.digest.json"),
-        "--development-digest", str(final_dir / "development.digest.json"),
-        "--comparison-digest", str(final_dir / "comparison.digest.json"),
+        "--description-digest", str(work_dir / "description.digest.json"),
+        "--development-digest", str(work_dir / "development.digest.json"),
+        "--comparison-digest", str(work_dir / "comparison.digest.json"),
         "--repo-id", team_id, "--output", str(dst),
     ]
     ok, body = run_step("一页摘要", cmd, logfile, timeout=180)
@@ -348,128 +396,120 @@ def main() -> None:
     st["key"] = active_key
     try:
         set_api_key(active_key)
+        total = len(teams)
+        log(f"==== 批处理启动，共 {total} 个作品 ====")
+
+        for entry in teams:
+            idx = entry["序号"]
+            team_id = entry["队伍编号"]
+            url = entry["Fork地址"]
+            repo_name = fork_to_repo_name(url)
+            final_dir = OUT / team_id
+            final_dir.mkdir(parents=True, exist_ok=True)
+            tstate = st["teams"].setdefault(team_id, {})
+            deliverables = deliverable_paths(team_id, final_dir)
+
+            if all(path.is_file() for path in deliverables):
+                cleanup_final_dir(team_id, final_dir)
+                cleanup_team(repo_name, final_dir=final_dir)
+                log(f"[{idx}/{total}] {team_id} 已完成，跳过")
+                for kind in ("comparison", "description", "development", "summary"):
+                    tstate[kind] = "done"
+                save_state(st)
+                continue
+
+            # 不完整的旧结果不可与本次结果混用；正式目录先回到空状态。
+            purge_final_dir(team_id, final_dir)
+            fg = free_gb()
+            if fg < MIN_FREE_GB:
+                log(f"⚠ 剩余磁盘 {fg:.1f}GB < {MIN_FREE_GB}GB，中止批处理（请先清理磁盘再重跑）")
+                break
+
+            log(f"[{idx}/{total}] {team_id}  {url}  (剩余 {fg:.1f}GB)")
+            if not ensure_clone(url, repo_name):
+                log(f"  克隆最终失败，未发布 {team_id}")
+                for kind in ("comparison", "description", "development", "summary"):
+                    tstate[kind] = "failed"
+                save_state(st)
+                cleanup_team(repo_name, final_dir=final_dir)
+                continue
+
+            readiness = {
+                "comparison": False,
+                "description": False,
+                "development": False,
+                "summary": False,
+            }
+            try:
+                with tempfile.TemporaryDirectory(prefix=f"oskernel_reports_{team_id}_") as temporary:
+                    work_dir = Path(temporary)
+
+                    lf = LOGDIR / f"{team_id}_comparison.log"
+                    ok, body = do_comparison(team_id, url, work_dir, lf)
+                    if not ok and quota_exhausted(body) and st["key"] == "primary":
+                        log("  检测到额度/鉴权问题，切换备用 key 后重试对比报告")
+                        if switch_to_fallback(st):
+                            ok, body = do_comparison(team_id, url, work_dir, lf)
+                    readiness["comparison"] = ok
+                    log(f"  对比报告 {'成功' if ok else '失败'}")
+
+                    lf = LOGDIR / f"{team_id}_description.log"
+                    ok, body = do_description(team_id, url, work_dir, lf)
+                    if not ok and quota_exhausted(body) and st["key"] == "primary":
+                        log("  检测到额度/鉴权问题，切换备用 key 后重试描述报告")
+                        if switch_to_fallback(st):
+                            ok, body = do_description(team_id, url, work_dir, lf)
+                    readiness["description"] = ok
+                    log(f"  描述报告 {'成功' if ok else '失败'}")
+
+                    lf = LOGDIR / f"{team_id}_development.log"
+                    ok, _body = do_development(team_id, url, work_dir, lf)
+                    readiness["development"] = ok
+                    log(f"  开发过程报告 {'成功' if ok else '失败'}")
+
+                    digest_inputs = (
+                        work_dir / "comparison.digest.json",
+                        work_dir / "description.digest.json",
+                        work_dir / "development.digest.json",
+                    )
+                    if all(path.is_file() for path in digest_inputs):
+                        lf = LOGDIR / f"{team_id}_summary.log"
+                        ok, _body = do_summary(team_id, work_dir, lf)
+                    else:
+                        ok = False
+                        missing = "、".join(path.name for path in digest_inputs if not path.is_file())
+                        log(f"  一页摘要未生成，缺少临时输入：{missing}")
+                    readiness["summary"] = ok
+                    log(f"  一页摘要 {'成功' if ok else '失败'}")
+
+                    if all(readiness.values()):
+                        publish_final_reports(team_id, work_dir, final_dir)
+                    else:
+                        purge_final_dir(team_id, final_dir)
+            finally:
+                cleanup_team(repo_name, final_dir=final_dir)
+
+            for kind, ready in readiness.items():
+                tstate[kind] = "done" if ready else "failed"
+            save_state(st)
+            log(f"[{idx}/{total}] {team_id} 处理完毕 "
+                f"(summary={tstate.get('summary')}, desc={tstate.get('description')}, "
+                f"dev={tstate.get('development')}, cmp={tstate.get('comparison')}, "
+                f"剩余 {free_gb():.1f}GB)")
+
+        done = sum(1 for t in st["teams"].values()
+                   if all(t.get(kind) == "done" for kind in
+                          ("summary", "description", "development", "comparison")))
+        log(f"==== 批处理结束：{done}/{total} 完整完成 ====")
     except BatchConfigurationError as exc:
         raise SystemExit(f"[batch] 配置错误：{exc}") from None
-
-    total = len(teams)
-    log(f"==== 批处理启动，共 {total} 个作品 ====")
-
-    for entry in teams:
-        idx = entry["序号"]
-        team_id = entry["队伍编号"]
-        url = entry["Fork地址"]
-        final_dir = OUT / team_id
-        final_dir.mkdir(parents=True, exist_ok=True)
-        cmp_html = final_dir / "comparison.html"
-        cmp_digest = final_dir / "comparison.digest.json"
-        desc_html = final_dir / "description.html"
-        desc_digest = final_dir / "description.digest.json"
-        dev_html = final_dir / "development.html"
-        dev_digest = final_dir / "development.digest.json"
-        summary_pdf = final_dir / "summary.pdf"
-
-        tstate = st["teams"].setdefault(team_id, {})
-
-        deliverables = deliverable_paths(team_id, final_dir)
-        if all(path.exists() for path in deliverables):
-            cleanup_final_dir(team_id, final_dir)
-            cleanup_team(fork_to_repo_name(url), final_dir=final_dir)
-            log(f"[{idx}/{total}] {team_id} 已完成，跳过")
-            for kind in ("comparison", "description", "development", "summary"):
-                tstate[kind] = "done"
-            save_state(st)
-            continue
-
-        # ---- 磁盘保护：空间不足直接中止，绝不撑爆磁盘 ----
-        fg = free_gb()
-        if fg < MIN_FREE_GB:
-            log(f"⚠ 剩余磁盘 {fg:.1f}GB < {MIN_FREE_GB}GB，中止批处理（请先清理磁盘再续跑）")
-            break
-
-        log(f"[{idx}/{total}] {team_id}  {url}  (剩余 {fg:.1f}GB)")
-
-        # ---- 预克隆（带重试）：让对比、描述、开发过程三步复用同一份仓库 ----
-        repo_name = fork_to_repo_name(url)
-        need_any = any(not path.exists() for path in deliverables)
-        if need_any and not ensure_clone(url, repo_name):
-            log(f"  克隆最终失败，跳过 {team_id}（下次重跑会再试）")
-            tstate["comparison"] = "done" if cmp_html.exists() and cmp_digest.exists() else "failed"
-            tstate["description"] = "done" if desc_html.exists() and desc_digest.exists() else "failed"
-            tstate["development"] = "done" if dev_html.exists() and dev_digest.exists() else "failed"
-            tstate["summary"] = "done" if summary_pdf.exists() else "failed"
-            save_state(st)
-            continue
-
-        # ---- 对比报告 ----
-        if not cmp_html.exists() or not cmp_digest.exists():
-            lf = LOGDIR / f"{team_id}_comparison.log"
-            ok, body = do_comparison(team_id, url, final_dir, lf)
-            if not ok and quota_exhausted(body) and st["key"] == "primary":
-                log("  检测到额度/鉴权问题，切换备用 key 后重试对比报告")
-                if switch_to_fallback(st):
-                    ok, body = do_comparison(team_id, url, final_dir, lf)
-            tstate["comparison"] = "done" if ok else "failed"
-            log(f"  对比报告 {'成功' if ok else '失败'}")
-            save_state(st)
-
-        # ---- 描述报告 ----
-        if not desc_html.exists() or not desc_digest.exists():
-            lf = LOGDIR / f"{team_id}_description.log"
-            ok, body = do_description(team_id, url, final_dir, lf)
-            if not ok and quota_exhausted(body) and st["key"] == "primary":
-                log("  检测到额度/鉴权问题，切换备用 key 后重试描述报告")
-                if switch_to_fallback(st):
-                    ok, body = do_description(team_id, url, final_dir, lf)
-            tstate["description"] = "done" if ok else "failed"
-            log(f"  描述报告 {'成功' if ok else '失败'}")
-            save_state(st)
-
-        # ---- 开发过程报告 ----
-        if not dev_html.exists() or not dev_digest.exists():
-            lf = LOGDIR / f"{team_id}_development.log"
-            ok, _body = do_development(team_id, url, final_dir, lf)
-            tstate["development"] = "done" if ok else "failed"
-            log(f"  开发过程报告 {'成功' if ok else '失败'}")
-            save_state(st)
-
-        # ---- 一页摘要：必须消费三份报告各自的结构化摘要 ----
-        if not summary_pdf.exists():
-            inputs = (cmp_digest, desc_digest, dev_digest)
-            if all(path.exists() for path in inputs):
-                lf = LOGDIR / f"{team_id}_summary.log"
-                ok, _body = do_summary(team_id, final_dir, lf)
-            else:
-                ok = False
-                missing = "、".join(path.name for path in inputs if not path.exists())
-                log(f"  一页摘要未生成，缺少：{missing}")
-            tstate["summary"] = "done" if ok else "failed"
-            log(f"  一页摘要 {'成功' if ok else '失败'}")
-            save_state(st)
-
-        readiness = {
-            "comparison": cmp_html.exists() and cmp_digest.exists(),
-            "description": desc_html.exists() and desc_digest.exists(),
-            "development": dev_html.exists() and dev_digest.exists(),
-            "summary": summary_pdf.exists(),
-        }
-        for kind, ready in readiness.items():
-            tstate[kind] = "done" if ready else "failed"
-        save_state(st)
-
-        # ---- 成功后正式目录只保留四份报告，再清理克隆/流水线中间目录 ----
-        if all(readiness.values()):
-            cleanup_final_dir(team_id, final_dir)
-        cleanup_team(repo_name, final_dir=final_dir)
-
-        log(f"[{idx}/{total}] {team_id} 处理完毕 "
-            f"(summary={tstate.get('summary')}, desc={tstate.get('description')}, "
-            f"dev={tstate.get('development')}, cmp={tstate.get('comparison')}, "
-            f"剩余 {free_gb():.1f}GB)")
-
-    done = sum(1 for t in st["teams"].values()
-               if all(t.get(kind) == "done" for kind in
-                      ("summary", "description", "development", "comparison")))
-    log(f"==== 批处理结束：{done}/{total} 完整完成 ====")
+    finally:
+        # 无论成功、失败还是异常退出，运行日志、状态和克隆都不属于交付物。
+        for entry in teams:
+            final_dir = OUT / entry["队伍编号"]
+            cleanup_team(fork_to_repo_name(entry["Fork地址"]), final_dir=final_dir)
+            remove_empty_final_dir(entry["队伍编号"], final_dir)
+        cleanup_batch_runtime()
 
 
 if __name__ == "__main__":

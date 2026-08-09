@@ -172,7 +172,7 @@ def _overview_lines(digests: dict[str, ReportDigest]) -> list[tuple[str, str]]:
         "unknown": "未能确认",
         "not_provided": "未提供",
         "missing": "文件缺失",
-        "skipped": "不适用",
+        "skipped": "未执行",
     }
     build_status = status_text.get(
         str(desc_metrics.get("build_log_status", "not_provided")), "未能确认"

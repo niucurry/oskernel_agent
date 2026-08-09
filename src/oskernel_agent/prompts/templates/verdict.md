@@ -28,6 +28,8 @@ similarity（`overlap_pct` 取代码综合相似度）。指纹库缺失或损�
 2. **先检查 facts.integrity**：
    - build_log / run_log 的状态必须写入 one_line 与详细分析；首屏会直接展示日志事实，
      issues 只列能回溯到仓库源码 path:line 的设计或实现问题，避免重复；
+   - reproducibility 描述容器构建入口是否自洽。配置存在不等于构建通过；配置不一致时
+     必须作为真实可用性风险，并引用其 evidence；
    - hardcode.findings 只是待复核线索。逐条结合源码判断，并把每条结果写入
      `hardcode_reviews`；即使判断为 cleared 也不能省略；
    - 主动搜索四类方法：按测试名或被加载 ELF 名称产生确定性输出、针对测试的 cache
@@ -45,6 +47,8 @@ similarity（`overlap_pct` 取代码综合相似度）。指纹库缺失或损�
    - **文档质量** ← facts.key_files 中的 README/docs + read_file（若调）
    - **完整性** ← facts.syscall + 各子系统的覆盖深度（需深入核实 syscall 覆盖时，
      调一次 `list_implemented_syscalls`，或直接用 facts.syscall）
+     facts.syscall.standard_count 只是函数定义正则统计；与子系统或工具口径不一致时必须
+     披露差异，任何静态数量都不得等同于语义可用或测试通过
    - **功能性** ← 已实现功能能否走通正常路径、编译/运行日志与关键功能闭环；
      未提供日志时只能写“未核验”，不得凭静态代码断言可运行
    - 对设计不完整或不合理的问题，说明具体模块、正确性/性能影响和代码位置；如果某种
@@ -52,13 +56,20 @@ similarity（`overlap_pct` 取代码综合相似度）。指纹库缺失或损�
 
 4. 选最有代表性的 highlights / issues（数量自定，宁缺毋滥；必须从 facts.integrity、
    subsys_summaries 或工具返回中真实存在）
+   - 最终主报告不设问题数量上限：所有高/中风险、作弊问题以及会返回错误成功、破坏语义、
+     丢失资源或产生竞态的问题都必须保留；其余低风险项也进入紧凑清单。排序上构建/复现、
+     作弊和正确性优先，没有实测数据的性能推断靠后。
+   - 构建、启动或测试未执行时，禁止使用“完整”“确保兼容”“功能可用”等已验证措辞。
 
 5. 必要时调工具补强证据（≤20 次）
 
 ━━ 写出顺序（两份文件各一次 write_report 调用）━━
 
-a. 详细评判 **HTML 片段**（含强制雷达图）→ 写到 `outputs.content_path`
+a. 详细评判 **HTML 片段**（不含评分图表）→ 写到 `outputs.content_path`
 b. 结构化 JSON（短字段，无 content）→ 写到 `outputs.json_path`
+
+详细 HTML 正文禁止重复写总分、评分制或雷达图；总分与雷达图由最终页面根据 JSON
+dimensions 统一生成，避免出现两套评分尺度。
 
 ━━ 硬性约束 ━━
 
@@ -84,6 +95,8 @@ dimensions 恰好 6 项，name 严格使用：
 〔约束5：one_line ≤ 80 字〕
 one_line 必须逐项出现“编译”“运行”“硬编码”三个词，并分别写明状态；最后再写最严重的
 设计问题。日志未提供时明确写“未提供，无法核验”，不得省略。
+confirmed / suspected / cleared 只允许出现在 status 枚举字段，禁止写入 one_line；若所有
+硬编码线索均为 cleared，one_line 直接写“未发现硬编码”。
 
 〔约束6：说人话并把问题前置〕
 禁止使用“综上所述”“值得注意的是”“从上述分析可以看出”等空泛套话。

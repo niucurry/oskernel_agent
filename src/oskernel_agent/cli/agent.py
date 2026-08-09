@@ -112,11 +112,26 @@ def _env_disabled(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
 
 
+def _cleanup_tree_intermediates(output_file: str) -> None:
+    """删除描述报告的结构化摘要、树和模型工作目录，仅保留 HTML。"""
+    from finals.cleanup import remove_directory
+
+    out_html = Path(output_file)
+    if out_html.suffix.lower() != ".html":
+        out_html = out_html.with_suffix(".html")
+    out_html.with_suffix(".tree.json").unlink(missing_ok=True)
+    out_html.with_suffix(".digest.json").unlink(missing_ok=True)
+    remove_directory(out_html.parent / f"{out_html.stem}_tree_work")
+
+
 # 树状报告主入口
 
 def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
                    cli_depth: int = 3, *, build_log: str | None = None,
-                   run_log: str | None = None) -> Path | None:
+                   run_log: str | None = None,
+                   team_id: str | None = None,
+                   repository_url: str | None = None,
+                   repository_ref: str | None = None) -> Path | None:
     """自底向上构建 tree.json，并产出终端打印 + HTML 报告。"""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -148,6 +163,12 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
 
     tree = build_tree(repo_path, repo_name, ts, facts=facts,
                        output_dir=work_dir)
+    if team_id:
+        tree.setdefault("meta", {})["team_id"] = team_id
+    if repository_url:
+        tree.setdefault("meta", {})["repository_url"] = repository_url.removesuffix(".git")
+    if repository_ref:
+        tree.setdefault("meta", {})["repository_ref"] = repository_ref
 
     # 3. 写 tree.json（单一真相源）
     tree_json_path = out_html.with_suffix(".tree.json")
@@ -208,6 +229,10 @@ def main() -> None:
                         help="终端树打印的最大下钻层数（默认 3）")
     parser.add_argument("--build-log", help="可选：正式编译日志，用于问题前置与证据提取")
     parser.add_argument("--run-log", help="可选：正式运行日志，用于问题前置与证据提取")
+    parser.add_argument("--team-id", help="队伍编号，写入报告元数据")
+    parser.add_argument("--repository-url", help="目标仓库网页地址；证据链接只使用该地址")
+    parser.add_argument("--repository-ref", help="证据链接使用的不可变提交或分支")
+    parser.add_argument("--keep-intermediates", action="store_true", help=argparse.SUPPRESS)
 
     args = parser.parse_args()
 
@@ -222,9 +247,16 @@ def main() -> None:
         output_file = str(reports_dir / f"{repo_name_a}_{ts}.html")
 
     print(f"[agent] 报告将写入：{output_file}")
-    result = _run_tree_mode(repo_path_a, repo_name_a, output_file,
-                            cli_depth=args.depth, build_log=args.build_log,
-                            run_log=args.run_log)
+    try:
+        result = _run_tree_mode(repo_path_a, repo_name_a, output_file,
+                                cli_depth=args.depth, build_log=args.build_log,
+                                run_log=args.run_log, team_id=args.team_id,
+                                repository_url=args.repository_url or args.url,
+                                repository_ref=args.repository_ref)
+    finally:
+        if not args.keep_intermediates:
+            _cleanup_tree_intermediates(output_file)
+            print("[cleanup] 已删除 tree、digest 和模型工作目录，仅保留 HTML 报告")
     if result is None:
         raise SystemExit(1)
 

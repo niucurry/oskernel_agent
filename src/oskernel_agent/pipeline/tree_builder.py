@@ -63,11 +63,44 @@ _LANG_BY_EXT = {
 }
 _SKIP_LANGS = {"markdown", "text", "rst", "toml", "other"}
 
+_VERDICT_DUPLICATE_SCORE_RE = re.compile(
+    r"<p>\s*<strong>\s*(?:总?评分|综合分)[：:].*?</p>",
+    re.IGNORECASE | re.DOTALL,
+)
+
 # 与 code_parser.SUBSYSTEM_FINGERPRINTS 同口径；保留显示顺序
 _SUBSYS_DISPLAY_ORDER = [
     "启动模块", "内存管理", "进程管理", "文件系统", "设备管理",
     "系统调用", "硬件抽象", "其他",
 ]
+
+
+# 内容指纹适合确认一个文件“做了什么”，但入口薄封装、模块导出文件和仅含类型
+# 声明的文件经常达不到命中阈值。只在内容分类没有结论时，按明确的目录/文件名
+# 语义回退，避免把 mm、task、fs、driver、arch 等一股脑归入“其他”。
+_PATH_SUBSYSTEM_TOKENS = [
+    ("启动模块", {"boot", "bootstrap", "entry", "init", "loader", "startup"}),
+    ("内存管理", {"alloc", "allocator", "heap", "memory", "mm", "page", "paging", "vm"}),
+    ("进程管理", {
+        "ipc", "process", "proc", "sched", "scheduler", "signal", "sync", "task", "thread",
+    }),
+    ("文件系统", {"file", "filesystem", "fs", "inode", "vfs"}),
+    ("设备管理", {"device", "devices", "driver", "drivers", "net", "network"}),
+    ("系统调用", {"syscall", "syscalls"}),
+    ("硬件抽象", {"arch", "hal", "platform"}),
+]
+
+
+def _fallback_subsystem_for_path(path: str) -> str | None:
+    """Infer a subsystem from unambiguous path components only."""
+    normalized = path.replace("\\", "/").lower()
+    parts: set[str] = set()
+    for component in normalized.split("/"):
+        parts.update(token for token in re.split(r"[^a-z0-9]+", component) if token)
+    for subsystem, tokens in _PATH_SUBSYSTEM_TOKENS:
+        if parts & tokens:
+            return subsystem
+    return None
 
 
 def _detect_lang(path: Path) -> str:
@@ -113,8 +146,8 @@ def _subsys_concurrency() -> int:
 
 def enumerate_subsystems(repo_path: Path) -> tuple[dict, int]:
     """
-    扫描仓库源文件，按 SUBSYSTEM_FINGERPRINTS 归类到 6 个 OS 子系统；
-    没有命中任何子系统的归到"其他"。
+    扫描仓库源文件，优先按 SUBSYSTEM_FINGERPRINTS 归类；内容指纹没有结论时
+    再按明确的路径组件回退，仍无法判断的归到“其他”。
     返回 (tree_root, total_file_count)。
     """
     repo_path = Path(repo_path).resolve()
@@ -152,7 +185,11 @@ def enumerate_subsystems(repo_path: Path) -> tuple[dict, int]:
     # 3. 按子系统分组
     by_subsys: dict[str, list[dict]] = {s: [] for s in _SUBSYS_DISPLAY_ORDER}
     for f in all_files:
-        subsys = file_to_subsys.get(f["path"], "其他")
+        subsys = (
+            file_to_subsys.get(f["path"])
+            or _fallback_subsystem_for_path(f["path"])
+            or "其他"
+        )
         by_subsys.setdefault(subsys, []).append(f)
 
     # 4. 装配 tree
@@ -227,6 +264,7 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
         "repo_path":      str(repo_path),
         "subsystem":      subsys_node["name"],
         "reference_os":   (facts or {}).get("meta", {}).get("reference_os"),
+        "syscall_facts":  (facts or {}).get("syscall", {}),
         "file_count":     len(files),
         "files_truncated": len(prompt_files) < len(files),
         "files":          prompt_files,
@@ -242,6 +280,8 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
         "  a. 子系统总览 **HTML 片段**（写到 outputs.content_path）—— 总评、模块列表\n"
         "  b. 每个模块的详细 **HTML 片段**（写到 outputs.module_paths[i] 中你选用的槽位）\n"
         "  c. 结构化 JSON（写到 outputs.json_path）—— 含模块清单与各模块槽位号\n\n"
+        "若 subsystem 是系统调用，syscall_facts.standard_count 只是函数定义正则统计。"
+        "工具统计与其不一致时必须同时说明口径差异；任何静态数量都不得写成语义可用或测试通过。\n\n"
         "内容直接写 HTML（不要 Markdown）：用 `<h3>/<p>/<ul>/<table>` 等语义标签；"
         "**不要画架构图/流程图**（不要 `<pre class=\"mermaid\">`），用文字说明模块关系；"
         "文件引用写纯文本 path:line（自动变链接）。\n\n"
@@ -267,6 +307,10 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
         '}\n\n'
         "modules[].slot 是 1..8 之间的整数，对应你用 outputs.module_paths[slot-1] "
         "写出的那份 .md（slot 从 1 开始计数）。\n\n"
+        "证据与模块路径硬性自检：highlights/issues 的 path 必须是实际文件并精确到 "
+        "file:line；modules[].file_paths 只能填写实际存在的源文件，严禁填写目录。"
+        "files 只是候选索引，无须为了覆盖全部候选而用目录代替文件；每个模块选择 1–4 个"
+        "最具代表性的真实文件即可。写 JSON 前逐项核对。\n\n"
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
         "写入前做最后一次语言自检：若任何标题、段落、表格单元格或 JSON 描述仍是英文，"
         "先改写成简体中文再调用写入工具；不要输出英文版后等待后续翻译。"
@@ -389,6 +433,12 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
     )
     _validate_subsys_result(parsed, subsys_node["name"], repo_path)
 
+    _apply_subsys_result(subsys_node, parsed, repo_path)
+
+
+def _apply_subsys_result(subsys_node: dict, parsed: dict, repo_path: Path) -> None:
+    """把已经验证并补齐正文的子系统结果装配到报告树。"""
+
     # 填子系统字段（子系统/模块不打分，评分只在顶层 VERDICT）
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
     from finals.readability import concise_module_summary, explain_terms_on_first_use
@@ -431,6 +481,48 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
         })
 
 
+def load_subsys_stage_from_artifacts(
+    tree_root: dict,
+    repo_path: Path,
+    work_dir: Path,
+) -> None:
+    """从已通过 AI 生成的阶段产物恢复子系统树，不再次调用模型。
+
+    顶层阶段校验失败不应迫使所有子系统重新分析。JSON 修复产物优先于模型写出的
+    原始 JSON；恢复时仍执行与正常流水线相同的语言、路径和完整性校验。
+    """
+    from .lang_guard import normalize_tree_language, normalize_tree_titles
+
+    for subsys_node in tree_root.get("children", []):
+        if subsys_node.get("type") != "subsystem":
+            continue
+        outputs = _build_subsys_outputs(subsys_node, work_dir)
+        original_path = Path(outputs["json_path"])
+        repaired_path = original_path.with_name(f"{original_path.stem}.repair.json")
+        artifact_path = repaired_path if repaired_path.exists() else original_path
+        try:
+            parsed = json.loads(artifact_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                f"无法恢复{subsys_node['name']}阶段产物：{artifact_path}：{exc}"
+            ) from exc
+
+        parsed["content"] = _read_md_if_exists(Path(outputs["content_path"]))
+        for index, module in enumerate(parsed.get("modules") or [], start=1):
+            slot = int(module.get("slot") or index)
+            module["file_paths"] = _normalize_adjacent_module_paths(
+                module.get("file_paths") or [], repo_path,
+            )
+            if 1 <= slot <= MAX_MODULES_PER_SUBSYS:
+                module["content"] = _read_md_if_exists(
+                    Path(outputs["module_paths"][slot - 1])
+                )
+        normalize_tree_language(parsed)
+        normalize_tree_titles(parsed)
+        _validate_subsys_result(parsed, subsys_node["name"], repo_path)
+        _apply_subsys_result(subsys_node, parsed, repo_path)
+
+
 def _normalize_adjacent_module_paths(paths: list, repo_path: Path) -> list[str]:
     """把模型省略目录的相邻文件名补成仓库内真实路径。"""
     normalized: list[str] = []
@@ -463,6 +555,24 @@ def _normalize_module_content_paths(content: str, paths: list[str]) -> str:
             normalized,
         )
     return normalized
+
+
+def _normalize_verdict_content_paths(parsed: dict) -> None:
+    """用顶层结构化证据补全总评正文中的裸 ``文件名:行号``。"""
+    evidence_files: list[str] = []
+    for field in ("highlights", "issues"):
+        for item in parsed.get(field) or []:
+            if not isinstance(item, dict):
+                continue
+            raw = str(item.get("path") or "").strip()
+            match = _SOURCE_LOCATION_RE.match(raw)
+            evidence_files.append(match.group(1) if match else raw)
+    for item in parsed.get("hardcode_reviews") or []:
+        if isinstance(item, dict) and item.get("path"):
+            evidence_files.append(str(item["path"]))
+    parsed["content"] = _normalize_module_content_paths(
+        str(parsed.get("content") or ""), evidence_files,
+    )
 
 
 def run_subsys_stage(tree_root: dict, repo_path: Path,
@@ -529,10 +639,15 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         "规则命中不是作弊结论；结合上下文给 confirmed/suspected/cleared，说明实现方法、影响和依据。\n"
         "3. build_log/run_log 的状态必须写入 one_line 与详细分析；结构化 issues 只列可回溯到"
         "仓库源码 path:line 的设计或实现问题，避免与首屏日志事实重复。\n"
-        "4. 对设计不完整或不合理的问题，必须说明具体模块、性能/正确性影响、真实 path:line；"
+        "4. 检查 facts.integrity.reproducibility：容器配置存在不等于构建通过；配置入口不一致时"
+        "必须报告并引用 evidence。对设计不完整或不合理的问题，必须说明具体模块、"
+        "性能/正确性影响、真实 path:line；"
         "若某种不合理设计会对特定测试有利，也要明确写出获益条件。\n"
-        "5. 必要时 compare_with_reference_os(facts.meta.reference_os) / read_file / search_code 验证关键判断\n"
-        "6. 工具调用 ≤20 次；必须为分散在不同文件的硬编码线索读取足够上下文，不得仅凭摘录猜测\n\n"
+        "5. 最终主报告不设问题数量上限：全部高/中风险、作弊和破坏语义正确性的缺失必须保留；"
+        "其余低风险项进入紧凑清单。构建/复现、作弊、正确性优先，无实测支撑的性能推断靠后。"
+        "构建、启动或测试未执行时，禁止声称功能完整或可用。\n"
+        "6. 必要时 compare_with_reference_os(facts.meta.reference_os) / read_file / search_code 验证关键判断\n"
+        "7. 工具调用 ≤20 次；必须为分散在不同文件的硬编码线索读取足够上下文，不得仅凭摘录猜测\n\n"
         "**写出顺序**：\n"
         "  a. 详细评判 HTML 片段（不含图表）→ 写到 outputs.content_path\n"
         "  b. 结构化 JSON → 写到 outputs.json_path\n\n"
@@ -540,7 +655,7 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         '{\n'
         '  "score_total":int,\n'
         '  "dimensions":[6 items: 原创性/架构合理性/代码质量/文档质量/完整性/功能性,\n'
-        '    each {"name":"...","score":int,"reason":"..."}],\n'
+        '    each {"name":"...","score":int 0到100（禁止使用0到10制）,"reason":"..."}],\n'
         '  "highlights":[{"path":"...","quote":"..."}],\n'
         '  "issues":[{"path":"...","severity":"low|medium|high","quote":"...","confidence":0到100}],\n'
         '  "hardcode_reviews":[{\n'
@@ -552,8 +667,14 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         '    "reason":"结合代码上下文的中文判断","confidence":0到100,\n'
         '    "excerpt":"不超过200字的关键代码摘录"\n'
         '  }],\n'
+        '  "similarity":{"reference_os":"...","overlap_pct":0到100,'
+        '"level":"low|medium|high","summary":"...","borrowed":[],"original":[]},\n'
         '  "one_line":"≤80字；逐项写明编译状态、运行状态、硬编码结论和最严重设计问题"\n'
         '}\n\n'
+        "one_line 必须使用自然、完整的中文；confirmed/suspected/cleared 只允许出现在 status "
+        "枚举字段，禁止写入 one_line。若全部复核为 cleared，one_line 明确写“未发现硬编码”。\n\n"
+        "详细 HTML 正文禁止重复写总分、评分制或雷达图；最终页面只显示 JSON dimensions "
+        "生成的唯一评分卡，避免出现两套分数。\n\n"
         "hardcode_reviews[].category 只能逐项填写以下一个固定值：按测试名或 ELF 名称分支、"
         "测试专用缓存策略、疑似写死测试结果、脚本强制忽略失败。\n\n"
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
@@ -680,7 +801,9 @@ def _validate_verdict_integrity_conclusion(parsed: dict, facts: dict | None) -> 
         if not any(phrase in text for phrase in ("发现", "存在", "确认", "疑似", "未确认")):
             raise RuntimeError("顶层一句话结论未明确说明硬编码复核结论")
     if not active and not any(
-        phrase in text for phrase in ("未发现", "未确认", "无硬编码", "已排除", "排除")
+        phrase in text for phrase in (
+            "未发现", "未确认", "无硬编码", "无作弊", "不构成作弊", "已排除", "排除",
+        )
     ):
         raise RuntimeError("顶层一句话结论未明确说明未形成硬编码问题")
 
@@ -689,6 +812,8 @@ def _validate_verdict_result(
     parsed: dict,
     repo_path: Path | None = None,
     facts: dict | None = None,
+    *,
+    enforce_one_line_length: bool = True,
 ) -> None:
     """总评必须包含真实正文、六维评分和理由，不允许用固定分数补位。"""
     if parsed.get("_error"):
@@ -697,7 +822,7 @@ def _validate_verdict_result(
         raise RuntimeError("顶层评判缺少详细正文")
     if not str(parsed.get("one_line") or "").strip():
         raise RuntimeError("顶层评判缺少一句话结论")
-    if len(str(parsed.get("one_line") or "")) > 80:
+    if enforce_one_line_length and len(str(parsed.get("one_line") or "")) > 80:
         raise RuntimeError("顶层评判一句话结论超过 80 字")
     _validate_verdict_integrity_conclusion(parsed, facts)
     dimensions = parsed.get("dimensions") or []
@@ -987,6 +1112,162 @@ def _collect_subsys_summaries(tree_root: dict) -> list[dict]:
     return out
 
 
+def repair_verdict_one_line(
+    parsed: dict,
+    facts: dict | None,
+    work_dir: Path,
+    repo_path: Path,
+) -> dict:
+    """让 AI 只压缩不合规的顶层一句话，不重写整份已验证总评。"""
+    out_path = work_dir / "verdict-one-line.repair.json"
+    integrity = ((facts or {}).get("integrity") or {})
+    issues = [item for item in (parsed.get("issues") or []) if isinstance(item, dict)]
+    issue_hint = str((issues[0] if issues else {}).get("quote") or "未说明")
+    payload = {
+        "原句": str(parsed.get("one_line") or ""),
+        "编译状态": str((integrity.get("build_log") or {}).get("status") or "not_provided"),
+        "运行状态": str((integrity.get("run_log") or {}).get("status") or "not_provided"),
+        "硬编码复核状态": [
+            str(item.get("status") or "")
+            for item in (parsed.get("hardcode_reviews") or [])
+            if isinstance(item, dict)
+        ],
+        "最严重设计问题候选": issue_hint,
+        "输出路径": str(out_path),
+    }
+
+    def _complete(candidate: dict) -> bool:
+        one_line = str(candidate.get("one_line") or "").strip()
+        if not one_line or len(one_line) > 80:
+            return False
+        merged = dict(parsed)
+        merged["one_line"] = one_line
+        try:
+            _validate_verdict_integrity_conclusion(merged, facts)
+        except RuntimeError:
+            return False
+        return True
+
+    task = BatchTask(
+        batch_id="verdict-one-line-repair",
+        agent_name="os-kernel-verdict",
+        user_request=(
+            "只修复顶层报告的一句话结论，不修改其他任何结论。根据下面数据生成一条不超过 "
+            "70 个字符的自然中文句子；必须逐项出现“编译”“运行”“硬编码”，准确说明状态，"
+            "末尾点出一个最严重设计问题。status 枚举值不得写入句子；全部 cleared 时写"
+            "“未发现硬编码”。不要解释。调用 write_report，把仅含 one_line 字段的 JSON 写入"
+            f"指定输出路径。\n\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
+        ),
+        output_path=out_path,
+        cache_dir=work_dir,
+        cache_key="",
+        cache_enabled=False,
+        fallback={"one_line": ""},
+        repo_path=repo_path,
+        cache_validator=_complete,
+    )
+    candidate = run_batch_task(
+        task,
+        schema_hint='{"one_line":"不超过70个字符的中文结论"}',
+        timeout=180,
+    )
+    if not _complete(candidate):
+        raise RuntimeError("AI 未能把顶层一句话结论压缩到 80 字以内")
+    parsed["one_line"] = str(candidate["one_line"]).strip()
+    return parsed
+
+
+def repair_verdict_similarity(
+    parsed: dict,
+    facts: dict | None,
+    work_dir: Path,
+    repo_path: Path,
+) -> dict:
+    """只补生成缺失/无效的参考 OS 指纹比对字段。"""
+    reference_os = str(((facts or {}).get("meta") or {}).get("reference_os") or "").strip()
+    if not reference_os:
+        return parsed
+    out_path = work_dir / "verdict-similarity.repair.json"
+    # MCP 会为这个工具等待完整语义引擎初始化，在大仓库中可能超过请求超时；这里用
+    # 同一 TreeSitterEngine + ToolDispatcher 直接取得完全相同的代码指纹结果，再交给
+    # AI 只做中文摘要与结构化，不让模型主观估算数值。
+    from .. import config as agent_config
+    from ..engines.path_c import TreeSitterEngine
+    from ..tools.tool_dispatcher import ToolDispatcher
+
+    primary_lang = str(((facts or {}).get("profile_lite") or {}).get("primary_lang") or "rust")
+    engine_lang = "c" if primary_lang.lower() in {"c", "cpp", "c++"} else "rust"
+    engine = TreeSitterEngine(
+        str(repo_path), engine_lang,
+        skip_dirs=agent_config.engine.get("skip_dirs"),
+    )
+    dispatcher = ToolDispatcher(
+        engine, None, str(repo_path), {"primary_lang": engine_lang},
+        ref_db_dir=agent_config.data.get("reference_db_dir", "reference_db"),
+    )
+    comparison = dispatcher.compare_with_reference_os(reference_os)
+    salient_lines = [
+        line for line in comparison.splitlines()
+        if ("综合相似度" in line or "共有函数" in line or line.startswith("### "))
+    ]
+    payload = {
+        "repo_path": str(repo_path),
+        "reference_os": reference_os,
+        "指纹工具结果": salient_lines,
+        "output_path": str(out_path),
+    }
+
+    def _complete(candidate: dict) -> bool:
+        similarity = candidate.get("similarity")
+        if not isinstance(similarity, dict):
+            return False
+        merged = dict(parsed)
+        merged["similarity"] = similarity
+        try:
+            _validate_similarity_result(merged, facts)
+            _validate_structured_evidence(
+                similarity.get("borrowed") or [], repo_path, label="参考实现沿用证据",
+            )
+            _validate_structured_evidence(
+                similarity.get("original") or [], repo_path, label="候选创新证据",
+            )
+        except RuntimeError:
+            return False
+        return True
+
+    task = BatchTask(
+        batch_id="verdict-similarity-repair",
+        agent_name="os-kernel-verdict",
+        user_request=(
+            "只补生成顶层报告的代码指纹相似度字段，不修改其他结论。代码指纹工具已执行，"
+            "必须原样使用输入里的综合相似度，禁止重新估算；不需要再调用任何分析工具。"
+            "调用 write_report，将 JSON 写入 output_path；JSON 只能有 similarity "
+            "顶层字段，内含 reference_os、overlap_pct、level、summary、borrowed、original。"
+            "borrowed/original 若无可靠 path:line 证据就使用空数组。所有描述使用中文。\n\n"
+            + json.dumps(payload, ensure_ascii=False, indent=2)
+        ),
+        output_path=out_path,
+        cache_dir=work_dir,
+        cache_key="",
+        cache_enabled=False,
+        fallback={"similarity": {}},
+        repo_path=repo_path,
+        cache_validator=_complete,
+    )
+    candidate = run_batch_task(
+        task,
+        schema_hint=(
+            '{"similarity":{"reference_os":str,"overlap_pct":int,'
+            '"level":"low|medium|high","summary":str,"borrowed":[],"original":[]}}'
+        ),
+        timeout=300,
+    )
+    if not _complete(candidate):
+        raise RuntimeError("AI 未能补齐参考 OS 代码指纹比对结果")
+    parsed["similarity"] = candidate["similarity"]
+    return parsed
+
+
 def run_verdict_stage(tree_root: dict, facts: dict | None,
                        work_dir: Path,
                        repo_path: Path | None = None) -> dict:
@@ -1002,6 +1283,8 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
     def _enrich(parsed: dict) -> dict:
         """把 verdict 详细正文（HTML，含强制图表）读进 parsed，随 JSON 一起进缓存。"""
         parsed["content"] = _read_md_if_exists(Path(outputs["content_path"]))
+        parsed["content"] = _VERDICT_DUPLICATE_SCORE_RE.sub("", parsed["content"])
+        _normalize_verdict_content_paths(parsed)
         # 正常情况下提示词已直接生成中文；只有检测出英文正文时才调用翻译兜底。
         from .lang_guard import normalize_tree_language
         normalize_tree_language(parsed)
@@ -1013,8 +1296,10 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
         if not language_output_complete(parsed):
             return False
         try:
-            _validate_verdict_result(parsed, repo_path or Path("."), facts)
-            _validate_similarity_result(parsed, facts)
+            _validate_verdict_result(
+                parsed, repo_path or Path("."), facts,
+                enforce_one_line_length=False,
+            )
             _validate_hardcode_reviews(parsed, facts, repo_path or Path("."))
         except RuntimeError:
             return False
@@ -1044,6 +1329,16 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                     '"one_line":str}',
         timeout=600,
     )
+    if len(str(parsed.get("one_line") or "")) > 80:
+        repair_verdict_one_line(
+            parsed, facts, work_dir, repo_path or Path("."),
+        )
+    try:
+        _validate_similarity_result(parsed, facts)
+    except RuntimeError:
+        repair_verdict_similarity(
+            parsed, facts, work_dir, repo_path or Path("."),
+        )
     _validate_verdict_result(parsed, repo_path or Path("."), facts)
     _validate_similarity_result(parsed, facts)
     _validate_hardcode_reviews(parsed, facts, repo_path or Path("."))

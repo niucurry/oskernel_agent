@@ -21,3 +21,21 @@ def test_frontend_exposes_finals_reports_in_judge_order():
     assert 'path.join(reportDir(repo.id), "summary.pdf")' in pipeline
     assert '"-m",\n        "finals",\n        "development"' in pipeline
     assert '"--description-digest"' in pipeline
+
+
+def test_frontend_always_cleans_intermediates_and_keeps_digests_internal():
+    report_files = (ROOT / "frontend/server/reportFiles.js").read_text(encoding="utf-8")
+    pipeline = (ROOT / "frontend/server/pipeline.js").read_text(encoding="utf-8")
+
+    for name in (
+        "summary.pdf",
+        "description.html",
+        "development.html",
+        "comparison.html",
+    ):
+        assert f'"{name}"' in report_files
+    assert "await this.runJobImplementation(id, job);" in pipeline
+    assert "finally" in pipeline
+    assert "await cleanupReportDirectory(job.repo_id);" in pipeline
+    assert "await cleanupReportDirectory(repo.id);" in pipeline
+    assert pipeline.count('"--keep-intermediates"') == 2

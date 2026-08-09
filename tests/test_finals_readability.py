@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from finals.models import EvidenceRef, Finding, ModuleDigest, ReportDigest
+from oskernel_agent.pipeline.lang_guard import needs_translation
 from finals.readability import (
     concise_module_summary,
     explain_terms_in_html,
@@ -51,6 +52,14 @@ def test_html_term_gate_ignores_code_and_defines_first_visible_use():
     assert rendered.count("写时复制（Copy-on-Write，COW）") == 1
 
 
+def test_term_expansion_never_rewrites_a_source_path():
+    source = "<p>问题位于 os/src/fs/inode.rs:545，inode 缓存未同步。</p>"
+    rendered = explain_terms_in_html(source)
+    assert "os/src/fs/inode.rs:545" in rendered
+    assert "os/src/fs/索引节点" not in rendered
+    assert "索引节点（inode）缓存" in rendered
+
+
 def test_unexplained_term_and_ai_filler_are_reported():
     errors = readability_errors("值得注意的是，VFS 提供统一接口。")
     assert any("模板语" in error for error in errors)
@@ -75,3 +84,8 @@ def test_digest_selects_only_decision_relevant_findings():
         modules=[ModuleDigest(name="内存管理", summary="负责页表映射。")],
     )
     assert [item.title for item in digest.decision_findings(1)] == ["高风险"]
+
+def test_makefile_line_references_are_not_misread_as_english_headings():
+    assert not needs_translation(
+        "<li><strong>Makefile:310 / Makefile:317</strong> — 镜像存在性检查。</li>"
+    )

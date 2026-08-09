@@ -31,6 +31,9 @@ _CODE_SPAN = re.compile(r"<code\b[^>]*>.*?</code>", re.I | re.S)
 _TAG = re.compile(r"<[^>]+>")
 _URL = re.compile(r"https?://\S+")
 _FILELINE = re.compile(r"[\w./\\-]+\.[A-Za-z0-9]+:\d+(?:-\d+)?")
+_BUILD_FILELINE = re.compile(
+    r"\b(?:GNUmakefile|Makefile|makefile)(?::\d+(?:-\d+)?)?\b"
+)
 _FILEPATH = re.compile(r"(?:[A-Za-z0-9_.-]+[/\\])+(?:[A-Za-z0-9_.-]+)?")
 _FILENAME = re.compile(r"\b[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:rs|c|cc|cpp|h|hpp|s|asm|py|sh|ld|toml|yaml|yml|json|md)\b", re.I)
 _PAREN_IDENT_LIST = re.compile(
@@ -60,6 +63,7 @@ def _strip_noise(s: str) -> str:
     t = _TAG.sub(" ", t)
     t = _URL.sub(" ", t)
     t = _FILELINE.sub(" ", t)
+    t = _BUILD_FILELINE.sub(" ", t)
     t = _FILEPATH.sub(" ", t)
     t = _FILENAME.sub(" ", t)
     t = _PAREN_IDENT_LIST.sub(" ", t)
@@ -116,7 +120,9 @@ def needs_translation(s: str) -> bool:
 _SYS_PROMPT = (
     "你是操作系统技术报告的中文化器。输入是报告中的一个字段（可能含 HTML 片段）。"
     "把其中的**英文自然语言句子/正文，以及英文标题**（<h1>–<h6> / <th> / <strong> 里的英文短语，"
-    "如 'Task Core & Process Control Block'、'Program Loading & Execution'）全部改写成简洁准确的简体中文；"
+    "如 'Task Core & Process Control Block'、'Program Loading & Execution'、"
+    "'per-hart PLIC context'）全部改写成简洁准确的简体中文；技术短语也要翻译，例如将 "
+    "'per-hart PLIC context' 写成“每硬件线程 PLIC 上下文”；"
     "严格原样保留：所有 HTML 标签本身、<code>…</code> 里的标识符、形如 path/to/file.c:120 "
     "的文件行号引用、函数名/类型名等代码标识符。不要新增解释、不要加 Markdown 代码围栏、"
     "不要改变 HTML 结构。只输出改写后的内容本身。"
