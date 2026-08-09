@@ -302,11 +302,12 @@ def _format_symbol(tag: dict, lang: str) -> str:
 
 
 _SUBSYSTEM_ORDER = [
+    "启动模块",
     "系统调用",
     "进程管理",
     "内存管理",
     "文件系统",
-    "设备驱动",
+    "设备管理",
     "硬件抽象",
     "同步原语",
 ]
@@ -372,6 +373,10 @@ def generate_level1_map(
 
 #子系统分类
 SUBSYSTEM_FINGERPRINTS = {
+    "启动模块": [
+        "_start", "rust_main", "kernel_main", "start_kernel", "boot",
+        "bootstrap", "early_init", "boot_stack", ".bss", "opensbi",
+    ],
     "进程管理": [
         "fork", "exec", "waitpid", "do_fork", "task_struct",
         "proc_struct", "TaskControlBlock", "switch_to", "schedule()"
@@ -388,7 +393,7 @@ SUBSYSTEM_FINGERPRINTS = {
         "sys_read", "sys_write", "sys_fork", "ecall",
         "trap_handler", "syscall_handler", "SYSCALL_"
     ],
-    "设备驱动": [
+    "设备管理": [
         "virtio", "uart", "mmio", "disk_read", "disk_write",
         "PLIC", "interrupt", "block_device"
     ],

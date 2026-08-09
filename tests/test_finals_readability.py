@@ -22,6 +22,14 @@ def test_module_summary_stops_at_sentence_and_obeys_limit():
     assert not summary.endswith("，")
 
 
+def test_term_expansion_cannot_push_module_summary_over_limit():
+    raw = "模块采用 COW VFS ELF IPC ABI SMP，" + "映射路径稳定，" * 37 + "确保正确。"
+    assert len(raw) <= 300
+    summary = concise_module_summary(raw)
+    assert len(summary) <= 300
+    assert not summary.endswith("，")
+
+
 def test_common_term_is_explained_only_once():
     text = explain_terms_on_first_use("COW 用于缺页处理，后续 COW 路径复用同一映射。")
     assert text.count("写时复制") == 1
@@ -47,6 +55,10 @@ def test_unexplained_term_and_ai_filler_are_reported():
     errors = readability_errors("值得注意的是，VFS 提供统一接口。")
     assert any("模板语" in error for error in errors)
     assert any("VFS" in error for error in errors)
+
+
+def test_short_term_inside_a_larger_standard_name_is_not_a_false_first_use():
+    assert not any("术语 OS" in error for error in readability_errors("符合 POSIX 接口约定。"))
 
 
 def test_digest_selects_only_decision_relevant_findings():

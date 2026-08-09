@@ -114,22 +114,25 @@ def _reviewed_hardcode_findings(verdict: dict, integrity: dict) -> list[Finding]
     return findings
 
 
+def _description_priority_key(item: Finding) -> tuple[int, int, float, str]:
+    rank = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
+    if item.title in {"编译失败", "运行失败", "编译日志缺失", "运行日志缺失"}:
+        group = 0
+    elif "硬编码" in item.title:
+        group = 1
+    elif item.title.startswith(("编译", "运行")):
+        group = 2
+    elif item.severity in {"critical", "high"}:
+        group = 3
+    else:
+        group = 4
+    return group, -rank[item.severity], -item.confidence, item.title
+
+
 def description_priority_findings(digest: ReportDigest, limit: int = 8) -> list[Finding]:
     """描述报告专用顺序：构建/运行失败、硬编码、严重设计问题、其他。"""
-    rank = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
 
-    def priority(item: Finding) -> tuple[int, int, float, str]:
-        if item.title in {"编译失败", "运行失败"}:
-            group = 0
-        elif "硬编码" in item.title:
-            group = 1
-        elif item.severity in {"critical", "high"}:
-            group = 2
-        else:
-            group = 3
-        return group, -rank[item.severity], -item.confidence, item.title
-
-    return sorted(digest.findings, key=priority)[: max(0, limit)]
+    return sorted(digest.findings, key=_description_priority_key)[: max(0, limit)]
 
 
 def description_digest_from_tree(tree: dict) -> ReportDigest:
@@ -159,6 +162,23 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
                 confidence=1.0,
                 source="description",
             ))
+        elif log.get("status") == "not_provided":
+            findings.append(Finding(
+                title=f"{label}日志未提供",
+                detail=f"未提供正式{label}日志，无法核验作品是否能够正常{label}。",
+                severity="low",
+                confidence=1.0,
+                source="description",
+            ))
+        elif log.get("status") == "unknown":
+            findings.append(Finding(
+                title=f"{label}结果未能确认",
+                detail=f"{label}日志没有可识别的成功或失败标记，不能据此判断结果。",
+                severity="medium",
+                confidence=1.0,
+                source="description",
+                evidence=[EvidenceRef(path=str(log.get("path") or ""))],
+            ))
 
     hardcode_findings = _reviewed_hardcode_findings(verdict, integrity)
     findings.extend(hardcode_findings)
@@ -179,7 +199,7 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             title=explain_terms_on_first_use(concise_module_summary(quote))[:80],
             detail=concise_module_summary(quote),
             severity=_severity(str(item.get("severity") or "medium")),
-            confidence=0.78,
+            confidence=_confidence_ratio(item.get("confidence"), default=0.5),
             source="description",
             evidence=[issue_path],
         ))
@@ -198,16 +218,24 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
         str(verdict.get("one_line") or "已完成源码结构分析，结论见问题清单。")
     ))
     reviews = verdict.get("hardcode_reviews") or []
+    ordered_findings = sorted(findings, key=_description_priority_key)
     return ReportDigest(
         repo_id=str(meta.get("repo") or (facts.get("meta") or {}).get("repo_id") or "unknown"),
         kind="description",
         conclusion=conclusion[:240],
         confidence=0.8 if findings else 0.65,
-        findings=findings[:8],
+        findings=ordered_findings[:8],
         modules=modules[:32],
         metrics={
             "indexed_files": int(meta.get("indexed_files") or 0),
             "hardcode_signals": len((integrity.get("hardcode") or {}).get("findings") or []),
+            "hardcode_candidates": int(
+                (integrity.get("hardcode") or {}).get("candidate_count")
+                or len((integrity.get("hardcode") or {}).get("findings") or [])
+            ),
+            "hardcode_scan_truncated": bool(
+                (integrity.get("hardcode") or {}).get("truncated")
+            ),
             "hardcode_confirmed": sum(
                 1 for item in reviews if isinstance(item, dict) and item.get("status") == "confirmed"
             ),

@@ -3,8 +3,8 @@
 
 树结构（3 层）：
   Level 0  根节点（VERDICT 顶层评判）
-  Level 1  OS 子系统：进程管理 / 内存管理 / 文件系统 / 系统调用 /
-           设备驱动 / 硬件抽象 / 其他
+  Level 1  OS 子系统：启动模块 / 进程管理 / 内存管理 / 文件系统 / 系统调用 /
+           设备管理 / 硬件抽象 / 其他
   Level 2  模块：由 SUBSYS agent 在分析阶段动态识别（如 文件系统 →
            VFS 层 / inode 层 / 块缓存 / 日志层）
 
@@ -65,8 +65,8 @@ _SKIP_LANGS = {"markdown", "text", "rst", "toml", "other"}
 
 # 与 code_parser.SUBSYSTEM_FINGERPRINTS 同口径；保留显示顺序
 _SUBSYS_DISPLAY_ORDER = [
-    "进程管理", "内存管理", "文件系统",
-    "系统调用", "设备驱动", "硬件抽象", "其他",
+    "启动模块", "内存管理", "进程管理", "文件系统", "设备管理",
+    "系统调用", "硬件抽象", "其他",
 ]
 
 
@@ -285,7 +285,11 @@ def _subsys_fallback(subsys_node: dict) -> dict:
     }
 
 
-def _validate_subsys_result(parsed: dict, subsystem_name: str) -> None:
+def _validate_subsys_result(
+    parsed: dict,
+    subsystem_name: str,
+    repo_path: Path | None = None,
+) -> None:
     """子系统分析必须有真实总览和至少一个完整模块，否则拒绝继续生成报告。"""
     if parsed.get("_error"):
         raise RuntimeError(f"{subsystem_name} 语义聚合失败：{parsed['_error']}")
@@ -306,6 +310,24 @@ def _validate_subsys_result(parsed: dict, subsystem_name: str) -> None:
         if missing:
             raise RuntimeError(
                 f"{subsystem_name} 第 {index} 个模块缺少：{'、'.join(missing)}")
+        if repo_path is not None:
+            normalized_files: list[str] = []
+            for file_path in module.get("file_paths") or []:
+                canonical_path, _ = _validate_repo_location(
+                    repo_path, str(file_path),
+                    label=f"{subsystem_name} 第 {index} 个模块文件", require_line=False,
+                )
+                normalized_files.append(canonical_path)
+            module["file_paths"] = normalized_files
+    if repo_path is not None:
+        _validate_structured_evidence(
+            parsed.get("highlights") or [], repo_path,
+            label=f"{subsystem_name}亮点",
+        )
+        _validate_structured_evidence(
+            parsed.get("issues") or [], repo_path,
+            label=f"{subsystem_name}问题",
+        )
 
 
 def _process_one_subsys(subsys_node: dict, repo_path: Path,
@@ -321,6 +343,9 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
         parsed["content"] = _read_md_if_exists(Path(outputs["content_path"]))
         for i, m in enumerate(parsed.get("modules") or [], start=1):
             slot = int(m.get("slot") or i)
+            m["file_paths"] = _normalize_adjacent_module_paths(
+                m.get("file_paths") or [], repo_path,
+            )
             if 1 <= slot <= MAX_MODULES_PER_SUBSYS:
                 m["content"] = _read_md_if_exists(Path(module_paths[slot - 1]))
         # 正常情况下提示词已直接生成中文；只有检测出英文正文时才调用翻译兜底。
@@ -335,7 +360,7 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
         if not language_output_complete(parsed):
             return False
         try:
-            _validate_subsys_result(parsed, subsys_node["name"])
+            _validate_subsys_result(parsed, subsys_node["name"], repo_path)
         except RuntimeError:
             return False
         return True
@@ -362,7 +387,7 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
                     'file_paths:[...]}]}',
         timeout=600,
     )
-    _validate_subsys_result(parsed, subsys_node["name"])
+    _validate_subsys_result(parsed, subsys_node["name"], repo_path)
 
     # 填子系统字段（子系统/模块不打分，评分只在顶层 VERDICT）
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
@@ -502,10 +527,12 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         "2. 必须逐条复核 facts.integrity.hardcode.findings，并主动搜索四类实现："
         "按测试名/ELF 名分支、针对测试的 cache 替换、直接打印预期输出、修改脚本旁路失败。"
         "规则命中不是作弊结论；结合上下文给 confirmed/suspected/cleared，说明实现方法、影响和依据。\n"
-        "3. 对设计不完整或不合理的问题，必须说明具体模块、性能/正确性影响、真实 path:line；"
+        "3. build_log/run_log 的状态必须写入 one_line 与详细分析；结构化 issues 只列可回溯到"
+        "仓库源码 path:line 的设计或实现问题，避免与首屏日志事实重复。\n"
+        "4. 对设计不完整或不合理的问题，必须说明具体模块、性能/正确性影响、真实 path:line；"
         "若某种不合理设计会对特定测试有利，也要明确写出获益条件。\n"
-        "4. 必要时 compare_with_reference_os(facts.meta.reference_os) / read_file / search_code 验证关键判断\n"
-        "5. 工具调用 ≤5 次；其余判断可使用 findings 已附的代码摘录，但不得跳过任何扫描线索\n\n"
+        "5. 必要时 compare_with_reference_os(facts.meta.reference_os) / read_file / search_code 验证关键判断\n"
+        "6. 工具调用 ≤20 次；必须为分散在不同文件的硬编码线索读取足够上下文，不得仅凭摘录猜测\n\n"
         "**写出顺序**：\n"
         "  a. 详细评判 HTML 片段（不含图表）→ 写到 outputs.content_path\n"
         "  b. 结构化 JSON → 写到 outputs.json_path\n\n"
@@ -515,17 +542,20 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         '  "dimensions":[6 items: 原创性/架构合理性/代码质量/文档质量/完整性/功能性,\n'
         '    each {"name":"...","score":int,"reason":"..."}],\n'
         '  "highlights":[{"path":"...","quote":"..."}],\n'
-        '  "issues":[{"path":"...","severity":"low|medium|high","quote":"..."}],\n'
+        '  "issues":[{"path":"...","severity":"low|medium|high","quote":"...","confidence":0到100}],\n'
         '  "hardcode_reviews":[{\n'
         '    "signal_id":"原 signal_id；AI 主动发现时用 ai-new-N",\n'
-        '    "category":"四类方法之一","path":"真实相对路径","line":int,\n'
+        '    "category":"四个固定类别之一",'
+        '"path":"真实相对路径","line":int,\n'
         '    "status":"confirmed|suspected|cleared",\n'
         '    "method":"具体作弊或获益方法；cleared 时写未构成原因",\n'
         '    "reason":"结合代码上下文的中文判断","confidence":0到100,\n'
         '    "excerpt":"不超过200字的关键代码摘录"\n'
         '  }],\n'
-        '  "one_line":"... ≤40 字"\n'
+        '  "one_line":"≤80字；逐项写明编译状态、运行状态、硬编码结论和最严重设计问题"\n'
         '}\n\n'
+        "hardcode_reviews[].category 只能逐项填写以下一个固定值：按测试名或 ELF 名称分支、"
+        "测试专用缓存策略、疑似写死测试结果、脚本强制忽略失败。\n\n"
         f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```\n\n"
         "写入前做最后一次语言自检：若任何标题、段落、表格单元格或 JSON 描述仍是英文，"
         "先改写成简体中文再调用写入工具；不要输出英文版后等待后续翻译。"
@@ -612,7 +642,54 @@ def _normalize_verdict(parsed: dict) -> dict:
     return parsed
 
 
-def _validate_verdict_result(parsed: dict) -> None:
+def _validate_verdict_integrity_conclusion(parsed: dict, facts: dict | None) -> None:
+    """确保首屏一句话没有漏掉编译、运行或硬编码结论。"""
+    if facts is None:
+        return
+    text = str(parsed.get("one_line") or "")
+    integrity = (facts.get("integrity") or {}) if isinstance(facts, dict) else {}
+    status_phrases = {
+        "passed": ("通过", "成功"),
+        "failed": ("失败",),
+        "unknown": ("未确认", "无法确认", "未能确认"),
+        "not_provided": ("未提供", "未核验", "无法核验"),
+        "missing": ("缺失", "不存在"),
+        "skipped": ("不适用", "未执行"),
+    }
+    clauses = [clause for clause in re.split(r"[，,；;。！？!?]", text) if clause.strip()]
+    for key, labels in (("build_log", ("编译", "构建")), ("run_log", ("运行",))):
+        status = str((integrity.get(key) or {}).get("status") or "not_provided")
+        matching_clauses = [
+            clause for clause in clauses if any(label in clause for label in labels)
+        ]
+        if not matching_clauses:
+            raise RuntimeError(f"顶层一句话结论未说明{'编译' if key == 'build_log' else '运行'}状态")
+        phrases = status_phrases.get(status, status_phrases["unknown"])
+        if not any(phrase in clause for clause in matching_clauses for phrase in phrases):
+            raise RuntimeError(
+                f"顶层一句话结论与{'编译' if key == 'build_log' else '运行'}事实不一致：{status}"
+            )
+
+    reviews = [item for item in (parsed.get("hardcode_reviews") or []) if isinstance(item, dict)]
+    if "硬编码" not in text:
+        raise RuntimeError("顶层一句话结论未说明硬编码检查结果")
+    active = [item for item in reviews if item.get("status") in {"confirmed", "suspected"}]
+    if active:
+        if any(phrase in text for phrase in ("未发现硬编码", "无硬编码")):
+            raise RuntimeError("顶层一句话结论与硬编码复核结果不一致")
+        if not any(phrase in text for phrase in ("发现", "存在", "确认", "疑似", "未确认")):
+            raise RuntimeError("顶层一句话结论未明确说明硬编码复核结论")
+    if not active and not any(
+        phrase in text for phrase in ("未发现", "未确认", "无硬编码", "已排除", "排除")
+    ):
+        raise RuntimeError("顶层一句话结论未明确说明未形成硬编码问题")
+
+
+def _validate_verdict_result(
+    parsed: dict,
+    repo_path: Path | None = None,
+    facts: dict | None = None,
+) -> None:
     """总评必须包含真实正文、六维评分和理由，不允许用固定分数补位。"""
     if parsed.get("_error"):
         raise RuntimeError(f"顶层评判失败：{parsed['_error']}")
@@ -620,6 +697,9 @@ def _validate_verdict_result(parsed: dict) -> None:
         raise RuntimeError("顶层评判缺少详细正文")
     if not str(parsed.get("one_line") or "").strip():
         raise RuntimeError("顶层评判缺少一句话结论")
+    if len(str(parsed.get("one_line") or "")) > 80:
+        raise RuntimeError("顶层评判一句话结论超过 80 字")
+    _validate_verdict_integrity_conclusion(parsed, facts)
     dimensions = parsed.get("dimensions") or []
     if not isinstance(dimensions, list):
         raise RuntimeError("顶层评判 dimensions 格式无效")
@@ -638,6 +718,22 @@ def _validate_verdict_result(parsed: dict) -> None:
             raise RuntimeError(f"顶层评判 {name} 缺少有效分数") from exc
         if not str(item.get("reason") or "").strip():
             raise RuntimeError(f"顶层评判 {name} 缺少评分理由")
+    if repo_path is not None:
+        _validate_structured_evidence(
+            parsed.get("highlights") or [], repo_path, label="顶层亮点",
+        )
+        _validate_structured_evidence(
+            parsed.get("issues") or [], repo_path, label="顶层问题",
+            require_confidence=True,
+        )
+        similarity = parsed.get("similarity") or {}
+        if isinstance(similarity, dict):
+            _validate_structured_evidence(
+                similarity.get("borrowed") or [], repo_path, label="参考实现沿用证据",
+            )
+            _validate_structured_evidence(
+                similarity.get("original") or [], repo_path, label="候选创新证据",
+            )
 
 
 def _validate_similarity_result(parsed: dict, facts: dict | None) -> None:
@@ -684,14 +780,120 @@ def _norm_path(p: str) -> str:
     return p.replace("\\", "/").replace("./", "").strip("/").lower()
 
 
-def _validate_hardcode_reviews(parsed: dict, facts: dict | None) -> None:
+_SOURCE_LOCATION_RE = re.compile(r"^(.*?)(?::|#L)(\d+)(?:-L?\d+)?$")
+
+
+def _validate_repo_location(
+    repo_path: Path,
+    path_value: str,
+    *,
+    label: str,
+    line: int | None = None,
+    require_line: bool = True,
+) -> tuple[str, int | None]:
+    """验证 AI 引用确实位于仓库内，并且行号落在文件范围内。"""
+    raw = str(path_value or "").strip().strip("`'")
+    parsed_line = line
+    if parsed_line is None:
+        match = _SOURCE_LOCATION_RE.match(raw)
+        if match:
+            raw = match.group(1)
+            parsed_line = int(match.group(2))
+    if not raw or (require_line and not parsed_line):
+        raise RuntimeError(f"{label}缺少真实相对 path:line")
+    relative = Path(raw.replace("\\", "/"))
+    if relative.is_absolute():
+        raise RuntimeError(f"{label}必须使用仓库相对路径：{path_value}")
+    root = Path(repo_path).resolve()
+    candidate = (root / relative).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError(f"{label}路径越出仓库：{path_value}") from exc
+    if not candidate.is_file():
+        raise RuntimeError(f"{label}引用的文件不存在：{path_value}")
+    if parsed_line is not None:
+        if parsed_line < 1:
+            raise RuntimeError(f"{label}行号无效：{path_value}")
+        try:
+            line_count = len(candidate.read_text(
+                encoding="utf-8", errors="replace",
+            ).splitlines())
+        except OSError as exc:
+            raise RuntimeError(f"{label}引用文件无法读取：{path_value}") from exc
+        if parsed_line > line_count:
+            raise RuntimeError(
+                f"{label}行号超出文件范围：{path_value}（共 {line_count} 行）"
+            )
+    return candidate.relative_to(root).as_posix(), parsed_line
+
+
+def _validate_structured_evidence(
+    items: list,
+    repo_path: Path,
+    *,
+    label: str,
+    require_confidence: bool = False,
+) -> None:
+    if not isinstance(items, list):
+        raise RuntimeError(f"{label}格式无效")
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"{label}第 {index} 项格式无效")
+        canonical_path, canonical_line = _validate_repo_location(
+            repo_path, str(item.get("path") or ""),
+            label=f"{label}第 {index} 项",
+        )
+        item["path"] = f"{canonical_path}:{canonical_line}"
+        if not str(item.get("quote") or "").strip():
+            raise RuntimeError(f"{label}第 {index} 项缺少 AI 分析")
+        if require_confidence:
+            try:
+                confidence = float(item.get("confidence"))
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(f"{label}第 {index} 项缺少置信度") from exc
+            if not 0 <= confidence <= 100:
+                raise RuntimeError(f"{label}第 {index} 项置信度不在 0–100")
+            # 兼容模型偶发返回 0–1 比例；落盘统一为 0–100，避免 HTML 把 0.91 显示成 1%。
+            item["confidence"] = confidence * 100 if 0 < confidence <= 1 else confidence
+
+
+def _actual_source_excerpt(repo_path: Path, relative_path: str, line: int) -> str:
+    """从已验证的位置提取真实代码窗口，替换模型可能改写过的 excerpt。"""
+    source_lines = (Path(repo_path).resolve() / relative_path).read_text(
+        encoding="utf-8", errors="replace",
+    ).splitlines()
+    start = max(0, line - 2)
+    end = min(len(source_lines), line + 1)
+    return " ".join(part.strip() for part in source_lines[start:end] if part.strip())[:500]
+
+
+def _validate_hardcode_reviews(
+    parsed: dict,
+    facts: dict | None,
+    repo_path: Path | None = None,
+) -> None:
     """确保每条规则线索都经过 AI 复核，且结论能回到真实代码位置。"""
-    signals = ((((facts or {}).get("integrity") or {}).get("hardcode") or {})
-               .get("findings") or [])
+    hardcode = (((facts or {}).get("integrity") or {}).get("hardcode") or {})
+    signals = hardcode.get("findings") or []
+    if hardcode.get("truncated"):
+        raise RuntimeError(
+            "硬编码候选超过复核上限，拒绝生成不完整报告："
+            f"候选 {hardcode.get('candidate_count', '?')} 条，"
+            f"当前上限 {len(signals)} 条；请提高 AGENT_HARDCODE_SIGNAL_LIMIT 后重跑"
+        )
     reviews = parsed.get("hardcode_reviews") or []
     if not isinstance(reviews, list):
         raise RuntimeError("顶层评判 hardcode_reviews 格式无效")
 
+    from finals.integrity import REQUIRED_HARDCODE_CATEGORIES
+
+    by_signal_id = {
+        str(signal.get("signal_id") or (
+            f"{signal.get('path')}:{signal.get('line')}:{signal.get('category')}"
+        )): signal
+        for signal in signals
+    }
     by_id: dict[str, dict] = {}
     for item in reviews:
         if not isinstance(item, dict):
@@ -705,12 +907,35 @@ def _validate_hardcode_reviews(parsed: dict, facts: dict | None) -> None:
             raise RuntimeError(f"硬编码复核 {signal_id} 缺少真实 path:line")
         if not str(item.get("method") or "").strip() or not str(item.get("reason") or "").strip():
             raise RuntimeError(f"硬编码复核 {signal_id} 缺少方法或分析")
+        if not str(item.get("excerpt") or "").strip():
+            raise RuntimeError(f"硬编码复核 {signal_id} 缺少关键代码摘录")
         try:
             confidence = float(item.get("confidence"))
         except (TypeError, ValueError) as exc:
             raise RuntimeError(f"硬编码复核 {signal_id} 缺少置信度") from exc
         if not 0 <= confidence <= 100:
             raise RuntimeError(f"硬编码复核 {signal_id} 的置信度不在 0–100")
+        item["confidence"] = confidence * 100 if 0 < confidence <= 1 else confidence
+        original = by_signal_id.get(signal_id)
+        category = str(item.get("category") or "").strip()
+        if original is not None:
+            if category != str(original.get("category") or "").strip():
+                raise RuntimeError(f"硬编码复核 {signal_id} 的类别与扫描证据不一致")
+        else:
+            if not re.fullmatch(r"ai-new-\d+", signal_id):
+                raise RuntimeError(f"AI 主动发现的硬编码复核 ID 无效：{signal_id}")
+            if category not in REQUIRED_HARDCODE_CATEGORIES:
+                raise RuntimeError(f"硬编码复核 {signal_id} 的类别无效")
+        if repo_path is not None:
+            canonical_path, canonical_line = _validate_repo_location(
+                repo_path, str(item.get("path") or ""),
+                line=int(item.get("line") or 0), label=f"硬编码复核 {signal_id}",
+            )
+            item["path"] = canonical_path
+            item["line"] = canonical_line
+            item["excerpt"] = _actual_source_excerpt(
+                repo_path, canonical_path, int(canonical_line or 0),
+            )
         by_id[signal_id] = item
 
     missing: list[str] = []
@@ -728,6 +953,17 @@ def _validate_hardcode_reviews(parsed: dict, facts: dict | None) -> None:
             raise RuntimeError(f"硬编码复核 {signal_id} 的路径与扫描证据不一致")
         if abs(int(review.get("line") or 0) - int(signal.get("line") or 0)) > 2:
             raise RuntimeError(f"硬编码复核 {signal_id} 的行号与扫描证据不一致")
+        if repo_path is not None:
+            # 对规则扫描命中以扫描器的真实位置为准；AI 只负责解释上下文和作出结论。
+            canonical_path, canonical_line = _validate_repo_location(
+                repo_path, str(signal.get("path") or ""),
+                line=int(signal.get("line") or 0), label=f"硬编码复核 {signal_id}",
+            )
+            review["path"] = canonical_path
+            review["line"] = canonical_line
+            review["excerpt"] = _actual_source_excerpt(
+                repo_path, canonical_path, int(canonical_line or 0),
+            )
     if missing:
         raise RuntimeError("以下硬编码线索未经 AI 复核：" + "、".join(missing[:6]))
 
@@ -777,9 +1013,9 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
         if not language_output_complete(parsed):
             return False
         try:
-            _validate_verdict_result(parsed)
+            _validate_verdict_result(parsed, repo_path or Path("."), facts)
             _validate_similarity_result(parsed, facts)
-            _validate_hardcode_reviews(parsed, facts)
+            _validate_hardcode_reviews(parsed, facts, repo_path or Path("."))
         except RuntimeError:
             return False
         return True
@@ -808,9 +1044,9 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                     '"one_line":str}',
         timeout=600,
     )
-    _validate_verdict_result(parsed)
+    _validate_verdict_result(parsed, repo_path or Path("."), facts)
     _validate_similarity_result(parsed, facts)
-    _validate_hardcode_reviews(parsed, facts)
+    _validate_hardcode_reviews(parsed, facts, repo_path or Path("."))
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
     # 归一化评分：维度统一到 0–100，总分=维度加权平均（覆盖 LLM 自填值）
     return _normalize_verdict(parsed)
@@ -875,8 +1111,7 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
           " / ".join(c["name"] for c in tree_root["children"]))
 
     if file_count == 0:
-        print("[tree] 仓库未找到可索引源文件，放弃。", file=sys.stderr)
-        return _empty_tree(repo_name, ts, facts)
+        raise RuntimeError("仓库未找到可索引源文件，拒绝生成空的作品描述报告")
 
     # B. SUBSYS 并发分析
     run_subsys_stage(tree_root, repo_path, out_dir, facts)

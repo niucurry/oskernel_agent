@@ -15,7 +15,7 @@ from pathlib import Path
 from finals.digests import description_digest_from_tree, description_priority_findings
 from finals.readability import concise_module_summary, explain_terms_in_html
 
-from ..report_quality import assert_report_complete
+from ..report_quality import IncompleteReportError, assert_report_complete
 from .html import (
     _BROKEN_PREFIX,
     _CDN_HEAD,
@@ -346,9 +346,16 @@ def _render_priority_summary(tree_json: dict, resolver) -> str:
     }
     build_status = status_text.get(str(metrics.get("build_log_status")), "未能确认")
     run_status = status_text.get(str(metrics.get("run_log_status")), "未能确认")
+    candidates = int(metrics.get("hardcode_candidates", metrics.get("hardcode_signals", 0)) or 0)
+    selected_signals = int(metrics.get("hardcode_signals", 0) or 0)
+    hardcode_count_text = (
+        f"硬编码规则命中 {candidates} 条候选，选取 {selected_signals} 条进入 AI 复核，"
+        if candidates != selected_signals else
+        f"硬编码规则命中 {selected_signals} 条候选，"
+    )
     coverage = (
         f'编译日志：{build_status}；运行日志：{run_status}；'
-        f'硬编码扫描命中 {_esc(metrics.get("hardcode_signals", 0))} 条，'
+        f'{hardcode_count_text}'
         f'AI 确认 {_esc(metrics.get("hardcode_confirmed", 0))} 条、'
         f'疑似 {_esc(metrics.get("hardcode_suspected", 0))} 条、'
         f'排除 {_esc(metrics.get("hardcode_cleared", 0))} 条。'
@@ -392,7 +399,11 @@ def _render_hardcode_reviews(verdict: dict, resolver) -> str:
             f'<div><strong>{_esc(review.get("category") or "未分类线索")}</strong> · '
             f'{_esc(status)} · 置信度 {confidence}%</div>'
             f'<div class="text-xs mt-1">证据：{evidence}</div>'
-            f'<p class="text-sm mt-1">{_esc(review.get("reason") or review.get("method") or "未提供判断理由")}</p>'
+            f'<p class="text-sm mt-1"><strong>实现方法：</strong>'
+            f'{_esc(review.get("method") or "未提供")}</p>'
+            f'<p class="text-sm mt-1"><strong>AI 分析：</strong>'
+            f'{_esc(review.get("reason") or "未提供判断理由")}</p>'
+            f'<pre class="text-xs mt-1 overflow-x-auto"><code>{_esc(review.get("excerpt") or "")}</code></pre>'
             '</li>'
         )
     return (
@@ -658,6 +669,18 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
             f'{summary}</div>'
         )
 
+    if typ == "module" and node.get("file_paths"):
+        source_links = [
+            _resolve_path_anchor(str(path), resolver)
+            for path in (node.get("file_paths") or [])[:8]
+            if str(path or "").strip()
+        ]
+        if source_links:
+            body_parts.append(
+                '<div class="text-xs text-slate-500 mb-2">源码证据：'
+                + "、".join(source_links) + '</div>'
+            )
+
     # 决赛交付中，子系统和模块只保留不超过 300 字的分析及源码证据入口；
     # LLM 的长正文不再嵌入报告，避免“折叠了但仍然交付大量文字”的形式合规。
     content = _strip_html_ids(_strip_diagrams(node.get("content") or ""))
@@ -677,7 +700,7 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
             is_issue=False))
         body_parts.append(_render_findings(
             node.get("issues") or [], resolver,
-            title="本节点槽点", color_cls="text-red-700 dark:text-red-400",
+            title="本节点问题", color_cls="text-red-700 dark:text-red-400",
             is_issue=True))
     else:
         body_parts.append(_render_findings(
@@ -686,7 +709,7 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
             is_issue=False))
         body_parts.append(_render_findings(
             node.get("issues") or [], resolver,
-            title="本节点槽点", color_cls="text-red-700 dark:text-red-400",
+            title="本节点问题", color_cls="text-red-700 dark:text-red-400",
             is_issue=True))
 
     # 任何带 children 的节点都递归渲染子树
@@ -733,5 +756,10 @@ def write_tree_html(out_path: Path, tree_json: dict,
         title=title or f"{tree_json.get('meta',{}).get('repo','?')} 作品描述报告",
         resolver=resolver,
     )
+    if broken:
+        sample = "、".join(sorted(broken)[:8])
+        raise IncompleteReportError(
+            f"报告包含 {len(broken)} 个无法回溯到源码的文件引用：{sample}"
+        )
     out_path.write_text(html_text, encoding="utf-8")
     return out_path, broken
