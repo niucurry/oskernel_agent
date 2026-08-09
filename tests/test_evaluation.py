@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.models import FunctionRecord
-from src.normalize.store import FunctionStore
+from oskernel_agent.comparison.models import FunctionRecord
+from oskernel_agent.comparison.normalize.store import FunctionStore
 from tests.evaluation.run import check_thresholds, render_report
 from tests.evaluation.synthesize import synthesize
 from tests.evaluation.transforms import is_valid, transform

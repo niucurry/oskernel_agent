@@ -4,16 +4,16 @@ import json
 import sys
 from pathlib import Path
 
-# 项目根目录：src/oskernel_agent/cli/setup_opencode.py → ../../../
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+from oskernel_agent.paths import PROJECT_ROOT, SOURCE_ROOT
+
 # 兼容 Linux (.venv/bin) 和 Windows (.venv/Scripts)
 _VENV_PY_CANDIDATES = [
-    _PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
-    _PROJECT_ROOT / ".venv" / "Scripts" / "python",
-    _PROJECT_ROOT / ".venv" / "bin" / "python",
+    PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
+    PROJECT_ROOT / ".venv" / "Scripts" / "python",
+    PROJECT_ROOT / ".venv" / "bin" / "python",
 ]
 _VENV_PY = next((str(p) for p in _VENV_PY_CANDIDATES if p.exists()),
-                str(_PROJECT_ROOT / ".venv" / "bin" / "python"))
+                str(PROJECT_ROOT / ".venv" / "bin" / "python"))
 # opencode 全局配置路径：优先 opencode.jsonc（opencode npm 版本使用），
 # 降级到 opencode.json（Linux 版本），都在 ~/.config/opencode/ 下。
 _CFG_DIR = Path.home() / ".config" / "opencode"
@@ -29,7 +29,6 @@ _GLOBAL_CFG = (
 def _build_session_prompt(session_type) -> str:
     """为树状管道某个 SessionType 构建静态系统提示词。"""
     from ..prompts.builder import (
-        SessionType,
         _SESSION_CONFIG,
         LAYER_1_ROLE,
         LAYER_2_CONSTRAINTS,
@@ -142,7 +141,7 @@ def setup() -> None:
 
     # MCP server 通过当前项目 src 直接启动，避免依赖外部 shell 的 PYTHONPATH
     # 或 editable install 状态；OpenCode 会把后续参数原样传给 python -c。
-    src_root = str(_PROJECT_ROOT / "src")
+    src_root = str(SOURCE_ROOT)
     mcp_boot = (
         "import runpy,sys;"
         f"sys.path.insert(0,{src_root!r});"
@@ -156,7 +155,7 @@ def setup() -> None:
             "--max-steps", str(max_steps),
         ],
         "environment": {
-            "PYTHONPATH": str(_PROJECT_ROOT / "src"),
+            "PYTHONPATH": str(SOURCE_ROOT),
             "PYTHONIOENCODING": "utf-8",
         },
     }

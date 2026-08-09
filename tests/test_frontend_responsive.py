@@ -19,7 +19,7 @@ def test_frontend_exposes_finals_reports_in_judge_order():
     assert expected in report_files
     assert 'activeReportKind = ref("summary")' in app
     assert 'path.join(reportDir(repo.id), "summary.pdf")' in pipeline
-    assert '"-m",\n        "finals",\n        "development"' in pipeline
+    assert '"-m",\n        "oskernel_agent.finals",\n        "development"' in pipeline
     assert '"--description-digest"' in pipeline
 
 

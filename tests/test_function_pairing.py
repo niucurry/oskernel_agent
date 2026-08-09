@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from src.embed.query import _identity_neighbor_candidates
-from src.exact.identity import (compare_function_identity_features,
+from oskernel_agent.comparison.embed.query import _identity_neighbor_candidates
+from oskernel_agent.comparison.exact.identity import (compare_function_identity_features,
                                 function_identity,
                                 function_identity_features,
                                 identity_relation,
                                 is_trivial_constant_stub)
-from src.models import FunctionRecord
-from src.normalize.store import FunctionStore
-from src.report import semantic_compare as SC
+from oskernel_agent.comparison.models import FunctionRecord
+from oskernel_agent.comparison.normalize.store import FunctionStore
+from oskernel_agent.comparison.report import semantic_compare as SC
 
 
 def _record(repo: str, path: str, start: int, name: str, code: str) -> FunctionRecord:

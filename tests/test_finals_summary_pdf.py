@@ -5,8 +5,8 @@ import json
 import pytest
 from pypdf import PdfReader
 
-from finals.models import Finding, ModuleDigest, ReportDigest
-from finals.summary_pdf import (
+from oskernel_agent.finals.models import Finding, ModuleDigest, ReportDigest
+from oskernel_agent.finals.summary_pdf import (
     BODY_FONT_SIZE,
     SummaryPdfError,
     _combined_findings,

@@ -29,6 +29,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from oskernel_agent.paths import SOURCE_ROOT
+
 def _find_opencode() -> str:
     import shutil
 
@@ -206,7 +208,7 @@ def _opencode_run_guard():
 
 def _opencode_env(task: "BatchTask") -> dict:
     env = os.environ.copy()
-    src_root = str(Path(__file__).resolve().parents[2])
+    src_root = str(SOURCE_ROOT)
     existing_pythonpath = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = (
         src_root

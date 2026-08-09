@@ -1,7 +1,7 @@
 """
 离线构建参考 OS 代码指纹库。
 
-对每个参考 OS 运行一次，生成 reference_db/<name>.json。
+对每个参考 OS 运行一次，生成 resources/reference_db/<name>.json。
 正常运行无需手工调用：compare_with_reference_os 会校验指纹库，并在缺失或损坏时
 根据 config/reference_sources.yaml 自动重建。本脚本仅用于主动重建或开发调试。
 
@@ -21,14 +21,10 @@
 import argparse
 import os
 import sys
-from pathlib import Path
-
-# 把 src/ 加到 path，使 `import oskernel_agent.*` 可用
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from oskernel_agent.tools.reference_db import ReferenceOSDatabase
 
-DEFAULT_DB_DIR = "reference_db"
+DEFAULT_DB_DIR = "resources/reference_db"
 
 
 def build_one(ref_name: str, repo_path: str, db_dir: str) -> None:

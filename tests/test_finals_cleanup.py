@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
 import stat
 
 import pytest
 
-from finals.cleanup import (
+from oskernel_agent.finals.cleanup import (
     cleanup_report_directory,
     cleanup_report_sidecars,
     purge_report_directory,

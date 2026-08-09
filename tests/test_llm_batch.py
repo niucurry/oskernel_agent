@@ -2,7 +2,7 @@ import json
 import shutil
 from pathlib import Path
 
-from src.oskernel_agent.engines import llm_batch
+from oskernel_agent.engines import llm_batch
 
 
 def test_find_opencode_ignores_inaccessible_candidates(monkeypatch):

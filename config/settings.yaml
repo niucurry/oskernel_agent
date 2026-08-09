@@ -1,4 +1,4 @@
-# 查重引擎运行配置（src.embed 等模块读取）。
+# 查重引擎运行配置（oskernel_agent.comparison.embed 等模块读取）。
 
 embedding:
   # HuggingFace 模型名；后续可换 UniXcoder 等同类嵌入模型
@@ -38,7 +38,7 @@ llm:
 
 ai_detect:
   # AI 生成代码检测（DetectCodeGPT，困惑度/log-rank）。参考模型 14GB，建议在带 GPU 的宿主机
-  # 标准 pipeline 默认运行；也可单独执行 `python -m src.ai_detect --repo X`。
+  # 标准 pipeline 默认运行；也可单独执行 `python -m oskernel_agent.comparison.ai_detect --repo X`。
   # VM 无模型时该步骤优雅跳过，报告章节明确显示模型检测未完成及原因。
   # 打分模型：本系统选定 bigcode/starcoder2-3b（3B/bf16≈6GB，可整模型上 8GB 卡如 RTX 4060；
   # 比 CodeLlama-7b 更轻更快）。首次使用需把权重下到 HF 缓存，之后离线即可加载：

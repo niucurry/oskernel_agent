@@ -6,10 +6,9 @@ except ImportError:
     except ImportError:
         raise ImportError("需要 Python ≥ 3.11，或运行：pip install tomli")
 
-from pathlib import Path
+from .paths import PROJECT_ROOT
 
-_project_root = Path(__file__).resolve().parents[2]
-_path = _project_root / "config.toml"
+_path = PROJECT_ROOT / "config.toml"
 if _path.is_file():
     with _path.open("rb") as _f:
         _cfg = tomllib.load(_f)
@@ -20,7 +19,7 @@ else:
         "data": {"repos_dir": "./data/historical_repos",
                  "metadata_dir": "./data/metadata", "cache_dir": "./data/cache",
                  "reports_dir": "./data/output",
-                 "reference_db_dir": "./reference_db",
+                 "reference_db_dir": "./resources/reference_db",
                  "reference_sources_config": "./config/reference_sources.yaml",
                  "reference_sources_dir": "./data/reference_sources"},
         "target": {"repo_id": ""},

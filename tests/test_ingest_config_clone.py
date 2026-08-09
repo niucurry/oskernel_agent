@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 
-from src.ingest.cloner import (
+from oskernel_agent.comparison.ingest.cloner import (
     _auth_url,
     _is_windows_unsafe_path,
     base_url_from_url,
@@ -12,7 +12,7 @@ from src.ingest.cloner import (
     is_cloned,
     project_path_from_url,
 )
-from src.ingest.config import load_repos, write_template
+from oskernel_agent.comparison.ingest.config import load_repos, write_template
 
 
 def test_write_template_has_three_entries(tmp_path):

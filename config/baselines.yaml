@@ -1,5 +1,5 @@
 # 基线白底库（公共/模板代码：教学 OS、组委会模板）。
-# 与 repos.yaml 同结构，可被 src.ingest 拉取；入库后 Qdrant payload 标 is_baseline=true，
+# 与 repos.yaml 同结构，可被 oskernel_agent.comparison.ingest 拉取；入库后 Qdrant payload 标 is_baseline=true，
 # 命中基线只作扣除依据、不计抄袭。
 repos:
   - repo_url: https://github.com/rcore-os/rCore-Tutorial-v3
@@ -15,7 +15,7 @@ repos:
     team_name: baseline_contest_template
     award_level: baseline
   # 公共参考 OS（回应待确认#1：压低「复用比例异常高」误报）。
-  # 拉取入库：`python -m src.ingest --config config/baselines.yaml`；查询时加 `--baselines` 启用扣除。
+  # 拉取入库：`python -m oskernel_agent.comparison.ingest --config config/baselines.yaml`；查询时加 `--baselines` 启用扣除。
   - repo_url: https://github.com/arceos-org/arceos
     year: 0
     team_name: baseline_arceos

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import sqlite3
 
-from src.embed.query import (_fingerprint_candidates, _name_candidates,
+from oskernel_agent.comparison.embed.query import (_fingerprint_candidates, _name_candidates,
                              _same_language_candidates)
-from src.models import FunctionRecord, ModuleTag
-from src.normalize.store import FunctionStore
+from oskernel_agent.comparison.models import FunctionRecord, ModuleTag
+from oskernel_agent.comparison.normalize.store import FunctionStore
 
 
 def test_fingerprint_recall_returns_every_matching_history_repo(tmp_path):

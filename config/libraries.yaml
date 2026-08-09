@@ -4,7 +4,7 @@
 # 借鉴/抄袭**——报告里会从「主要借鉴来源」图、各模块借鉴占比/清单、原创代码清单、
 # 文件级清单中剔除，另单列「复用库统计」小节呈现。
 #
-# 识别规则（见 src/report/libraries.py）：把文件路径分隔符与大小写归一后，
+# 识别规则（见 src/oskernel_agent/comparison/report/libraries.py）：把文件路径分隔符与大小写归一后，
 #   1) 若任一目录段 ∈ vendor_dirs（vendor/third_party/…），取其下一段为库名（结构兜底，
 #      自动覆盖 cargo vendor 出来的全部 crate）；
 #   2) 否则若任一目录段 == 某库的 segments 之一，则判为该库。可能同时表示业务模块的短名称

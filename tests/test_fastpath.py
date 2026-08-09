@@ -1,10 +1,10 @@
-"""src.fastpath（L0 文件指纹层）测试：整文件复制检测 + 文件整体相似后聚合。"""
+"""oskernel_agent.comparison.fastpath（L0 文件指纹层）测试：整文件复制检测 + 文件整体相似后聚合。"""
 
 from __future__ import annotations
 
-from src.fastpath.scan import aggregate_file_similarity, scan_repo
-from src.normalize.runner import normalize_repo
-from src.normalize.store import FunctionStore
+from oskernel_agent.comparison.fastpath.scan import aggregate_file_similarity, scan_repo
+from oskernel_agent.comparison.normalize.runner import normalize_repo
+from oskernel_agent.comparison.normalize.store import FunctionStore
 
 FILE_A = (
     "// 头部注释\n"

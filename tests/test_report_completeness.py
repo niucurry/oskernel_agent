@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from src.oskernel_agent.pipeline import tree_builder
-from src.oskernel_agent.report_quality import (
+from oskernel_agent.pipeline import tree_builder
+from oskernel_agent.report_quality import (
     IncompleteReportError,
     assert_report_complete,
     find_system_placeholders,
 )
-from src.report import semantic_compare as SC
-from src.report.__main__ import build_parser as build_report_parser
+from oskernel_agent.comparison.report import semantic_compare as SC
+from oskernel_agent.comparison.report.__main__ import build_parser as build_report_parser
 
 
 def test_system_placeholder_text_is_a_hard_report_error():

@@ -1,4 +1,4 @@
-"""跨架构 / 跨语言 / 样板汇编 / 内部跨架构复用 误报识别测试（src.report.false_positives）。
+"""跨架构 / 跨语言 / 样板汇编 / 内部跨架构复用 误报识别测试（oskernel_agent.comparison.report.false_positives）。
 
 对应评审实测暴露的四类对比报告假阳性：__switch 样板、龙芯 write_csr vs RISC-V
 exchange_trap_frame、find_nul(safe Rust) vs c_strlen(unsafe C)、src/ 与 src-la/ 硬拷贝。
@@ -6,8 +6,8 @@ exchange_trap_frame、find_nul(safe Rust) vs c_strlen(unsafe C)、src/ 与 src-l
 
 from __future__ import annotations
 
-from src.report import false_positives as FP
-from src.report import semantic_compare as SC
+from oskernel_agent.comparison.report import false_positives as FP
+from oskernel_agent.comparison.report import semantic_compare as SC
 
 # ── 真实片段（精简） ─────────────────────────────────────────────────────────
 _RV_SWITCH = """\

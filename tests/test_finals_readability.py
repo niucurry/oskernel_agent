@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from finals.models import EvidenceRef, Finding, ModuleDigest, ReportDigest
+from oskernel_agent.finals.models import EvidenceRef, Finding, ModuleDigest, ReportDigest
 from oskernel_agent.pipeline.lang_guard import needs_translation
-from finals.readability import (
+from oskernel_agent.finals.readability import (
     concise_module_summary,
     explain_terms_in_html,
     explain_terms_on_first_use,

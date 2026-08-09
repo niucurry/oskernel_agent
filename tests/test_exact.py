@@ -1,14 +1,14 @@
-"""src.exact 测试：行级比对、行号换算、分流与 verify 流水线。"""
+"""oskernel_agent.comparison.exact 测试：行级比对、行号换算、分流与 verify 流水线。"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from src.exact.matcher import ExactMatcher, ExactMatchResult, remap_spans
-from src.exact.verify import tier_of, verify_recall
-from src.models import FunctionRecord
-from src.normalize.store import FunctionStore
+from oskernel_agent.comparison.exact.matcher import ExactMatcher, ExactMatchResult, remap_spans
+from oskernel_agent.comparison.exact.verify import tier_of, verify_recall
+from oskernel_agent.comparison.models import FunctionRecord
+from oskernel_agent.comparison.normalize.store import FunctionStore
 
 CAND = (
     "fn schedule(ready: &Vec<usize>) -> usize {\n"

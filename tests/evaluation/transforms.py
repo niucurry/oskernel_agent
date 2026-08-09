@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import random
 
-from src.normalize.keep_symbols import load_keep_symbols
-from src.normalize.ts import parse
+from oskernel_agent.comparison.normalize.keep_symbols import load_keep_symbols
+from oskernel_agent.comparison.normalize.ts import parse
 
 CLASSES = ("T1", "T2", "T3", "T4")
 

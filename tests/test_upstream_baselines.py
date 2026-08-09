@@ -1,4 +1,4 @@
-"""上游基线 vendored / ABI 受限代码 识别测试（src.report.upstream_baselines）。
+"""上游基线 vendored / ABI 受限代码 识别测试（oskernel_agent.comparison.report.upstream_baselines）。
 
 对应评审实测：ArceOS 上游整库 vendored 被当跨队抄袭（70% confirmed 误报）、
 metadata_to_kstat 等 ABI 受限实现被计借鉴。验证降级不误伤自研 asynctask。
@@ -6,8 +6,8 @@ metadata_to_kstat 等 ABI 受限实现被计借鉴。验证降级不误伤自研
 
 from __future__ import annotations
 
-from src.report import upstream_baselines as UB
-from src.report import semantic_compare as SC
+from oskernel_agent.comparison.report import upstream_baselines as UB
+from oskernel_agent.comparison.report import semantic_compare as SC
 
 
 def _q(fp, fn, lang="rust", start=10, module="arch"):
@@ -25,7 +25,6 @@ def _pair(qf, cf, tier="confirmed", score=0.96):
 def test_framework_path_catches_renamed_candidate():
     # query 在 arceos/modules/axfs/ 下（ArceOS 框架固有模块），候选队改名 axfs-ng → 路径全等漏判，
     # 但框架路径判据按上游模块段名（axfs）命中。用兜底模块集（不依赖已 ingest 的 baseline 仓库）。
-    segs = frozenset(UB._DEFAULT_FRAMEWORK_SEGS)
     assert UB.is_upstream_framework_path("arceos/modules/axfs/src/disk.rs") is True
     assert UB.is_upstream_framework_path("arceos/modules/axhal/src/x.rs") is True
     # 队伍自研模块（asynctask/trampoline 不在上游固有模块集）→ 不命中，保留为真实信号

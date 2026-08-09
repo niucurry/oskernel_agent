@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # 项目环境一键安装脚本（Ubuntu 24.04 / Debian）
-set -e
+set -euo pipefail
 
 # OpenCode（前置依赖，需要 Node.js / npm）
-echo "[0/5] 检查 OpenCode..."
+echo "[0/6] 检查 OpenCode..."
 if ! command -v opencode &>/dev/null; then
     if command -v npm &>/dev/null; then
         npm install -g opencode-ai
@@ -47,8 +47,7 @@ echo "[3/6] 创建虚拟环境并安装 Python 依赖..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 python3 -m venv "$SCRIPT_DIR/.venv"
 "$SCRIPT_DIR/.venv/bin/pip" install --upgrade pip -q
-"$SCRIPT_DIR/.venv/bin/pip" install -r "$SCRIPT_DIR/requirements.txt"
-# 以可编辑模式安装本项目，使 `import oskernel_agent` 与 `python -m oskernel_agent.cli.*` 可用
+# 安装项目及运行依赖，使 `import oskernel_agent` 与正式命令入口可用。
 "$SCRIPT_DIR/.venv/bin/pip" install -e "$SCRIPT_DIR" -q
 
 # 验证安装
@@ -94,11 +93,11 @@ EOF
 # OpenCode 全局配置注册
 echo ""
 echo "[5/6] 注册多会话 agents 到 OpenCode 全局配置..."
-"$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/setup_opencode.py"
+"$SCRIPT_DIR/.venv/bin/python" -m oskernel_agent.cli.setup_opencode
 
 echo ""
 echo "完成！使用方式（多会话流水线，单次跑全分析 + 格式审查 + 合并）："
 echo "  source .venv/bin/activate"
-echo "  python agent.py --url https://gitlab.example.com/repo.git"
-echo "  python agent.py --repo-path /path/to/local/repo"
-echo "  python agent.py --repo-id REPO_NAME"
+echo "  oskernel-agent --url https://gitlab.example.com/repo.git"
+echo "  oskernel-agent --repo-path /path/to/local/repo"
+echo "  oskernel-agent --repo-id REPO_NAME"

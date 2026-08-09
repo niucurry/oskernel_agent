@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from src.buildlib.coverage import audit_entries
-from src.ingest.config import RepoEntry
-from src.models import FunctionRecord, ModuleTag
-from src.normalize.store import FunctionStore
-from src.retrieval_contract import build_retrieval_contract, contract_errors
+from oskernel_agent.comparison.buildlib.coverage import audit_entries
+from oskernel_agent.comparison.ingest.config import RepoEntry
+from oskernel_agent.comparison.models import FunctionRecord, ModuleTag
+from oskernel_agent.comparison.normalize.store import FunctionStore
+from oskernel_agent.comparison.retrieval_contract import build_retrieval_contract, contract_errors
 
 
 def _entry(team: str) -> RepoEntry:

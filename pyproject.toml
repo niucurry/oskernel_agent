@@ -4,30 +4,43 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oskernel-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "OS 内核代码分析智能体 — 完整性与原创性自动评估"
 requires-python = ">=3.11"
 readme = "README.md"
 dynamic = ["dependencies"]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.11",
+]
+
 [project.scripts]
 oskernel-agent = "oskernel_agent.cli.agent:main"
 oskernel-setup = "oskernel_agent.cli.setup_opencode:setup"
+oskernel-batch = "oskernel_agent.cli.batch:main"
+oskernel-compare = "oskernel_agent.comparison.pipeline.__main__:main"
+oskernel-finals = "oskernel_agent.finals.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-# 仅打包既有的 oskernel_agent；查重引擎模块通过 `python -m src.<module>` 源码运行，
-# 不作为已安装包，避免与 src.* 导入路径冲突。
-include = ["oskernel_agent*", "finals*"]
+include = ["oskernel_agent*"]
 
 [tool.setuptools.package-data]
 "oskernel_agent.prompts" = ["templates/*.md"]
+"oskernel_agent.comparison.ai_detect.vendor.ai_code_detector" = ["templates/*.jinja2"]
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
 
 [tool.pytest.ini_options]
-# pythonpath=["."] 让 `import src.xxx`（查重引擎）可用；
-# 现有 tests/test_toc.py 自行把 src/ 加入 path 导入 oskernel_agent，二者互不影响。
-pythonpath = ["."]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+exclude = ["src/oskernel_agent/comparison/ai_detect/vendor"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

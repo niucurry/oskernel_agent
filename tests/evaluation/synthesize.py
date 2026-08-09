@@ -16,8 +16,8 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.normalize.extract import extract_functions
-from src.normalize.store import DEFAULT_DB
+from oskernel_agent.comparison.normalize.extract import extract_functions
+from oskernel_agent.comparison.normalize.store import DEFAULT_DB
 
 from .transforms import CLASSES, is_valid, transform
 

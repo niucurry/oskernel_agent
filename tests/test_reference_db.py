@@ -1,15 +1,14 @@
 import json
-from pathlib import Path
 
 import pytest
 
-from src.oskernel_agent.pipeline.tree_builder import _validate_similarity_result
-from src.oskernel_agent.tools.reference_db import (
+from oskernel_agent.pipeline.tree_builder import _validate_similarity_result
+from oskernel_agent.tools.reference_db import (
     ReferenceDatabaseError,
     ReferenceOSDatabase,
     normalize_code,
 )
-from src.oskernel_agent.tools.tool_dispatcher import ToolDispatcher
+from oskernel_agent.tools.tool_dispatcher import ToolDispatcher
 
 
 REFERENCE = "rcore-tutorial-v3"
@@ -26,7 +25,7 @@ def _record(body: str = "pub fn shared() -> usize { 1 }") -> dict:
 
 
 def test_all_supported_references_have_pinned_sources():
-    database = ReferenceOSDatabase("reference_db")
+    database = ReferenceOSDatabase("resources/reference_db")
     specs = database._source_specs()
 
     assert set(database.SUPPORTED) == set(specs)

@@ -1,7 +1,7 @@
-"""评测脚本：把样本注入流水线各层，统计召回/精确率/LLM 准确率/耗时。
+"""评测脚本：把样本注入流水线各层，统计召回率、精确率与耗时。
 
   python -m tests.evaluation.run [--eval-set ...] [--manual ...] [--top-k 20]
-                                 [--with-llm --llm-sample 20] [--check]
+                                 [--check]
 输出 Markdown 报告并保存历史结果到 tests/evaluation/history/{date}.json。
 --check：T1/T2 最终召回 < 0.95 或 T3 < 0.80 时以非零退出（供 CI 回归基线）。
 """
@@ -17,12 +17,11 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-import numpy as np
 import yaml
 from loguru import logger
 
-from src.exact.matcher import ExactMatcher
-from src.normalize.store import DEFAULT_DB
+from oskernel_agent.comparison.exact.matcher import ExactMatcher
+from oskernel_agent.comparison.normalize.store import DEFAULT_DB
 
 HISTORY_DIR = "tests/evaluation/history"
 DEFAULT_EVAL_SET = "tests/fixtures/eval_set.json"
@@ -75,13 +74,11 @@ def evaluate(
     faiss_ids_path: str = "data/db/faiss_ids.npy",
     top_k: int = 20,
     manual: list[dict] | None = None,
-    with_llm: bool = False,
-    llm_sample: int = 20,
 ) -> dict:
-    from src.embed.embedder import get_embedder
-    from src.embed.faiss_store import FaissVectorStore, load_faiss_index
-    from src.simhash.build import SimHashQuery
-    from src.simhash.code_index import CodeSimHashQuery
+    from oskernel_agent.comparison.embed.embedder import get_embedder
+    from oskernel_agent.comparison.embed.faiss_store import FaissVectorStore, load_faiss_index
+    from oskernel_agent.comparison.simhash.build import SimHashQuery
+    from oskernel_agent.comparison.simhash.code_index import CodeSimHashQuery
 
     samples = list(eval_set["samples"]) + (manual or [])
     raw_by_id = _raw_by_id(db_path)
@@ -128,8 +125,11 @@ def evaluate(
         if label == 1:
             p = per[cls]
             p["n"] += 1
-            p["l1"] += l1; p["l2"] += l2; p["code"] += code_hit
-            p["casc"] += casc; p["final"] += final
+            p["l1"] += l1
+            p["l2"] += l2
+            p["code"] += code_hit
+            p["casc"] += casc
+            p["final"] += final
         else:
             neg_total += 1
             if final:
@@ -165,54 +165,7 @@ def evaluate(
         "timings_sec": timings,
     }
 
-    if with_llm:
-        result["llm"] = _eval_llm(samples, raw_by_id, n=llm_sample)
     return result
-
-
-def _eval_llm(samples, raw_by_id, n: int) -> dict:
-    """对子集跑真实 LLM 复核，统计 verdict 极性准确率。"""
-    try:
-        from src.review.config import load_llm_settings
-        from src.review.llm import OpenAICompatClient
-        from src.review.voting import review_one
-        import asyncio
-        s = load_llm_settings()
-        if not s.api_key:
-            return {"skipped": "no LLM_API_KEY"}
-        client = OpenAICompatClient(s)
-    except Exception as exc:  # noqa: BLE001
-        return {"skipped": str(exc)}
-
-    import asyncio
-    pos = [x for x in samples if x["label"] == 1][: n // 2]
-    neg = [x for x in samples if x["label"] == 0][: n // 2]
-    correct = 0
-    total = 0
-    for x in pos + neg:
-        tgt_raw = x["target"].get("raw_code") or raw_by_id.get(x["target"]["id"], "")
-        susp = _mk_suspect(x["variant"], tgt_raw)
-        out = asyncio.run(review_one(susp, client, s))
-        verdict = out["review"]["verdict"]
-        is_clone_verdict = verdict in ("likely_clone", "high_similarity")
-        if (x["label"] == 1) == is_clone_verdict:
-            correct += 1
-        total += 1
-    return {"accuracy": round(correct / total, 3) if total else 0.0, "n": total}
-
-
-def _mk_suspect(var, tgt_raw):
-    return {
-        "tier": "review", "final_score": 0.8,
-        "query_func": {"repo_id": "eval/new", "file_path": var.get("file_path", "v.rs"),
-                       "start_line": 1, "end_line": var["raw_code"].count("\n") + 1, "func_name": "f",
-                       "module_tag": "other", "lang": var.get("lang", "rust"),
-                       "raw_code": var["raw_code"], "normalized_code": var.get("normalized_code", "")},
-        "candidate_func": {"repo_id": "hist/old", "file_path": "o.rs", "start_line": 1,
-                           "end_line": tgt_raw.count("\n") + 1, "func_name": "g", "module_tag": "other",
-                           "lang": "rust", "raw_code": tgt_raw, "normalized_code": ""},
-        "evidence": {"vector_similarity": 0.8}, "matched_spans": [], "match_type_per_span": [],
-    }
 
 
 def render_report(result: dict) -> str:
@@ -233,8 +186,6 @@ def render_report(result: dict) -> str:
               f"- recall = {o['recall']}（TP={o['tp']} / 正样本={o['pos_total']}）",
               f"- 负样本 {o['neg_total']}", "",
               f"## 耗时(s)：{result['timings_sec']}"]
-    if "llm" in result:
-        lines += ["", f"## LLM 复核 verdict 准确率：{result['llm']}"]
     return "\n".join(lines)
 
 
@@ -259,8 +210,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--faiss-index", default="data/db/faiss_hnsw.index")
     p.add_argument("--faiss-ids", default="data/db/faiss_ids.npy")
     p.add_argument("--top-k", type=int, default=20)
-    p.add_argument("--with-llm", action="store_true")
-    p.add_argument("--llm-sample", type=int, default=20)
     p.add_argument("--check", action="store_true", help="召回低于回归阈值则非零退出")
     args = p.parse_args(argv)
 
@@ -276,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
                       code_index_path=args.code_simhash_index,
                       faiss_index_path=args.faiss_index, faiss_ids_path=args.faiss_ids,
                       top_k=args.top_k,
-                      manual=manual, with_llm=args.with_llm, llm_sample=args.llm_sample)
+                      manual=manual)
 
     report = render_report(result)
     print(report)

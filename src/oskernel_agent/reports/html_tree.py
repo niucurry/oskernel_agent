@@ -12,19 +12,18 @@ import json
 import re
 from pathlib import Path
 
-from finals.digests import (
+from oskernel_agent.finals.digests import (
     description_digest_from_tree,
     description_priority_findings,
     description_review_sections,
     normalize_description_claim,
 )
-from finals.readability import clip_at_sentence, concise_module_summary, explain_terms_in_html
+from oskernel_agent.finals.readability import clip_at_sentence, concise_module_summary, explain_terms_in_html
 
 from ..report_quality import IncompleteReportError, assert_report_complete
 from .html import (
     _BROKEN_PREFIX,
     _CDN_HEAD,
-    _INIT_SCRIPT,
     assert_toc_resolves,
     derive_repo_web_base,
     linkify_html,

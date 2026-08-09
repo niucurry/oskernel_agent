@@ -93,7 +93,7 @@ class ToolDispatcher:
         repo_path: str,
         profile: dict,
         structure: dict | None = None,
-        ref_db_dir: str = "reference_db",
+        ref_db_dir: str = "resources/reference_db",
     ):
         self.engine = engine
         self.level2_index = level2_index        # 可为 None（降级模式）
@@ -538,11 +538,10 @@ class ToolDispatcher:
 
         def render(subtree: dict, prefix: str = "") -> None:
             items = [(k, v) for k, v in subtree.items() if not k.startswith("_")]
-            for i, (func_name, children) in enumerate(items):
+            for func_name, children in items:
                 if total_nodes[0] > 60:
                     tree_lines.append(f"{prefix}... [节点过多，已截断]")
                     return
-                is_last = (i == len(items) - 1)
                 sym = func_syms.get(func_name, {})
                 if sym:
                     loc = f"  ({sym['file']}:{sym['start_line']})"

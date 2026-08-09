@@ -1,4 +1,4 @@
-# 归一化时「保留不替换」的标识符白名单（src.normalize 使用）。
+# 归一化时「保留不替换」的标识符白名单（oskernel_agent.comparison.normalize 使用）。
 # 这些符号属于语言/标准库/已知内核常用 crate，不应被脱敏为 VAR_n/FUNC_n，
 # 否则会丢失区分度。每行一个符号，# 开头为注释，空行忽略。
 # 注意：所有「类型名」（tree-sitter 的 type_identifier / primitive_type）已在代码中
