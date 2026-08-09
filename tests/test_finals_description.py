@@ -11,6 +11,7 @@ from oskernel_agent.engines.path_c import TreeSitterEngine
 from oskernel_agent.pipeline.tree_builder import (
     _fallback_subsystem_for_path,
     _normalize_verdict_content_paths,
+    _normalize_similarity_evidence,
     _validate_hardcode_reviews,
     _validate_verdict_integrity_conclusion,
 )
@@ -80,6 +81,25 @@ def test_description_cli_cleanup_keeps_only_html(tmp_path):
     _cleanup_tree_intermediates(str(output))
 
     assert {path.name for path in tmp_path.iterdir()} == {"description.html"}
+
+
+def test_similarity_string_evidence_is_normalized_without_inventing_analysis():
+    similarity = {
+        "borrowed": [
+            "src/mm.c:20 — 页表入口与参考实现具有同构控制流",
+            "src/bare_path.c:9",
+            '{"path":"src/fs.c:3","quote":"目录遍历接口形成可定位对应"}',
+        ],
+        "original": [42, "未包含源码位置的主观判断"],
+    }
+
+    _normalize_similarity_evidence(similarity)
+
+    assert similarity["borrowed"] == [
+        {"path": "src/mm.c:20", "quote": "页表入口与参考实现具有同构控制流"},
+        {"path": "src/fs.c:3", "quote": "目录遍历接口形成可定位对应"},
+    ]
+    assert similarity["original"] == []
 
 
 def test_log_failure_is_extracted(tmp_path):
@@ -241,7 +261,7 @@ def test_description_html_is_problem_first_and_module_text_is_bounded():
     assert "根据被加载的测试" in rendered
     assert "模块详细证据" not in rendered and "子系统详细证据" not in rendered
     assert rendered.count('data-subsystem="') == 1
-    assert all(int(value) <= 180 for value in re.findall(r'data-analysis-chars="(\d+)"', rendered))
+    assert all(int(value) <= 300 for value in re.findall(r'data-analysis-chars="(\d+)"', rendered))
     assert "构建</strong>" in rendered and "失败" in rendered
     assert "启动 / 运行" in rendered and "未提供" in rendered
     assert "修改测试脚本旁路失败" in rendered
@@ -277,6 +297,104 @@ def test_description_renders_every_top_level_subsystem_not_only_five():
     rendered = render_tree_html(tree)
     assert rendered.count('data-subsystem="') == len(names)
     assert all(f'data-subsystem="{name}"' in rendered for name in names)
+
+
+def test_description_promotes_generic_children_to_peer_sections():
+    tree = _tree()
+    tree["tree"]["children"].append({
+        "type": "subsystem",
+        "name": "其他",
+        "summary": "公共基础设施。",
+        "children": [
+            {"type": "module", "name": "定时器与时钟", "summary": "维护单调时钟。",
+             "file_paths": ["src/timer.c"]},
+            {"type": "module", "name": "进程间通信", "summary": "提供管道和消息队列。",
+             "file_paths": ["src/ipc.c"]},
+        ],
+    })
+
+    rendered = render_tree_html(tree)
+    digest = description_digest_from_tree(tree)
+
+    assert 'data-subsystem="其他"' not in rendered
+    assert 'data-subsystem="定时器与时钟"' in rendered
+    assert 'data-subsystem="进程间通信"' in rendered
+    assert {module.name for module in digest.modules} >= {"定时器与时钟", "进程间通信"}
+
+
+def test_important_issues_are_severity_sorted_and_not_repeated_in_modules():
+    tree = _tree()
+    subsystem = tree["tree"]["children"][0]
+    subsystem["summary"] = (
+        "该模块构造用户与内核地址空间，管理页表映射、页框生命周期和缺页处理。"
+        "地址空间复制支持写时复制，回收路径按映射关系释放资源。"
+    )
+    subsystem["highlights"] = [
+        {"path": "src/mm.c:2", "quote": "页表接口统一封装映射、查询与撤销流程。"},
+        {"path": "src/alloc.c:3", "quote": "页框分配器支持回收并维护空闲集合。"},
+    ]
+    subsystem["children"] = [
+        {"type": "module", "name": "页表与地址空间",
+         "summary": "处理多级页表映射、权限转换和用户地址空间构造。",
+         "content": "<p>入口位于 src/mm.c:2。</p>", "file_paths": ["src/mm.c"]},
+        {"type": "module", "name": "物理页分配",
+         "summary": "维护空闲页框并为缺页和内核对象提供物理内存。",
+         "content": "<p>分配逻辑位于 src/alloc.c:3。</p>", "file_paths": ["src/alloc.c"]},
+    ]
+    subsystem["issues"] = [
+        {"path": "src/mm.c:20", "severity": "medium", "quote": "撤销映射时缺少跨核同步。"},
+        {"path": "src/mm.c:30", "severity": "high", "quote": "页表权限检查错误会允许越权写入。"},
+        {"path": "src/alloc.c:40", "severity": "low", "quote": "分配器统计信息命名不统一。"},
+    ]
+    tree["verdict"]["issues"] = list(subsystem["issues"])
+
+    rendered = render_tree_html(tree)
+
+    assert rendered.index("页表权限检查错误") < rendered.index("撤销映射时缺少跨核同步")
+    assert rendered.count("页表权限检查错误") == 1
+    assert rendered.count("撤销映射时缺少跨核同步") == 1
+    assert "局部问题：</strong>分配器统计信息命名不统一" in rendered
+    assert "data-other-finding" not in rendered
+    assert "src/mm.c:2" in rendered and "src/alloc.c:3" in rendered
+    assert 'data-evidence-count="2"' in rendered
+    analysis_lengths = [int(value) for value in re.findall(
+        r'data-analysis-chars="(\d+)"', rendered
+    )]
+    assert 150 <= analysis_lengths[0] <= 300
+
+
+def test_low_severity_incomplete_feature_stays_in_its_module():
+    tree = _tree()
+    subsystem = tree["tree"]["children"][0]
+    subsystem["issues"] = [{
+        "path": "src/mm.c:50", "severity": "low",
+        "quote": "调试接口尚未实现，当前返回 ENOSYS。",
+    }]
+    tree["verdict"]["issues"] = list(subsystem["issues"])
+
+    rendered = render_tree_html(tree)
+
+    assert "data-main-finding" not in rendered
+    assert "局部问题：</strong>调试接口尚未实现，当前返回 ENOSYS" in rendered
+
+
+def test_module_summary_does_not_paraphrase_an_important_issue_again():
+    tree = _tree()
+    subsystem = tree["tree"]["children"][0]
+    subsystem["summary"] = (
+        "调度策略框架支持多种策略；SCHED_DEADLINE 字段存在但未实现实际调度逻辑。"
+    )
+    subsystem["issues"] = [{
+        "path": "src/mm.c:60", "severity": "medium",
+        "quote": "SCHED_DEADLINE 字段已定义但未实现实际调度逻辑。",
+    }]
+    tree["verdict"]["issues"] = list(subsystem["issues"])
+
+    rendered = render_tree_html(tree)
+    modules = re.search(r'<section id="modules"[\s\S]*?</section>', rendered).group(0)
+
+    assert "SCHED_DEADLINE" in rendered
+    assert "SCHED_DEADLINE" not in modules
 
 
 def test_syscall_count_is_labeled_as_a_static_signal_and_never_overclaims():

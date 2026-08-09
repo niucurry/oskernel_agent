@@ -40,6 +40,7 @@ from src.normalize.classify import load_classifier
 from src.normalize.discovery import is_test_or_benchmark_path
 from src.retrieval_contract import (CONTRACT_VERSION, contract_errors,
                                     require_complete_contract)
+from finals.readability import explain_terms_in_html
 
 from .false_positives import (FP_REASON_DISP, false_positive_stats,
                               tag_false_positives, tag_internal_arch_dups)
@@ -3601,6 +3602,7 @@ def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
         body = '<p class="text-sm text-slate-500">没有形成高置信同源功能簇。</p>'
     else:
         cards = []
+        anchored_modules: set[str] = set()
         for index, c in enumerate(clusters, 1):
             tone = "critical" if c["priority"] == "重点核查" else "normal"
             table = _groups_table(
@@ -3614,8 +3616,13 @@ def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
                 + _strip_addr_refs(frag) + '</div>'
                 if frag else ""
             )
+            module_anchor = ""
+            if c["module"] not in anchored_modules:
+                module_anchor = f' id="module-evidence-{html.escape(c["module"])}"'
+                anchored_modules.add(c["module"])
             cards.append(
-                f'<article class="cluster-card" data-priority="{tone}" x-data="{{open:{str(index <= 3).lower()}}}">'
+                f'<article{module_anchor} class="cluster-card" data-priority="{tone}" '
+                'x-data="{open:false}">'
                 '<button type="button" class="cluster-head" @click="open=!open">'
                 f'<span class="cluster-index">C{index:02d}</span><span class="cluster-main">'
                 f'<b>{html.escape(c["feature"])}</b><small>{html.escape(_MODULE_DISPLAY.get(c["module"], c["module"]))}</small></span>'
@@ -5697,37 +5704,79 @@ def _compliance_section(query_repo_path: Path | None, linker, query_repo_id: str
                      str(unique_excluded), "excluded"), section
 
 
-def _finals_comparison_summary(digest, linker) -> str:
+def _finals_comparison_summary(
+    digest,
+    linker,
+    submodule_stats: dict,
+    *,
+    anchored_modules: set[str] | None = None,
+    has_review_evidence: bool = False,
+) -> str:
     metrics = digest.metrics
     closest = str(metrics.get("closest_source") or "未确定")
-    module_rows = "".join(
-        '<tr>'
-        f'<td><strong>{html.escape(module.name)}</strong></td>'
-        f'<td>{module.similarity_pct or 0:.1f}%</td>'
-        f'<td>{html.escape(module.summary)}</td>'
-        '</tr>'
-        for module in digest.modules
-    ) or '<tr><td colspan="3">没有形成可报告的模块级同源证据。</td></tr>'
+    tag_by_name = {name: tag for tag, name in _MODULE_DISPLAY.items()}
+    module_rows: list[str] = []
+    for index, module in enumerate(digest.modules, 1):
+        tag = tag_by_name.get(module.name, "")
+        stats = submodule_stats.get(tag) or {}
+        evidence_links: list[str] = []
+        if int(stats.get("confirmed") or 0):
+            target = (
+                f"#module-evidence-{html.escape(tag)}"
+                if tag in (anchored_modules or set()) else "#sec-clusters"
+            )
+            evidence_links.append(
+                f'<a href="{target}">高置信证据</a>'
+            )
+        if int(stats.get("review") or 0):
+            target = "#sec-review" if has_review_evidence else "#closest-evidence"
+            evidence_links.append(f'<a href="{target}">复核难例</a>')
+        evidence = "、".join(evidence_links) or "未形成同源证据"
+        module_rows.append(
+            '<tr>'
+            f'<td>{index}. <strong>{html.escape(module.name)}</strong></td>'
+            f'<td>{module.similarity_pct or 0:.1f}%</td>'
+            f'<td>{html.escape(module.summary)}</td>'
+            f'<td>{evidence}</td>'
+            '</tr>'
+        )
+    module_rows_html = "".join(module_rows) or '<tr><td colspan="4">没有形成可报告的模块级同源证据。</td></tr>'
     findings = "".join(
         '<li class="summary-alert ' + html.escape(item.severity) + '">'
         f'<strong>{html.escape(item.title)}</strong>'
         f'<span>置信度 {round(item.confidence * 100)}%</span>'
         f'<p>{html.escape(item.detail)}</p></li>'
-        for item in digest.decision_findings(5)
+        for item in digest.decision_findings(len(digest.findings))
     ) or '<li class="summary-alert"><strong>未形成高风险结论</strong><p>当前证据不足以锁定同源代码。</p></li>'
+    year = str(metrics.get("closest_year") or "")
+    team = str(metrics.get("closest_team") or "")
+    institution = str(metrics.get("closest_institution") or "")
+    identity = ""
+    if year and team:
+        identity = (
+            f'{html.escape(year)} 年 · {html.escape(institution)} · {html.escape(team)} 队'
+            if institution else
+            f'{html.escape(year)} 年 · {html.escape(team)} 队 · 学校信息未提供'
+        )
     return f"""
 <section id="summary" data-section-id="summary" class="summary-card">
   <div class="summary-kicker">先看结论</div>
-  <h2>与 {_ref_repo_anchor(linker, closest)} 最接近</h2>
+  <h2>经 AI 分析，与 {_ref_repo_anchor(linker, closest)} 最接近</h2>
+  {f'<p class="closest-identity">{identity}</p>' if identity else ''}
   <p class="summary-lead">{html.escape(digest.conclusion)}</p>
   <p class="section-intro"><b>整体比例口径：</b>高置信同源目标函数 ÷ 可比目标函数。
   公共上游、第三方库、应用二进制接口（ABI）约束和机械误报均已扣除；该比例用于安排人工核查，
   不等同于抄袭认定。</p>
   <ul class="summary-alerts">{findings}</ul>
-  <div class="overflow-x-auto"><table><thead><tr><th>模块</th><th>高置信比例</th><th>结论</th></tr></thead>
-  <tbody>{module_rows}</tbody></table></div>
+  <div class="overflow-x-auto"><table><thead><tr><th>模块</th><th>高置信比例</th><th>结论</th><th>实现依据</th></tr></thead>
+  <tbody>{module_rows_html}</tbody></table></div>
 </section>
 """
+
+
+def _closed_by_default(section_html: str) -> str:
+    """决赛首屏只展开模块索引；完整证据保留，但由评委按需打开。"""
+    return section_html.replace('x-data="{open: true}"', 'x-data="{open: false}"', 1)
 
 
 def generate_finals_comparison_html(
@@ -5755,7 +5804,17 @@ def generate_finals_comparison_html(
         query_repo_id, closest_source, submodule_stats,
         exact_file_matches=len(file_matches), ai_detect_data=ai_detect_data,
     )
-    summary_html = _finals_comparison_summary(digest, linker)
+    anchored_modules = {
+        str(cluster.get("module") or "")
+        for cluster in build_similarity_clusters(file_pairs)
+    }
+    summary_html = _finals_comparison_summary(
+        digest,
+        linker,
+        submodule_stats,
+        anchored_modules=anchored_modules,
+        has_review_evidence=bool(review_pairs or cleared_review_pairs),
+    )
     _toc_lineage, sec_lineage = _lineage_section(query_repo_id, suspects, linker, recall)
     _toc_clusters, sec_clusters = _cluster_section(
         file_pairs, analysis_html, linker, query_repo_id)
@@ -5765,8 +5824,14 @@ def generate_finals_comparison_html(
         file_matches, file_similar, linker, query_repo_id)
     _toc_ai, sec_ai = _ai_detect_section(ai_detect_data, linker, query_repo_id)
 
-    evidence_parts = [sec_lineage, sec_clusters, sec_review, sec_files]
+    evidence_parts = [
+        _closed_by_default(sec_lineage),
+        sec_clusters,
+        _closed_by_default(sec_review),
+        _closed_by_default(sec_files),
+    ]
     evidence_html = "\n".join(part for part in evidence_parts if part)
+    sec_ai = _closed_by_default(sec_ai)
     method_status = _retrieval_status(retrieval_contract)
     toc_html = (
         '<div class="toc-card"><div class="toc-header"><span class="toc-kicker">最终报告</span>'
@@ -5778,16 +5843,17 @@ def generate_finals_comparison_html(
         + '</div></div>'
     )
     title = f"{html.escape(query_repo_id)} 对比分析报告"
-    return f"""<!DOCTYPE html>
+    rendered = f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title>{_CDN_HEAD}{_STYLES}<style>
 .summary-alerts{{display:grid;gap:.65rem;list-style:none;padding:0;margin:1rem 0}}
 .summary-alert{{border-left:3px solid #f59e0b;background:#fffbeb;padding:.7rem .85rem;border-radius:.35rem}}
 .summary-alert.high,.summary-alert.critical{{border-left-color:#dc2626;background:#fef2f2}}
 .summary-alert>span{{float:right;color:#64748b;font-size:.72rem}}.summary-alert p{{margin:.25rem 0 0;font-size:.86rem}}
+.closest-identity{{margin:.2rem 0 .7rem;color:#475569;font-weight:600}}
 </style></head><body><div class="layout"><nav class="toc">{toc_html}</nav><main class="main">
-<header class="report-header"><span class="report-kicker">唯一最接近历史作品</span>
-<h1>{title}</h1><p>只围绕历史上最接近的一个作品展开，模块按高置信同源比例排序。</p></header>
+<header class="report-header"><span class="report-kicker">完全由 AI 工具生成 · 参赛队不得修改</span>
+<h1>{title}</h1><p>只围绕历史上最接近的一个作品展开；问题先列，模块按高置信同源比例降序排列。</p></header>
 {summary_html}
 <section id="closest-evidence" data-section-id="closest-evidence">
 {_chapter_heading("02", "最近历史作品的证据", "先看模块结论；函数、文件和代码细节默认折叠，需要时再展开。")}
@@ -5801,7 +5867,8 @@ def generate_finals_comparison_html(
 <p><b>召回状态：</b>{html.escape(method_status)}</p>
 <p>系统内部仍使用全部历史库完成召回和排除，但交付报告只展示最近作品；其他候选不进入评委正文。</p></div>
 </section>
-</main></div><a href="#summary" class="to-top" title="回到顶部">↑</a>{_INIT_SCRIPT}</body></html>""", digest
+</main></div><a href="#summary" class="to-top" title="回到顶部">↑</a>{_INIT_SCRIPT}</body></html>"""
+    return explain_terms_in_html(rendered), digest
 
 
 def generate_comparison_html(

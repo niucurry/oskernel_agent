@@ -295,13 +295,19 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
         "**写出顺序**：先写各模块 HTML → 再写子系统总览 HTML → **最后**写 JSON。\n"
         "**不要给子系统或模块打分**（JSON 无 score 字段）。\n\n"
         "**不要对子系统或模块打分**——评分只在顶层 VERDICT 会话产出。\n\n"
+        "最终描述报告会将这些事实组合成每个并列模块不超过 300 字的评委分析。"
+        "summary 应为 140–200 字，覆盖结构、关键机制和已完成能力；每个 "
+        "modules[].summary 应为 80–160 字且不要重复总摘要原句。highlights 写 2–6 条"
+        "有 file:line 的实现能力或设计优点，并尽量覆盖不同子模块。若子系统名为“其他”或"
+        "“未分类”，必须按定时器、日志、随机数、进程间通信等真实职责拆成独立模块，"
+        "不得再使用“其他/杂项”作为模块名。\n\n"
         "JSON schema：\n"
         '{\n'
-        '  "name":"...","role":"...","summary":"...",\n'
+        '  "name":"...","role":"...","summary":"140–200字",\n'
         '  "highlights":[{"path":"...","quote":"..."}],\n'
         '  "issues":[{"path":"...","severity":"low|medium|high","quote":"..."}],\n'
         '  "modules":[\n'
-        '    {"slot":1,"name":"模块名","summary":"≤200字",'
+        '    {"slot":1,"name":"模块名","summary":"80–160字",'
         '"file_paths":["..."]}\n'
         '  ]\n'
         '}\n\n'
@@ -853,6 +859,7 @@ def _validate_verdict_result(
         )
         similarity = parsed.get("similarity") or {}
         if isinstance(similarity, dict):
+            _normalize_similarity_evidence(similarity)
             _validate_structured_evidence(
                 similarity.get("borrowed") or [], repo_path, label="参考实现沿用证据",
             )
@@ -906,6 +913,44 @@ def _norm_path(p: str) -> str:
 
 
 _SOURCE_LOCATION_RE = re.compile(r"^(.*?)(?::|#L)(\d+)(?:-L?\d+)?$")
+_SOURCE_LOCATION_IN_TEXT_RE = re.compile(
+    r"(?P<path>(?:[A-Za-z0-9_.+@-]+/)+[A-Za-z0-9_.+@-]+(?::|#L)\d+(?:-L?\d+)?)"
+)
+
+
+def _normalize_similarity_evidence(similarity: dict) -> None:
+    """兼容模型把借鉴/创新证据写成字符串，同时不为裸路径编造分析。"""
+    for key in ("borrowed", "original"):
+        raw_items = similarity.get(key) or []
+        if not isinstance(raw_items, list):
+            continue
+        normalized: list[dict] = []
+        for item in raw_items:
+            if isinstance(item, dict):
+                normalized.append(item)
+                continue
+            if not isinstance(item, str):
+                continue
+            text = item.strip().strip("` ")
+            if text.startswith("{"):
+                try:
+                    decoded = json.loads(text)
+                except json.JSONDecodeError:
+                    decoded = None
+                if isinstance(decoded, dict):
+                    normalized.append(decoded)
+                    continue
+            match = _SOURCE_LOCATION_IN_TEXT_RE.search(text)
+            if not match:
+                continue
+            quote = (text[:match.start()] + " " + text[match.end():]).strip(
+                " \t\r\n—–-：:，,；;。"
+            )
+            # 只有位置而没有分析时按提示契约丢弃；空数组比伪造说明更可靠。
+            if not quote:
+                continue
+            normalized.append({"path": match.group("path"), "quote": quote})
+        similarity[key] = normalized
 
 
 def _validate_repo_location(
@@ -1221,6 +1266,7 @@ def repair_verdict_similarity(
         similarity = candidate.get("similarity")
         if not isinstance(similarity, dict):
             return False
+        _normalize_similarity_evidence(similarity)
         merged = dict(parsed)
         merged["similarity"] = similarity
         try:

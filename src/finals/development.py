@@ -25,7 +25,7 @@ from .readability import (
 _LARGE_COMMIT_FLOOR = 1000
 _MAX_STAGES = 12
 _MAX_KEY_COMMITS = 3
-_MAX_STAGE_FILES = 8
+_PRIMARY_STAGE_FILES = 6
 _SEVERITIES = {"info", "low", "medium", "high", "critical"}
 _THRESHOLD_DEFINITION = (
     "有变更的提交少于 8 次时，阈值固定为 1000 LOC；否则取 1000 与"
@@ -440,11 +440,11 @@ def _stage_file_stats(stage_commits: list[dict]) -> list[dict]:
                 totals[path] += int(item.get("additions") or 0) + int(
                     item.get("deletions") or 0
                 )
+    # 全量保留，避免“精简”变成静默丢证据。渲染器把前几项放在主阅读路径，
+    # 其余项折叠展示，因此评委可以速读，也能完整复核阶段涉及的文件。
     return [
         {"path": path, "loc": loc}
-        for path, loc in sorted(totals.items(), key=lambda item: (-item[1], item[0]))[
-            :_MAX_STAGE_FILES
-        ]
+        for path, loc in sorted(totals.items(), key=lambda item: (-item[1], item[0]))
     ]
 
 
@@ -455,6 +455,7 @@ def analyze_history(
     *,
     shallow: bool = False,
     min_commits: int | None = None,
+    repository_url: str = "",
 ) -> dict:
     """用经校验的 AI 判断组织报告，所有明细数字由提交历史复算。"""
     evidence = build_development_evidence(
@@ -479,6 +480,10 @@ def analyze_history(
                     EvidenceRef(
                         path=f"commit:{sha}",
                         excerpt=str(commit_by_sha[sha].get("subject") or ""),
+                        url=(
+                            f"{repository_url.rstrip('/')}/-/commit/{sha}"
+                            if repository_url else ""
+                        ),
                     )
                     for sha in review["commit_shas"][:6]
                 ],
@@ -506,6 +511,10 @@ def analyze_history(
                         "subject": commit.get("subject", ""),
                         "date": str(commit["date"])[:10],
                         "loc": _changes(commit),
+                        "url": (
+                            f"{repository_url.rstrip('/')}/-/commit/{commit['sha']}"
+                            if repository_url else ""
+                        ),
                     }
                     for commit in key_commits
                 ],
@@ -526,7 +535,7 @@ def analyze_history(
             if not shallow
             else min(0.65, min((stage["confidence"] for stage in stages), default=0.65))
         ),
-        findings=findings[:8],
+        findings=findings,
         modules=[
             ModuleDigest(
                 name=f"阶段 {stage['number']}：{stage['name']}",
@@ -563,6 +572,7 @@ def analyze_history(
         "reviews": validated["issues"],
         "evidence": evidence,
         "digest": digest,
+        "repository_url": repository_url,
     }
 
 
@@ -573,7 +583,8 @@ def _esc(value: object) -> str:
 def render_development_html(analysis: dict) -> str:
     digest: ReportDigest = analysis["digest"]
     metrics = digest.metrics
-    findings = digest.decision_findings(8)
+    # 问题按严重度前置，但不设置条数上限：精简只压缩表达，不能漏掉严重问题。
+    findings = digest.decision_findings(len(digest.findings))
     finding_html = "".join(
         '<li class="finding ' + _esc(item.severity) + '">'
         f'<div><strong>{_esc(item.title)}</strong><span>AI 置信度 {round(item.confidence * 100)}%</span></div>'
@@ -581,7 +592,12 @@ def render_development_html(analysis: dict) -> str:
         + (
             '<p class="evidence">证据：'
             + "、".join(
-                f'<code>{_esc(ref.path.removeprefix("commit:")[:12])}</code>'
+                (
+                    f'<a href="{_esc(ref.url)}"><code>'
+                    f'{_esc(ref.path.removeprefix("commit:")[:12])}</code></a>'
+                    if ref.url else
+                    f'<code>{_esc(ref.path.removeprefix("commit:")[:12])}</code>'
+                )
                 for ref in item.evidence
             )
             + "</p>"
@@ -611,14 +627,31 @@ def render_development_html(analysis: dict) -> str:
     stage_html: list[str] = []
     for stage in analysis.get("stages") or []:
         commits = "".join(
-            f'<li><code>{_esc(item["sha"][:12])}</code> · {_esc(item["date"])} · '
+            '<li>'
+            + (
+                f'<a href="{_esc(item.get("url"))}"><code>{_esc(item["sha"][:12])}</code></a>'
+                if item.get("url") else f'<code>{_esc(item["sha"][:12])}</code>'
+            )
+            + f' · {_esc(item["date"])} · '
             f'{_esc(item["subject"])} · {_esc(item["loc"])} LOC</li>'
             for item in stage["key_commits"]
         )
+        primary_files = stage["files"][:_PRIMARY_STAGE_FILES]
+        extra_files = stage["files"][_PRIMARY_STAGE_FILES:]
         files = "、".join(
             f'<code>{_esc(item["path"])}</code>（{_esc(item["loc"])} LOC）'
-            for item in stage["files"]
+            for item in primary_files
         ) or "无可统计文件"
+        extra_files_html = ""
+        if extra_files:
+            extra_files_html = (
+                f'<details class="more-files"><summary>其余 {len(extra_files)} 个涉及文件</summary><p>'
+                + "、".join(
+                    f'<code>{_esc(item["path"])}</code>（{_esc(item["loc"])} LOC）'
+                    for item in extra_files
+                )
+                + "</p></details>"
+            )
         stage_html.append(
             f'<article class="stage"><div class="stage-head"><h3>阶段 {stage["number"]}：{_esc(stage["name"])}</h3>'
             f'<span>AI 置信度 {round(stage["confidence"] * 100)}%</span></div>'
@@ -626,8 +659,8 @@ def render_development_html(analysis: dict) -> str:
             f'<p>{_esc(stage["start"])} 至 {_esc(stage["end"])}；'
             f'{stage["commit_count"]} 次提交；变更 {stage["loc"]} LOC。</p>'
             f'<p class="reason"><strong>划分依据：</strong>{_esc(stage["reason"])}</p>'
-            f'<details><summary>关键提交与涉及文件</summary><ul>{commits}</ul>'
-            f'<p><strong>主要文件：</strong>{files}</p></details></article>'
+            f'<div class="stage-evidence"><div><strong>关键提交</strong><ul>{commits}</ul></div>'
+            f'<div><strong>主要文件</strong><p>{files}</p>{extra_files_html}</div></div></article>'
         )
 
     authors = "、".join(
@@ -656,13 +689,16 @@ main{{max-width:980px;margin:auto;padding:32px 22px 70px}}h1{{font-size:28px;mar
 .finding.high,.finding.critical{{border-left-color:#dc2626}}.finding>div,.stage-head{{display:flex;justify-content:space-between;gap:12px}}
 .finding span,.stage-head span{{font-size:12px;color:#64748b}}.finding p{{margin:4px 0 0}}.evidence,.reason{{color:#475569;font-size:14px}}
 .stages{{display:grid;gap:12px}}.stage h3{{margin:0}}.stage-conclusion{{font-size:16px;font-weight:600;margin-bottom:4px}}
-details summary{{cursor:pointer;color:#475569;font-weight:600}}code{{font-family:ui-monospace,Consolas,monospace}}
-@media(max-width:640px){{main{{padding:20px 14px}}.finding>div,.stage-head{{display:block}}}}
+.stage-evidence{{display:grid;grid-template-columns:minmax(15rem,.85fr) minmax(18rem,1.15fr);gap:18px;border-top:1px solid #e2e8f0;padding-top:10px}}
+.stage-evidence ul,.stage-evidence p{{margin:.35rem 0;padding-left:1.2rem}}.stage-evidence p{{padding-left:0}}
+details summary{{cursor:pointer;color:#475569;font-weight:600}}.more-files{{margin-top:.4rem}}code{{font-family:ui-monospace,Consolas,monospace}}
+a{{color:#075985;text-decoration:none}}a:hover{{text-decoration:underline}}
+@media(max-width:640px){{main{{padding:20px 14px}}.finding>div,.stage-head{{display:block}}.stage-evidence{{grid-template-columns:1fr}}}}
 </style></head><body><main>
 <header><span class="ai-mark">完全由 AI 工具生成</span><h1>{title}</h1>
 <p class="lead">{_esc(digest.conclusion)}</p>
 <p>AI 负责问题判断和阶段归纳；提交次数、日期、LOC 与文件明细均由程序依据 Git 复算，参赛队不得修改本报告。</p></header>
-<section id="findings"><h2>AI 结论与问题</h2><ol class="findings">{finding_html}</ol>{dismissed_html}</section>
+<section id="findings"><h2>经 AI 分析，该作品存在以下问题</h2><ol class="findings">{finding_html}</ol>{dismissed_html}</section>
 <section><h2>历史概况</h2><div class="metrics">
 <div class="metric"><b>{_esc(metrics.get('commit_count', 0))}</b><span>可见提交</span></div>
 <div class="metric"><b>{_esc(minimum)}</b><span>章程最低提交次数</span></div>
@@ -672,7 +708,7 @@ details summary{{cursor:pointer;color:#475569;font-weight:600}}code{{font-family
 </div><div class="panel" style="margin-top:10px"><p><strong>判定口径：</strong>{_esc(minimum_note)}</p>
 <p><strong>大规模提交口径：</strong>{_esc(_THRESHOLD_DEFINITION)}</p>
 <p><strong>主要贡献者：</strong>{authors}</p></div></section>
-<section><h2>AI 归纳的提交阶段</h2><div class="stages">{"".join(stage_html)}</div></section>
+<section><h2>提交历史与开发阶段</h2><div class="stages">{"".join(stage_html)}</div></section>
 </main></body></html>"""
     return explain_terms_in_html(rendered)
 
@@ -699,9 +735,14 @@ def run_ai_development_analysis(
         '"key_shas":[str]}]}'
     )
     request = (
-        "请分析随消息附加的 development evidence JSON，逐一复核问题候选，并按时间连续区间归纳开发阶段。"
+        "请站在操作系统内核赛题评委角度，分析随消息附加的 development evidence JSON，"
+        "逐一复核问题候选，并按时间连续区间归纳开发阶段。"
         "只能使用输入事实，不得编造提交、日期、LOC 或文件。所有候选必须恰好复核一次；"
-        "阶段必须覆盖全部 timeline，不能重叠或留空。\n"
+        "阶段必须覆盖全部 timeline，不能重叠或留空。只有证据足以影响真实性、过程可信度或"
+        "章程符合性时才标为 report；不能仅因提交较大就下负面结论。问题标题直接点明性质，"
+        "analysis 用可复算数字说明为何需要评委复核；严重度按对评审结论的影响填写。"
+        "阶段按功能目标合并，避免逐提交复述；conclusion 先写本阶段形成的能力，再写主要限制，"
+        "reason 只说明划分依据。文字必须精炼，不写套话。\n"
         f"repo_id: {repo_id}\n"
         f"evidence_file: {evidence_path.resolve()}\n"
         f"expected_schema: {schema_hint}\n"
@@ -745,6 +786,16 @@ def generate_development_report(
     output = Path(output_path).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     commits, shallow = collect_commits(repo)
+    repository_url = ""
+    try:
+        # 只接受传入仓库本身的 remote，不能让归档子目录继承外层工作树地址。
+        git_root = Path(_git(repo, "rev-parse", "--show-toplevel").strip()).resolve()
+        if git_root == repo:
+            from src.report.gitlab_links import repo_web_url
+
+            repository_url = repo_web_url(_git(repo, "remote", "get-url", "origin").strip()) or ""
+    except (RuntimeError, OSError):
+        repository_url = ""
     evidence = build_development_evidence(
         commits, shallow=shallow, min_commits=min_commits
     )
@@ -757,6 +808,7 @@ def generate_development_report(
         ai_result,
         shallow=shallow,
         min_commits=min_commits,
+        repository_url=repository_url,
     )
     output.write_text(render_development_html(analysis), encoding="utf-8")
     digest_path = output.with_suffix(".digest.json")
