@@ -1,8 +1,18 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 
-from oskernel_agent.reports.html import make_file_link_resolver
+import pytest
+
+from oskernel_agent.reports.html import (
+    _BROKEN_PREFIX,
+    derive_repo_web_base,
+    linkify_html,
+    make_file_link_resolver,
+    repository_url_to_web_base,
+)
 
 
 def test_windows_reserved_path_map_uses_original_gitlab_path(tmp_path):
@@ -10,7 +20,7 @@ def test_windows_reserved_path_map_uses_original_gitlab_path(tmp_path):
     original = "os/src/task/aux.rs"
     source = tmp_path / safe
     source.parent.mkdir(parents=True)
-    source.write_text("pub fn init() {}", encoding="utf-8")
+    source.write_text("\n" * 6 + "pub fn init() {}\n", encoding="utf-8")
     (tmp_path / ".codex_windows_path_map.json").write_text(
         json.dumps({safe: original}), encoding="utf-8"
     )
@@ -23,3 +33,50 @@ def test_windows_reserved_path_map_uses_original_gitlab_path(tmp_path):
     expected = "https://gitlab.example.com/group/repo/-/blob/deadbeef/os/src/task/aux.rs#L7"
     assert resolver(safe, "7") == expected
     assert resolver(original, "7") == expected
+
+def test_file_extension_match_requires_a_token_boundary(tmp_path):
+    broken = set()
+    resolver = make_file_link_resolver([tmp_path], broken_paths=broken)
+    assert linkify_html(".bss 段与 cifs.spnego 名称", resolver) == ".bss 段与 cifs.spnego 名称"
+
+
+def test_bare_filename_without_line_is_plain_prose(tmp_path):
+    broken = set()
+    resolver = make_file_link_resolver([tmp_path], broken_paths=broken)
+    rendered = linkify_html("与 hart.rs 中定义重复", resolver)
+    assert rendered == "与 hart.rs 中定义重复"
+    assert not broken
+
+
+def test_line_number_outside_source_file_is_marked_broken(tmp_path):
+    source = tmp_path / "src" / "main.rs"
+    source.parent.mkdir()
+    source.write_text("fn main() {}\n", encoding="utf-8")
+    broken = set()
+    resolver = make_file_link_resolver([tmp_path], broken_paths=broken)
+    assert resolver is not None
+    assert resolver("src/main.rs", "2").startswith(_BROKEN_PREFIX)
+    assert "src/main.rs:2" in broken
+
+
+def test_non_git_archive_does_not_inherit_parent_repository_remote(tmp_path):
+    if not shutil.which("git"):
+        pytest.skip("git unavailable")
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "remote", "add", "origin",
+         "https://gitlab.example.com/report/generator.git"],
+        check=True,
+    )
+    archive = tmp_path / "downloaded-archive"
+    archive.mkdir()
+    assert derive_repo_web_base(archive) is None
+
+
+def test_explicit_target_repository_url_builds_the_evidence_base():
+    base = repository_url_to_web_base(
+        "https://gitlab.example.com/team/entry.git", "a" * 40,
+    )
+    assert base == (
+        "https://gitlab.example.com/team/entry/-/blob/" + "a" * 40
+    )

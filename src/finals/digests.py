@@ -7,7 +7,18 @@ import re
 from pathlib import Path
 
 from .models import EvidenceRef, Finding, ModuleDigest, ReportDigest
-from .readability import concise_module_summary, explain_terms_on_first_use, remove_ai_filler
+from .readability import (
+    clip_at_sentence,
+    concise_module_summary,
+    explain_terms_on_first_use,
+    remove_ai_filler,
+)
+
+
+DESCRIPTION_SUBSYSTEM_ORDER = (
+    "启动模块", "内存管理", "进程管理", "文件系统", "设备管理",
+    "系统调用", "硬件抽象", "其他",
+)
 
 
 def _path_ref(value: str) -> EvidenceRef:
@@ -18,8 +29,13 @@ def _path_ref(value: str) -> EvidenceRef:
     return EvidenceRef(path=match.group(1), line=int(match.group(2)))
 
 
-def _severity(value: str) -> str:
-    return value if value in {"info", "low", "medium", "high", "critical"} else "medium"
+def _severity(value: str, text: str = "") -> str:
+    severity = value if value in {"info", "low", "medium", "high", "critical"} else "medium"
+    if severity == "medium" and any(
+        term in text for term in ("重复代码", "缺乏复用", "重复定义")
+    ):
+        return "low"
+    return severity
 
 
 def _confidence_ratio(value: object, default: float = 0.5) -> float:
@@ -114,25 +130,63 @@ def _reviewed_hardcode_findings(verdict: dict, integrity: dict) -> list[Finding]
     return findings
 
 
-def _description_priority_key(item: Finding) -> tuple[int, int, float, str]:
+def normalize_description_claim(value: str, path: str, facts: dict) -> str:
+    """用事实档案约束容易被误写成“已可用”的系统调用数量声明。"""
+    text = remove_ai_filler(str(value or ""))
+    syscall = (facts.get("syscall") or {}) if isinstance(facts, dict) else {}
+    try:
+        count = int(syscall.get("standard_count"))
+        total = int(syscall.get("standard_total"))
+    except (TypeError, ValueError):
+        return text
+    has_count_claim = bool(re.search(r"\b\d+\s*/\s*\d+\b", text))
+    if not has_count_claim or not ("系统调用" in text or "syscall" in text.casefold()):
+        return text
+    if "nisyscall" in text.casefold() or "ENOSYS" in text:
+        return (
+            f"sys_nisyscall 对未实现编号返回 ENOSYS；函数定义正则扫描识别到 "
+            f"{count}/{total} 个标准名称，该数字不代表接口语义可用。"
+        )
+    return (
+        f"函数定义正则扫描识别到 {count}/{total} 个标准系统调用名称；"
+        "该计数只表示接口线索，不代表语义可用或测试通过。"
+    )
+
+
+def _description_priority_key(item: Finding) -> tuple[int, int, float]:
+    """按评委决策价值排序，而不是按标题字典序或泛化“性能问题”排序。"""
     rank = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
+    text = f"{item.title} {item.detail}"
     if item.title in {"编译失败", "运行失败", "编译日志缺失", "运行日志缺失"}:
         group = 0
     elif "硬编码" in item.title:
         group = 1
-    elif item.title.startswith(("编译", "运行")):
+    elif "复现" in item.title or "Dockerfile" in text:
         group = 2
-    elif item.severity in {"critical", "high"}:
+    elif any(token in text for token in (
+        "仅返回成功", "占位实现", "行为不明确", "溢出丢弃", "旁路",
+        "伪造", "错误结果",
+    )):
         group = 3
-    else:
+    elif any(token in text for token in ("路由", "竞态", "死锁", "越界", "权限")):
         group = 4
-    return group, -rank[item.severity], -item.confidence, item.title
+    elif item.severity in {"critical", "high"}:
+        group = 5
+    elif any(token in text for token in ("性能", "浪费", "热点", "锁竞争")):
+        group = 8
+    elif item.severity == "medium":
+        group = 6
+    else:
+        group = 7
+    return group, -rank[item.severity], -item.confidence
 
 
-def description_priority_findings(digest: ReportDigest, limit: int = 8) -> list[Finding]:
-    """描述报告专用顺序：构建/运行失败、硬编码、严重设计问题、其他。"""
-
-    return sorted(digest.findings, key=_description_priority_key)[: max(0, limit)]
+def description_priority_findings(
+    digest: ReportDigest, limit: int | None = None,
+) -> list[Finding]:
+    """描述报告专用顺序：可复现性、诚信、正确性、性能。"""
+    ordered = sorted(digest.findings, key=_description_priority_key)
+    return ordered if limit is None else ordered[: max(0, limit)]
 
 
 def description_digest_from_tree(tree: dict) -> ReportDigest:
@@ -180,6 +234,27 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
                 evidence=[EvidenceRef(path=str(log.get("path") or ""))],
             ))
 
+    reproducibility = integrity.get("reproducibility") or {}
+    if reproducibility.get("status") in {"warning", "missing"}:
+        findings.append(Finding(
+            title="自动评测环境复现存在风险",
+            detail=concise_module_summary(str(
+                reproducibility.get("summary") or "容器构建环境无法核验。"
+            )),
+            severity="high" if reproducibility.get("status") == "warning" else "medium",
+            confidence=1.0,
+            source="description",
+            evidence=[
+                EvidenceRef(
+                    path=str(item.get("path") or ""),
+                    line=item.get("line"),
+                    excerpt=str(item.get("excerpt") or "")[:500],
+                )
+                for item in (reproducibility.get("evidence") or [])[:2]
+                if isinstance(item, dict) and item.get("path")
+            ],
+        ))
+
     hardcode_findings = _reviewed_hardcode_findings(verdict, integrity)
     findings.extend(hardcode_findings)
     hardcode_locations = {
@@ -188,31 +263,79 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
         if evidence.path
     }
 
+    reported_issue_locations: set[tuple[str, int | None]] = set()
     for item in verdict.get("issues") or []:
-        quote = remove_ai_filler(str(item.get("quote") or ""))
+        raw_path = str(item.get("path") or "")
+        quote = normalize_description_claim(str(item.get("quote") or ""), raw_path, facts)
         if not quote:
             continue
-        issue_path = _path_ref(str(item.get("path") or ""))
+        issue_path = _path_ref(raw_path)
         if (issue_path.path, issue_path.line) in hardcode_locations:
             continue
+        reported_issue_locations.add((issue_path.path, issue_path.line))
+        source_name = Path(issue_path.path).name or "未知文件"
         findings.append(Finding(
-            title=explain_terms_on_first_use(concise_module_summary(quote))[:80],
+            title=f"源码实现问题：{source_name}",
             detail=concise_module_summary(quote),
-            severity=_severity(str(item.get("severity") or "medium")),
+            severity=_severity(str(item.get("severity") or "medium"), quote),
             confidence=_confidence_ratio(item.get("confidence"), default=0.5),
             source="description",
             evidence=[issue_path],
         ))
 
-    modules: list[ModuleDigest] = []
+    # 顶层 verdict 只会挑代表项；描述报告还必须吸收各一级子系统中未被挑中的问题，
+    # 以免“精简”演变成静默丢失严重或语义不完整的实现。
     for subsystem in ((tree.get("tree") or {}).get("children") or []):
-        for module in subsystem.get("children") or []:
-            summary = module.get("brief") or module.get("summary") or module.get("content") or "未形成模块摘要。"
-            modules.append(ModuleDigest(
-                name=str(module.get("name") or "未命名模块"),
-                summary=concise_module_summary(str(summary)),
-                evidence_count=len(module.get("highlights") or []) + len(module.get("issues") or []),
+        if not isinstance(subsystem, dict):
+            continue
+        for item in subsystem.get("issues") or []:
+            if not isinstance(item, dict):
+                continue
+            raw_path = str(item.get("path") or "")
+            quote = normalize_description_claim(str(item.get("quote") or ""), raw_path, facts)
+            issue_path = _path_ref(raw_path)
+            location = (issue_path.path, issue_path.line)
+            if (
+                not quote or not issue_path.path or location in hardcode_locations
+                or location in reported_issue_locations
+            ):
+                continue
+            reported_issue_locations.add(location)
+            source_name = Path(issue_path.path).name or "未知文件"
+            findings.append(Finding(
+                title=f"源码实现问题：{source_name}",
+                detail=concise_module_summary(quote),
+                severity=_severity(str(item.get("severity") or "medium"), quote),
+                confidence=_confidence_ratio(item.get("confidence"), default=0.75),
+                source="description",
+                evidence=[issue_path],
             ))
+
+    modules: list[ModuleDigest] = []
+    subsystems_by_name = {
+        str(subsystem.get("name") or ""): subsystem
+        for subsystem in ((tree.get("tree") or {}).get("children") or [])
+        if isinstance(subsystem, dict)
+    }
+    ordered_names = [name for name in DESCRIPTION_SUBSYSTEM_ORDER if name in subsystems_by_name]
+    ordered_names.extend(
+        name for name in subsystems_by_name if name not in DESCRIPTION_SUBSYSTEM_ORDER
+    )
+    for name in ordered_names:
+        subsystem = subsystems_by_name.get(name)
+        if not subsystem:
+            continue
+        summary = normalize_description_claim(str(
+            subsystem.get("brief") or subsystem.get("summary")
+            or subsystem.get("content") or "未形成模块摘要。"
+        ), "", facts)
+        modules.append(ModuleDigest(
+            name=name,
+            summary=clip_at_sentence(explain_terms_on_first_use(str(summary)), 160),
+            evidence_count=(
+                len(subsystem.get("highlights") or []) + len(subsystem.get("issues") or [])
+            ),
+        ))
 
     conclusion = explain_terms_on_first_use(remove_ai_filler(
         str(verdict.get("one_line") or "已完成源码结构分析，结论见问题清单。")
@@ -224,8 +347,8 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
         kind="description",
         conclusion=conclusion[:240],
         confidence=0.8 if findings else 0.65,
-        findings=ordered_findings[:8],
-        modules=modules[:32],
+        findings=ordered_findings,
+        modules=modules,
         metrics={
             "indexed_files": int(meta.get("indexed_files") or 0),
             "hardcode_signals": len((integrity.get("hardcode") or {}).get("findings") or []),
@@ -235,6 +358,9 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             ),
             "hardcode_scan_truncated": bool(
                 (integrity.get("hardcode") or {}).get("truncated")
+            ),
+            "hardcode_scanned_files": int(
+                (integrity.get("hardcode") or {}).get("scanned_files") or 0
             ),
             "hardcode_confirmed": sum(
                 1 for item in reviews if isinstance(item, dict) and item.get("status") == "confirmed"
@@ -247,6 +373,10 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             ),
             "build_log_status": (integrity.get("build_log") or {}).get("status", "not_provided"),
             "run_log_status": (integrity.get("run_log") or {}).get("status", "not_provided"),
+            "build_log_note": str((integrity.get("build_log") or {}).get("note") or ""),
+            "run_log_note": str((integrity.get("run_log") or {}).get("note") or ""),
+            "reproducibility_status": reproducibility.get("status", "unknown"),
+            "reproducibility_summary": str(reproducibility.get("summary") or ""),
         },
     )
 

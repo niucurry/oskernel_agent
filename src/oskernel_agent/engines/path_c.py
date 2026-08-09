@@ -49,9 +49,10 @@ class TreeSitterEngine(AnalysisEngine):
             try:
                 source = src_file.read_bytes()
                 tree = self.parser.parse(source)
-                source_str = source.decode("utf-8", errors="replace")
-                self._index_functions(tree.root_node, source_str, rel)
-                self._index_structs(tree.root_node, source_str, rel)
+                # tree-sitter 的 start_byte/end_byte 是 UTF-8 字节偏移；必须始终在
+                # bytes 上切片，再解码。直接切 Python str 会在中文注释之后错位。
+                self._index_functions(tree.root_node, source, rel)
+                self._index_structs(tree.root_node, source, rel)
                 count += 1
             except Exception:
                 continue
@@ -60,13 +61,17 @@ class TreeSitterEngine(AnalysisEngine):
               f"{len(self._func_index)} 个函数，"
               f"{len(self._struct_index)} 个结构体")
 
-    def _index_functions(self, root_node, source: str, file_path: str):
+    @staticmethod
+    def _node_text(source: bytes, node) -> str:
+        return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+
+    def _index_functions(self, root_node, source: bytes, file_path: str):
         """遍历 AST 提取所有函数定义。"""
         def traverse(node):
             if node.type == self._func_node_type:
                 name = self._extract_func_name(node, source)
                 if name:
-                    body = source[node.start_byte:node.end_byte]
+                    body = self._node_text(source, node)
                     calls = self._extract_calls(node, source)
                     # 同名函数用 name@file 的 key 去重，查询时通过 go_to_definition 消歧
                     key = name if name not in self._func_index else f"{name}@{file_path}"
@@ -83,7 +88,7 @@ class TreeSitterEngine(AnalysisEngine):
 
         traverse(root_node)
 
-    def _extract_func_name(self, func_node, source: str) -> str | None:
+    def _extract_func_name(self, func_node, source: bytes) -> str | None:
         """从函数定义节点中提取函数名（C 和 Rust 的 AST 结构不同）。"""
         if self.lang == "c":
             declarator = func_node.child_by_field_name("declarator")
@@ -94,16 +99,16 @@ class TreeSitterEngine(AnalysisEngine):
                 if declarator and declarator.type == "function_declarator":
                     name_node = declarator.child_by_field_name("declarator")
                     if name_node:
-                        return source[name_node.start_byte:name_node.end_byte]
+                        return self._node_text(source, name_node)
             return None
 
         elif self.lang == "rust":
             name_node = func_node.child_by_field_name("name")
             if name_node:
-                return source[name_node.start_byte:name_node.end_byte]
+                return self._node_text(source, name_node)
             return None
 
-    def _extract_calls(self, func_node, source: str) -> list[str]:
+    def _extract_calls(self, func_node, source: bytes) -> list[str]:
         """
         提取函数体内所有被调用的函数名。
         基于文本匹配，不做类型分析：a.method() 提取为 "method"，
@@ -115,7 +120,7 @@ class TreeSitterEngine(AnalysisEngine):
             if node.type == self._call_node_type:
                 func_part = node.child_by_field_name("function")
                 if func_part:
-                    call_text = source[func_part.start_byte:func_part.end_byte]
+                    call_text = self._node_text(source, func_part)
                     # a.method() → "method"
                     if "." in call_text:
                         call_text = call_text.rsplit(".", 1)[-1]
@@ -130,7 +135,7 @@ class TreeSitterEngine(AnalysisEngine):
             if self.lang == "rust" and node.type == "macro_invocation":
                 macro_node = node.child(0)
                 if macro_node:
-                    calls.add(source[macro_node.start_byte:macro_node.end_byte])
+                    calls.add(self._node_text(source, macro_node))
 
             for child in node.children:
                 find_calls(child)
@@ -138,13 +143,13 @@ class TreeSitterEngine(AnalysisEngine):
         find_calls(func_node)
         return list(calls)
 
-    def _index_structs(self, root_node, source: str, file_path: str):
+    def _index_structs(self, root_node, source: bytes, file_path: str):
         """提取结构体定义和字段。"""
         def traverse(node):
             if node.type == self._struct_node_type:
                 name = self._extract_struct_name(node, source)
                 if name:
-                    body = source[node.start_byte:node.end_byte]
+                    body = self._node_text(source, node)
                     self._struct_index[name] = {
                         "name":   name,
                         "file":   file_path,
@@ -157,14 +162,14 @@ class TreeSitterEngine(AnalysisEngine):
 
         traverse(root_node)
 
-    def _extract_struct_name(self, struct_node, source: str) -> str | None:
+    def _extract_struct_name(self, struct_node, source: bytes) -> str | None:
         """C 和 Rust 的 struct 节点都用 'name' 字段存名称。"""
         name_node = struct_node.child_by_field_name("name")
         if name_node:
-            return source[name_node.start_byte:name_node.end_byte]
+            return self._node_text(source, name_node)
         return None
 
-    def _parse_struct_fields_from_node(self, struct_node, source: str) -> list[dict]:
+    def _parse_struct_fields_from_node(self, struct_node, source: bytes) -> list[dict]:
         """直接从 AST 节点提取字段，比正则更准确。"""
         fields = []
         body_node = struct_node.child_by_field_name("body")
@@ -176,7 +181,7 @@ class TreeSitterEngine(AnalysisEngine):
                 if child.type != "field_declaration":
                     continue
                 type_node = child.child_by_field_name("type")
-                type_str = source[type_node.start_byte:type_node.end_byte].strip() if type_node else "?"
+                type_str = self._node_text(source, type_node).strip() if type_node else "?"
                 # 收集该 field_declaration 下所有 field_identifier
                 for ident in self._collect_field_identifiers(child, source):
                     fields.append({"name": ident, "type": type_str})
@@ -189,17 +194,17 @@ class TreeSitterEngine(AnalysisEngine):
                 type_node = child.child_by_field_name("type")
                 if name_node and type_node:
                     fields.append({
-                        "name": source[name_node.start_byte:name_node.end_byte],
-                        "type": source[type_node.start_byte:type_node.end_byte],
+                        "name": self._node_text(source, name_node),
+                        "type": self._node_text(source, type_node),
                     })
 
         return fields
 
-    def _collect_field_identifiers(self, node, source: str) -> list[str]:
+    def _collect_field_identifiers(self, node, source: bytes) -> list[str]:
         """递归收集节点下所有 field_identifier 的文本。"""
         result = []
         if node.type == "field_identifier":
-            result.append(source[node.start_byte:node.end_byte])
+            result.append(self._node_text(source, node))
         for child in node.children:
             result.extend(self._collect_field_identifiers(child, source))
         return result

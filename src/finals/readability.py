@@ -22,6 +22,7 @@ _EMPTY_PHRASES = (
 )
 
 _TERMS = {
+    "AI": "人工智能（AI）",
     "OS": "操作系统（Operating System，OS）",
     "LOC": "代码变更行数（LOC）",
     "COW": "写时复制（Copy-on-Write，COW）",
@@ -42,6 +43,18 @@ _TERMS = {
     "ASID": "地址空间标识符（ASID）",
     "SBI": "监管者二进制接口（SBI）",
     "CSR": "控制与状态寄存器（CSR）",
+    "QEMU": "开源硬件模拟器（QEMU）",
+    "RV64": "64 位 RISC-V（RV64）",
+    "SV39": "三级虚拟内存分页方案（SV39）",
+    "VirtIO": "虚拟输入输出设备规范（VirtIO）",
+    "FDT": "扁平设备树（Flattened Device Tree，FDT）",
+    "CFS": "完全公平调度器（Completely Fair Scheduler，CFS）",
+    "PLIC": "平台级中断控制器（PLIC）",
+    "HAL": "硬件抽象层（HAL）",
+    "POSIX": "可移植操作系统接口（POSIX）",
+    "bootstrap hart": "引导硬件线程（bootstrap hart）",
+    "secondary hart": "次级硬件线程（secondary hart）",
+    "shootdown": "跨核失效同步（shootdown）",
     "PCI": "外设组件互连（PCI）",
     "CMA": "连续内存分配器（CMA）",
     "UML": "统一建模语言（UML）",
@@ -62,6 +75,21 @@ _TERMS = {
 }
 
 
+def _inside_source_path(text: str, start: int, end: int) -> bool:
+    """术语若位于 ``path/to/file.rs:42`` 中，不得改写源码路径。"""
+    separators = set(" \t\r\n<>\"'，。；：、！？()（）[]【】{}")
+    left = start
+    while left > 0 and text[left - 1] not in separators:
+        left -= 1
+    right = end
+    while right < len(text) and text[right] not in separators:
+        right += 1
+    token = text[left:right]
+    return "/" in token and bool(
+        re.search(r"\.[A-Za-z0-9_+-]+(?:(?::|#L)\d+(?:-L?\d+)?)?$", token)
+    )
+
+
 def _tidy_term_expansions(text: str) -> str:
     for expansion in _TERMS.values():
         escaped = re.escape(expansion)
@@ -71,7 +99,13 @@ def _tidy_term_expansions(text: str) -> str:
         text = re.sub(
             rf"{escaped}\s+(?=[\u3400-\u9fff，。；：、])", expansion, text
         )
-    return text.replace("（IRQ）中断", "（IRQ）").replace("（LTP）测试", "（LTP）")
+    return (
+        text.replace("（IRQ）中断", "（IRQ）")
+        .replace("（LTP）测试", "（LTP）")
+        .replace("多核（对称多处理（SMP））", "对称多处理（SMP）多核")
+        .replace("平台级中断控制器（PLIC）中断控制器", "平台级中断控制器（PLIC）")
+        .replace("三级虚拟内存分页方案（SV39）分页", "三级虚拟内存分页方案（SV39）")
+    )
 
 
 def html_to_text(value: str) -> str:
@@ -112,8 +146,14 @@ def explain_terms_on_first_use(value: str) -> str:
     for term, expansion in _TERMS.items():
         if term not in text or expansion in text:
             continue
-        text = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])",
-                      expansion, text, count=1)
+        pattern = re.compile(
+            rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])"
+        )
+        for match in pattern.finditer(text):
+            if _inside_source_path(text, match.start(), match.end()):
+                continue
+            text = text[:match.start()] + expansion + text[match.end():]
+            break
     return _tidy_term_expansions(text)
 
 
@@ -156,6 +196,20 @@ def explain_terms_in_html(value: str) -> str:
             )
             if not term_match:
                 continue
+            if _inside_source_path(text, term_match.start(), term_match.end()):
+                # 同一文本节点里可能稍后还有正文用法；寻找第一个非路径命中。
+                term_match = next(
+                    (
+                        match for match in re.finditer(
+                            rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])",
+                            text,
+                        )
+                        if not _inside_source_path(text, match.start(), match.end())
+                    ),
+                    None,
+                )
+                if term_match is None:
+                    continue
             expansion_at = text.find(expansion)
             if 0 <= expansion_at <= term_match.start():
                 defined.add(term)

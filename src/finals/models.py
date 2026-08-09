@@ -53,8 +53,9 @@ class ReportDigest(BaseModel):
     kind: ReportKind
     conclusion: str = Field(min_length=1, max_length=240)
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
-    findings: list[Finding] = Field(default_factory=list, max_length=8)
-    modules: list[ModuleDigest] = Field(default_factory=list, max_length=32)
+    # 描述报告不得因为版面配额静默丢失严重问题或一级子系统。
+    findings: list[Finding] = Field(default_factory=list, max_length=64)
+    modules: list[ModuleDigest] = Field(default_factory=list, max_length=64)
     metrics: dict[str, int | float | str | bool | None] = Field(default_factory=dict)
     generated_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()

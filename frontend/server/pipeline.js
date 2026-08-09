@@ -364,6 +364,11 @@ export class PipelineQueue {
     }
 
     await this.db.save();
+    // 服务异常退出可能来不及执行任务 finally；每次启动恢复时再次执行四文件白名单。
+    const repositories = this.db.query("SELECT id FROM repositories");
+    for (const repo of repositories) {
+      await cleanupReportDirectory(repo.id);
+    }
     return {
       cancelledQueued: staleQueued.length,
       failedRunning: staleRunning.length
@@ -407,6 +412,15 @@ export class PipelineQueue {
   async runJob(id) {
     const job = this.db.get("SELECT * FROM jobs WHERE id = ?", [id]);
     if (!job) return;
+    try {
+      await this.runJobImplementation(id, job);
+    } finally {
+      // 成功、失败、取消或抛出异常都不能把摘要、克隆和工作目录留在正式目录。
+      await cleanupReportDirectory(job.repo_id);
+    }
+  }
+
+  async runJobImplementation(id, job) {
     const repo = this.db.get("SELECT * FROM repositories WHERE id = ?", [job.repo_id]);
     if (!repo) {
       await this.updateJob(id, { status: "failed", error: "作品记录不存在", finished_at: nowIso() });
@@ -553,7 +567,8 @@ export class PipelineQueue {
         "--repo-path",
         clonedRepoPath,
         "--output",
-        descriptionPath
+        descriptionPath,
+        "--keep-intermediates"
       ];
       const result = await this.runProcess(id, "description", python, descriptionArgs, log, commandLines);
       log = result.log;
@@ -587,7 +602,8 @@ export class PipelineQueue {
         "--repo-id",
         repo.id,
         "--output",
-        developmentPath
+        developmentPath,
+        "--keep-intermediates"
       ];
       const minimumCommits = String(process.env.FINALS_MIN_COMMITS || "").trim();
       if (minimumCommits) {

@@ -12,8 +12,13 @@ import json
 import re
 from pathlib import Path
 
-from finals.digests import description_digest_from_tree, description_priority_findings
-from finals.readability import concise_module_summary, explain_terms_in_html
+from finals.digests import (
+    DESCRIPTION_SUBSYSTEM_ORDER,
+    description_digest_from_tree,
+    description_priority_findings,
+    normalize_description_claim,
+)
+from finals.readability import clip_at_sentence, concise_module_summary, explain_terms_in_html
 
 from ..report_quality import IncompleteReportError, assert_report_complete
 from .html import (
@@ -24,6 +29,7 @@ from .html import (
     derive_repo_web_base,
     linkify_html,
     make_file_link_resolver,
+    repository_url_to_web_base,
 )
 
 # 架构图/流程图已弃用：剥离正文里残留的 Mermaid 块（防 LLM 偶发输出）
@@ -58,6 +64,9 @@ def _strip_html_ids(content: str) -> str:
 # 复用 html.py 的 CDN 头：已含 Tailwind + ECharts + Mermaid + Alpine 及其初始化。
 # 折叠节点展开时让其中的 ECharts 重新计算尺寸（初次在 display:none 下 init 会是 0 尺寸）。
 _TREE_HEAD = _CDN_HEAD
+
+# 评委速读版没有图表和交互树，不再加载 ECharts / Alpine.js。
+_BRIEF_HEAD = '<script src="https://cdn.tailwindcss.com"></script>'
 
 _TREE_RESIZE_ON_OPEN = """
 <script>
@@ -141,6 +150,40 @@ a.file-jump:hover { background: rgba(9, 105, 218, 0.08); }
 .verdict-content h1, .verdict-content h2 { font-size: 1.1rem; font-weight: 700; margin: 0.8em 0 0.4em; line-height: 1.35; }
 .verdict-content h3 { font-size: 1rem; font-weight: 600; margin: 0.7em 0 0.35em; }
 .verdict-content h4, .verdict-content h5, .verdict-content h6 { font-size: 0.9rem; font-weight: 600; margin: 0.5em 0 0.25em; }
+"""
+
+_BRIEF_CSS = """
+:root { color-scheme: light dark; }
+html { scroll-behavior: smooth; }
+html, body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+[id] { scroll-margin-top: 1rem; }
+a.file-jump { color: rgb(37 99 235); border-bottom: 1px dashed currentColor; text-decoration: none; }
+a.file-jump:hover { background: rgb(37 99 235 / 0.08); }
+.brief-card { border: 1px solid rgb(203 213 225); border-radius: 0.75rem; background: white; }
+.status-ok { color: rgb(21 128 61); background: rgb(220 252 231); }
+.status-warn { color: rgb(180 83 9); background: rgb(254 243 199); }
+.status-bad { color: rgb(185 28 28); background: rgb(254 226 226); }
+.status-info { color: rgb(71 85 105); background: rgb(226 232 240); }
+.status-pill { display: inline-block; padding: 0.1rem 0.55rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 700; }
+.finding-row { border-left: 3px solid rgb(245 158 11); padding-left: 0.8rem; }
+.core-card { border-top: 1px solid rgb(226 232 240); padding: 0.9rem 0; }
+.core-card:first-child { border-top: 0; padding-top: 0; }
+.toc-nav a { display: block; padding: 0.25rem 0.6rem; color: rgb(100 116 139); text-decoration: none; border-left: 2px solid transparent; }
+.toc-nav a:hover { color: rgb(30 64 175); border-left-color: rgb(96 165 250); }
+@media (prefers-color-scheme: dark) {
+  .brief-card { border-color: rgb(51 65 85); background: rgb(30 41 59); }
+  .core-card { border-color: rgb(51 65 85); }
+  .status-ok { color: rgb(134 239 172); background: rgb(20 83 45); }
+  .status-warn { color: rgb(253 230 138); background: rgb(120 53 15); }
+  .status-bad { color: rgb(254 202 202); background: rgb(127 29 29); }
+  .status-info { color: rgb(203 213 225); background: rgb(51 65 85); }
+  a.file-jump { color: rgb(147 197 253); }
+}
+@media print {
+  .toc-nav { display: none !important; }
+  main { max-width: none !important; }
+  a.file-jump { color: inherit; border-bottom: 0; }
+}
 """
 
 
@@ -361,8 +404,9 @@ def _render_priority_summary(tree_json: dict, resolver) -> str:
         f'排除 {_esc(metrics.get("hardcode_cleared", 0))} 条。'
     )
     hardcode_scope = (
-        "硬编码专项检查范围：按测试名或被加载的 ELF 文件名分支、针对测试的不合理缓存替换策略、"
-        "直接打印预期输出、修改测试脚本绕过失败用例。"
+        "硬编码专项检查范围：仓库第一方源码与测试/评测脚本中的按测试名或被加载的 ELF 文件名分支、"
+        "针对测试的不合理缓存替换策略、直接打印预期输出、修改测试脚本绕过失败用例；"
+        "vendor、third_party、external 等第三方依赖目录不计入作品作弊候选。"
     )
     return f"""
 <section id="verdict" data-section-id="verdict" class="mb-6 p-6 rounded-lg border border-slate-300 dark:border-slate-700
@@ -494,48 +538,412 @@ def _render_verdict(verdict: dict, resolver) -> str:
 """
 
 
+def _status_label(status: str) -> tuple[str, str]:
+    labels = {
+        "passed": ("已验证通过", "status-ok"),
+        "failed": ("失败", "status-bad"),
+        "skipped": ("未执行", "status-warn"),
+        "not_provided": ("未提供", "status-warn"),
+        "missing": ("文件缺失", "status-bad"),
+        "unknown": ("结果不明确", "status-warn"),
+        "configured": ("配置存在，未实测", "status-warn"),
+        "warning": ("配置不一致", "status-bad"),
+        "partial": ("仅部分配置", "status-warn"),
+    }
+    return labels.get(str(status or "unknown"), ("未核验", "status-warn"))
+
+
+def _first_evidence_link(evidence_items: list, resolver) -> str:
+    for item in evidence_items or []:
+        if isinstance(item, dict):
+            path = str(item.get("path") or "")
+            line = item.get("line")
+        else:
+            path = str(getattr(item, "path", "") or "")
+            line = getattr(item, "line", None)
+        if not path:
+            continue
+        if line:
+            return _resolve_path_anchor(f"{path}:{line}", resolver)
+        if re.search(r"(?::|#L)\d+(?:-L?\d+)?$", path):
+            return _resolve_path_anchor(path, resolver)
+    return ""
+
+
+_SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
+_CORRECTNESS_RISK_TERMS = (
+    "仅返回成功", "占位实现", "行为不明确", "溢出", "丢弃", "旁路", "伪造",
+    "竞态", "死锁", "越界", "权限", "错误结果",
+)
+_COMPLETENESS_RISK_TERMS = ("未实现", "不支持", "仅实现", "ENOSYS", "Unsupported")
+_PERFORMANCE_RISK_TERMS = ("性能", "浪费", "热点", "锁竞争", "瓶颈", "全量")
+
+
+def _collect_report_issues(tree_json: dict) -> list[dict]:
+    """收集 verdict 与全部一级子系统问题，按源码位置去重但不做数量截断。"""
+    root = tree_json.get("tree") or {}
+    subsystem_nodes = [
+        node for node in (root.get("children") or []) if isinstance(node, dict)
+    ]
+    subsystem_by_path: dict[str, list[str]] = {}
+    for node in subsystem_nodes:
+        name = str(node.get("name") or "未分类")
+        for item in node.get("issues") or []:
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path") or "")
+            if path:
+                subsystem_by_path.setdefault(path, []).append(name)
+
+    merged: dict[str, dict] = {}
+    order = 0
+
+    def _add(item: dict, subsystem: str | None = None) -> None:
+        nonlocal order
+        path = str(item.get("path") or "").strip()
+        quote = clip_at_sentence(normalize_description_claim(
+            str(item.get("quote") or ""), path, tree_json.get("facts") or {},
+        ), 150)
+        if not path or not quote or not re.search(r"(?::|#L)\d+(?:-L?\d+)?$", path):
+            return
+        severity = str(item.get("severity") or "medium")
+        if severity not in _SEVERITY_RANK:
+            severity = "medium"
+        # 纯重复/复用问题属于维护性，不应与正确性和可用性风险并列为中风险。
+        if severity == "medium" and any(
+            term in quote for term in ("重复代码", "缺乏复用", "重复定义")
+        ) and not any(term in quote for term in _CORRECTNESS_RISK_TERMS):
+            severity = "low"
+        if path not in merged:
+            names = list(dict.fromkeys(subsystem_by_path.get(path, [])))
+            if subsystem and subsystem not in names:
+                names.append(subsystem)
+            merged[path] = {
+                "path": path,
+                "quote": quote,
+                "severity": severity,
+                "subsystems": names,
+                "order": order,
+            }
+            order += 1
+            return
+        current = merged[path]
+        if _SEVERITY_RANK[severity] > _SEVERITY_RANK[current["severity"]]:
+            current["severity"] = severity
+        if subsystem and subsystem not in current["subsystems"]:
+            current["subsystems"].append(subsystem)
+
+    for item in (tree_json.get("verdict") or {}).get("issues") or []:
+        if isinstance(item, dict):
+            _add(item)
+    for node in subsystem_nodes:
+        name = str(node.get("name") or "未分类")
+        for item in node.get("issues") or []:
+            if isinstance(item, dict):
+                _add(item, name)
+
+    issues = list(merged.values())
+    for item in issues:
+        text = item["quote"]
+        correctness = any(term in text for term in _CORRECTNESS_RISK_TERMS)
+        incomplete = any(term in text for term in _COMPLETENESS_RISK_TERMS)
+        performance = any(term in text for term in _PERFORMANCE_RISK_TERMS)
+        item["major"] = (
+            item["severity"] in {"critical", "high", "medium"}
+            or correctness or incomplete
+        )
+        if correctness:
+            item["impact_group"] = 0
+        elif item["severity"] in {"critical", "high", "medium"} and not performance:
+            item["impact_group"] = 1
+        elif incomplete:
+            item["impact_group"] = 2
+        elif performance:
+            item["impact_group"] = 3
+        else:
+            item["impact_group"] = 4
+    issues.sort(key=lambda item: (
+        not item["major"],
+        item["impact_group"],
+        -_SEVERITY_RANK[item["severity"]],
+        item["order"],
+    ))
+    for index, item in enumerate(issues, start=1):
+        item["number"] = index
+        item["anchor"] = f"issue-{index}"
+    return issues
+
+
+def _render_issue_row(item: dict, resolver, *, main: bool) -> str:
+    severity = str(item.get("severity") or "medium")
+    severity_text = {
+        "critical": "严重", "high": "高风险", "medium": "中风险", "low": "低风险",
+    }.get(severity, "提示")
+    severity_cls = "status-bad" if severity in {"critical", "high"} else (
+        "status-warn" if severity == "medium" else "status-info"
+    )
+    subsystem_text = " / ".join(item.get("subsystems") or []) or "跨模块"
+    evidence = _resolve_path_anchor(str(item.get("path") or ""), resolver)
+    data_attr = "data-main-finding" if main else "data-other-finding"
+    return (
+        f'<li id="{_esc(item["anchor"])}" class="finding-row" '
+        f'{data_attr}="{item["number"]}">'
+        '<div class="flex flex-wrap items-center gap-2 mb-1">'
+        f'<strong>{item["number"]}.</strong>'
+        f'<span class="status-pill {severity_cls}">{severity_text}</span>'
+        f'<span class="text-xs text-slate-500">{_esc(subsystem_text)}</span></div>'
+        f'<p class="text-sm leading-relaxed">{_esc(item["quote"])}</p>'
+        f'<p class="text-xs text-slate-500 mt-1">证据：{evidence}</p></li>'
+    )
+
+
+def _render_judge_conclusion(tree_json: dict, resolver) -> str:
+    digest = description_digest_from_tree(tree_json)
+    issues = _collect_report_issues(tree_json)
+    major_rows = [
+        _render_issue_row(item, resolver, main=True) for item in issues if item["major"]
+    ]
+    other_rows = [
+        _render_issue_row(item, resolver, main=False) for item in issues if not item["major"]
+    ]
+    if not major_rows:
+        major_rows.append(
+            '<li class="finding-row"><p class="text-sm">静态分析未形成需要优先报告的高置信代码问题；'
+            '这不等同于功能测试通过。</p></li>'
+        )
+    other_html = (
+        '<details class="mt-4"><summary class="cursor-pointer text-sm font-semibold">'
+        f'其他已定位的低风险问题（{len(other_rows)} 项）</summary>'
+        f'<ol class="space-y-3 mt-3">{"".join(other_rows)}</ol></details>'
+        if other_rows else ""
+    )
+    return f"""
+<section id="verdict" data-section-id="verdict" class="brief-card p-5 mb-5">
+  <div class="text-xs font-semibold tracking-wider text-blue-700 dark:text-blue-300 mb-2">先看结论</div>
+  <h2 class="text-xl font-bold mb-2">AI 分析结论</h2>
+  <p class="text-base leading-relaxed mb-5">{_esc(clip_at_sentence(digest.conclusion, 180))}</p>
+  <div id="findings" data-section-id="findings">
+    <h3 class="font-semibold mb-1">AI 检测到的重要问题</h3>
+    <p class="text-xs text-slate-500 mb-3">全部高、中风险及影响语义正确性的缺失均直接展示，不设数量上限。</p>
+    <ol class="space-y-3">{"".join(major_rows)}</ol>
+    {other_html}
+  </div>
+</section>
+"""
+
+
+def _render_usability(tree_json: dict, resolver) -> str:
+    integrity = ((tree_json.get("facts") or {}).get("integrity") or {})
+    rows: list[str] = []
+    for key, label in (("build_log", "构建"), ("run_log", "启动 / 运行")):
+        fact = integrity.get(key) or {}
+        status = str(fact.get("status") or "not_provided")
+        status_text, status_cls = _status_label(status)
+        note = str(fact.get("note") or "").strip()
+        if not note:
+            if fact.get("errors"):
+                note = "；".join(str(value) for value in fact.get("errors")[:2])
+            elif status == "not_provided":
+                note = "没有正式日志，不能判断结果。"
+            else:
+                note = "当前材料不足以核验。"
+        evidence = ""
+        if fact.get("path"):
+            evidence = _resolve_path_anchor(str(fact.get("path")), resolver)
+        rows.append(
+            '<div class="grid grid-cols-1 md:grid-cols-[7rem_8rem_1fr] gap-2 py-2 border-b '
+            'border-slate-200 dark:border-slate-700">'
+            f'<strong class="text-sm">{label}</strong>'
+            f'<span><span class="status-pill {status_cls}">{status_text}</span></span>'
+            f'<p class="text-sm text-slate-600 dark:text-slate-300">{_esc(clip_at_sentence(note, 150))}'
+            f'{(" · 日志：" + evidence) if evidence else ""}</p></div>'
+        )
+
+    reproducibility = integrity.get("reproducibility") or {}
+    repro_status = str(reproducibility.get("status") or "unknown")
+    repro_text, repro_cls = _status_label(repro_status)
+    repro_summary = str(reproducibility.get("summary") or "未采集容器复现配置。")
+    repro_evidence = _first_evidence_link(reproducibility.get("evidence") or [], resolver)
+    rows.append(
+        '<div class="grid grid-cols-1 md:grid-cols-[7rem_8rem_1fr] gap-2 py-2">'
+        '<strong class="text-sm">自动评测复现</strong>'
+        f'<span><span class="status-pill {repro_cls}">{repro_text}</span></span>'
+        f'<p class="text-sm text-slate-600 dark:text-slate-300">'
+        f'{_esc(clip_at_sentence(repro_summary, 160))}'
+        f'{(" · 证据：" + repro_evidence) if repro_evidence else ""}</p></div>'
+    )
+    return f"""
+<section id="usability" data-section-id="usability" class="brief-card p-5 mb-5">
+  <h2 class="text-xl font-bold mb-3">真实可用性</h2>
+  <div>{"".join(rows)}</div>
+  <p class="text-xs text-slate-500 mt-3">分析边界：构建、启动和测试均未通过实测；静态代码不能证明评测通过或性能达标。</p>
+</section>
+"""
+
+
+def _render_hardcode_brief(tree_json: dict, resolver) -> str:
+    integrity = ((tree_json.get("facts") or {}).get("integrity") or {})
+    hardcode = integrity.get("hardcode") or {}
+    reviews = (tree_json.get("verdict") or {}).get("hardcode_reviews") or []
+    confirmed = [item for item in reviews if isinstance(item, dict) and item.get("status") == "confirmed"]
+    suspected = [item for item in reviews if isinstance(item, dict) and item.get("status") == "suspected"]
+    cleared = [item for item in reviews if isinstance(item, dict) and item.get("status") == "cleared"]
+    scanned = int(hardcode.get("scanned_files") or 0)
+    candidates = int(hardcode.get("candidate_count") or len(hardcode.get("findings") or []))
+    truncated = bool(hardcode.get("truncated"))
+    category_coverage = hardcode.get("category_coverage") or {}
+    scope_complete = len(category_coverage) >= 4 and all(
+        isinstance(value, dict) and value.get("scanned") is True
+        for value in category_coverage.values()
+    )
+
+    if not scope_complete:
+        conclusion = "四类硬编码方法的规则扫描范围不完整，不能给出无作弊结论。"
+        status_text, status_cls = "检查不完整", "status-warn"
+    elif truncated:
+        conclusion = (
+            f"扫描 {scanned} 个文件并抽取 {len(hardcode.get('findings') or [])}/{candidates} 条候选；"
+            "候选输出被截断，不能据此给出完整的无作弊结论。"
+        )
+        status_text, status_cls = "范围不完整", "status-warn"
+    elif confirmed or suspected:
+        conclusion = (
+            f"扫描 {scanned} 个文件、命中 {candidates} 条候选；AI 复核确认 {len(confirmed)} 条、"
+            f"疑似 {len(suspected)} 条、排除 {len(cleared)} 条。"
+        )
+        status_text, status_cls = "需要核查", "status-bad"
+    elif len(reviews) >= len(hardcode.get("findings") or []):
+        conclusion = (
+            f"未发现作弊型硬编码。扫描 {scanned} 个文件、命中 {candidates} 条候选，"
+            f"AI 逐条复核后排除 {len(cleared)} 条。"
+        )
+        status_text, status_cls = "未发现", "status-ok"
+    else:
+        conclusion = "硬编码候选尚未全部完成结构化 AI 复核，不能下结论。"
+        status_text, status_cls = "复核不完整", "status-warn"
+
+    risky_rows: list[str] = []
+    for item in (confirmed + suspected):
+        location = str(item.get("path") or "")
+        if item.get("line"):
+            location += f':{int(item["line"])}'
+        evidence = _resolve_path_anchor(location, resolver) if location else ""
+        method = clip_at_sentence(str(item.get("method") or "未说明实现方法。"), 100)
+        reason = clip_at_sentence(str(item.get("reason") or "证据需要复核。"), 100)
+        review_status = "确认问题" if item.get("status") == "confirmed" else "疑似问题"
+        risky_rows.append(
+            '<li class="finding-row text-sm">'
+            f'<strong>{_esc(item.get("category") or "硬编码线索")} · {review_status}</strong>：{_esc(method)} '
+            f'{_esc(reason)}{(" · 证据：" + evidence) if evidence else ""}</li>'
+        )
+    return f"""
+<section id="hardcode" data-section-id="hardcode" class="brief-card p-5 mb-5">
+  <div class="flex flex-wrap items-center gap-3 mb-2">
+    <h2 class="text-xl font-bold">硬编码 / 作弊复核</h2>
+    <span class="status-pill {status_cls}">{status_text}</span>
+  </div>
+  <p class="text-sm leading-relaxed">{_esc(conclusion)}</p>
+  {('<ol class="space-y-3 mt-3">' + ''.join(risky_rows) + '</ol>') if risky_rows else ''}
+  <p class="text-xs text-slate-500 mt-3">覆盖四类方法：按测试名或可执行文件名分支、测试专用缓存策略、直接打印预期结果、修改测试脚本旁路失败；已排除候选不在主报告逐条展开。</p>
+</section>
+"""
+
+
+def _render_all_subsystems(tree_json: dict, resolver) -> str:
+    root = tree_json.get("tree") or {}
+    nodes = [node for node in (root.get("children") or []) if isinstance(node, dict)]
+    by_name = {str(node.get("name") or ""): node for node in nodes}
+    ordered_names = [name for name in DESCRIPTION_SUBSYSTEM_ORDER if name in by_name]
+    ordered_names.extend(
+        str(node.get("name") or "未命名模块")
+        for node in nodes
+        if str(node.get("name") or "") not in DESCRIPTION_SUBSYSTEM_ORDER
+    )
+    issue_by_path = {
+        str(item.get("path") or ""): item for item in _collect_report_issues(tree_json)
+    }
+    cards: list[str] = []
+    for name in ordered_names:
+        node = by_name[name]
+        capability = clip_at_sentence(normalize_description_claim(
+            str(node.get("brief") or node.get("summary") or "未形成可靠的静态模块摘要。"),
+            "", tree_json.get("facts") or {},
+        ), 90)
+        capability = (
+            capability.replace("实现了完整的", "覆盖")
+            .replace("实现完整", "覆盖")
+            .replace("确保 ", "用于 ")
+            .replace("完全解耦", "解耦")
+        )
+        implementation_link = _first_evidence_link(node.get("highlights") or [], resolver)
+        evidence_html = (
+            f'<p class="text-xs text-slate-500 mt-1">实现依据：{implementation_link}</p>'
+            if implementation_link else ""
+        )
+        issue_refs: list[str] = []
+        for node_issue in node.get("issues") or []:
+            if not isinstance(node_issue, dict):
+                continue
+            issue = issue_by_path.get(str(node_issue.get("path") or ""))
+            if not issue:
+                continue
+            issue_refs.append(
+                f'<a class="file-jump" href="#{_esc(issue["anchor"])}" '
+                f'title="{_esc(issue["quote"])}">#{issue["number"]}</a>'
+            )
+        issue_html = (
+            '<p class="text-sm leading-relaxed"><strong>已定位问题：</strong>'
+            + "、".join(issue_refs) + '（见上方问题清单与证据）</p>'
+            if issue_refs else
+            '<p class="text-sm leading-relaxed"><strong>已定位问题：</strong>'
+            '未形成带源码位置的结构化问题；运行状态仍以“真实可用性”为准。</p>'
+        )
+        cards.append(
+            f'<article class="core-card" data-subsystem="{_esc(name)}" '
+            f'data-analysis-chars="{len(capability)}">'
+            f'<h3 class="font-bold mb-1">{_esc(name)}</h3>'
+            f'<p class="text-sm leading-relaxed"><strong>静态实现：</strong>{_esc(capability)}</p>'
+            f'{issue_html}'
+            f'{evidence_html}</article>'
+        )
+    return f"""
+<section id="modules" data-section-id="modules" class="brief-card p-5 mb-5">
+  <h2 class="text-xl font-bold mb-1">模块概览</h2>
+  <p class="text-xs text-slate-500 mb-3">覆盖仓库识别出的全部一级子系统；每项只保留实现判断、源码入口和上方问题编号。</p>
+  <div>{"".join(cards)}</div>
+</section>
+"""
+
+
+def _render_brief_toc() -> str:
+    items = (
+        ("verdict", "结论与关键问题"),
+        ("usability", "真实可用性"),
+        ("hardcode", "硬编码复核"),
+        ("modules", "全部模块概览"),
+    )
+    links = "".join(
+        f'<a class="toc-link" href="#{anchor}">{label}</a>' for anchor, label in items
+    )
+    return (
+        '<nav class="toc-nav hidden lg:block w-48 shrink-0 self-start sticky top-6 py-10">'
+        '<div class="text-xs font-semibold tracking-wider text-slate-400 mb-2 px-2">精简审阅</div>'
+        f'{links}</nav>'
+    )
+
+
 # 渲染入口
 
 def render_tree_html(tree_json: dict, title: str = "代码树报告",
                      resolver=None) -> str:
-    """渲染完整 HTML 文档。"""
-    # 结构化分析任何一级失败都拒绝渲染，不能把失败节点包装成可交付模块。
+    """渲染“问题完整、文字精简”的评委作品描述报告。"""
     assert_report_complete("", structured=tree_json)
     meta = tree_json.get("meta", {})
-    verdict = tree_json.get("verdict", {}) or {}
-    priority_html = _render_priority_summary(tree_json, resolver)
-    verdict_html = _render_verdict(verdict, resolver)
-    similarity_html = _render_similarity(verdict.get("similarity") or {}, resolver)
-
-    # 为顶层子系统及其直接子节点（模块）分配稳定锚点 id（供目录跳转 + 滚动高亮）。
-    # 目录做两层：子系统（level 1）+ 模块（level 2），更深的节点不进目录以免过长。
-    tree_root = tree_json.get("tree", {}) or {}
-    subsystems = (tree_root.get("children") or []) \
-        if tree_root.get("type") == "root" else [tree_root]
-    anchor_ids: dict[int, str] = {}
-    toc_subs: list[tuple[str, str, int]] = []  # (anchor_id, label, level)
-    for i, node in enumerate(subsystems):
-        if not isinstance(node, dict):
-            continue
-        sid = f"subsys-{i}"
-        anchor_ids[id(node)] = sid
-        label = node.get("name") or node.get("path") or f"模块 {i + 1}"
-        toc_subs.append((sid, str(label), 1))
-        for j, child in enumerate(node.get("children") or []):
-            if not isinstance(child, dict):
-                continue
-            cid = f"subsys-{i}-{j}"
-            anchor_ids[id(child)] = cid
-            clabel = child.get("name") or child.get("path") or f"模块 {j + 1}"
-            toc_subs.append((cid, str(clabel), 2))
-
-    # 直接生成静态 HTML 树（折叠状态由 Alpine 的 x-data open 控制），
-    # 节点内部 HTML 片段在服务端预渲染好，file:line 链接已解析。
-    tree_static_html = _render_tree_node_static(
-        tree_root, depth=0, resolver=resolver, anchor_ids=anchor_ids,
-    )
-
-    toc_html = _render_toc(priority_html, similarity_html, toc_subs)
+    conclusion_html = _render_judge_conclusion(tree_json, resolver)
+    usability_html = _render_usability(tree_json, resolver)
+    hardcode_html = _render_hardcode_brief(tree_json, resolver)
+    modules_html = _render_all_subsystems(tree_json, resolver)
+    toc_html = _render_brief_toc()
 
     title_safe = _esc(title)
     if meta.get("language_incomplete"):
@@ -548,40 +956,32 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>{title_safe}</title>
-{_TREE_HEAD}
-<style>{_TREE_CSS}</style>
+{_BRIEF_HEAD}
+<style>{_BRIEF_CSS}</style>
 </head>
 <body class="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
-<div class="max-w-7xl mx-auto flex gap-6 px-4 md:px-6">
+<div class="max-w-6xl mx-auto flex gap-6 px-4 md:px-6">
   {toc_html}
-  <main class="flex-1 min-w-0 py-6 md:py-10">
+  <main class="flex-1 min-w-0 max-w-4xl py-6 md:py-10">
     <header class="mb-6">
-      <h1 class="text-2xl font-bold">{_esc(meta.get('repo','?'))}</h1>
-      <div class="text-sm text-slate-500">
-        评估时间：{_esc(meta.get('ts',''))} · 源文件：{_esc(meta.get('indexed_files',0))} 个
+      <div class="flex flex-wrap items-baseline gap-3">
+        <h1 class="text-2xl font-bold">{_esc(meta.get('repo','?'))} 作品描述报告</h1>
+        <span class="status-pill status-ok">准确性优先 · 精简呈现</span>
       </div>
-      <div class="text-xs text-slate-500 mt-1">本报告由 AI 分析工具直接生成，生成流程不包含人工编辑步骤。</div>
+      <div class="text-sm text-slate-500 mt-2">队伍：{_esc(meta.get('team_id','未记录'))} · 分析时间：{_esc(meta.get('ts',''))} · 索引源文件：{_esc(meta.get('indexed_files',0))} 个</div>
+      <div class="text-xs text-slate-500 mt-1">本报告完全由 AI 分析工具生成，参赛队未参与修改。</div>
     </header>
-    {priority_html}
-    {verdict_html}
-    {similarity_html}
-    <section id="tree" data-section-id="tree">
-      <h2 class="text-xl font-semibold mb-3">模块摘要与证据</h2>
-      <div class="tree-root rounded-lg border border-slate-200 dark:border-slate-700
-                  bg-white dark:bg-slate-800 p-4">
-        {tree_static_html}
-      </div>
-    </section>
+    {conclusion_html}
+    {usability_html}
+    {hardcode_html}
+    {modules_html}
+    <footer class="text-xs text-slate-500 pb-8">结论所需证据均已收录在本报告的源码链接中。</footer>
   </main>
 </div>
-{_INIT_SCRIPT}
-{_TREE_RESIZE_ON_OPEN}
 </body>
 </html>
 """
-    # 最终 HTML 门禁：不再只依赖提示词，确保可见正文中的常见术语首次出现即解释。
     doc = explain_terms_in_html(doc)
-    # 产出前硬校验：每个目录项都必须精确定位到唯一锚点，否则抛错而非静默产出
     assert_toc_resolves(doc)
     assert_report_complete(doc, structured=tree_json)
     return doc
@@ -742,10 +1142,31 @@ def write_tree_html(out_path: Path, tree_json: dict,
                     title: str | None = None) -> tuple[Path, set[str]]:
     """把 tree.json 渲染为 HTML 并写入 out_path。返回 (path, 断链路径集合)。"""
     broken: set[str] = set()
-    # 优先生成指向仓库网页的链接（从 git remote+HEAD 推 blob 基址）；
-    # 无 git 信息的本地仓库回退到本地编辑器 scheme。
-    web_bases = ([derive_repo_web_base(Path(r)) for r in repo_roots]
-                 if repo_roots else None)
+    # 报告元数据中的目标仓库 URL 是证据链接的权威来源。下载归档通常没有 .git，
+    # 此时绝不能让 git 向上穿透并继承报告生成器仓库的 remote。
+    web_bases = None
+    if repo_roots:
+        meta = tree_json.get("meta") or {}
+        repository_url = str(meta.get("repository_url") or "")
+        explicit_ref = str(
+            meta.get("repository_ref") or meta.get("revision") or meta.get("commit") or ""
+        )
+        web_bases = []
+        for index, root in enumerate(repo_roots):
+            derived_base = derive_repo_web_base(Path(root))
+            ref = explicit_ref
+            if not ref:
+                archive_match = re.search(r"-([0-9a-fA-F]{40})$", Path(root).name)
+                derived_ref = re.search(r"/([0-9a-fA-F]{40})$", derived_base or "")
+                ref = (
+                    archive_match.group(1) if archive_match else
+                    (derived_ref.group(1) if derived_ref else "main")
+                )
+            explicit_base = (
+                repository_url_to_web_base(repository_url, ref)
+                if index == 0 and repository_url else None
+            )
+            web_bases.append(explicit_base or derived_base)
     resolver = make_file_link_resolver(
         repo_roots, scheme="vscode", broken_paths=broken,
         repo_web_bases=web_bases,

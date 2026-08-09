@@ -13,6 +13,34 @@ from finals.development import (
 )
 
 
+def test_development_cli_default_keeps_only_html(tmp_path, monkeypatch):
+    import finals.__main__ as cli
+    import finals.development as development
+
+    output = tmp_path / "development.html"
+
+    def fake_generate(_repo, target, **_kwargs):
+        target = target.resolve()
+        target.write_text("<html></html>", encoding="utf-8")
+        paths = {
+            "digest_path": target.with_suffix(".digest.json"),
+            "ai_path": target.with_suffix(".ai.json"),
+            "evidence_path": target.with_suffix(".evidence.json"),
+        }
+        for path in paths.values():
+            path.write_text("{}", encoding="utf-8")
+        return {"html_path": str(target), **{key: str(path) for key, path in paths.items()}}
+
+    monkeypatch.setattr(development, "generate_development_report", fake_generate)
+
+    result = cli.main([
+        "development", "--repo", str(tmp_path), "--output", str(output),
+    ])
+
+    assert result == 0
+    assert {path.name for path in tmp_path.iterdir()} == {"development.html"}
+
+
 def _commit(sha: str, when: datetime, subject: str, additions: int, path: str) -> dict:
     return {
         "sha": sha * 40,
@@ -170,7 +198,7 @@ def test_development_html_puts_ai_findings_first_and_shows_exact_evidence():
     rendered = render_development_html(analysis)
 
     assert rendered.index("AI 结论与问题") < rendered.index("AI 归纳的提交阶段")
-    assert "完全由 AI 工具生成" in rendered
+    assert "完全由人工智能（AI）工具生成" in rendered
     assert "章程最低提交次数未配置" in rendered
     assert "大规模提交口径" in rendered
     assert "kernel/fs/inode.c</code>（1300 LOC）" in rendered
