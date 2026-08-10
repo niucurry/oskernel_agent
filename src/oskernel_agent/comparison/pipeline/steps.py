@@ -8,6 +8,7 @@ from pathlib import Path
 from loguru import logger
 
 from oskernel_agent.comparison.ingest.cloner import clone_repo, is_cloned
+from oskernel_agent.repository_identity import repository_storage_key
 
 # 流水线步骤顺序（normalize 并入 recall：新作品在召回时在线归一化）
 # fastpath：L0 文件指纹层，ingest 后 recall 前检测整文件复制，命中文件在 recall 跳过嵌入
@@ -24,8 +25,7 @@ def local_ingest(repo_arg: str, work_root: str | Path) -> Path:
     if is_url(repo_arg):
         work_root = Path(work_root)
         work_root.mkdir(parents=True, exist_ok=True)
-        name = repo_arg.rstrip("/").split("/")[-1].removesuffix(".git")
-        dest = work_root / name
+        dest = work_root / repository_storage_key(repo_arg)
         if not is_cloned(dest):
             logger.info("克隆新作品 {} → {}", repo_arg, dest)
             clone_repo(repo_arg, dest, depth=200)
