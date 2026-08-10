@@ -21,6 +21,21 @@ unit-tests:
     # 依赖 codet5p 模型的用例在离线环境会自动 skip
     - python -m pytest tests/ -q -p no:cacheprovider
 
+frontend-build:
+  stage: test
+  image: node:22
+  before_script: []
+  cache:
+    key:
+      files:
+        - frontend/package-lock.json
+    paths:
+      - .npm/
+  script:
+    - cd frontend
+    - npm ci --cache ../.npm --prefer-offline
+    - npm run build
+
 eval-regression:
   stage: eval
   variables:
