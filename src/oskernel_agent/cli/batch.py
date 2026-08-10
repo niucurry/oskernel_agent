@@ -367,8 +367,27 @@ def do_comparison(team_id: str, url: str, work_dir: Path, logfile: Path) -> tupl
             continue
         shutil.copy2(pair[0], dst)
         shutil.copy2(pair[1], dst_digest)
+        normalize_comparison_identity(dst, dst_digest, team_id, repo_name)
         return True, body
     return False, body + "\n对比报告命令虽返回成功，但未产生本轮新的 HTML 与摘要文件。"
+
+
+def normalize_comparison_identity(
+    html_path: Path, digest_path: Path, team_id: str, storage_key: str,
+) -> None:
+    """Replace the private workspace key with the public contest team id."""
+    payload = json.loads(digest_path.read_text(encoding="utf-8"))
+    original_repo_id = str(payload.get("repo_id") or "")
+    if original_repo_id not in {storage_key, team_id}:
+        raise RuntimeError(
+            f"comparison digest identity mismatch: {original_repo_id!r}"
+        )
+    payload["repo_id"] = team_id
+    digest_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8",
+    )
+    html = html_path.read_text(encoding="utf-8")
+    html_path.write_text(html.replace(storage_key, team_id), encoding="utf-8")
 
 
 def do_description(team_id: str, url: str, work_dir: Path, logfile: Path) -> tuple[bool, str]:
@@ -554,7 +573,16 @@ def main(argv: list[str] | None = None) -> None:
                     log(f"  一页摘要 {'成功' if ok else '失败'}")
 
                     if all(readiness.values()):
-                        publish_final_reports(team_id, work_dir, final_dir)
+                        # Structured digests are staging-only inputs.  Validate
+                        # their identity before publishing because the final
+                        # directory intentionally keeps just four reports.
+                        if _report_digests_match_team(team_id, work_dir):
+                            publish_final_reports(team_id, work_dir, final_dir)
+                        else:
+                            log(f"  {team_id} 报告摘要不属于当前队伍，拒绝发布")
+                            for kind in readiness:
+                                readiness[kind] = False
+                            purge_final_dir(team_id, final_dir)
                     else:
                         purge_final_dir(team_id, final_dir)
             finally:
@@ -562,10 +590,6 @@ def main(argv: list[str] | None = None) -> None:
 
             for kind, ready in readiness.items():
                 tstate[kind] = "done" if ready else "failed"
-            if not _report_digests_match_team(team_id, final_dir):
-                log(f"  {team_id} 报告摘要不属于当前队伍，拒绝标记完成")
-                for kind in readiness:
-                    tstate[kind] = "failed"
             save_state(st)
             log(f"[{idx}/{total}] {team_id} 处理完毕 "
                 f"(summary={tstate.get('summary')}, desc={tstate.get('description')}, "

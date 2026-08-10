@@ -5,6 +5,7 @@ import re
 import pytest
 
 from oskernel_agent.finals.digests import description_digest_from_tree
+from oskernel_agent.analysis.repo_facts import _probe_syscall_dispatch
 from oskernel_agent.finals.integrity import analyze_log, scan_hardcode_signals, scan_reproducibility
 from oskernel_agent.parsers.code_parser import classify_files_by_content
 from oskernel_agent.engines.path_c import TreeSitterEngine
@@ -16,7 +17,11 @@ from oskernel_agent.pipeline.tree_builder import (
     _validate_verdict_integrity_conclusion,
 )
 from oskernel_agent.report_quality import IncompleteReportError
-from oskernel_agent.reports.html_tree import render_tree_html, write_tree_html
+from oskernel_agent.reports.html_tree import (
+    _clean_capability_claim,
+    render_tree_html,
+    write_tree_html,
+)
 from oskernel_agent.cli.agent import _cleanup_tree_intermediates
 
 
@@ -413,6 +418,54 @@ def test_syscall_count_is_labeled_as_a_static_signal_and_never_overclaims():
     assert "不代表语义可用或测试通过" in rendered
 
 
+def test_plain_syscall_count_is_also_replaced_by_static_scan_wording():
+    tree = _tree()
+    tree["facts"]["syscall"] = {
+        "standard_count": 44, "standard_total": 60, "dispatch_count": 230,
+    }
+    tree["tree"]["children"][0]["summary"] = "模块实现了44个标准 Linux 系统调用。"
+
+    rendered = render_tree_html(tree)
+
+    assert "实现了44个" not in rendered
+    assert "44/60" in rendered and "230 个不同分支" in rendered
+
+
+def test_syscall_dispatch_probe_counts_unique_rust_and_c_arms(tmp_path):
+    rust = tmp_path / "src" / "syscall.rs"
+    rust.parent.mkdir()
+    rust.write_text(
+        "match id {\n SYS_OPEN => open(),\n SYS_CLOSE => close(),\n SYS_OPEN => open2(),\n}\n",
+        encoding="utf-8",
+    )
+    c = tmp_path / "kernel.c"
+    c.write_text("switch (id) {\ncase SYS_READ: return read();\n}\n", encoding="utf-8")
+
+    count, evidence = _probe_syscall_dispatch(tmp_path)
+
+    assert count == 3
+    assert evidence == ["src/syscall.rs:2", "kernel.c:2"] or evidence == [
+        "kernel.c:2", "src/syscall.rs:2",
+    ]
+
+
+def test_hardcode_count_in_conclusion_comes_from_structured_reviews():
+    tree = _tree()
+    tree["verdict"]["one_line"] = "构建未提供；硬编码存在6处嫌疑。"
+    tree["verdict"]["hardcode_reviews"] = [
+        {**tree["verdict"]["hardcode_reviews"][0], "signal_id": f"s{i}", "status": "suspected"}
+        for i in range(7)
+    ]
+    tree["facts"]["integrity"]["hardcode"]["findings"] = [
+        {"signal_id": f"s{i}"} for i in range(7)
+    ]
+
+    rendered = render_tree_html(tree)
+
+    assert "硬编码存在6处嫌疑" not in rendered
+    assert "硬编码复核发现 7 条疑似线索、无确认项" in rendered
+
+
 def test_every_scanner_signal_requires_structured_ai_review():
     tree = _tree()
     facts = tree["facts"]
@@ -511,3 +564,41 @@ def test_description_links_use_target_repository_metadata(tmp_path):
     assert not broken
     assert "https://gitlab.example.com/contest/cosmos/-/blob/deadbeef/" in rendered
     assert "report/generator" not in rendered
+
+
+def test_description_file_only_evidence_gets_a_line_anchor(tmp_path):
+    tree = _tree()
+    tree["meta"]["repository_url"] = "https://gitlab.example.com/contest/cosmos"
+    tree["meta"]["repository_ref"] = "deadbeef"
+    tree["facts"]["integrity"]["build_log"] = {"status": "not_provided"}
+    tree["tree"]["children"][0]["highlights"] = [
+        {"path": "src/main.c", "quote": "entry point"},
+    ]
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "main.c").write_text("\n" * 7 + "int main(void) {}\n", encoding="utf-8")
+    (repo / "src" / "mm.c").write_text("\n" * 9, encoding="utf-8")
+
+    output, broken = write_tree_html(
+        tmp_path / "description.html", tree, repo_roots=[repo]
+    )
+
+    rendered = output.read_text(encoding="utf-8")
+    assert not broken
+    assert "/src/main.c#L1" in rendered
+    assert ">src/main.c:1</a>" in rendered
+
+
+def test_description_softens_unverified_absolute_capability_claims():
+    claim = (
+        "覆盖完整，构建了完整的 TCP/IP 网络协议栈，完整定义接口，"
+        "与 Linux 主线 UAPI 头文件保持一致，确保用户程序二进制兼容。"
+    )
+
+    cleaned = _clean_capability_claim(claim, {"facts": {}})
+
+    assert "覆盖主要路径" in cleaned
+    assert "基于 smoltcp 的 TCP/IP 网络能力" in cleaned
+    assert "集中定义接口" in cleaned
+    assert "以兼容 Linux UAPI 为目标" in cleaned
+    assert "为用户程序二进制兼容提供接口基础" in cleaned

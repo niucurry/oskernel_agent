@@ -426,6 +426,7 @@ repos:
 - repo_url: https://gitlab.eduxiji.net/willson0v0/oscomp_handin
   year: 2021
   team_name: "啊普鲁派哒哒哒哒哒\"; DROP DATABASE teams;"
+  repo_key: willson0v0-oscomp-handin
   award_level: ''
 - repo_url: https://gitlab.eduxiji.net/buaawyk2/oskernel2021-too_low
   year: 2021

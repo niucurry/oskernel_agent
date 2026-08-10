@@ -172,7 +172,11 @@ def normalize_description_claim(value: str, path: str, facts: dict) -> str:
         total = int(syscall.get("standard_total"))
     except (TypeError, ValueError):
         return text
-    has_count_claim = bool(re.search(r"\b\d+\s*/\s*\d+\b", text))
+    has_count_claim = bool(re.search(
+        r"\b\d+\s*/\s*\d+\b|(?<!\d)\d+\s*个(?:标准\s*)?(?:Linux\s*)?(?:系统调用|syscall)",
+        text,
+        re.I,
+    ))
     if not has_count_claim or not ("系统调用" in text or "syscall" in text.casefold()):
         return text
     if "nisyscall" in text.casefold() or "ENOSYS" in text:
@@ -180,10 +184,33 @@ def normalize_description_claim(value: str, path: str, facts: dict) -> str:
             f"sys_nisyscall 对未实现编号返回 ENOSYS；函数定义正则扫描识别到 "
             f"{count}/{total} 个标准名称，该数字不代表接口语义可用。"
         )
+    dispatch = syscall.get("dispatch_count")
+    dispatch_note = (
+        f"；SYS_* 分发表静态识别到 {int(dispatch)} 个不同分支"
+        if isinstance(dispatch, int) and dispatch >= 0 else ""
+    )
     return (
         f"函数定义正则扫描识别到 {count}/{total} 个标准系统调用名称；"
-        "该计数只表示接口线索，不代表语义可用或测试通过。"
+        f"该计数只表示接口线索{dispatch_note}，不代表语义可用或测试通过。"
     )
+
+
+def normalize_description_conclusion(value: str, verdict: dict) -> str:
+    """Make hardcode counts in the headline agree with structured reviews."""
+    text = explain_terms_on_first_use(remove_ai_filler(str(value or "")))
+    reviews = [item for item in (verdict.get("hardcode_reviews") or []) if isinstance(item, dict)]
+    confirmed = sum(item.get("status") == "confirmed" for item in reviews)
+    suspected = sum(item.get("status") == "suspected" for item in reviews)
+    pattern = re.compile(
+        r"硬编码(?:存在|有|复核发现)?\s*\d+\s*(?:处|条)(?:嫌疑|疑似(?:线索|问题)?)"
+    )
+    if not pattern.search(text):
+        return text
+    replacement = (
+        f"硬编码复核确认 {confirmed} 条、疑似 {suspected} 条"
+        if confirmed else f"硬编码复核发现 {suspected} 条疑似线索、无确认项"
+    )
+    return pattern.sub(replacement, text, count=1)
 
 
 def _description_priority_key(item: Finding) -> tuple[int, int, float]:
@@ -362,9 +389,10 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             ),
         ))
 
-    conclusion = explain_terms_on_first_use(remove_ai_filler(
-        str(verdict.get("one_line") or "已完成源码结构分析，结论见问题清单。")
-    ))
+    conclusion = normalize_description_conclusion(
+        str(verdict.get("one_line") or "已完成源码结构分析，结论见问题清单。"),
+        verdict,
+    )
     reviews = verdict.get("hardcode_reviews") or []
     ordered_findings = sorted(findings, key=_description_priority_key)
     return ReportDigest(
@@ -454,10 +482,13 @@ def comparison_digest(
         closest_year, closest_team = closest_source.split("/", 1)
     identity = source_text
     if closest_year and closest_team:
+        closest_team_label = (
+            closest_team if closest_team.endswith("队") else f"{closest_team} 队"
+        )
         identity = (
-            f"{closest_year} 年来自 {closest_institution} 的 {closest_team} 队作品"
+            f"{closest_year} 年来自 {closest_institution} 的 {closest_team_label}作品"
             if closest_institution else
-            f"{closest_year} 年 {closest_team} 队作品"
+            f"{closest_year} 年 {closest_team_label}作品"
         )
     conclusion = (
         f"与 {identity}最接近；按可比函数口径，{confirmed}/{total} 个函数形成"

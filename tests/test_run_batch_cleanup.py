@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -172,6 +173,43 @@ def test_report_digests_must_match_team_id(tmp_path):
     assert not run_batch._report_digests_match_team("team-1", final_dir)
 
 
+def test_identity_check_uses_staging_digests_before_sidecar_cleanup(tmp_path):
+    staging = tmp_path / "staging"
+    final_dir = tmp_path / "team-1"
+    staging.mkdir()
+    for kind in ("comparison", "description", "development"):
+        (staging / f"{kind}.digest.json").write_text(
+            '{"repo_id":"team-1"}', encoding="utf-8",
+        )
+
+    assert run_batch._report_digests_match_team("team-1", staging)
+    final_dir.mkdir()
+    assert not run_batch._report_digests_match_team("team-1", final_dir)
+
+
+def test_comparison_identity_hides_collision_safe_storage_key(tmp_path):
+    storage_key = "team-1-deadbeef"
+    html = tmp_path / "comparison.html"
+    digest = tmp_path / "comparison.digest.json"
+    html.write_text(
+        f"<title>{storage_key} 对比分析报告</title><h1>{storage_key}</h1>",
+        encoding="utf-8",
+    )
+    digest.write_text(
+        json.dumps({"repo_id": storage_key, "closest": "2025/source"}),
+        encoding="utf-8",
+    )
+
+    run_batch.normalize_comparison_identity(
+        html, digest, "T202600000000001", storage_key,
+    )
+
+    assert storage_key not in html.read_text(encoding="utf-8")
+    assert "T202600000000001" in html.read_text(encoding="utf-8")
+    payload = json.loads(digest.read_text(encoding="utf-8"))
+    assert payload == {"repo_id": "T202600000000001", "closest": "2025/source"}
+
+
 def test_do_comparison_does_not_archive_old_output_after_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(run_batch, "OUT", tmp_path / "output")
     repo_name = run_batch.fork_to_repo_name("https://gitlab.example.test/group/repo")
@@ -234,7 +272,8 @@ def test_do_comparison_archives_pair_created_by_current_run(tmp_path, monkeypatc
             "<html>fresh comparison</html>", encoding="utf-8"
         )
         (source / f"{repo_name}_comparison.digest.json").write_text(
-            "{\"kind\":\"comparison\",\"fresh\":true}", encoding="utf-8"
+            json.dumps({"kind": "comparison", "fresh": True, "repo_id": repo_name}),
+            encoding="utf-8",
         )
         return True, "ok"
 

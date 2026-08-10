@@ -8,6 +8,7 @@ from oskernel_agent.finals.readability import (
     explain_terms_on_first_use,
     readability_errors,
     remove_ai_filler,
+    sanitize_html_controls,
 )
 
 
@@ -38,6 +39,23 @@ def test_common_term_is_explained_only_once():
     assert not readability_errors(text)
 
 
+def test_localized_term_is_not_expanded_inside_itself():
+    text = explain_terms_on_first_use("采用写时复制（COW）处理缺页。")
+    assert text == "采用写时复制（Copy-on-Write，COW）处理缺页。"
+    assert "写时复制（写时复制" not in text
+
+
+def test_redundant_virtio_suffix_is_removed():
+    text = explain_terms_on_first_use("基于虚拟输入输出设备规范（VirtIO）规范实现驱动。")
+    assert text == "基于虚拟输入输出设备规范（VirtIO）实现驱动。"
+
+
+def test_invalid_html_control_bytes_are_visible_and_removed():
+    rendered = sanitize_html_controls("before\x00after\x07")
+    assert rendered == r"before\x00after\x07"
+    assert "\x00" not in rendered and "\x07" not in rendered
+
+
 def test_competition_report_terms_are_defined_on_first_use():
     text = explain_terms_on_first_use("vendor 依赖引入后开展 LTP 测试。")
     assert "仓库内置第三方（vendor）依赖" in text
@@ -58,6 +76,13 @@ def test_term_expansion_never_rewrites_a_source_path():
     assert "os/src/fs/inode.rs:545" in rendered
     assert "os/src/fs/索引节点" not in rendered
     assert "索引节点（inode）缓存" in rendered
+
+
+def test_term_expansion_never_rewrites_a_source_directory():
+    rendered = explain_terms_in_html("<p>分发器位于 os/src/syscall/ 目录，syscall 表统一路由。</p>")
+    assert "os/src/syscall/" in rendered
+    assert "os/src/系统调用" not in rendered
+    assert "系统调用（syscall）表" in rendered
 
 
 def test_unexplained_term_and_ai_filler_are_reported():
