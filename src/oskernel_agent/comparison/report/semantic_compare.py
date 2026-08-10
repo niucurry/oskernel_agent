@@ -430,8 +430,8 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None, *,
       借鉴(confirmed)：confirmed 且非库复用、非公共/样板；
       模型复核难例(review)：review/weak 且模型返回有效“借鉴/疑似”；
       复核未完成：模型调用/格式校验失败，或已入队但未配置模型；绝不计入“模型仍存疑”；
-      原创(original)：recall 中（非库）完全未进入嫌疑清单的函数。
-    库复用 / 公共样板 / baseline 既不算借鉴也不算原创，**不计入 total**（在各自小节单列），
+      暂未检出(original)：recall 中（非库）完全未进入嫌疑清单的函数。
+    库复用 / 公共样板 / baseline 既不算借鉴也不算暂未检出，**不计入 total**（在各自小节单列），
     所以 total = 同源 + 存疑 + 复核未完成 + 暂未检出，占比相加为 100%。
 
     Returns: dict[module] → {confirmed, review, review_failed, review_pending,
@@ -441,12 +441,12 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None, *,
                      "review_pending": 1}
     best: dict[tuple, list] = {}                 # key -> [rank, module, category]
     sources: dict[str, Counter] = defaultdict(Counter)
-    matched_keys: set[tuple] = set()             # 任何非 dismissed 命中（含库/公共）→ 不算原创
+    matched_keys: set[tuple] = set()             # 任何历史命中（含 dismissed/库/公共）→ 不算暂未检出
     for s in suspects:
         tier = s.get("tier", "")
         q = s.get("query_func", {})
         key = _query_key(q)
-        if tier != "dismissed":
+        if tier:
             matched_keys.add(key)
         if _is_excluded_pair(s) or tier in ("dismissed", "baseline_derived", "common_code"):
             continue
@@ -476,7 +476,7 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None, *,
     for _key, (_r, mod, category) in best.items():
         agg[mod][category] += 1
 
-    # 原创 = recall 中（非库）完全未进入嫌疑清单的函数
+    # 暂未检出 = recall 中（非库）完全未进入任何历史匹配清单的函数
     if recall:
         for item in recall.get("results", []):
             q = item.get("query", {})
@@ -513,17 +513,17 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None, *,
 
 def _original_functions(recall: dict, suspects: list[dict], top_n: int | None = None, *,
                         library_context: LibraryContext | None = None) -> list[dict]:
-    """recall 中「完全未进入嫌疑清单（非库复用/非公共样板/非任何命中）」的函数 = 原创/自研。
+    """recall 中完全未进入历史匹配清单的函数；这不等于原创认定。
 
-    与 compute_submodule_stats 的「原创」同口径（matched = 任何非 dismissed 命中），所以二者
+    与 compute_submodule_stats 的暂未检出口径一致（matched = 任何历史命中），所以二者
     数量一致。判据用「是否进入命中清单」而非相似度阈值：代码嵌入余弦相似度有很高地板（OS
     内核链表/调度循环等结构高度雷同，无关函数 max_sim 也普遍 0.6+），用阈值会把几乎所有函数
-    误判为非原创。返回**全部**原创函数（按行数降序）；展示层自行截断并显示总数。
+    误把领域共性当成有效命中。返回**全部**暂未检出函数（按行数降序）；展示层自行截断并显示总数。
     """
     matched_keys = {
         _query_key(s.get("query_func", {}))
         for s in suspects
-        if s.get("tier") != "dismissed"   # 任何命中（含库/公共/baseline）都不算原创
+        if s.get("tier")   # dismissed 仍有历史匹配证据，不能重新归为暂未检出
     }
     out = []
     for item in recall.get("results", []):
@@ -6309,7 +6309,7 @@ def run_semantic_compare(
         except (OSError, json.JSONDecodeError) as e:
             logger.warning("[compare] 读取 ai_detect 结果失败：{}", e)
 
-    # 暂未命中函数（含复核判「非借鉴」而降级的函数）
+    # 暂未命中函数只包含从未形成历史匹配的函数；复核排除项仍保留其历史匹配事实。
     original_funcs  = _original_functions(
         recall, suspects, library_context=library_context) if recall else []
 

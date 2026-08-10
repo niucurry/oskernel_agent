@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -29,6 +30,7 @@ from pathlib import Path
 from oskernel_agent.finals.cleanup import cleanup_report_directory, purge_report_directory, remove_directory
 from oskernel_agent.comparison.ingest.cloner import clone_repo
 from oskernel_agent.paths import PROJECT_ROOT
+from oskernel_agent.repository_identity import repository_storage_key
 
 ROOT = PROJECT_ROOT
 # 跨平台定位 venv 解释器：优先当前解释器（激活 venv 后即为 venv python），
@@ -187,7 +189,8 @@ MIN_FREE_GB = 3.0                         # 剩余空间低于此值即中止，
 
 
 def fork_to_repo_name(url: str) -> str:
-    return url.rstrip("/").split("/")[-1].removesuffix(".git")
+    """兼容旧调用名；返回 URL 派生的稳定唯一存储键。"""
+    return repository_storage_key(url)
 
 
 def free_gb() -> float:
@@ -202,6 +205,19 @@ def deliverable_paths(team_id: str, final_dir: Path) -> tuple[Path, ...]:
         final_dir / "development.html",
         final_dir / "comparison.html",
     )
+
+
+def _report_digests_match_team(team_id: str, final_dir: Path) -> bool:
+    """确认三份结构化摘要属于当前队伍；失败时保持可重跑。"""
+    for kind in ("comparison", "description", "development"):
+        path = final_dir / f"{kind}.digest.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        if str(payload.get("repo_id") or "") != team_id:
+            return False
+    return True
 
 
 def cleanup_final_dir(team_id: str, final_dir: Path) -> None:
@@ -319,26 +335,40 @@ def do_comparison(team_id: str, url: str, work_dir: Path, logfile: Path) -> tupl
     if os.environ.get("BATCH_ENABLE_AI_DETECT", "").strip().lower() in {"1", "true", "yes"}:
         cmd.append("--ai-detect")
     cmp_timeout = int(os.environ.get("BATCH_CMP_TIMEOUT", "3600"))  # 巨型仓库可调大
+    source_pairs = (
+        (
+            OUT / repo_name / f"{repo_name}_comparison.html",
+            OUT / repo_name / f"{repo_name}_comparison.digest.json",
+        ),
+        (
+            OUT / f"{repo_name}_comparison.html",
+            OUT / f"{repo_name}_comparison.digest.json",
+        ),
+    )
+
+    def signature(path: Path) -> tuple[str, int] | None:
+        if not path.is_file():
+            return None
+        try:
+            return hashlib.sha256(path.read_bytes()).hexdigest(), path.stat().st_mtime_ns
+        except OSError:
+            return None
+
+    before = [tuple(signature(path) for path in pair) for pair in source_pairs]
     ok, body = run_step("对比报告", cmd, logfile, timeout=cmp_timeout)
-    # 归档 HTML：pipeline 落到 data/output/<repo_name>/<repo_name>_comparison.html
-    src_html = OUT / repo_name / f"{repo_name}_comparison.html"
+    if not ok:
+        return False, body
+
     dst = work_dir / "comparison.html"
     dst_digest = work_dir / "comparison.digest.json"
-    if src_html.exists():
-        shutil.copy2(src_html, dst)
-        src_digest = OUT / repo_name / f"{repo_name}_comparison.digest.json"
-        if src_digest.exists():
-            shutil.copy2(src_digest, dst_digest)
-        return ok and dst.exists() and dst_digest.exists(), body
-    # 兜底：直接落在 output 根
-    alt = OUT / f"{repo_name}_comparison.html"
-    if alt.exists():
-        shutil.copy2(alt, dst)
-        alt_digest = OUT / f"{repo_name}_comparison.digest.json"
-        if alt_digest.exists():
-            shutil.copy2(alt_digest, dst_digest)
-        return ok and dst.exists() and dst_digest.exists(), body
-    return False, body
+    for index, pair in enumerate(source_pairs):
+        current = tuple(signature(path) for path in pair)
+        if current[0] is None or current[1] is None or current == before[index]:
+            continue
+        shutil.copy2(pair[0], dst)
+        shutil.copy2(pair[1], dst_digest)
+        return True, body
+    return False, body + "\n对比报告命令虽返回成功，但未产生本轮新的 HTML 与摘要文件。"
 
 
 def do_description(team_id: str, url: str, work_dir: Path, logfile: Path) -> tuple[bool, str]:
@@ -450,7 +480,7 @@ def main(argv: list[str] | None = None) -> None:
             tstate = st["teams"].setdefault(team_id, {})
             deliverables = deliverable_paths(team_id, final_dir)
 
-            if all(path.is_file() for path in deliverables):
+            if all(path.is_file() for path in deliverables) and _report_digests_match_team(team_id, final_dir):
                 cleanup_final_dir(team_id, final_dir)
                 cleanup_team(repo_name, final_dir=final_dir)
                 log(f"[{idx}/{total}] {team_id} 已完成，跳过")
@@ -532,6 +562,10 @@ def main(argv: list[str] | None = None) -> None:
 
             for kind, ready in readiness.items():
                 tstate[kind] = "done" if ready else "failed"
+            if not _report_digests_match_team(team_id, final_dir):
+                log(f"  {team_id} 报告摘要不属于当前队伍，拒绝标记完成")
+                for kind in readiness:
+                    tstate[kind] = "failed"
             save_state(st)
             log(f"[{idx}/{total}] {team_id} 处理完毕 "
                 f"(summary={tstate.get('summary')}, desc={tstate.get('description')}, "
