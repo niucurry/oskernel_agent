@@ -43,7 +43,7 @@ from oskernel_agent.comparison.normalize.classify import load_classifier
 from oskernel_agent.comparison.normalize.discovery import is_test_or_benchmark_path
 from oskernel_agent.comparison.retrieval_contract import (CONTRACT_VERSION, contract_errors,
                                     require_complete_contract)
-from oskernel_agent.finals.readability import explain_terms_in_html
+from oskernel_agent.finals.readability import explain_terms_in_html, sanitize_html_controls
 
 from .false_positives import (FP_REASON_DISP, false_positive_stats,
                               tag_false_positives, tag_internal_arch_dups)
@@ -5769,13 +5769,14 @@ def _finals_comparison_summary(
     ) or '<li class="summary-alert"><strong>未形成高风险结论</strong><p>当前证据不足以锁定同源代码。</p></li>'
     year = str(metrics.get("closest_year") or "")
     team = str(metrics.get("closest_team") or "")
+    team_label = team if team.endswith("队") else f"{team} 队"
     institution = str(metrics.get("closest_institution") or "")
     identity = ""
     if year and team:
         identity = (
-            f'{html.escape(year)} 年 · {html.escape(institution)} · {html.escape(team)} 队'
+            f'{html.escape(year)} 年 · {html.escape(institution)} · {html.escape(team_label)}'
             if institution else
-            f'{html.escape(year)} 年 · {html.escape(team)} 队 · 学校信息未提供'
+            f'{html.escape(year)} 年 · {html.escape(team_label)} · 学校信息未提供'
         )
     return f"""
 <section id="summary" data-section-id="summary" class="summary-card">
@@ -5887,7 +5888,7 @@ def generate_finals_comparison_html(
 <p>系统内部仍使用全部历史库完成召回和排除，但交付报告只展示最近作品；其他候选不进入评委正文。</p></div>
 </section>
 </main></div><a href="#summary" class="to-top" title="回到顶部">↑</a>{_INIT_SCRIPT}</body></html>"""
-    return explain_terms_in_html(rendered), digest
+    return sanitize_html_controls(explain_terms_in_html(rendered)), digest
 
 
 def generate_comparison_html(

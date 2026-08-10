@@ -73,6 +73,28 @@ def _probe_standard_syscalls(repo_path: Path) -> tuple[int, list[str]]:
     return len(implemented), sorted(implemented)
 
 
+def _probe_syscall_dispatch(repo_path: Path) -> tuple[int, list[str]]:
+    """Count distinct static syscall dispatch arms without claiming usability."""
+    skip = {"vendor", "third_party", "target", ".git", "node_modules"}
+    rust_arm = re.compile(r"^\s*(SYS_[A-Z0-9_]+)\s*=>", re.M)
+    c_arm = re.compile(r"^\s*case\s+(SYS_[A-Z0-9_]+)\s*:", re.M)
+    entries: set[str] = set()
+    evidence: list[str] = []
+    for src in repo_path.rglob("*"):
+        if not src.is_file() or src.suffix not in (".c", ".rs", ".h"):
+            continue
+        if any(part in skip for part in src.relative_to(repo_path).parts):
+            continue
+        text = _read_text_safe(src)
+        matches = list((rust_arm if src.suffix == ".rs" else c_arm).finditer(text))
+        if not matches:
+            continue
+        entries.update(match.group(1) for match in matches)
+        first_line = text.count("\n", 0, matches[0].start()) + 1
+        evidence.append(f"{src.relative_to(repo_path).as_posix()}:{first_line}")
+    return len(entries), evidence[:6]
+
+
 def _probe_key_files(repo_path: Path) -> list[dict]:
     """采样关键内核文件的体积/行数（用于跨分片口径对齐）。"""
     facts: list[dict] = []
@@ -195,6 +217,7 @@ def build_repo_facts(
     ref_os = profile.get("reference_os") or None
 
     standard_count, std_list = _probe_standard_syscalls(repo_path)
+    dispatch_count, dispatch_evidence = _probe_syscall_dispatch(repo_path)
 
     from oskernel_agent.finals.integrity import collect_integrity_facts
 
@@ -210,9 +233,12 @@ def build_repo_facts(
             "standard_count":   standard_count,
             "standard_total":   len(_STANDARD_SYSCALLS),
             "standard_implemented": std_list,
+            "dispatch_count": dispatch_count,
+            "dispatch_evidence": dispatch_evidence,
             "source_note": (
                 "standard_count 来自仓库内 sys_*/syscall_* 函数定义正则扫描；"
-                "该计数只描述接口覆盖，不参与原创性判断"
+                "dispatch_count 来自 SYS_* 静态分发表分支；"
+                "两种计数都只描述接口线索，不代表语义可用或测试通过"
             ),
         },
         "key_files":   _probe_key_files(repo_path),

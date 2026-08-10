@@ -84,3 +84,29 @@ def test_finals_comparison_html_has_one_source_and_no_top_five_noise():
     assert "Top 8" not in rendered
     assert ">候选创新<" not in rendered
     assert "其他候选不进入评委正文" in rendered
+
+
+def test_team_name_already_ending_in_team_suffix_is_not_duplicated():
+    rendered, digest = SC.generate_finals_comparison_html(
+        query_repo_id="2026/new", closest_source="2025/火箭队",
+        suspects=[_suspect("2025/火箭队", "open")],
+        submodule_stats={"arch": {
+            "confirmed": 1, "review": 0, "review_failed": 0,
+            "review_pending": 0, "review_incomplete": 0, "weak": 0,
+            "original": 1, "total": 2, "copy_pct": .5,
+            "review_pct": 0, "review_incomplete_pct": 0,
+            "original_pct": .5, "top_source": "2025/火箭队",
+        }},
+        file_pairs=[], analysis_html="", review_pairs=[], cleared_review_pairs=[],
+        ai_detect_data={
+            "status": "skipped", "reason": "无可检测函数",
+            "scope": {"eligible_functions": 0, "analyzed_functions": 0,
+                      "extracted_functions": 0, "borrowed_excluded": 0,
+                      "third_party_excluded": 0},
+        },
+        query_repo_path=None, linker=None, file_matches=[], file_similar=[],
+        retrieval_contract=None, recall=None,
+    )
+
+    assert "火箭队 队" not in rendered
+    assert "2025 年 火箭队作品" in digest.conclusion
