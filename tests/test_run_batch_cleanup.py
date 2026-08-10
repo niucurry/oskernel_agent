@@ -155,3 +155,94 @@ def test_remove_empty_final_dir_only_removes_scoped_empty_directory(
     outside.mkdir(exist_ok=True)
     with pytest.raises(ValueError, match="拒绝清理"):
         run_batch.remove_empty_final_dir("outside", outside)
+
+
+def test_report_digests_must_match_team_id(tmp_path):
+    final_dir = tmp_path / "team-1"
+    final_dir.mkdir()
+    for kind in ("comparison", "description", "development"):
+        (final_dir / f"{kind}.digest.json").write_text(
+            '{"repo_id":"team-1"}', encoding="utf-8",
+        )
+
+    assert run_batch._report_digests_match_team("team-1", final_dir)
+    (final_dir / "development.digest.json").write_text(
+        '{"repo_id":"team-2"}', encoding="utf-8",
+    )
+    assert not run_batch._report_digests_match_team("team-1", final_dir)
+
+
+def test_do_comparison_does_not_archive_old_output_after_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_batch, "OUT", tmp_path / "output")
+    repo_name = run_batch.fork_to_repo_name("https://gitlab.example.test/group/repo")
+    source = run_batch.OUT / repo_name
+    source.mkdir(parents=True)
+    (source / f"{repo_name}_comparison.html").write_text(
+        "<html>old comparison</html>", encoding="utf-8"
+    )
+    (source / f"{repo_name}_comparison.digest.json").write_text(
+        "{\"kind\":\"comparison\"}", encoding="utf-8"
+    )
+    final_dir = tmp_path / "final"
+    final_dir.mkdir()
+    monkeypatch.setattr(run_batch, "run_step", lambda *args, **kwargs: (False, "failed"))
+
+    ok, body = run_batch.do_comparison(
+        "team-1", "https://gitlab.example.test/group/repo", final_dir, tmp_path / "cmp.log"
+    )
+
+    assert not ok
+    assert "failed" in body
+    assert not (final_dir / "comparison.html").exists()
+    assert not (final_dir / "comparison.digest.json").exists()
+
+
+def test_do_comparison_rejects_success_without_fresh_output(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_batch, "OUT", tmp_path / "output")
+    repo_name = run_batch.fork_to_repo_name("https://gitlab.example.test/group/repo")
+    source = run_batch.OUT / repo_name
+    source.mkdir(parents=True)
+    (source / f"{repo_name}_comparison.html").write_text(
+        "<html>old comparison</html>", encoding="utf-8"
+    )
+    (source / f"{repo_name}_comparison.digest.json").write_text(
+        "{\"kind\":\"comparison\"}", encoding="utf-8"
+    )
+    final_dir = tmp_path / "final"
+    final_dir.mkdir()
+    monkeypatch.setattr(run_batch, "run_step", lambda *args, **kwargs: (True, "ok"))
+
+    ok, body = run_batch.do_comparison(
+        "team-1", "https://gitlab.example.test/group/repo", final_dir, tmp_path / "cmp.log"
+    )
+
+    assert not ok
+    assert "未产生本轮新的" in body
+    assert not (final_dir / "comparison.html").exists()
+
+
+def test_do_comparison_archives_pair_created_by_current_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_batch, "OUT", tmp_path / "output")
+    repo_name = run_batch.fork_to_repo_name("https://gitlab.example.test/group/repo")
+    final_dir = tmp_path / "final"
+    final_dir.mkdir()
+
+    def successful_step(*_args, **_kwargs):
+        source = run_batch.OUT / repo_name
+        source.mkdir(parents=True, exist_ok=True)
+        (source / f"{repo_name}_comparison.html").write_text(
+            "<html>fresh comparison</html>", encoding="utf-8"
+        )
+        (source / f"{repo_name}_comparison.digest.json").write_text(
+            "{\"kind\":\"comparison\",\"fresh\":true}", encoding="utf-8"
+        )
+        return True, "ok"
+
+    monkeypatch.setattr(run_batch, "run_step", successful_step)
+
+    ok, _body = run_batch.do_comparison(
+        "team-1", "https://gitlab.example.test/group/repo", final_dir, tmp_path / "cmp.log"
+    )
+
+    assert ok
+    assert "fresh comparison" in (final_dir / "comparison.html").read_text(encoding="utf-8")

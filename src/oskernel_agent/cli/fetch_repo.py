@@ -3,6 +3,8 @@ import argparse
 from collections import Counter
 from git import Repo
 
+from oskernel_agent.repository_identity import repository_display_name, repository_storage_key
+
 
 def extract_commit_logs(repo_path: str) -> list[dict]:
     """提取仓库全量 commit 记录。"""
@@ -49,11 +51,8 @@ def fetch_repo(url: str, output_dir: str = "./data/historical_repos") -> str:
     """克隆远程仓库，返回本地仓库路径。"""
     os.makedirs(output_dir, exist_ok=True)
 
-    repo_name = url.rstrip("/").split("/")[-1]
-    if repo_name.endswith(".git"):
-        repo_name = repo_name[:-4]
-
-    project_path = os.path.join(output_dir, repo_name)
+    repo_name = repository_display_name(url)
+    project_path = os.path.join(output_dir, repository_storage_key(url))
     print(f"正在处理项目: {repo_name}...")
 
     if not os.path.exists(project_path):

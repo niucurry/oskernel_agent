@@ -21,6 +21,21 @@ jobs:
         # 依赖 codet5p 模型的用例在离线环境会自动 skip
         run: python -m pytest tests/ -q -p no:cacheprovider
 
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci --prefer-offline
+          npm run build
+
   eval-regression:
     runs-on: ubuntu-latest
     # 评测需要嵌入模型与向量库，较重；仅在主干/特性分支跑小型集

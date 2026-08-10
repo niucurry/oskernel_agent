@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import subprocess
+
+import pytest
 
 from oskernel_agent.comparison.ingest.cloner import (
     _auth_url,
@@ -27,8 +30,60 @@ def test_write_template_no_overwrite(tmp_path):
     path = tmp_path / "repos.yaml"
     write_template(path)
     path.write_text("repos: []\n", encoding="utf-8")
-    write_template(path)  # 不应覆盖
+    write_template(path)
     assert load_repos(path) == []
+
+
+def test_repo_key_produces_scoped_identity(tmp_path):
+    path = tmp_path / "repos.yaml"
+    write_template(path)
+    entries = load_repos(path)
+    assert entries[0].repo_id == "2023/team_alpha"
+
+
+def test_repo_key_rejects_empty_str(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(
+        'repos:\n- {repo_url: "https://g.example/x", year: 2023, team_name: "a", repo_key: ""}\n',
+        encoding="utf-8",
+    )
+    entries = load_repos(path)
+    assert entries[0].repo_id == "2023/a"
+
+
+def test_duplicate_repo_id_raises_without_repo_key(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(
+        'repos:\n'
+        '- {repo_url: "https://g.example/x", year: 2023, team_name: "a"}\n'
+        '- {repo_url: "https://g.example/y", year: 2023, team_name: "a"}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="repo_id 冲突"):
+        load_repos(path)
+
+
+def test_repo_key_case_mismatch_still_collides(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(
+        'repos:\n'
+        '- {repo_url: "https://g.example/x", year: 2023, team_name: "aB"}\n'
+        '- {repo_url: "https://g.example/y", year: 2023, team_name: "ab"}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="repo_id 冲突"):
+        load_repos(path)
+
+
+def test_invalid_repo_key_character_raises(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(
+        'repos:\n'
+        '- {repo_url: "https://g.example/x", year: 2023, team_name: "a", repo_key: "key with space"}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        load_repos(path)
 
 
 def test_project_path_from_url():
@@ -45,7 +100,6 @@ def test_base_url_from_url():
 def test_auth_url_injects_token():
     url = _auth_url("https://gitlab.com/g/p.git", "secret-tok")
     assert url == "https://oauth2:secret-tok@gitlab.com/g/p.git"
-    # 无 token 时原样返回
     assert _auth_url("https://gitlab.com/g/p.git", None) == "https://gitlab.com/g/p.git"
 
 
@@ -59,7 +113,6 @@ def test_clone_skips_existing_without_force(tmp_path):
     subprocess.run(["git", "-C", str(dest), "add", "kernel.rs"], check=True)
     subprocess.run(["git", "-C", str(dest), "commit", "-q", "-m", "init"], check=True)
     assert is_cloned(dest)
-    # 已存在且未 --force：直接跳过，不触碰 git
     status = clone_repo("https://gitlab.com/g/p", dest, force=False)
     assert status == "skipped"
 
