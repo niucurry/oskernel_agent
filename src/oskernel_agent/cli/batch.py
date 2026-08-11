@@ -433,7 +433,8 @@ def do_summary(team_id: str, work_dir: Path, logfile: Path) -> tuple[bool, str]:
         "--comparison-digest", str(work_dir / "comparison.digest.json"),
         "--repo-id", team_id, "--output", str(dst),
     ]
-    ok, body = run_step("一页摘要", cmd, logfile, timeout=180)
+    # 摘要现由专用 AI 会话撰写；外层超时必须覆盖模型的 300 秒重试窗口和 PDF 校验。
+    ok, body = run_step("一页摘要", cmd, logfile, timeout=420)
     return ok and dst.exists(), body
 
 
