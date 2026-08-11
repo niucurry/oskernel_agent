@@ -220,6 +220,23 @@ def explain_terms_in_html(value: str) -> str:
     return "".join(output)
 
 
+def ai_disclaimer_html(kind: str) -> str:
+    """统一的 AI 生成声明，三份报告复用。"""
+    sources = {
+        "description": "源码结构分析与编译运行日志",
+        "development": "Git 提交历史与代码变更记录",
+        "comparison": "历史作品向量检索与代码相似度比对",
+    }
+    source_text = sources.get(kind, "程序自动分析")
+    return (
+        '<div class="ai-disclaimer">'
+        "本报告由人工智能（AI）分析工具自动生成，参赛队伍不得修改。"
+        f"分析依据：{source_text}。"
+        "AI 判断仅供评委参考，不构成违规认定。"
+        "</div>"
+    )
+
+
 def concise_module_summary(value: str) -> str:
     # 先解释术语再限长；反过来会让补入的中文全称把已截到 300 字的摘要再次撑长。
     plain = remove_ai_filler(html_to_text(value))

@@ -24,7 +24,7 @@ class Finding(BaseModel):
     """面向评委的问题或重要判断。"""
 
     title: str = Field(min_length=1, max_length=80)
-    detail: str = Field(min_length=1, max_length=360)
+    detail: str = Field(min_length=1, max_length=500)
     severity: Severity = "info"
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     source: ReportKind
