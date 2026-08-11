@@ -626,9 +626,8 @@ def _story(
         HRFlowable(width="100%", thickness=1.2, color=colors.HexColor("#1d4ed8")),
         Spacer(1, 3),
         Table(
-            [[Paragraph(f"作品编号：{_safe(repo_id)}", style["meta_left"]),
-              Paragraph("AI 自动生成 · 未经人工修改", style["meta"])]],
-            colWidths=[available_width * .58, available_width * .42],
+            [[Paragraph(f"作品编号：{_safe(repo_id)}", style["meta_left"])]],
+            colWidths=[available_width],
             style=TableStyle([
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
@@ -691,8 +690,7 @@ def _story(
         HRFlowable(width="100%", thickness=.6, color=colors.HexColor("#d0d5dd")),
         Spacer(1, 3),
         Paragraph(
-            "生成说明：本页作品相关判断由摘要智能体根据三份结构化报告自动生成，未经过参赛队"
-            "人工审阅或修改。内容仅用于安排评委核查顺序，不替代源码、正式编译运行日志、比赛章程与现场说明。",
+            "使用说明：内容仅用于安排评委核查顺序，不替代源码、正式编译运行日志、比赛章程与现场说明。",
             style["small"],
         ),
     ])

@@ -123,7 +123,8 @@ def test_summary_pdf_is_one_a4_page_without_links(tmp_path, monkeypatch):
     assert not (reader.pages[0].get("/Annots") or [])
     text = reader.pages[0].extract_text()
     assert "AI 总体判断" in text and "AI 检出问题与判断" in text
-    assert "AI 自动生成 · 未经人工修改" in text
+    assert "AI 自动生成 · 未经人工修改" not in text
+    assert "使用说明" in text
     assert BODY_FONT_SIZE == 10.5
 
 

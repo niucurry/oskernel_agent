@@ -431,7 +431,8 @@ def test_description_html_is_problem_first_and_module_text_is_bounded():
     assert "不据此判定风险" in rendered
     assert "修改测试脚本旁路失败" in rendered
     assert "src/main.c:7" in rendered and "确认问题" in rendered
-    assert "参赛队伍不得修改" in rendered
+    assert "参赛队伍不得修改" not in rendered
+    assert "分析依据：源码结构分析与编译运行日志" in rendered
     assert '<section id="evaluation"' not in rendered
     assert "tree-node" not in rendered
 
