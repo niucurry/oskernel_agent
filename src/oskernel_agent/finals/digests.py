@@ -24,7 +24,7 @@ GENERIC_DESCRIPTION_SUBSYSTEMS = {"其他", "其他模块", "未分类", "基础
 
 
 def description_review_sections(tree: dict) -> list[tuple[str, dict, dict | None]]:
-    """返回评委报告的并列分析维度，并把笼统“其他”拆成真实子模块。"""
+    """返回评委报告的并列分析维度，并把笼统"其他"拆成真实子模块。"""
     root = tree.get("tree") or {}
     top_nodes = [
         node for node in (root.get("children") or []) if isinstance(node, dict)
@@ -164,7 +164,7 @@ def _reviewed_hardcode_findings(verdict: dict, integrity: dict) -> list[Finding]
 
 
 def normalize_description_claim(value: str, path: str, facts: dict) -> str:
-    """用事实档案约束容易被误写成“已可用”的系统调用数量声明。"""
+    """用事实档案约束容易被误写成"已可用"的系统调用数量声明。"""
     text = remove_ai_filler(str(value or ""))
     syscall = (facts.get("syscall") or {}) if isinstance(facts, dict) else {}
     try:
@@ -317,7 +317,7 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
         ))
 
     # 顶层 verdict 只会挑代表项；描述报告还必须吸收各一级子系统中未被挑中的问题，
-    # 以免“精简”演变成静默丢失严重或语义不完整的实现。
+    # 以免"精简"演变成静默丢失严重或语义不完整的实现。
     for subsystem in ((tree.get("tree") or {}).get("children") or []):
         if not isinstance(subsystem, dict):
             continue
@@ -424,8 +424,9 @@ def comparison_digest(
     exact_file_matches: int = 0,
     ai_detect_data: dict | None = None,
     closest_institution: str = "",
+    weak_sources: list[dict] | None = None,
 ) -> ReportDigest:
-    """生成“只对比一个最近历史作品”的短摘要。"""
+    """Generate comparison digest with fallback for weak similarity signals."""
     modules: list[ModuleDigest] = []
     confirmed = review = total = 0
     for module, stats in submodule_stats.items():
@@ -434,7 +435,7 @@ def comparison_digest(
         module_review = int(stats.get("review") or 0)
         if not module_total:
             continue
-        pct = round(module_confirmed / module_total * 100, 1)
+        pct = round(module_confirmed / module_total * 100, 1) if module_total else 0.0
         modules.append(ModuleDigest(
             name=_MODULE_NAMES.get(module, module),
             summary=(f"{module_confirmed}/{module_total} 个函数形成高置信同源证据；"
@@ -447,6 +448,7 @@ def comparison_digest(
         total += module_total
     modules.sort(key=lambda item: (-(item.similarity_pct or 0), -item.evidence_count, item.name))
     overall = round(confirmed / total * 100, 1) if total else 0.0
+    weak_count = len(weak_sources or [])
     source_text = closest_source or "未形成可靠的最近历史作品"
     closest_year = ""
     closest_team = ""
@@ -459,12 +461,23 @@ def comparison_digest(
             if closest_institution else
             f"{closest_year} 年 {closest_team} 队作品"
         )
-    conclusion = (
-        f"与 {identity}最接近；按可比函数口径，{confirmed}/{total} 个函数形成"
-        f"高置信同源证据，整体比例 {overall}%。"
-        if closest_source else
-        "当前证据不足以确定唯一的最近历史作品。"
-    )
+    if closest_source:
+        conclusion = (
+            f"与 {identity}最接近；按可比函数口径，{confirmed}/{total} 个函数形成"
+            f"高置信同源证据，整体比例 {overall}%。"
+        )
+    elif confirmed + review > 0:
+        conclusion = (
+            f"检测到 {confirmed + review} 个函数存在历史相似信号（其中 {confirmed} 个高置信），"
+            f"但未形成唯一主对比对象；建议人工指定参考作品后重新比对。"
+        )
+    elif weak_count > 0:
+        conclusion = (
+            f"在 {weak_count} 个历史作品中检测到弱相似信号，"
+            f"证据不足以归入高置信同源；建议人工复核后补充对比库。"
+        )
+    else:
+        conclusion = "当前证据不足以确定历史相似作品。"
     findings: list[Finding] = []
     if closest_source and confirmed:
         findings.append(Finding(
