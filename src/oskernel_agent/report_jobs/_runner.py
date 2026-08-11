@@ -43,7 +43,11 @@ class JobResult:
 
 
 _FINAL_FILES = frozenset({
-    "summary.pdf", "description.html", "development.html", "comparison.html",
+    "summary.pdf",
+    "description.html", "description.digest.json",
+    "development.html", "development.digest.json",
+    "comparison.html", "comparison.digest.json",
+    ".report_jobs_state.json",
 })
 
 _STATE_SCHEMA_VERSION = "report-jobs-v1"
@@ -346,6 +350,13 @@ def run(
     out = Path(output_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
 
+    # comparison pipeline 使用 CWD 相对路径定位 DB/index；确保从项目根目录运行。
+    try:
+        from oskernel_agent.paths import PROJECT_ROOT
+        os.chdir(str(PROJECT_ROOT))
+    except Exception:
+        pass
+
     state = _load_state(out)
     # only reuse state if the request matches
     if (state.get("repo_id") != repo_id
@@ -414,10 +425,9 @@ def run(
             # don't proceed to downstream kinds on failure
             break
 
-    # cleanup non-final artifacts if summary succeeded or wasn't requested
-    summary_result = kind_results.get("summary")
-    if (summary_result and summary_result.status == "ok") or "summary" not in requested_set:
-        _cleanup_non_final(out)
+    # 无论 downstream 成功或失败，都清理非最终产物。
+    # summary 失败时 _repos/ 等大文件不应残留在交付目录。
+    _cleanup_non_final(out)
 
     return JobResult(
         repo_id=repo_id,
