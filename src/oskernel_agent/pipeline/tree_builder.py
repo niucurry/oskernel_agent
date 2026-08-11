@@ -35,11 +35,29 @@ from ..parsers.code_parser import (
 from ..engines.llm_batch import (
     BatchTask, opencode_serial_enabled, run_batch_task,
 )
+from ..finals.readability import is_dependency_scope_only_issue
 
 SCHEMA_VERSION = "tree-v3"
 
 MAX_MODULES_PER_SUBSYS = 8   # 每个子系统至多 N 个模块槽位
 MAX_FILES_IN_SUBSYS_PROMPT = 80
+
+_DEPENDENCY_PATH_PARTS = {
+    "vendor", "third_party", "thirdparty", "external", "node_modules", "target",
+}
+
+
+def _is_dependency_evidence_path(location: str) -> bool:
+    path = str(location or "").split(":", 1)[0].replace("\\", "/")
+    return any(part.casefold() in _DEPENDENCY_PATH_PARTS for part in path.split("/"))
+
+
+def _keep_system_level_issue(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if _is_dependency_evidence_path(str(item.get("path") or "")):
+        return False
+    return not is_dependency_scope_only_issue(str(item.get("quote") or ""))
 
 # 顶层评判 6 维度及其在总分中的权重（默认等权；如需侧重可调）。
 # score_total 由这些维度加权平均确定性算出，不再采信 LLM 自填的总分。
@@ -283,7 +301,11 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
         "若 subsystem 是系统调用，syscall_facts.standard_count 只是函数定义正则统计。"
         "工具统计与其不一致时必须同时说明口径差异；任何静态数量都不得写成语义可用或测试通过。\n"
         "除非已经逐项核验源码与测试证据，不得使用“完整”“全部”“完全一致”“确保兼容”等绝对化能力宣称；"
-        "应改写为源码能够直接证明的模块、机制或兼容目标。\n\n"
+        "应改写为源码能够直接证明的模块、机制或兼容目标。\n"
+        "第三方库（如 smoltcp、lwIP、LittleFS）本身不作为参赛作品的缺陷或自研亮点；只评价作品自有适配层"
+        "及操作系统可见行为，例如驱动接入、系统调用 ABI、阻塞/非阻塞、信号、超时、poll/epoll、路由和真实设备收发。"
+        "不得仅依据注释或‘不是完整 Linux 协议栈/文件系统’作负面结论；问题必须给出项目自有代码中的具体行为"
+        "以及对系统调用、应用运行或硬件路径的可验证影响。\n\n"
         "内容直接写 HTML（不要 Markdown）：用 `<h3>/<p>/<ul>/<table>` 等语义标签；"
         "**不要画架构图/流程图**（不要 `<pre class=\"mermaid\">`），用文字说明模块关系；"
         "文件引用写纯文本 path:line（自动变链接）。\n\n"
@@ -349,12 +371,24 @@ def _validate_subsys_result(
         raise RuntimeError(f"{subsystem_name} 缺少子系统语义摘要")
     if not str(parsed.get("content") or "").strip():
         raise RuntimeError(f"{subsystem_name} 缺少子系统分析正文")
+    parsed["highlights"] = [
+        item for item in (parsed.get("highlights") or [])
+        if isinstance(item, dict)
+        and not _is_dependency_evidence_path(str(item.get("path") or ""))
+    ]
+    parsed["issues"] = [
+        item for item in (parsed.get("issues") or []) if _keep_system_level_issue(item)
+    ]
     modules = parsed.get("modules") or []
     if not isinstance(modules, list) or not modules:
         raise RuntimeError(f"{subsystem_name} 未形成任何真实模块分析")
     for index, module in enumerate(modules, start=1):
         if not isinstance(module, dict):
             raise RuntimeError(f"{subsystem_name} 第 {index} 个模块格式无效")
+        module["file_paths"] = [
+            path for path in (module.get("file_paths") or [])
+            if not _is_dependency_evidence_path(str(path))
+        ]
         missing = [field for field in ("name", "summary", "content")
                    if not str(module.get(field) or "").strip()]
         if not module.get("file_paths"):

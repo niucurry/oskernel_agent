@@ -18,6 +18,7 @@ from oskernel_agent.pipeline.tree_builder import (
     _fallback_subsystem_for_path,
     _normalize_verdict_content_paths,
     _normalize_similarity_evidence,
+    _validate_subsys_result,
     _validate_hardcode_reviews,
     _validate_verdict_integrity_conclusion,
 )
@@ -753,3 +754,64 @@ def test_description_softens_unverified_absolute_capability_claims():
     assert "集中定义接口" in cleaned
     assert "以兼容 Linux UAPI 为目标" in cleaned
     assert "为用户程序二进制兼容提供接口基础" in cleaned
+
+
+def test_subsystem_analysis_excludes_dependency_scope_only_issues(tmp_path):
+    repo = tmp_path / "repo"
+    source = repo / "os" / "src" / "net" / "tcp.rs"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "//! loopback-oriented compatibility layer\n"
+        "pub fn sys_connect() -> isize { -111 }\n",
+        encoding="utf-8",
+    )
+    parsed = {
+        "summary": "网络适配层摘要",
+        "content": "<p>网络适配层分析。</p>",
+        "highlights": [{"path": "os/src/net/tcp.rs:2", "quote": "连接入口"}],
+        "issues": [
+            {
+                "path": "os/src/net/tcp.rs:1",
+                "severity": "low",
+                "quote": "TCP 实现声明为 loopback-oriented 兼容层，非完整 Linux TCP 栈",
+            },
+            {
+                "path": "os/src/net/tcp.rs:2",
+                "severity": "high",
+                "quote": "connect 系统调用直接返回错误码 -111，导致外部连接失败",
+            },
+            {
+                "path": "vendor/smoltcp/src/socket/tcp.rs:1",
+                "severity": "medium",
+                "quote": "第三方协议库内部实现不完整",
+            },
+        ],
+        "modules": [{
+            "name": "TCP 适配层",
+            "summary": "连接接口",
+            "content": "<p>连接接口。</p>",
+            "file_paths": ["os/src/net/tcp.rs"],
+        }],
+    }
+
+    _validate_subsys_result(parsed, "设备管理", repo)
+
+    assert parsed["issues"] == [{
+        "path": "os/src/net/tcp.rs:2",
+        "severity": "high",
+        "quote": "connect 系统调用直接返回错误码 -111，导致外部连接失败",
+    }]
+
+
+def test_description_renderer_hides_dependency_scope_only_issue():
+    tree = _tree()
+    tree["verdict"]["issues"] = []
+    tree["tree"]["children"][0]["issues"] = [{
+        "path": "src/mm.c:9",
+        "severity": "low",
+        "quote": "TCP 实现声明为 loopback-oriented 兼容层，非完整 Linux TCP 栈",
+    }]
+
+    rendered = render_tree_html(tree)
+
+    assert "loopback-oriented" not in rendered

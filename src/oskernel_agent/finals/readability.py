@@ -10,6 +10,29 @@ import re
 
 MODULE_SUMMARY_LIMIT = 300
 
+_DEPENDENCY_SCOPE_ONLY_RE = re.compile(
+    r"(?:smoltcp|lwip|littlefs|fatfs|virtio|第三方|上游|依赖).{0,60}"
+    r"(?:不完整|非完整|不是完整|未实现全部|不支持全部)"
+    r"|(?:不完整|非完整|不是完整|未实现全部|不支持全部).{0,60}"
+    r"(?:Linux\s*)?(?:TCP(?:/IP)?|网络|协议|文件系统).{0,12}(?:栈|实现)?",
+    re.IGNORECASE,
+)
+_SYSTEM_VISIBLE_EFFECT_RE = re.compile(
+    r"(?:系统调用|syscall|ABI|错误码|errno|ENOSYS|EINTR|EAGAIN|"
+    r"阻塞|非阻塞|超时|信号|poll|epoll|select|backlog|路由|eth0|网卡|"
+    r"外部网络|收包|发包|连接失败|无法连接|崩溃|panic|"
+    r"socket|connect|listen|accept|send|recv|shutdown|sockopt)",
+    re.IGNORECASE,
+)
+
+
+def is_dependency_scope_only_issue(value: str) -> bool:
+    """Reject upstream-completeness criticism without an OS-visible consequence."""
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    return bool(_DEPENDENCY_SCOPE_ONLY_RE.search(text)) and not bool(
+        _SYSTEM_VISIBLE_EFFECT_RE.search(text)
+    )
+
 _EMPTY_PHRASES = (
     "综上所述，",
     "综上所述",
