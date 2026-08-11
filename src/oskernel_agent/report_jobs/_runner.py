@@ -238,7 +238,14 @@ def _run_description(clone_path: Path, output_dir: Path) -> KindResult:
 
         html_path = output_dir / "description.html"
         repo_name = clone_path.name
-        out = _run_tree_mode(clone_path, repo_name, str(html_path), cli_depth=3)
+        out = _run_tree_mode(
+            clone_path,
+            repo_name,
+            str(html_path),
+            cli_depth=3,
+            verify_build=True,
+            pull_build_image=True,
+        )
         if out is None:
             result.error = "description report generation returned None"
             result.finished_at = _now()

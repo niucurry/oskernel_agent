@@ -259,8 +259,56 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
     integrity = facts.get("integrity") or {}
     findings: list[Finding] = []
 
+    # 新报告优先使用比赛镜像真实编译；旧报告仍可只提供外部 build_log。
+    build_interface = integrity.get("build_interface") or {}
+    if not build_interface:
+        legacy = integrity.get("reproducibility") or {}
+        if legacy.get("required_targets"):
+            build_interface = legacy
+    build_verification = (
+        integrity.get("build_verification")
+        or build_interface.get("verification")
+        or {}
+    )
+    verification_requested = bool(build_verification.get("requested"))
+    if verification_requested:
+        verification_status = str(build_verification.get("status") or "unknown")
+        target_results = build_verification.get("targets") or {}
+        if verification_status in {"failed", "partial"}:
+            details = []
+            for target in ("kernel-rv", "kernel-la"):
+                item = target_results.get(target) or {}
+                if item.get("status") == "passed":
+                    details.append(f"{target} 编译成功")
+                    continue
+                error = "；".join(str(value) for value in (item.get("errors") or [])[:2])
+                details.append(f"{target} {error or '编译未通过'}")
+            findings.append(Finding(
+                title="比赛镜像双架构编译未全部通过",
+                detail=concise_module_summary("；".join(details)),
+                severity="high",
+                confidence=1.0,
+                source="description",
+            ))
+        elif verification_status in {"environment_error", "timeout"}:
+            findings.append(Finding(
+                title="比赛镜像编译未形成结论",
+                detail=concise_module_summary(str(
+                    build_verification.get("summary")
+                    or "Docker 或宿主环境未能完成编译验证；不能据此判断作品失败。"
+                )),
+                severity="info",
+                confidence=1.0,
+                source="description",
+            ))
+
     for log_key, label in (("build_log", "编译"), ("run_log", "运行")):
         log = integrity.get(log_key) or {}
+        if log_key == "build_log" and verification_requested:
+            continue
+        if log_key == "run_log" and log.get("status") == "not_provided":
+            # 没有动态运行材料时不在描述报告中额外展开无法验证的环境。
+            continue
         if log.get("status") == "failed":
             details = "；".join(log.get("errors") or []) or f"{label}日志出现失败标记。"
             findings.append(Finding(
@@ -300,12 +348,6 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
                 evidence=[EvidenceRef(path=str(log.get("path") or ""))],
             ))
 
-    # 新报告使用 build_interface；回读旧 tree.json 时兼容原 reproducibility 字段。
-    build_interface = integrity.get("build_interface") or {}
-    if not build_interface:
-        legacy = integrity.get("reproducibility") or {}
-        if legacy.get("required_targets"):
-            build_interface = legacy
     interface_status = str(build_interface.get("status") or "unknown")
     if interface_status in {"partial", "missing"}:
         findings.append(Finding(
@@ -459,10 +501,29 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             "hardcode_cleared": sum(
                 1 for item in reviews if isinstance(item, dict) and item.get("status") == "cleared"
             ),
-            "build_log_status": (integrity.get("build_log") or {}).get("status", "not_provided"),
+            "build_log_status": (
+                build_verification.get("status", "unknown")
+                if verification_requested else
+                (integrity.get("build_log") or {}).get("status", "not_provided")
+            ),
             "run_log_status": (integrity.get("run_log") or {}).get("status", "not_provided"),
-            "build_log_note": str((integrity.get("build_log") or {}).get("note") or ""),
+            "build_log_note": str(
+                build_verification.get("summary")
+                if verification_requested else
+                (integrity.get("build_log") or {}).get("note") or ""
+            ),
             "run_log_note": str((integrity.get("run_log") or {}).get("note") or ""),
+            "build_verification_requested": verification_requested,
+            "build_verification_image": str(build_verification.get("image") or ""),
+            "build_verification_digest": str(build_verification.get("image_digest") or ""),
+            "kernel_rv_build_status": str(
+                ((build_verification.get("targets") or {}).get("kernel-rv") or {}).get("status")
+                or "not_run"
+            ),
+            "kernel_la_build_status": str(
+                ((build_verification.get("targets") or {}).get("kernel-la") or {}).get("status")
+                or "not_run"
+            ),
             "build_interface_status": build_interface.get("status", "unknown"),
             "build_interface_summary": str(build_interface.get("summary") or ""),
             "build_interface_missing_targets": "、".join(

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import re
+import subprocess
+from pathlib import Path
 
 import pytest
 
+from oskernel_agent.finals import integrity as integrity_module
 from oskernel_agent.finals.digests import description_digest_from_tree
 from oskernel_agent.analysis.repo_facts import _probe_syscall_dispatch
 from oskernel_agent.finals.integrity import (
@@ -11,6 +14,7 @@ from oskernel_agent.finals.integrity import (
     scan_build_interface,
     scan_hardcode_signals,
     scan_reproducibility,
+    verify_contest_build,
 )
 from oskernel_agent.parsers.code_parser import classify_files_by_content
 from oskernel_agent.engines.path_c import TreeSitterEngine
@@ -410,8 +414,9 @@ def test_description_html_is_problem_first_and_module_text_is_bounded():
     assert rendered.count('data-subsystem="') == 1
     assert all(int(value) <= 300 for value in re.findall(r'data-analysis-chars="(\d+)"', rendered))
     assert "构建接口</strong>" in rendered and "双架构入口完整" in rendered
-    assert "实际编译</strong>" in rendered and "失败" in rendered
-    assert "QEMU）启动 / 运行" in rendered and "未实测" in rendered
+    assert "提交编译日志</strong>" in rendered and "失败" in rendered
+    assert "QEMU）启动 / 运行" not in rendered
+    assert "运行日志</strong>" not in rendered
     assert "非必需 / 未提供" in rendered
     assert "缺少该文件不作为风险或扣分依据" not in rendered
     assert "不据此判定风险" in rendered
@@ -420,6 +425,237 @@ def test_description_html_is_problem_first_and_module_text_is_bounded():
     assert "参赛队伍不得修改" in rendered
     assert '<section id="evaluation"' not in rendered
     assert "tree-node" not in rendered
+
+
+def test_contest_build_verification_uses_temporary_copy_and_records_artifacts(
+    tmp_path, monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "Makefile").write_text(
+        "kernel-rv:\n\t@true\nkernel-la:\n\t@true\n", encoding="utf-8",
+    )
+
+    monkeypatch.setattr(integrity_module.shutil, "which", lambda _name: "docker")
+
+    def fake_docker(command, *, timeout):
+        if command[1:3] == ["version", "--format"]:
+            return subprocess.CompletedProcess(command, 0, '{"Version":"1"}\n')
+        if command[1:3] == ["image", "inspect"]:
+            return subprocess.CompletedProcess(
+                command, 0,
+                '{"Id":"sha256:image","RepoDigests":["contest@sha256:digest"],"Size":123}\n',
+            )
+        assert command[1] == "run"
+        mount = command[command.index("--mount") + 1]
+        source = mount.removeprefix("type=bind,source=").removesuffix(",target=/work")
+        target = command[-1].split()[-1]
+        (Path(source) / target).write_bytes(f"artifact-{target}".encode())
+        return subprocess.CompletedProcess(
+            command, 0,
+            f"IOCTL_HEX2STR_ERROR configuration enabled\nFinished {target}\n",
+        )
+
+    monkeypatch.setattr(integrity_module, "_docker_result", fake_docker)
+    result = verify_contest_build(repo, image="contest:test", timeout_seconds=60)
+
+    assert result["status"] == "passed"
+    assert result["image_id"] == "sha256:image"
+    assert result["image_digest"] == "contest@sha256:digest"
+    assert result["limits"] == {"cpus": "8", "memory": "12g", "pids": 2048}
+    assert set(result["targets"]) == {"kernel-rv", "kernel-la"}
+    assert all(item["artifact"]["sha256"] for item in result["targets"].values())
+    assert all(not item["errors"] for item in result["targets"].values())
+    assert not (repo / "kernel-rv").exists() and not (repo / "kernel-la").exists()
+
+
+def test_git_build_snapshot_uses_committed_lf_bytes_on_windows(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "Makefile").write_text(
+        "kernel-rv:\n\t@true\nkernel-la:\n\t@true\n", encoding="utf-8",
+    )
+    script = repo / "build.sh"
+    script.write_bytes(b"#!/bin/sh\nexit 0\n")
+    for command in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "test@example.invalid"],
+        ["git", "config", "user.name", "Test"],
+        ["git", "add", "."],
+        ["git", "commit", "-qm", "fixture"],
+    ):
+        subprocess.run(command, cwd=repo, check=True, capture_output=True)
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    committed_script = subprocess.run(
+        ["git", "show", "HEAD:build.sh"], cwd=repo, check=True, capture_output=True,
+    ).stdout
+    assert committed_script == b"#!/bin/sh\nexit 0\n"
+    script.write_bytes(b"#!/bin/sh\r\nexit 0\r\n")
+    real_which = integrity_module.shutil.which
+    monkeypatch.setattr(
+        integrity_module.shutil, "which",
+        lambda name: "docker" if name == "docker" else real_which(name),
+    )
+    observed_scripts = []
+
+    def fake_docker(command, *, timeout):
+        if command[1] == "version":
+            return subprocess.CompletedProcess(command, 0, '{"Version":"1"}\n')
+        if command[1] == "image":
+            return subprocess.CompletedProcess(
+                command, 0, '{"Id":"id","RepoDigests":[],"Size":1}\n',
+            )
+        mount = command[command.index("--mount") + 1]
+        source = mount.removeprefix("type=bind,source=").removesuffix(",target=/work")
+        observed_scripts.append((Path(source) / "build.sh").read_bytes())
+        target = command[-1].split()[-1]
+        (Path(source) / target).write_bytes(target.encode())
+        return subprocess.CompletedProcess(command, 0, f"Finished {target}\n")
+
+    monkeypatch.setattr(integrity_module, "_docker_result", fake_docker)
+    result = verify_contest_build(repo, image="contest:test", timeout_seconds=60)
+
+    assert result["status"] == "passed"
+    assert result["source"] == {
+        "kind": "git_head_snapshot",
+        "commit": commit,
+        "working_tree_dirty": True,
+    }
+    assert observed_scripts == [b"#!/bin/sh\nexit 0\n"] * 2
+
+
+def test_contest_build_verification_separates_compile_failure_from_environment_error(
+    tmp_path, monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "Makefile").write_text("all:\n\t@true\n", encoding="utf-8")
+    monkeypatch.setattr(integrity_module.shutil, "which", lambda _name: "docker")
+
+    def fake_docker(command, *, timeout):
+        if command[1] == "version":
+            return subprocess.CompletedProcess(command, 0, '{"Version":"1"}\n')
+        if command[1] == "image":
+            return subprocess.CompletedProcess(
+                command, 0, '{"Id":"id","RepoDigests":[],"Size":1}\n',
+            )
+        target = command[-1].split()[-1]
+        if target == "kernel-rv":
+            mount = command[command.index("--mount") + 1]
+            source = mount.removeprefix("type=bind,source=").removesuffix(",target=/work")
+            (Path(source) / target).write_bytes(b"rv")
+            return subprocess.CompletedProcess(command, 0, "Finished kernel-rv\n")
+        return subprocess.CompletedProcess(command, 2, "error: linker failed\n")
+
+    monkeypatch.setattr(integrity_module, "_docker_result", fake_docker)
+    result = verify_contest_build(repo, image="contest:test", timeout_seconds=60)
+
+    assert result["status"] == "partial"
+    assert result["targets"]["kernel-rv"]["status"] == "passed"
+    assert result["targets"]["kernel-la"]["status"] == "failed"
+    assert "linker failed" in result["targets"]["kernel-la"]["errors"][0]
+
+
+def test_contest_build_verification_reports_missing_docker_as_environment_error(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(integrity_module.shutil, "which", lambda _name: None)
+
+    result = verify_contest_build(tmp_path, image="contest:test", timeout_seconds=60)
+
+    assert result["status"] == "environment_error"
+    assert result["targets"] == {}
+    assert "Docker CLI" in result["summary"]
+
+
+def test_each_make_target_must_create_its_own_fresh_artifact(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "Makefile").write_text("all:\n\t@true\n", encoding="utf-8")
+    monkeypatch.setattr(integrity_module.shutil, "which", lambda _name: "docker")
+
+    def fake_docker(command, *, timeout):
+        if command[1] == "version":
+            return subprocess.CompletedProcess(command, 0, '{"Version":"1"}\n')
+        if command[1] == "image":
+            return subprocess.CompletedProcess(
+                command, 0, '{"Id":"id","RepoDigests":[],"Size":1}\n',
+            )
+        mount = command[command.index("--mount") + 1]
+        source = mount.removeprefix("type=bind,source=").removesuffix(",target=/work")
+        target = command[-1].split()[-1]
+        if target == "kernel-rv":
+            (Path(source) / "kernel-rv").write_bytes(b"rv")
+            (Path(source) / "kernel-la").write_bytes(b"stale-la")
+        return subprocess.CompletedProcess(command, 0, f"Finished {target}\n")
+
+    monkeypatch.setattr(integrity_module, "_docker_result", fake_docker)
+    result = verify_contest_build(repo, image="contest:test", timeout_seconds=60)
+
+    assert result["status"] == "partial"
+    assert result["targets"]["kernel-rv"]["status"] == "passed"
+    assert result["targets"]["kernel-la"]["status"] == "failed"
+    assert "未生成非空 kernel-la" in result["targets"]["kernel-la"]["errors"][0]
+
+
+def test_description_prefers_real_build_verification_and_omits_unprovided_run():
+    tree = _tree()
+    verification = {
+        "requested": True,
+        "status": "passed",
+        "summary": "比赛统一镜像中双架构编译成功。",
+        "image": "contest:test",
+        "image_digest": "contest@sha256:digest",
+        "targets": {
+            "kernel-rv": {
+                "status": "passed", "command": "make kernel-rv", "duration_seconds": 12,
+                "artifact": {"path": "kernel-rv", "size_bytes": 1048576, "sha256": "a" * 64},
+            },
+            "kernel-la": {
+                "status": "passed", "command": "make kernel-la", "duration_seconds": 14,
+                "artifact": {"path": "kernel-la", "size_bytes": 2097152, "sha256": "b" * 64},
+            },
+        },
+    }
+    tree["facts"]["integrity"]["build_verification"] = verification
+    tree["facts"]["integrity"]["build_interface"]["verification"] = verification
+
+    rendered = render_tree_html(tree)
+    digest = description_digest_from_tree(tree)
+
+    assert "RISC-V 编译</strong>" in rendered and "LoongArch 编译</strong>" in rendered
+    assert "比赛编译环境</strong>" in rendered and "已验证通过" in rendered
+    assert "contest@sha256:digest" in rendered
+    assert "1.0 MiB" in rendered and "2.0 MiB" in rendered
+    assert "运行日志</strong>" not in rendered
+    assert digest.metrics["build_log_status"] == "passed"
+    assert digest.metrics["kernel_rv_build_status"] == "passed"
+    assert not any(item.title == "编译失败" for item in digest.findings)
+
+
+def test_description_labels_build_environment_error_without_blame():
+    tree = _tree()
+    verification = {
+        "requested": True,
+        "status": "environment_error",
+        "summary": "本机没有可用的比赛镜像，未执行编译。",
+        "image": "contest:test",
+        "limits": {"cpus": "8", "memory": "12g", "pids": 2048},
+        "targets": {},
+    }
+    tree["facts"]["integrity"]["build_verification"] = verification
+    tree["facts"]["integrity"]["build_interface"]["verification"] = verification
+
+    rendered = render_tree_html(tree)
+    digest = description_digest_from_tree(tree)
+
+    assert "环境异常" in rendered
+    assert "本机没有可用的比赛镜像" in rendered
+    finding = next(item for item in digest.findings if item.title == "比赛镜像编译未形成结论")
+    assert finding.severity == "info"
 
 
 def test_description_has_no_problem_count_cap_and_keeps_every_serious_issue():
@@ -685,7 +921,7 @@ def test_one_line_conclusion_must_match_each_integrity_status():
 
 def test_one_line_accepts_equivalent_no_cheating_conclusion():
     parsed = {
-        "one_line": "编译日志未提供，运行日志未提供；硬编码线索均已复核，无作弊。",
+        "one_line": "编译日志未提供；硬编码线索均已复核，无作弊。",
         "hardcode_reviews": [{"status": "cleared"}],
     }
     facts = {
@@ -695,6 +931,22 @@ def test_one_line_accepts_equivalent_no_cheating_conclusion():
         }
     }
     _validate_verdict_integrity_conclusion(parsed, facts)
+
+
+def test_one_line_prefers_real_build_and_omits_unprovided_run():
+    parsed = {
+        "one_line": "双架构编译成功；未发现硬编码。",
+        "hardcode_reviews": [{"status": "cleared"}],
+    }
+    facts = {"integrity": {
+        "build_log": {"status": "failed"},
+        "build_verification": {"requested": True, "status": "passed"},
+        "run_log": {"status": "not_provided"},
+    }}
+    _validate_verdict_integrity_conclusion(parsed, facts)
+    parsed["one_line"] = "双架构编译成功，运行未实测；未发现硬编码。"
+    with pytest.raises(RuntimeError, match="不应展示运行环境缺口"):
+        _validate_verdict_integrity_conclusion(parsed, facts)
 
 
 def test_verdict_content_uses_full_path_from_structured_evidence():

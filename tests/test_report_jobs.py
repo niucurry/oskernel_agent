@@ -141,7 +141,10 @@ def test_run_description_only(monkeypatch) -> None:
     repo.mkdir()
     (repo / "main.c").write_text("int main() { return 0; }")
 
+    received = {}
+
     def fake_run_tree(repo_path, repo_name, output_file, cli_depth, **kwargs):
+        received.update(kwargs)
         Path(output_file).write_text("<html></html>")
         (Path(output_file).with_suffix(".digest.json")).write_text("{}")
         return Path(output_file)
@@ -151,6 +154,8 @@ def test_run_description_only(monkeypatch) -> None:
     assert result.kinds["description"].status == "ok"
     assert result.kinds["description"].html_path == "description.html"
     assert (output_dir / "description.html").exists()
+    assert received["verify_build"] is True
+    assert received["pull_build_image"] is True
 
 
 def test_run_checkpoint_resume(monkeypatch) -> None:

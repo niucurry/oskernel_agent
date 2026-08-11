@@ -5,8 +5,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
+import shutil
+import subprocess
+import tarfile
+import tempfile
+import time
 from pathlib import Path
 
 _ALWAYS_SKIP_DIRS = {".git", ".venv", "node_modules"}
@@ -21,6 +28,17 @@ _SCRIPT_NAMES = {"makefile", "gnumakefile", "kbuild", "kconfig"}
 _ROOT_MAKEFILE_NAMES = ("GNUmakefile", "makefile", "Makefile")
 _REQUIRED_KERNEL_TARGETS = ("kernel-rv", "kernel-la")
 _MAX_FILE_BYTES = 2 * 1024 * 1024
+DEFAULT_CONTEST_BUILD_IMAGE = "zhouzhouyi/os-contest:20260510"
+_BUILD_COPY_SKIP_DIRS = {
+    ".git", ".venv", "node_modules", "target", "build", "dist", "__pycache__",
+}
+_DOCKER_ENV_ERROR_RE = re.compile(
+    r"cannot connect to the docker daemon|docker desktop.*not running|"
+    r"error during connect|no space left on device|mounts denied|drive is not shared|"
+    r"manifest unknown|pull access denied|no matching manifest|oci runtime|"
+    r"failed to create task for container",
+    re.I,
+)
 
 REQUIRED_HARDCODE_CATEGORIES = (
     "按测试名或 ELF 名称分支",
@@ -468,8 +486,322 @@ def _scan_container_entry(root: Path) -> dict:
     }
 
 
+def _build_log_details(text: str) -> tuple[list[str], list[str]]:
+    lines = [" ".join(line.split())[:360] for line in text.splitlines() if line.strip()]
+    errors = [line for line in lines if _ERROR_RE.search(line)][:6]
+    return errors, lines[-12:]
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _build_copy_ignore(root: Path):
+    def ignore(source: str, names: list[str]) -> set[str]:
+        ignored = {name for name in names if name.casefold() in _BUILD_COPY_SKIP_DIRS}
+        if Path(source).resolve() == root:
+            ignored.update(name for name in names if name in _REQUIRED_KERNEL_TARGETS)
+        return ignored
+
+    return ignore
+
+
+def _prepare_build_workspace(root: Path, workspace: Path, temp_root: Path) -> dict:
+    """构造可复现编译输入；Git 仓库使用 HEAD 原始 blob，避开宿主换行转换。"""
+    git = shutil.which("git")
+    if git:
+        top = _local_result(
+            [git, "-C", str(root), "rev-parse", "--show-toplevel"], timeout=30,
+        )
+        if top.returncode == 0:
+            # Windows 的 Git 输出路径可能受控制台编码影响；仓库根的 .git（目录或
+            # worktree 指针文件）比字符串往返比较更可靠。
+            is_root = (root / ".git").exists()
+            if is_root:
+                revision = _local_result(
+                    [git, "-C", str(root), "rev-parse", "HEAD"], timeout=30,
+                )
+                status = _local_result(
+                    [git, "-C", str(root), "status", "--porcelain=v1"], timeout=60,
+                )
+                archive_path = temp_root / "source-head.tar"
+                archive = _local_result(
+                    [
+                        git, "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+                        "-C", str(root), "archive", "--format=tar",
+                        f"--output={archive_path}", "HEAD",
+                    ],
+                    timeout=120,
+                )
+                if revision.returncode == 0 and archive.returncode == 0 and archive_path.is_file():
+                    workspace.mkdir()
+                    with tarfile.open(archive_path, mode="r:") as source_tar:
+                        source_tar.extractall(workspace, filter="data")
+                    return {
+                        "kind": "git_head_snapshot",
+                        "commit": revision.stdout.strip(),
+                        "working_tree_dirty": bool(status.stdout.strip()) if status.returncode == 0 else None,
+                    }
+
+    shutil.copytree(
+        root,
+        workspace,
+        symlinks=True,
+        ignore=_build_copy_ignore(root),
+    )
+    return {
+        "kind": "filesystem_copy",
+        "commit": "",
+        "working_tree_dirty": None,
+    }
+
+
+def _local_result(
+    command: list[str], *, timeout: int,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        check=False,
+    )
+
+
+def _docker_result(
+    command: list[str], *, timeout: int,
+) -> subprocess.CompletedProcess[str]:
+    return _local_result(command, timeout=timeout)
+
+
+def verify_contest_build(
+    repo_path: str | Path,
+    *,
+    image: str = DEFAULT_CONTEST_BUILD_IMAGE,
+    timeout_seconds: int = 1800,
+    pull_image: bool = False,
+) -> dict:
+    """在比赛统一镜像的临时副本中依次执行双架构 Make 目标。
+
+    参赛仓库按不可信输入处理：构建发生在一次性目录和一次性容器中，不挂载原仓库、
+    Docker socket 或其他主机目录，且关闭容器网络。这里只验证编译和根目录产物，不启动
+    内核，也不把宿主环境异常归因于参赛作品。
+    """
+    root = Path(repo_path).resolve()
+    image = str(image or DEFAULT_CONTEST_BUILD_IMAGE).strip()
+    timeout_seconds = max(60, int(timeout_seconds or 1800))
+    started = time.monotonic()
+    base = {
+        "requested": True,
+        "image": image,
+        "image_id": "",
+        "image_digest": "",
+        "image_size_bytes": 0,
+        "workspace": "temporary_copy",
+        "network": "disabled",
+        "limits": {
+            "cpus": os.environ.get("OSKERNEL_BUILD_CPUS", "8"),
+            "memory": os.environ.get("OSKERNEL_BUILD_MEMORY", "12g"),
+            "pids": 2048,
+        },
+        "source": {
+            "kind": "not_prepared",
+            "commit": "",
+            "working_tree_dirty": None,
+        },
+        "targets": {},
+    }
+
+    docker = shutil.which("docker")
+    if not docker:
+        return {
+            **base,
+            "status": "environment_error",
+            "summary": "本机未安装 Docker CLI，未执行比赛镜像编译。",
+            "errors": ["docker command not found"],
+            "duration_seconds": round(time.monotonic() - started, 2),
+        }
+    try:
+        server = _docker_result(
+            [docker, "version", "--format", "{{json .Server}}"], timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            **base,
+            "status": "environment_error",
+            "summary": "无法连接 Docker Linux 引擎，未执行比赛镜像编译。",
+            "errors": [str(exc)[:360]],
+            "duration_seconds": round(time.monotonic() - started, 2),
+        }
+    if server.returncode != 0 or not server.stdout.strip() or server.stdout.strip() == "null":
+        errors, tail = _build_log_details(server.stdout)
+        return {
+            **base,
+            "status": "environment_error",
+            "summary": "Docker Linux 引擎未运行，未执行比赛镜像编译。",
+            "errors": errors or tail[-2:] or ["Docker server unavailable"],
+            "duration_seconds": round(time.monotonic() - started, 2),
+        }
+
+    inspect = _docker_result(
+        [docker, "image", "inspect", image, "--format", "{{json .}}"], timeout=30,
+    )
+    pull_output = ""
+    if inspect.returncode != 0 and pull_image:
+        try:
+            pull = _docker_result(
+                [docker, "pull", image], timeout=max(timeout_seconds, 3600),
+            )
+            pull_output = pull.stdout or ""
+        except subprocess.TimeoutExpired as exc:
+            return {
+                **base,
+                "status": "environment_error",
+                "summary": "拉取比赛镜像超时，未执行编译。",
+                "errors": [str(exc)[:360]],
+                "duration_seconds": round(time.monotonic() - started, 2),
+            }
+        if pull.returncode == 0:
+            inspect = _docker_result(
+                [docker, "image", "inspect", image, "--format", "{{json .}}"], timeout=30,
+            )
+    if inspect.returncode != 0:
+        errors, tail = _build_log_details(pull_output or inspect.stdout)
+        return {
+            **base,
+            "status": "environment_error",
+            "summary": f"本机没有可用的比赛镜像 {image}，未执行编译。",
+            "errors": errors or tail[-2:],
+            "duration_seconds": round(time.monotonic() - started, 2),
+        }
+    try:
+        image_meta = json.loads(inspect.stdout)
+    except json.JSONDecodeError:
+        image_meta = {}
+    repo_digests = image_meta.get("RepoDigests") or []
+    base.update({
+        "image_id": str(image_meta.get("Id") or ""),
+        "image_digest": str(repo_digests[0] if repo_digests else ""),
+        "image_size_bytes": int(image_meta.get("Size") or 0),
+    })
+    runtime_image = base["image_id"] or image
+
+    temp_parent = root.parent if os.access(root.parent, os.W_OK) else None
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix=".oskernel-build-", dir=str(temp_parent) if temp_parent else None,
+        ) as temp_dir:
+            workspace = Path(temp_dir) / "repo"
+            base["source"] = _prepare_build_workspace(root, workspace, Path(temp_dir))
+            for target in _REQUIRED_KERNEL_TARGETS:
+                target_started = time.monotonic()
+                artifact_path = workspace / target
+                if artifact_path.is_symlink() or artifact_path.is_file():
+                    artifact_path.unlink()
+                elif artifact_path.is_dir():
+                    shutil.rmtree(artifact_path)
+                command = [
+                    docker,
+                    "run",
+                    "--rm",
+                    "--network", "none",
+                    "--security-opt", "no-new-privileges",
+                    "--cap-drop", "ALL",
+                    "--cpus", base["limits"]["cpus"],
+                    "--memory", base["limits"]["memory"],
+                    "--pids-limit", "2048",
+                    "--mount", f"type=bind,source={workspace},target=/work",
+                    "-w", "/work",
+                    runtime_image,
+                    "/bin/bash", "-lc", f"make {target}",
+                ]
+                try:
+                    process = _docker_result(command, timeout=timeout_seconds)
+                    output = process.stdout or ""
+                    exit_code = process.returncode
+                    status = "passed" if exit_code == 0 else "failed"
+                except subprocess.TimeoutExpired as exc:
+                    raw_output = exc.stdout or ""
+                    output = (
+                        raw_output.decode("utf-8", errors="replace")
+                        if isinstance(raw_output, bytes) else str(raw_output)
+                    )
+                    exit_code = None
+                    status = "timeout"
+                errors, tail = _build_log_details(output)
+                artifact = None
+                if artifact_path.is_file() and artifact_path.stat().st_size > 0:
+                    artifact = {
+                        "path": target,
+                        "size_bytes": artifact_path.stat().st_size,
+                        "sha256": _sha256_file(artifact_path),
+                    }
+                if status == "passed" and artifact is None:
+                    status = "failed"
+                    errors.insert(0, f"命令退出码为 0，但仓库根目录未生成非空 {target}")
+                elif status == "passed":
+                    # 配置项名称可能含 ERROR（如 IOCTL_HEX2STR_ERROR），但成功退出且
+                    # 生成目标产物时不能在结构化结果中同时保留“错误”列表。
+                    errors = []
+                if status == "failed" and (
+                    exit_code == 125 or _DOCKER_ENV_ERROR_RE.search(output)
+                ):
+                    status = "environment_error"
+                base["targets"][target] = {
+                    "status": status,
+                    "command": f"make {target}",
+                    "exit_code": exit_code,
+                    "duration_seconds": round(time.monotonic() - target_started, 2),
+                    "artifact": artifact,
+                    "errors": errors[:6],
+                    "log_tail": tail,
+                }
+    except (OSError, shutil.Error) as exc:
+        return {
+            **base,
+            "status": "environment_error",
+            "summary": "创建一次性编译副本失败，未能完成比赛镜像编译。",
+            "errors": [str(exc)[:360]],
+            "duration_seconds": round(time.monotonic() - started, 2),
+        }
+
+    statuses = [
+        str((base["targets"].get(target) or {}).get("status") or "unknown")
+        for target in _REQUIRED_KERNEL_TARGETS
+    ]
+    if statuses and all(status == "passed" for status in statuses):
+        status = "passed"
+        summary = "比赛统一镜像中 kernel-rv 与 kernel-la 均编译成功，并生成非空根目录产物。"
+    elif "passed" in statuses:
+        status = "partial"
+        summary = "比赛统一镜像中仅有一个架构完成编译，双架构编译未全部通过。"
+    elif any(item == "environment_error" for item in statuses):
+        status = "environment_error"
+        summary = "比赛镜像编译受到 Docker 或宿主环境错误影响，不能据此判断作品失败。"
+    elif any(item == "timeout" for item in statuses):
+        status = "timeout"
+        summary = "比赛镜像编译超时，未形成双架构编译结论。"
+    else:
+        status = "failed"
+        summary = "比赛统一镜像中 kernel-rv 与 kernel-la 均未编译成功。"
+    return {
+        **base,
+        "status": status,
+        "summary": summary,
+        "errors": [],
+        "duration_seconds": round(time.monotonic() - started, 2),
+    }
+
+
 def scan_build_interface(repo_path: str | Path) -> dict:
-    """静态检查比赛约定的双架构 Make 入口，不执行编译或 QEMU。
+    """静态检查比赛约定的双架构 Make 入口，本函数本身不执行编译。
 
     该事实用于帮助评委确认作品是否声明了规定入口。即使两个目标都存在，也只能写
     “入口完整、未实测”，不能外推为编译、启动或测试通过。
@@ -490,7 +822,7 @@ def scan_build_interface(repo_path: str | Path) -> dict:
             "status": "missing",
             "summary": (
                 "仓库根目录未发现 Makefile、makefile 或 GNUmakefile，无法确认比赛规定的 "
-                "kernel-rv 与 kernel-la 构建入口；本报告未执行编译。"
+                "kernel-rv 与 kernel-la 构建入口。"
             ),
             "makefile": None,
             "required_targets": {
@@ -502,7 +834,7 @@ def scan_build_interface(repo_path: str | Path) -> dict:
             "evidence": [],
             "verification": {
                 "status": "not_run",
-                "summary": "本地描述报告不执行 make；实际编译状态未核验。",
+                "summary": "未请求比赛镜像编译验证；实际编译状态未核验。",
             },
             "container": container,
         }
@@ -539,7 +871,7 @@ def scan_build_interface(repo_path: str | Path) -> dict:
         status = "complete"
         summary = (
             f"根目录 {makefile_rel} 静态识别到 kernel-rv 与 kernel-la 双架构入口，"
-            "约定产物分别为仓库根目录同名文件；本报告未执行 make，不能据此判定编译通过。"
+            "约定产物分别为仓库根目录同名文件；静态目标存在不能据此判定编译通过。"
         )
     else:
         status = "partial"
@@ -548,7 +880,7 @@ def scan_build_interface(repo_path: str | Path) -> dict:
         missing_text = "、".join(missing_targets)
         summary = (
             f"根目录 {makefile_rel} 存在，但静态检查仅确认 {present_text}；"
-            f"未识别到 {missing_text}，双架构比赛构建入口不完整。本报告未执行 make。"
+            f"未识别到 {missing_text}，双架构比赛构建入口不完整。"
         )
 
     return {
@@ -561,7 +893,7 @@ def scan_build_interface(repo_path: str | Path) -> dict:
         "evidence": evidence,
         "verification": {
             "status": "not_run",
-            "summary": "本地描述报告不执行 make；目标存在只表示接口声明，实际编译状态未核验。",
+            "summary": "未请求比赛镜像编译验证；目标存在只表示接口声明，实际编译状态未核验。",
         },
         "container": container,
     }
@@ -577,19 +909,35 @@ def collect_integrity_facts(
     *,
     build_log: str | Path | None = None,
     run_log: str | Path | None = None,
+    verify_build: bool = False,
+    build_image: str = DEFAULT_CONTEST_BUILD_IMAGE,
+    build_timeout: int = 1800,
+    pull_build_image: bool = False,
 ) -> dict:
     try:
         signal_limit = max(4, int(os.environ.get("AGENT_HARDCODE_SIGNAL_LIMIT", "40")))
     except ValueError:
         signal_limit = 40
     build_interface = scan_build_interface(repo_path)
+    build_verification = (
+        verify_contest_build(
+            repo_path,
+            image=build_image,
+            timeout_seconds=build_timeout,
+            pull_image=pull_build_image,
+        )
+        if verify_build else build_interface["verification"]
+    )
+    build_interface["verification"] = build_verification
     return {
         "build_log": analyze_log(build_log, kind="build"),
         "run_log": analyze_log(run_log, kind="run"),
         "hardcode": scan_hardcode_signals(repo_path, limit=signal_limit),
         "build_interface": build_interface,
+        "build_verification": build_verification,
         "interpretation": (
-            "构建接口仅做 Makefile 静态检查，不执行编译或 QEMU；目标存在不等于编译通过。"
+            "构建接口来自 Makefile 静态检查；若请求比赛镜像验证，则双架构编译在一次性副本中执行。"
+            "目标存在不等于编译通过，宿主或 Docker 环境错误也不等于作品失败。"
             "硬编码扫描仅提供待复核线索；只有结合完整源码、正式日志和评测环境后，"
             "才能判断是否构成针对测试的作弊实现。未实测项不等于作品失败。"
         ),

@@ -678,11 +678,14 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         "2. 必须逐条复核 facts.integrity.hardcode.findings，并主动搜索四类实现："
         "按测试名/ELF 名分支、针对测试的 cache 替换、直接打印预期输出、修改脚本旁路失败。"
         "规则命中不是作弊结论；结合上下文给 confirmed/suspected/cleared，说明实现方法、影响和依据。\n"
-        "3. build_log/run_log 的状态必须写入 one_line 与详细分析；没有日志时写本报告未实测，"
-        "不得仅因本地系统未执行编译或 QEMU 而扣分。结构化 issues 只列可回溯到"
+        "3. facts.integrity.build_verification.requested=true 时，必须原样采用比赛镜像双架构"
+        "编译结果；passed 才能写实际编译通过，environment_error/timeout 不能归因于作品。"
+        "未请求真实编译时再依据 build_log，没有编译材料则写未实测。run_log 未提供时不要"
+        "额外讨论本地无法复现的运行环境，也不得因此扣分。结构化 issues 只列可回溯到"
         "仓库源码 path:line 的设计或实现问题，避免与首屏日志事实重复。\n"
         "4. 检查 facts.integrity.build_interface：它只静态判断根目录 Makefile 是否声明"
-        "kernel-rv 与 kernel-la。双目标完整只能写入口完整、未实测；缺少 Dockerfile 不是问题，"
+        "kernel-rv 与 kernel-la。双目标完整只能写入口完整；是否编译通过完全服从"
+        "build_verification 或正式 build_log。缺少 Dockerfile 不是问题，"
         "不得作为扣分依据。partial/missing 只能写静态检查未识别到规定入口，不能外推为源码"
         "编译失败。只有仓库自带容器辅助命令与 Dockerfile 明确矛盾时才作为低优先级补充。"
         "对设计不完整或不合理的问题，必须说明具体模块、"
@@ -690,7 +693,7 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         "若某种不合理设计会对特定测试有利，也要明确写出获益条件。\n"
         "5. 最终主报告不设问题数量上限：全部高/中风险、作弊和破坏语义正确性的缺失必须保留；"
         "其余低风险项进入紧凑清单。构建接口、作弊、正确性优先，无实测支撑的性能推断靠后。"
-        "构建、启动或测试未执行时，禁止声称功能完整或可用。\n"
+        "构建或测试未执行时，禁止声称功能完整或可用。\n"
         "6. 必要时 compare_with_reference_os(facts.meta.reference_os) / read_file / search_code 验证关键判断\n"
         "7. 工具调用 ≤20 次；必须为分散在不同文件的硬编码线索读取足够上下文，不得仅凭摘录猜测\n\n"
         "**写出顺序**：\n"
@@ -808,8 +811,21 @@ def _normalize_verdict(parsed: dict) -> dict:
     return parsed
 
 
+def _effective_build_status(integrity: dict) -> str:
+    """真实镜像编译一旦请求，就覆盖外部日志和静态入口判断。"""
+    build_interface = integrity.get("build_interface") or {}
+    verification = (
+        integrity.get("build_verification")
+        or build_interface.get("verification")
+        or {}
+    )
+    if verification.get("requested"):
+        return str(verification.get("status") or "unknown")
+    return str((integrity.get("build_log") or {}).get("status") or "not_provided")
+
+
 def _validate_verdict_integrity_conclusion(parsed: dict, facts: dict | None) -> None:
-    """确保首屏一句话没有漏掉编译、运行或硬编码结论。"""
+    """确保首屏一句话与唯一生效的编译、运行和硬编码事实一致。"""
     if facts is None:
         return
     text = str(parsed.get("one_line") or "")
@@ -821,20 +837,32 @@ def _validate_verdict_integrity_conclusion(parsed: dict, facts: dict | None) -> 
         "not_provided": ("未提供", "未实测", "未核验", "无法核验"),
         "missing": ("缺失", "不存在"),
         "skipped": ("不适用", "未执行"),
+        "partial": ("部分", "仅", "一个架构", "未全部通过"),
+        "timeout": ("超时", "未形成结论", "无法确认"),
+        "environment_error": ("环境异常", "环境错误", "未形成结论", "无法确认"),
     }
     clauses = [clause for clause in re.split(r"[，,；;。！？!?]", text) if clause.strip()]
-    for key, labels in (("build_log", ("编译", "构建")), ("run_log", ("运行",))):
-        status = str((integrity.get(key) or {}).get("status") or "not_provided")
+    checks = [("编译", _effective_build_status(integrity), ("编译", "构建"))]
+    run_status = str((integrity.get("run_log") or {}).get("status") or "not_provided")
+    if run_status not in {"not_provided", "missing", "skipped"}:
+        checks.append(("运行", run_status, ("运行",)))
+    else:
+        unavailable_phrases = ("未提供", "未实测", "未核验", "无法核验", "环境不可用")
+        if any(
+            "运行" in clause and any(phrase in clause for phrase in unavailable_phrases)
+            for clause in clauses
+        ):
+            raise RuntimeError("未提供正式运行日志时，顶层一句话不应展示运行环境缺口")
+
+    for subject, status, labels in checks:
         matching_clauses = [
             clause for clause in clauses if any(label in clause for label in labels)
         ]
         if not matching_clauses:
-            raise RuntimeError(f"顶层一句话结论未说明{'编译' if key == 'build_log' else '运行'}状态")
+            raise RuntimeError(f"顶层一句话结论未说明{subject}状态")
         phrases = status_phrases.get(status, status_phrases["unknown"])
         if not any(phrase in clause for clause in matching_clauses for phrase in phrases):
-            raise RuntimeError(
-                f"顶层一句话结论与{'编译' if key == 'build_log' else '运行'}事实不一致：{status}"
-            )
+            raise RuntimeError(f"顶层一句话结论与{subject}事实不一致：{status}")
 
     reviews = [item for item in (parsed.get("hardcode_reviews") or []) if isinstance(item, dict)]
     if "硬编码" not in text:
@@ -1205,12 +1233,14 @@ def repair_verdict_one_line(
     """让 AI 只压缩不合规的顶层一句话，不重写整份已验证总评。"""
     out_path = work_dir / "verdict-one-line.repair.json"
     integrity = ((facts or {}).get("integrity") or {})
+    run_status = str((integrity.get("run_log") or {}).get("status") or "not_provided")
+    run_available = run_status not in {"not_provided", "missing", "skipped"}
     issues = [item for item in (parsed.get("issues") or []) if isinstance(item, dict)]
     issue_hint = str((issues[0] if issues else {}).get("quote") or "未说明")
     payload = {
         "原句": str(parsed.get("one_line") or ""),
-        "编译状态": str((integrity.get("build_log") or {}).get("status") or "not_provided"),
-        "运行状态": str((integrity.get("run_log") or {}).get("status") or "not_provided"),
+        "编译状态": _effective_build_status(integrity),
+        "运行状态": run_status if run_available else "不展示",
         "硬编码复核状态": [
             str(item.get("status") or "")
             for item in (parsed.get("hardcode_reviews") or [])
@@ -1237,8 +1267,8 @@ def repair_verdict_one_line(
         agent_name="os-kernel-verdict",
         user_request=(
             "只修复顶层报告的一句话结论，不修改其他任何结论。根据下面数据生成一条不超过 "
-            "70 个字符的自然中文句子；必须逐项出现“编译”“运行”“硬编码”，准确说明状态，"
-            "not_provided 必须表述为本报告未实测或无法核验，不得表述为作品失败；"
+            "70 个字符的自然中文句子；必须出现“编译”“硬编码”并准确说明状态。只有“运行状态”"
+            "不是“不展示”时才写“运行”；为“不展示”时不得提运行环境或未实测。"
             "末尾点出一个最严重设计问题。status 枚举值不得写入句子；全部 cleared 时写"
             "“未发现硬编码”。不要解释。调用 write_report，把仅含 one_line 字段的 JSON 写入"
             f"指定输出路径。\n\n{json.dumps(payload, ensure_ascii=False, indent=2)}"

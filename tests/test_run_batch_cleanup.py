@@ -285,3 +285,31 @@ def test_do_comparison_archives_pair_created_by_current_run(tmp_path, monkeypatc
 
     assert ok
     assert "fresh comparison" in (final_dir / "comparison.html").read_text(encoding="utf-8")
+
+
+def test_batch_description_enables_official_image_build(tmp_path, monkeypatch):
+    url = "https://gitlab.example.test/group/repo"
+    repo_name = run_batch.fork_to_repo_name(url)
+    repos = tmp_path / "repos"
+    (repos / repo_name).mkdir(parents=True)
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    monkeypatch.setattr(run_batch, "REPOS", repos)
+    captured = {}
+
+    def successful_step(name, command, logfile, timeout):
+        captured.update(name=name, command=command, timeout=timeout)
+        (work_dir / "description.html").write_text("report", encoding="utf-8")
+        (work_dir / "description.digest.json").write_text("{}", encoding="utf-8")
+        return True, "ok"
+
+    monkeypatch.setattr(run_batch, "run_step", successful_step)
+    ok, _body = run_batch.do_description(
+        "team-1", url, work_dir, tmp_path / "description.log",
+    )
+
+    assert ok
+    assert captured["name"] == "描述报告"
+    assert "--verify-build" in captured["command"]
+    assert "--pull-build-image" in captured["command"]
+    assert captured["timeout"] == 7200

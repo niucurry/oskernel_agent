@@ -14,12 +14,14 @@ def test_frontend_exposes_finals_reports_in_judge_order():
     app = (ROOT / "frontend/src/App.vue").read_text(encoding="utf-8")
     report_files = (ROOT / "frontend/server/reportFiles.js").read_text(encoding="utf-8")
     pipeline = (ROOT / "frontend/server/pipeline.js").read_text(encoding="utf-8")
+    runner = (ROOT / "src/oskernel_agent/report_jobs/_runner.py").read_text(encoding="utf-8")
 
     expected = '["summary", "description", "development", "comparison"]'
     assert expected in report_files
     assert 'activeReportKind = ref("summary")' in app
     assert '"oskernel_agent.report_jobs"' in pipeline
     assert '"--kinds"' in pipeline
+    assert "verify_build=True" in runner and "pull_build_image=True" in runner
 
 
 def test_frontend_always_cleans_intermediates_and_keeps_digests_internal():

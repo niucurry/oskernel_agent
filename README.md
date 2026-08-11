@@ -54,7 +54,14 @@ oskernel-agent --repo-path /path/to/repository --output description.html
 oskernel-agent --url https://gitlab.example/group/project.git
 ```
 
-描述报告会先列出编译/运行证据、硬编码作弊风险和其他严重问题，再展示各内核模块。硬编码候选必须经过 AI 逐条复核；缺少必要事实、复核未完成或证据链接无效时拒绝交付。
+默认只静态核对根目录 Makefile 的 `kernel-rv` 与 `kernel-la`。需要在比赛统一镜像中真实编译时显式启用：
+
+```bash
+oskernel-agent --repo-path /path/to/repository --output description.html \
+  --verify-build --build-image zhouzhouyi/os-contest:20260510
+```
+
+本地还没有镜像时可追加 `--pull-build-image`；前端和批处理生成描述报告时会默认启用这两个参数。首次拉取镜像体积较大，工具最多等待一小时；后续直接复用本地镜像。真实编译使用一次性仓库副本、关闭容器网络并依次执行两个 Make 目标；实际运行锁定到已检查的镜像 ID，报告记录镜像 digest、资源限制、退出状态、耗时、产物大小和 SHA-256，不会修改原仓库。描述报告会先列出构建证据、硬编码作弊风险和其他严重问题，再展示各内核模块。硬编码候选必须经过 AI 逐条复核；缺少必要事实、复核未完成或证据链接无效时拒绝交付。
 
 ### 历史库与对比报告
 
