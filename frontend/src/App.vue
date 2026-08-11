@@ -134,7 +134,17 @@ async function loadAll() {
     jobs.value = jobData.rows;
     if (selected.value) {
       const latest = repositories.value.find((repo) => repo.id === selected.value.id);
-      if (latest) selected.value = { ...selected.value, ...latest };
+      if (latest) {
+        selected.value = { ...selected.value, ...latest };
+        if (latest.status === "ready" && latest.report_count !== (selected.value.reports || []).length) {
+          fetchRepository(selected.value.id).then((repo) => {
+            if (selected.value && selected.value.id === repo.id) {
+              selected.value = { ...selected.value, ...repo };
+              syncActiveReportKind(repo.reports || []);
+            }
+          }).catch(() => {});
+        }
+      }
     }
   } catch (error) {
     errorMessage.value = error.message;
