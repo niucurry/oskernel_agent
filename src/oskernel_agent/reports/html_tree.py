@@ -18,7 +18,12 @@ from oskernel_agent.finals.digests import (
     description_review_sections,
     normalize_description_claim,
 )
-from oskernel_agent.finals.readability import clip_at_sentence, concise_module_summary, explain_terms_in_html
+from oskernel_agent.finals.readability import (
+    clip_at_sentence,
+    concise_module_summary,
+    explain_terms_in_html,
+    is_dependency_scope_only_issue,
+)
 
 from ..report_quality import IncompleteReportError, assert_report_complete
 from .html import (
@@ -618,6 +623,8 @@ def _collect_report_issues(tree_json: dict) -> list[dict]:
         quote = clip_at_sentence(normalize_description_claim(
             str(item.get("quote") or ""), path, tree_json.get("facts") or {},
         ), 150)
+        if is_dependency_scope_only_issue(quote):
+            return
         if not path or not quote or not re.search(r"(?::|#L)\d+(?:-L?\d+)?$", path):
             return
         severity = str(item.get("severity") or "medium")
@@ -1152,7 +1159,7 @@ def _render_all_subsystems(tree_json: dict, resolver) -> str:
     return f"""
 <section id="modules" data-section-id="modules" class="brief-card p-5 mb-5">
   <h2 class="text-xl font-bold mb-1">模块概览</h2>
-  <p class="text-xs text-slate-500 mb-3">按仓库实际设计拆分并列模块；笼统“其他”会展开为真实子模块。每项分析不超过 300 字，重要问题不重复，低风险局部问题在所属模块内说明；实现依据覆盖各子模块的代表位置。</p>
+  <p class="text-xs text-slate-500 mb-3">按仓库实际设计拆分并列模块；笼统“其他”会展开为真实子模块。每项分析不超过 300 字，重要问题不重复，低风险局部问题在所属模块内说明；实现依据覆盖各子模块的代表位置。第三方库本身不计作作品缺陷或自研亮点，只评价项目适配代码及系统可见行为。</p>
   <div>{"".join(cards)}</div>
 </section>
 """
