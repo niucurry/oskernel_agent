@@ -1,9 +1,11 @@
 """
 用于自底向上树状报告管道的提示词构建。
 
-会话类型（2 个产出会话 + 1 个修复兜底）：
-  DIR         — 目录级聚合摘要（agent 用工具自主探索文件）
+会话类型（4 个产出会话 + 1 个修复兜底）：
+  SUBSYS      — 子系统级聚合摘要（agent 用工具自主探索文件）
   VERDICT     — 顶层评判性结论
+  DEVELOPMENT — 开发过程问题与阶段
+  SUMMARY     — 单页评审摘要
   JSON_REPAIR — JSON 损坏时的单 turn 修复
 
 第 1 层：固定角色与任务声明
@@ -21,6 +23,7 @@ class SessionType(str, Enum):
     SUBSYS      = "subsys"
     VERDICT     = "verdict"
     DEVELOPMENT = "development"
+    SUMMARY     = "summary"
     JSON_REPAIR = "json_repair"
 
 
@@ -48,6 +51,10 @@ _SESSION_TASK_DESC: dict[SessionType, str] = {
     SessionType.DEVELOPMENT: (
         "只依据用户消息提供的 Git 提交证据，复核开发过程问题候选并归纳连续开发阶段。"
         "不得编造提交、日期、代码行数或文件；问题判断和阶段结论必须给出依据与置信度。"
+    ),
+    SessionType.SUMMARY: (
+        "只依据作品描述、开发过程和历史作品对比三份结构化报告，生成一页 A4 评审摘要的"
+        "全部实质性文字；突出 AI 发现的问题、AI 判断及置信度，不得补写输入中不存在的事实。"
     ),
     SessionType.JSON_REPAIR: (
         "把损坏的 LLM 输出文本修复成合法 JSON，并通过 write_report 写入指定路径。"
@@ -128,6 +135,7 @@ SESSION_AGENT_NAMES: dict[SessionType, str] = {
     SessionType.SUBSYS:      "os-kernel-subsys",
     SessionType.VERDICT:     "os-kernel-verdict",
     SessionType.DEVELOPMENT: "os-kernel-development",
+    SessionType.SUMMARY:     "os-kernel-summary",
     SessionType.JSON_REPAIR: "os-kernel-json-repair",
 }
 

@@ -24,7 +24,7 @@ class RepoEntry(BaseModel):
             return None
         normalized = value.strip()
         if not normalized:
-            raise ValueError("repo_key 不能为空")
+            return None
         return normalized
 
     @model_validator(mode="after")
@@ -32,6 +32,7 @@ class RepoEntry(BaseModel):
         component = self.repo_key or self.team_name
         invalid_chars = '<>:"/\\|?*'
         if (component != component.strip() or component in {".", ".."}
+                or any(char.isspace() for char in component)
                 or any(char in component for char in invalid_chars)):
             raise ValueError("repo_key 或 team_name 必须是单个安全路径段")
         return self

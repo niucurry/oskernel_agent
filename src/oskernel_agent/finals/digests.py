@@ -24,7 +24,7 @@ GENERIC_DESCRIPTION_SUBSYSTEMS = {"其他", "其他模块", "未分类", "基础
 
 
 def description_review_sections(tree: dict) -> list[tuple[str, dict, dict | None]]:
-    """返回评委报告的并列分析维度，并把笼统"其他"拆成真实子模块。"""
+    """返回评委报告的并列分析维度，并把笼统“其他”拆成真实子模块。"""
     root = tree.get("tree") or {}
     top_nodes = [
         node for node in (root.get("children") or []) if isinstance(node, dict)
@@ -164,7 +164,7 @@ def _reviewed_hardcode_findings(verdict: dict, integrity: dict) -> list[Finding]
 
 
 def normalize_description_claim(value: str, path: str, facts: dict) -> str:
-    """用事实档案约束容易被误写成"已可用"的系统调用数量声明。"""
+    """用事实档案约束容易被误写成“已可用”的系统调用数量声明。"""
     text = remove_ai_filler(str(value or ""))
     syscall = (facts.get("syscall") or {}) if isinstance(facts, dict) else {}
     try:
@@ -172,7 +172,11 @@ def normalize_description_claim(value: str, path: str, facts: dict) -> str:
         total = int(syscall.get("standard_total"))
     except (TypeError, ValueError):
         return text
-    has_count_claim = bool(re.search(r"\b\d+\s*/\s*\d+\b", text))
+    has_count_claim = bool(re.search(
+        r"\b\d+\s*/\s*\d+\b|(?<!\d)\d+\s*个(?:标准\s*)?(?:Linux\s*)?(?:系统调用|syscall)",
+        text,
+        re.I,
+    ))
     if not has_count_claim or not ("系统调用" in text or "syscall" in text.casefold()):
         return text
     if "nisyscall" in text.casefold() or "ENOSYS" in text:
@@ -180,21 +184,47 @@ def normalize_description_claim(value: str, path: str, facts: dict) -> str:
             f"sys_nisyscall 对未实现编号返回 ENOSYS；函数定义正则扫描识别到 "
             f"{count}/{total} 个标准名称，该数字不代表接口语义可用。"
         )
+    dispatch = syscall.get("dispatch_count")
+    dispatch_note = (
+        f"；SYS_* 分发表静态识别到 {int(dispatch)} 个不同分支"
+        if isinstance(dispatch, int) and dispatch >= 0 else ""
+    )
     return (
         f"函数定义正则扫描识别到 {count}/{total} 个标准系统调用名称；"
-        "该计数只表示接口线索，不代表语义可用或测试通过。"
+        f"该计数只表示接口线索{dispatch_note}，不代表语义可用或测试通过。"
     )
+
+
+def normalize_description_conclusion(value: str, verdict: dict) -> str:
+    """Make hardcode counts in the headline agree with structured reviews."""
+    text = explain_terms_on_first_use(remove_ai_filler(str(value or "")))
+    reviews = [item for item in (verdict.get("hardcode_reviews") or []) if isinstance(item, dict)]
+    confirmed = sum(item.get("status") == "confirmed" for item in reviews)
+    suspected = sum(item.get("status") == "suspected" for item in reviews)
+    pattern = re.compile(
+        r"硬编码(?:存在|有|复核发现)?\s*\d+\s*(?:处|条)(?:嫌疑|疑似(?:线索|问题)?)"
+    )
+    if not pattern.search(text):
+        return text
+    replacement = (
+        f"硬编码复核确认 {confirmed} 条、疑似 {suspected} 条"
+        if confirmed else f"硬编码复核发现 {suspected} 条疑似线索、无确认项"
+    )
+    return pattern.sub(replacement, text, count=1)
 
 
 def _description_priority_key(item: Finding) -> tuple[int, int, float]:
     """先按严重级别，再在同级内按评委决策价值排序。"""
     rank = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
     text = f"{item.title} {item.detail}"
-    if item.title in {"编译失败", "运行失败", "编译日志缺失", "运行日志缺失"}:
+    if item.title in {
+        "编译失败", "运行失败", "编译日志缺失", "运行日志缺失",
+        "根目录 Make 构建入口缺失", "双架构 Make 构建入口不完整",
+    }:
         group = 0
     elif "硬编码" in item.title:
         group = 1
-    elif "复现" in item.title or "Dockerfile" in text:
+    elif "容器" in item.title or "Dockerfile" in text:
         group = 2
     elif any(token in text for token in (
         "仅返回成功", "占位实现", "行为不明确", "溢出丢弃", "旁路",
@@ -217,7 +247,7 @@ def _description_priority_key(item: Finding) -> tuple[int, int, float]:
 def description_priority_findings(
     digest: ReportDigest, limit: int | None = None,
 ) -> list[Finding]:
-    """描述报告专用顺序：可复现性、诚信、正确性、性能。"""
+    """描述报告专用顺序：比赛构建接口、诚信、正确性、性能。"""
     ordered = sorted(digest.findings, key=_description_priority_key)
     return ordered if limit is None else ordered[: max(0, limit)]
 
@@ -251,9 +281,12 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             ))
         elif log.get("status") == "not_provided":
             findings.append(Finding(
-                title=f"{label}日志未提供",
-                detail=f"未提供正式{label}日志，无法核验作品是否能够正常{label}。",
-                severity="low",
+                title=f"{label}未实测",
+                detail=(
+                    f"本地描述报告未执行正式{label}；该状态仅表示没有动态证据，"
+                    "不等于作品失败，也不应单独作为扣分依据。"
+                ),
+                severity="info",
                 confidence=1.0,
                 source="description",
             ))
@@ -267,14 +300,24 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
                 evidence=[EvidenceRef(path=str(log.get("path") or ""))],
             ))
 
-    reproducibility = integrity.get("reproducibility") or {}
-    if reproducibility.get("status") in {"warning", "missing"}:
+    # 新报告使用 build_interface；回读旧 tree.json 时兼容原 reproducibility 字段。
+    build_interface = integrity.get("build_interface") or {}
+    if not build_interface:
+        legacy = integrity.get("reproducibility") or {}
+        if legacy.get("required_targets"):
+            build_interface = legacy
+    interface_status = str(build_interface.get("status") or "unknown")
+    if interface_status in {"partial", "missing"}:
         findings.append(Finding(
-            title="自动评测环境复现存在风险",
+            title=(
+                "根目录 Make 构建入口缺失"
+                if interface_status == "missing"
+                else "双架构 Make 构建入口不完整"
+            ),
             detail=concise_module_summary(str(
-                reproducibility.get("summary") or "容器构建环境无法核验。"
+                build_interface.get("summary") or "未能确认比赛规定的双架构 Make 构建入口。"
             )),
-            severity="high" if reproducibility.get("status") == "warning" else "medium",
+            severity="high" if interface_status == "missing" else "medium",
             confidence=1.0,
             source="description",
             evidence=[
@@ -283,7 +326,26 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
                     line=item.get("line"),
                     excerpt=str(item.get("excerpt") or "")[:500],
                 )
-                for item in (reproducibility.get("evidence") or [])[:2]
+                for item in (build_interface.get("evidence") or [])[:3]
+                if isinstance(item, dict) and item.get("path")
+            ],
+        ))
+
+    container = build_interface.get("container") or {}
+    if container.get("status") == "inconsistent":
+        findings.append(Finding(
+            title="仓库自带容器辅助入口不一致",
+            detail=concise_module_summary(str(container.get("summary") or "容器辅助入口不一致。")),
+            severity="low",
+            confidence=1.0,
+            source="description",
+            evidence=[
+                EvidenceRef(
+                    path=str(item.get("path") or ""),
+                    line=item.get("line"),
+                    excerpt=str(item.get("excerpt") or "")[:500],
+                )
+                for item in (container.get("evidence") or [])[:2]
                 if isinstance(item, dict) and item.get("path")
             ],
         ))
@@ -317,7 +379,7 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
         ))
 
     # 顶层 verdict 只会挑代表项；描述报告还必须吸收各一级子系统中未被挑中的问题，
-    # 以免"精简"演变成静默丢失严重或语义不完整的实现。
+    # 以免“精简”演变成静默丢失严重或语义不完整的实现。
     for subsystem in ((tree.get("tree") or {}).get("children") or []):
         if not isinstance(subsystem, dict):
             continue
@@ -362,9 +424,10 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             ),
         ))
 
-    conclusion = explain_terms_on_first_use(remove_ai_filler(
-        str(verdict.get("one_line") or "已完成源码结构分析，结论见问题清单。")
-    ))
+    conclusion = normalize_description_conclusion(
+        str(verdict.get("one_line") or "已完成源码结构分析，结论见问题清单。"),
+        verdict,
+    )
     reviews = verdict.get("hardcode_reviews") or []
     ordered_findings = sorted(findings, key=_description_priority_key)
     return ReportDigest(
@@ -400,8 +463,15 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             "run_log_status": (integrity.get("run_log") or {}).get("status", "not_provided"),
             "build_log_note": str((integrity.get("build_log") or {}).get("note") or ""),
             "run_log_note": str((integrity.get("run_log") or {}).get("note") or ""),
-            "reproducibility_status": reproducibility.get("status", "unknown"),
-            "reproducibility_summary": str(reproducibility.get("summary") or ""),
+            "build_interface_status": build_interface.get("status", "unknown"),
+            "build_interface_summary": str(build_interface.get("summary") or ""),
+            "build_interface_missing_targets": "、".join(
+                str(value) for value in (build_interface.get("missing_targets") or [])
+            ),
+            "container_entry_status": container.get("status", "not_provided"),
+            # 兼容仍读取旧指标名的摘要产物；含义已变为比赛 Make 构建接口。
+            "reproducibility_status": build_interface.get("status", "unknown"),
+            "reproducibility_summary": str(build_interface.get("summary") or ""),
         },
     )
 
@@ -424,9 +494,9 @@ def comparison_digest(
     exact_file_matches: int = 0,
     ai_detect_data: dict | None = None,
     closest_institution: str = "",
-    weak_sources: list[dict] | None = None,
+    history_overview: dict | None = None,
 ) -> ReportDigest:
-    """Generate comparison digest with fallback for weak similarity signals."""
+    """生成主对象短摘要，并附带全历史库概览的对账指标。"""
     modules: list[ModuleDigest] = []
     confirmed = review = total = 0
     for module, stats in submodule_stats.items():
@@ -435,7 +505,7 @@ def comparison_digest(
         module_review = int(stats.get("review") or 0)
         if not module_total:
             continue
-        pct = round(module_confirmed / module_total * 100, 1) if module_total else 0.0
+        pct = round(module_confirmed / module_total * 100, 1)
         modules.append(ModuleDigest(
             name=_MODULE_NAMES.get(module, module),
             summary=(f"{module_confirmed}/{module_total} 个函数形成高置信同源证据；"
@@ -448,7 +518,6 @@ def comparison_digest(
         total += module_total
     modules.sort(key=lambda item: (-(item.similarity_pct or 0), -item.evidence_count, item.name))
     overall = round(confirmed / total * 100, 1) if total else 0.0
-    weak_count = len(weak_sources or [])
     source_text = closest_source or "未形成可靠的最近历史作品"
     closest_year = ""
     closest_team = ""
@@ -456,28 +525,20 @@ def comparison_digest(
         closest_year, closest_team = closest_source.split("/", 1)
     identity = source_text
     if closest_year and closest_team:
+        closest_team_label = (
+            closest_team if closest_team.endswith("队") else f"{closest_team} 队"
+        )
         identity = (
-            f"{closest_year} 年来自 {closest_institution} 的 {closest_team} 队作品"
+            f"{closest_year} 年来自 {closest_institution} 的 {closest_team_label}作品"
             if closest_institution else
-            f"{closest_year} 年 {closest_team} 队作品"
+            f"{closest_year} 年 {closest_team_label}作品"
         )
-    if closest_source:
-        conclusion = (
-            f"与 {identity}最接近；按可比函数口径，{confirmed}/{total} 个函数形成"
-            f"高置信同源证据，整体比例 {overall}%。"
-        )
-    elif confirmed + review > 0:
-        conclusion = (
-            f"检测到 {confirmed + review} 个函数存在历史相似信号（其中 {confirmed} 个高置信），"
-            f"但未形成唯一主对比对象；建议人工指定参考作品后重新比对。"
-        )
-    elif weak_count > 0:
-        conclusion = (
-            f"在 {weak_count} 个历史作品中检测到弱相似信号，"
-            f"证据不足以归入高置信同源；建议人工复核后补充对比库。"
-        )
-    else:
-        conclusion = "当前证据不足以确定历史相似作品。"
+    conclusion = (
+        f"与 {identity}最接近；按可比函数口径，{confirmed}/{total} 个函数形成"
+        f"高置信同源证据，整体比例 {overall}%。"
+        if closest_source else
+        "当前证据不足以确定唯一的最近历史作品。"
+    )
     findings: list[Finding] = []
     if closest_source and confirmed:
         findings.append(Finding(
@@ -511,6 +572,15 @@ def comparison_digest(
             severity="medium", confidence=0.7, source="comparison",
         ))
 
+    history = history_overview or {}
+    history_sources = list(history.get("sources") or [])
+    history_confirmed = int(history.get("confirmed_functions") or 0)
+    history_comparable = int(history.get("comparable_functions") or 0)
+    history_pct = (
+        round(history_confirmed / history_comparable * 100, 1)
+        if history_comparable else 0.0
+    )
+
     return ReportDigest(
         repo_id=repo_id,
         kind="comparison",
@@ -529,6 +599,12 @@ def comparison_digest(
             "comparable_functions": total,
             "exact_file_matches": exact_file_matches,
             "ai_llm_functions": llm_count,
+            "metric_scope": "closest_historical_repo",
+            "history_sources_shown": min(5, len(history_sources)),
+            "history_total_functions": int(history.get("total_functions") or 0),
+            "history_comparable_functions": history_comparable,
+            "history_confirmed_functions": history_confirmed,
+            "history_similarity_pct": history_pct,
         },
     )
 

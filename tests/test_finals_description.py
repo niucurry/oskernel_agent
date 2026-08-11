@@ -5,18 +5,29 @@ import re
 import pytest
 
 from oskernel_agent.finals.digests import description_digest_from_tree
-from oskernel_agent.finals.integrity import analyze_log, scan_hardcode_signals, scan_reproducibility
+from oskernel_agent.analysis.repo_facts import _probe_syscall_dispatch
+from oskernel_agent.finals.integrity import (
+    analyze_log,
+    scan_build_interface,
+    scan_hardcode_signals,
+    scan_reproducibility,
+)
 from oskernel_agent.parsers.code_parser import classify_files_by_content
 from oskernel_agent.engines.path_c import TreeSitterEngine
 from oskernel_agent.pipeline.tree_builder import (
     _fallback_subsystem_for_path,
     _normalize_verdict_content_paths,
     _normalize_similarity_evidence,
+    _validate_subsys_result,
     _validate_hardcode_reviews,
     _validate_verdict_integrity_conclusion,
 )
 from oskernel_agent.report_quality import IncompleteReportError
-from oskernel_agent.reports.html_tree import render_tree_html, write_tree_html
+from oskernel_agent.reports.html_tree import (
+    _clean_capability_claim,
+    render_tree_html,
+    write_tree_html,
+)
 from oskernel_agent.cli.agent import _cleanup_tree_intermediates
 
 
@@ -28,6 +39,26 @@ def _tree() -> dict:
                 "build_log": {"status": "failed", "path": "build.log",
                               "errors": ["error: missing symbol"]},
                 "run_log": {"status": "not_provided"},
+                "build_interface": {
+                    "status": "complete",
+                    "summary": (
+                        "根目录 Makefile 静态识别到 kernel-rv 与 kernel-la 双架构入口；"
+                        "本报告未执行 make。"
+                    ),
+                    "missing_targets": [],
+                    "evidence": [{
+                        "path": "Makefile", "line": 1,
+                        "excerpt": ".PHONY: kernel-rv kernel-la",
+                    }],
+                    "container": {
+                        "status": "not_provided",
+                        "summary": (
+                            "未提供 Dockerfile；比赛构建接口以根目录 Makefile 为准，"
+                            "因此不据此判定风险。"
+                        ),
+                        "evidence": [],
+                    },
+                },
                 "hardcode": {"findings": [{
                     "signal_id": "src/main.c:7:按测试名或 ELF 名称分支",
                     "category": "按测试名或 ELF 名称分支",
@@ -188,9 +219,90 @@ def test_early_success_exit_in_test_script_is_a_review_candidate(tmp_path):
     )
 
 
-def test_root_docker_build_without_root_dockerfile_is_a_reproducibility_risk(tmp_path):
+def test_mygo_style_makefile_is_complete_without_dockerfile(tmp_path):
     (tmp_path / "Makefile").write_text(
-        "build_docker:\n\tdocker build -t demo .\n", encoding="utf-8"
+        ".PHONY: all kernel-rv kernel-la\n"
+        "all: kernel-rv kernel-la\n"
+        "kernel-la:\n\tcargo build --target loongarch64-unknown-none\n"
+        "\tcp target/loongarch64-unknown-none/release/kernel kernel-la\n"
+        "kernel-rv:\n\tcargo build --target riscv64gc-unknown-none-elf\n"
+        "\tcp target/riscv64gc-unknown-none-elf/release/kernel kernel-rv\n",
+        encoding="utf-8",
+    )
+
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "complete"
+    assert result["missing_targets"] == []
+    assert all(item["declared"] for item in result["required_targets"].values())
+    assert result["verification"]["status"] == "not_run"
+    assert result["container"]["status"] == "not_provided"
+    assert "不据此判定风险" in result["container"]["summary"]
+    assert "不能据此判定编译通过" in result["summary"]
+
+
+def test_make_targets_declared_through_simple_variables_are_detected(tmp_path):
+    (tmp_path / "Makefile").write_text(
+        "KERNEL_RV := kernel-rv\n"
+        "KERNEL_LA := kernel-la\n"
+        "$(KERNEL_RV):\n\t@echo rv\n"
+        "$(KERNEL_LA):\n\t@echo la\n",
+        encoding="utf-8",
+    )
+
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "complete"
+    assert result["required_targets"]["kernel-rv"]["line"] == 3
+    assert result["required_targets"]["kernel-la"]["line"] == 5
+
+
+def test_literal_included_makefile_targets_are_detected_without_running_make(tmp_path):
+    rules = tmp_path / "mk" / "targets.mk"
+    rules.parent.mkdir()
+    rules.write_text(
+        "kernel-rv:\n\t@echo rv\n"
+        "kernel-la:\n\t@echo la\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "Makefile").write_text("include mk/targets.mk\n", encoding="utf-8")
+
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "complete"
+    assert result["required_targets"]["kernel-rv"]["path"] == "mk/targets.mk"
+
+
+def test_missing_one_architecture_is_reported_as_partial_interface(tmp_path):
+    (tmp_path / "Makefile").write_text(
+        "kernel-rv:\n\t@echo rv\n", encoding="utf-8"
+    )
+
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "partial"
+    assert result["missing_targets"] == ["kernel-la"]
+    assert "双架构比赛构建入口不完整" in result["summary"]
+
+
+def test_phony_names_without_real_rules_do_not_count_as_kernel_targets(tmp_path):
+    (tmp_path / "Makefile").write_text(
+        ".PHONY: kernel-rv kernel-la\nall: kernel-rv kernel-la\n",
+        encoding="utf-8",
+    )
+
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "partial"
+    assert result["missing_targets"] == ["kernel-rv", "kernel-la"]
+
+
+def test_root_docker_build_mismatch_is_only_an_auxiliary_warning(tmp_path):
+    (tmp_path / "Makefile").write_text(
+        "kernel-rv:\n\t@echo rv\n"
+        "kernel-la:\n\t@echo la\n"
+        "build_docker:\n\tdocker build -t demo .\n",
+        encoding="utf-8",
     )
     nested = tmp_path / "ci" / "Dockerfile"
     nested.parent.mkdir()
@@ -198,11 +310,21 @@ def test_root_docker_build_without_root_dockerfile_is_a_reproducibility_risk(tmp
 
     result = scan_reproducibility(tmp_path)
 
-    assert result["status"] == "warning"
-    assert "根目录没有 Dockerfile" in result["summary"]
-    assert {(item["path"], item["line"]) for item in result["evidence"]} == {
-        ("Makefile", 2), ("ci/Dockerfile", 1),
+    assert result["status"] == "complete"
+    assert result["container"]["status"] == "inconsistent"
+    assert "根目录没有 Dockerfile" in result["container"]["summary"]
+    assert {(item["path"], item["line"]) for item in result["container"]["evidence"]} == {
+        ("Makefile", 6), ("ci/Dockerfile", 1),
     }
+
+
+def test_missing_root_makefile_is_a_build_interface_problem_not_a_docker_problem(tmp_path):
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "missing"
+    assert result["missing_targets"] == ["kernel-rv", "kernel-la"]
+    assert "根目录未发现" in result["summary"]
+    assert result["container"]["status"] == "not_provided"
 
 
 def test_startup_code_is_classified_as_required_startup_module(tmp_path):
@@ -253,6 +375,31 @@ def test_description_digest_puts_runtime_and_hardcode_first():
     assert len(digest.modules[0].summary) <= 300
 
 
+def test_description_digest_flags_missing_arch_target_without_treating_no_docker_as_risk():
+    tree = _tree()
+    tree["facts"]["integrity"]["build_log"] = {"status": "not_provided"}
+    tree["facts"]["integrity"]["build_interface"] = {
+        "status": "partial",
+        "summary": "根目录 Makefile 未识别到 kernel-la，双架构比赛构建入口不完整。",
+        "missing_targets": ["kernel-la"],
+        "evidence": [{"path": "Makefile", "line": 1, "excerpt": "kernel-rv:"}],
+        "container": {
+            "status": "not_provided",
+            "summary": "未提供 Dockerfile；不据此判定风险。",
+            "evidence": [],
+        },
+    }
+
+    digest = description_digest_from_tree(tree)
+
+    interface = next(item for item in digest.findings if "构建入口" in item.title)
+    assert interface.title == "双架构 Make 构建入口不完整"
+    assert interface.severity == "medium"
+    assert not any("Dockerfile" in item.title for item in digest.findings)
+    compile_fact = next(item for item in digest.findings if item.title == "编译未实测")
+    assert compile_fact.severity == "info"
+
+
 def test_description_html_is_problem_first_and_module_text_is_bounded():
     rendered = render_tree_html(_tree())
     assert rendered.index('<section id="verdict"') < rendered.index('<section id="modules"')
@@ -262,8 +409,12 @@ def test_description_html_is_problem_first_and_module_text_is_bounded():
     assert "模块详细证据" not in rendered and "子系统详细证据" not in rendered
     assert rendered.count('data-subsystem="') == 1
     assert all(int(value) <= 300 for value in re.findall(r'data-analysis-chars="(\d+)"', rendered))
-    assert "构建</strong>" in rendered and "失败" in rendered
-    assert "启动 / 运行" in rendered and "未提供" in rendered
+    assert "构建接口</strong>" in rendered and "双架构入口完整" in rendered
+    assert "实际编译</strong>" in rendered and "失败" in rendered
+    assert "QEMU）启动 / 运行" in rendered and "未实测" in rendered
+    assert "非必需 / 未提供" in rendered
+    assert "缺少该文件不作为风险或扣分依据" not in rendered
+    assert "不据此判定风险" in rendered
     assert "修改测试脚本旁路失败" in rendered
     assert "src/main.c:7" in rendered and "确认问题" in rendered
     assert "参赛队伍不得修改" in rendered
@@ -413,6 +564,79 @@ def test_syscall_count_is_labeled_as_a_static_signal_and_never_overclaims():
     assert "不代表语义可用或测试通过" in rendered
 
 
+def test_plain_syscall_count_is_also_replaced_by_static_scan_wording():
+    tree = _tree()
+    tree["facts"]["syscall"] = {
+        "standard_count": 44, "standard_total": 60, "dispatch_count": 230,
+    }
+    tree["tree"]["children"][0]["summary"] = "模块实现了44个标准 Linux 系统调用。"
+
+    rendered = render_tree_html(tree)
+
+    assert "实现了44个" not in rendered
+    assert "44/60" in rendered and "230 个不同分支" in rendered
+
+
+def test_syscall_dispatch_probe_counts_unique_rust_and_c_arms(tmp_path):
+    rust = tmp_path / "src" / "syscall.rs"
+    rust.parent.mkdir()
+    rust.write_text(
+        "match id {\n SYS_OPEN => open(),\n SYS_CLOSE => close(),\n SYS_OPEN => open2(),\n}\n",
+        encoding="utf-8",
+    )
+    c = tmp_path / "kernel.c"
+    c.write_text("switch (id) {\ncase SYS_READ: return read();\n}\n", encoding="utf-8")
+
+    count, evidence = _probe_syscall_dispatch(tmp_path)
+
+    assert count == 3
+    assert evidence == ["src/syscall.rs:2", "kernel.c:2"] or evidence == [
+        "kernel.c:2", "src/syscall.rs:2",
+    ]
+
+
+def test_hardcode_count_in_conclusion_comes_from_structured_reviews():
+    tree = _tree()
+    tree["verdict"]["one_line"] = "构建未提供；硬编码存在6处嫌疑。"
+    tree["verdict"]["hardcode_reviews"] = [
+        {**tree["verdict"]["hardcode_reviews"][0], "signal_id": f"s{i}", "status": "suspected"}
+        for i in range(7)
+    ]
+    tree["facts"]["integrity"]["hardcode"]["findings"] = [
+        {"signal_id": f"s{i}"} for i in range(7)
+    ]
+
+    rendered = render_tree_html(tree)
+
+    assert "硬编码存在6处嫌疑" not in rendered
+    assert "硬编码复核发现 7 条疑似线索、无确认项" in rendered
+
+
+def test_hardcode_brief_hides_raw_scanner_candidate_counts():
+    tree = _tree()
+    tree["facts"]["integrity"]["hardcode"].update({
+        "candidate_count": 46,
+        "scanned_files": 220,
+        "category_coverage": {
+            name: {"scanned": True}
+            for name in ("elf", "cache", "print", "script")
+        },
+    })
+    tree["verdict"]["hardcode_reviews"] = [
+        {**tree["verdict"]["hardcode_reviews"][0], "signal_id": f"s{i}", "status": "suspected"}
+        for i in range(7)
+    ]
+    tree["facts"]["integrity"]["hardcode"]["findings"] = [
+        {"signal_id": f"s{i}"} for i in range(7)
+    ]
+
+    rendered = render_tree_html(tree)
+
+    assert "AI 复核确认 0 条、疑似 7 条" in rendered
+    assert "命中 46 条候选" not in rendered
+    assert "扫描 220 个文件" not in rendered
+
+
 def test_every_scanner_signal_requires_structured_ai_review():
     tree = _tree()
     facts = tree["facts"]
@@ -500,6 +724,9 @@ def test_description_links_use_target_repository_metadata(tmp_path):
     tree["facts"]["integrity"]["build_log"] = {"status": "not_provided"}
     repo = tmp_path / "repo"
     (repo / "src").mkdir(parents=True)
+    (repo / "Makefile").write_text(
+        "kernel-rv:\n\t@echo rv\nkernel-la:\n\t@echo la\n", encoding="utf-8"
+    )
     (repo / "src" / "main.c").write_text("\n" * 7, encoding="utf-8")
     (repo / "src" / "mm.c").write_text("\n" * 9, encoding="utf-8")
 
@@ -511,3 +738,105 @@ def test_description_links_use_target_repository_metadata(tmp_path):
     assert not broken
     assert "https://gitlab.example.com/contest/cosmos/-/blob/deadbeef/" in rendered
     assert "report/generator" not in rendered
+
+
+def test_description_file_only_evidence_gets_a_line_anchor(tmp_path):
+    tree = _tree()
+    tree["meta"]["repository_url"] = "https://gitlab.example.com/contest/cosmos"
+    tree["meta"]["repository_ref"] = "deadbeef"
+    tree["facts"]["integrity"]["build_log"] = {"status": "not_provided"}
+    tree["tree"]["children"][0]["highlights"] = [
+        {"path": "src/main.c", "quote": "entry point"},
+    ]
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "Makefile").write_text(
+        "kernel-rv:\n\t@echo rv\nkernel-la:\n\t@echo la\n", encoding="utf-8"
+    )
+    (repo / "src" / "main.c").write_text("\n" * 7 + "int main(void) {}\n", encoding="utf-8")
+    (repo / "src" / "mm.c").write_text("\n" * 9, encoding="utf-8")
+
+    output, broken = write_tree_html(
+        tmp_path / "description.html", tree, repo_roots=[repo]
+    )
+
+    rendered = output.read_text(encoding="utf-8")
+    assert not broken
+    assert "/src/main.c#L1" in rendered
+    assert ">src/main.c:1</a>" in rendered
+
+
+def test_description_softens_unverified_absolute_capability_claims():
+    claim = (
+        "覆盖完整，构建了完整的 TCP/IP 网络协议栈，完整定义接口，"
+        "与 Linux 主线 UAPI 头文件保持一致，确保用户程序二进制兼容。"
+    )
+
+    cleaned = _clean_capability_claim(claim, {"facts": {}})
+
+    assert "覆盖主要路径" in cleaned
+    assert "基于 smoltcp 的 TCP/IP 网络能力" in cleaned
+    assert "集中定义接口" in cleaned
+    assert "以兼容 Linux UAPI 为目标" in cleaned
+    assert "为用户程序二进制兼容提供接口基础" in cleaned
+
+
+def test_subsystem_analysis_excludes_dependency_scope_only_issues(tmp_path):
+    repo = tmp_path / "repo"
+    source = repo / "os" / "src" / "net" / "tcp.rs"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "//! loopback-oriented compatibility layer\n"
+        "pub fn sys_connect() -> isize { -111 }\n",
+        encoding="utf-8",
+    )
+    parsed = {
+        "summary": "网络适配层摘要",
+        "content": "<p>网络适配层分析。</p>",
+        "highlights": [{"path": "os/src/net/tcp.rs:2", "quote": "连接入口"}],
+        "issues": [
+            {
+                "path": "os/src/net/tcp.rs:1",
+                "severity": "low",
+                "quote": "TCP 实现声明为 loopback-oriented 兼容层，非完整 Linux TCP 栈",
+            },
+            {
+                "path": "os/src/net/tcp.rs:2",
+                "severity": "high",
+                "quote": "connect 系统调用直接返回错误码 -111，导致外部连接失败",
+            },
+            {
+                "path": "vendor/smoltcp/src/socket/tcp.rs:1",
+                "severity": "medium",
+                "quote": "第三方协议库内部实现不完整",
+            },
+        ],
+        "modules": [{
+            "name": "TCP 适配层",
+            "summary": "连接接口",
+            "content": "<p>连接接口。</p>",
+            "file_paths": ["os/src/net/tcp.rs"],
+        }],
+    }
+
+    _validate_subsys_result(parsed, "设备管理", repo)
+
+    assert parsed["issues"] == [{
+        "path": "os/src/net/tcp.rs:2",
+        "severity": "high",
+        "quote": "connect 系统调用直接返回错误码 -111，导致外部连接失败",
+    }]
+
+
+def test_description_renderer_hides_dependency_scope_only_issue():
+    tree = _tree()
+    tree["verdict"]["issues"] = []
+    tree["tree"]["children"][0]["issues"] = [{
+        "path": "src/mm.c:9",
+        "severity": "low",
+        "quote": "TCP 实现声明为 loopback-oriented 兼容层，非完整 Linux TCP 栈",
+    }]
+
+    rendered = render_tree_html(tree)
+
+    assert "loopback-oriented" not in rendered
