@@ -644,14 +644,18 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         "2. 必须逐条复核 facts.integrity.hardcode.findings，并主动搜索四类实现："
         "按测试名/ELF 名分支、针对测试的 cache 替换、直接打印预期输出、修改脚本旁路失败。"
         "规则命中不是作弊结论；结合上下文给 confirmed/suspected/cleared，说明实现方法、影响和依据。\n"
-        "3. build_log/run_log 的状态必须写入 one_line 与详细分析；结构化 issues 只列可回溯到"
+        "3. build_log/run_log 的状态必须写入 one_line 与详细分析；没有日志时写本报告未实测，"
+        "不得仅因本地系统未执行编译或 QEMU 而扣分。结构化 issues 只列可回溯到"
         "仓库源码 path:line 的设计或实现问题，避免与首屏日志事实重复。\n"
-        "4. 检查 facts.integrity.reproducibility：容器配置存在不等于构建通过；配置入口不一致时"
-        "必须报告并引用 evidence。对设计不完整或不合理的问题，必须说明具体模块、"
+        "4. 检查 facts.integrity.build_interface：它只静态判断根目录 Makefile 是否声明"
+        "kernel-rv 与 kernel-la。双目标完整只能写入口完整、未实测；缺少 Dockerfile 不是问题，"
+        "不得作为扣分依据。partial/missing 只能写静态检查未识别到规定入口，不能外推为源码"
+        "编译失败。只有仓库自带容器辅助命令与 Dockerfile 明确矛盾时才作为低优先级补充。"
+        "对设计不完整或不合理的问题，必须说明具体模块、"
         "性能/正确性影响、真实 path:line；"
         "若某种不合理设计会对特定测试有利，也要明确写出获益条件。\n"
         "5. 最终主报告不设问题数量上限：全部高/中风险、作弊和破坏语义正确性的缺失必须保留；"
-        "其余低风险项进入紧凑清单。构建/复现、作弊、正确性优先，无实测支撑的性能推断靠后。"
+        "其余低风险项进入紧凑清单。构建接口、作弊、正确性优先，无实测支撑的性能推断靠后。"
         "构建、启动或测试未执行时，禁止声称功能完整或可用。\n"
         "6. 必要时 compare_with_reference_os(facts.meta.reference_os) / read_file / search_code 验证关键判断\n"
         "7. 工具调用 ≤20 次；必须为分散在不同文件的硬编码线索读取足够上下文，不得仅凭摘录猜测\n\n"
@@ -780,7 +784,7 @@ def _validate_verdict_integrity_conclusion(parsed: dict, facts: dict | None) -> 
         "passed": ("通过", "成功"),
         "failed": ("失败",),
         "unknown": ("未确认", "无法确认", "未能确认"),
-        "not_provided": ("未提供", "未核验", "无法核验"),
+        "not_provided": ("未提供", "未实测", "未核验", "无法核验"),
         "missing": ("缺失", "不存在"),
         "skipped": ("不适用", "未执行"),
     }
@@ -1200,6 +1204,7 @@ def repair_verdict_one_line(
         user_request=(
             "只修复顶层报告的一句话结论，不修改其他任何结论。根据下面数据生成一条不超过 "
             "70 个字符的自然中文句子；必须逐项出现“编译”“运行”“硬编码”，准确说明状态，"
+            "not_provided 必须表述为本报告未实测或无法核验，不得表述为作品失败；"
             "末尾点出一个最严重设计问题。status 枚举值不得写入句子；全部 cleared 时写"
             "“未发现硬编码”。不要解释。调用 write_report，把仅含 one_line 字段的 JSON 写入"
             f"指定输出路径。\n\n{json.dumps(payload, ensure_ascii=False, indent=2)}"

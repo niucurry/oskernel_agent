@@ -217,11 +217,14 @@ def _description_priority_key(item: Finding) -> tuple[int, int, float]:
     """先按严重级别，再在同级内按评委决策价值排序。"""
     rank = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
     text = f"{item.title} {item.detail}"
-    if item.title in {"编译失败", "运行失败", "编译日志缺失", "运行日志缺失"}:
+    if item.title in {
+        "编译失败", "运行失败", "编译日志缺失", "运行日志缺失",
+        "根目录 Make 构建入口缺失", "双架构 Make 构建入口不完整",
+    }:
         group = 0
     elif "硬编码" in item.title:
         group = 1
-    elif "复现" in item.title or "Dockerfile" in text:
+    elif "容器" in item.title or "Dockerfile" in text:
         group = 2
     elif any(token in text for token in (
         "仅返回成功", "占位实现", "行为不明确", "溢出丢弃", "旁路",
@@ -244,7 +247,7 @@ def _description_priority_key(item: Finding) -> tuple[int, int, float]:
 def description_priority_findings(
     digest: ReportDigest, limit: int | None = None,
 ) -> list[Finding]:
-    """描述报告专用顺序：可复现性、诚信、正确性、性能。"""
+    """描述报告专用顺序：比赛构建接口、诚信、正确性、性能。"""
     ordered = sorted(digest.findings, key=_description_priority_key)
     return ordered if limit is None else ordered[: max(0, limit)]
 
@@ -278,9 +281,12 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             ))
         elif log.get("status") == "not_provided":
             findings.append(Finding(
-                title=f"{label}日志未提供",
-                detail=f"未提供正式{label}日志，无法核验作品是否能够正常{label}。",
-                severity="low",
+                title=f"{label}未实测",
+                detail=(
+                    f"本地描述报告未执行正式{label}；该状态仅表示没有动态证据，"
+                    "不等于作品失败，也不应单独作为扣分依据。"
+                ),
+                severity="info",
                 confidence=1.0,
                 source="description",
             ))
@@ -294,14 +300,24 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
                 evidence=[EvidenceRef(path=str(log.get("path") or ""))],
             ))
 
-    reproducibility = integrity.get("reproducibility") or {}
-    if reproducibility.get("status") in {"warning", "missing"}:
+    # 新报告使用 build_interface；回读旧 tree.json 时兼容原 reproducibility 字段。
+    build_interface = integrity.get("build_interface") or {}
+    if not build_interface:
+        legacy = integrity.get("reproducibility") or {}
+        if legacy.get("required_targets"):
+            build_interface = legacy
+    interface_status = str(build_interface.get("status") or "unknown")
+    if interface_status in {"partial", "missing"}:
         findings.append(Finding(
-            title="自动评测环境复现存在风险",
+            title=(
+                "根目录 Make 构建入口缺失"
+                if interface_status == "missing"
+                else "双架构 Make 构建入口不完整"
+            ),
             detail=concise_module_summary(str(
-                reproducibility.get("summary") or "容器构建环境无法核验。"
+                build_interface.get("summary") or "未能确认比赛规定的双架构 Make 构建入口。"
             )),
-            severity="high" if reproducibility.get("status") == "warning" else "medium",
+            severity="high" if interface_status == "missing" else "medium",
             confidence=1.0,
             source="description",
             evidence=[
@@ -310,7 +326,26 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
                     line=item.get("line"),
                     excerpt=str(item.get("excerpt") or "")[:500],
                 )
-                for item in (reproducibility.get("evidence") or [])[:2]
+                for item in (build_interface.get("evidence") or [])[:3]
+                if isinstance(item, dict) and item.get("path")
+            ],
+        ))
+
+    container = build_interface.get("container") or {}
+    if container.get("status") == "inconsistent":
+        findings.append(Finding(
+            title="仓库自带容器辅助入口不一致",
+            detail=concise_module_summary(str(container.get("summary") or "容器辅助入口不一致。")),
+            severity="low",
+            confidence=1.0,
+            source="description",
+            evidence=[
+                EvidenceRef(
+                    path=str(item.get("path") or ""),
+                    line=item.get("line"),
+                    excerpt=str(item.get("excerpt") or "")[:500],
+                )
+                for item in (container.get("evidence") or [])[:2]
                 if isinstance(item, dict) and item.get("path")
             ],
         ))
@@ -428,8 +463,15 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             "run_log_status": (integrity.get("run_log") or {}).get("status", "not_provided"),
             "build_log_note": str((integrity.get("build_log") or {}).get("note") or ""),
             "run_log_note": str((integrity.get("run_log") or {}).get("note") or ""),
-            "reproducibility_status": reproducibility.get("status", "unknown"),
-            "reproducibility_summary": str(reproducibility.get("summary") or ""),
+            "build_interface_status": build_interface.get("status", "unknown"),
+            "build_interface_summary": str(build_interface.get("summary") or ""),
+            "build_interface_missing_targets": "、".join(
+                str(value) for value in (build_interface.get("missing_targets") or [])
+            ),
+            "container_entry_status": container.get("status", "not_provided"),
+            # 兼容仍读取旧指标名的摘要产物；含义已变为比赛 Make 构建接口。
+            "reproducibility_status": build_interface.get("status", "unknown"),
+            "reproducibility_summary": str(build_interface.get("summary") or ""),
         },
     )
 
