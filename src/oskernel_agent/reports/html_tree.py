@@ -915,7 +915,7 @@ def _clean_capability_claim(value: str, tree_json: dict) -> str:
 
 def _fit_section_parts(raw_parts: list[str], limit: int = 300) -> list[str]:
     """在 300 字总预算内保留实现、亮点和局部问题，并把空余预算让给有内容的部分。"""
-    base_limits = [170, 75, 55]
+    base_limits = [160, 80, 120]
     parts = [clip_at_sentence(raw, cap) if raw else "" for raw, cap in zip(raw_parts, base_limits)]
     remaining = limit - sum(len(part) for part in parts)
     if remaining <= 0:
@@ -988,6 +988,7 @@ def _section_analysis_parts(
     implementation = _remove_assigned_issue_sentences(implementation, assigned_issues)
 
     highlights: list[str] = []
+    highlight_evidence: dict[str, str] = {}  # quote → path for flashcard anchors
     for source in [node, *children]:
         for item in source.get("highlights") or []:
             if not isinstance(item, dict):
@@ -995,6 +996,9 @@ def _section_analysis_parts(
             quote = _clean_capability_claim(str(item.get("quote") or ""), tree_json)
             if quote and quote not in major_quotes:
                 highlights.append(quote)
+                item_path = str(item.get("path") or "")
+                if item_path and quote not in highlight_evidence:
+                    highlight_evidence[quote] = item_path
     if parent is not None:
         scope = _section_scope(node)
         for item in parent.get("highlights") or []:
@@ -1005,12 +1009,16 @@ def _section_analysis_parts(
             quote = _clean_capability_claim(str(item.get("quote") or ""), tree_json)
             if quote and quote not in major_quotes:
                 highlights.append(quote)
+                if quote not in highlight_evidence:
+                    highlight_evidence[quote] = str(item.get("path") or "")
     strengths = "；".join(dict.fromkeys(highlights))
     strengths = _remove_assigned_issue_sentences(strengths, assigned_issues)
     local = "；".join(
         str(item.get("quote") or "") for item in assigned_issues if not item.get("major")
     )
-    return _fit_section_parts([implementation, strengths, local])
+    parts = _fit_section_parts([implementation, strengths, local])
+    parts.append(highlight_evidence)
+    return parts
 
 
 def _render_evidence_list(label: str, paths: list[str], resolver) -> str:
@@ -1068,24 +1076,49 @@ def _render_all_subsystems(tree_json: dict, resolver) -> str:
         name = section["name"]
         node = section["node"]
         local_issues = section["issues"]
-        implementation, strengths, local = _section_analysis_parts(
+        result = _section_analysis_parts(
             node, section["parent"], tree_json, local_issues, major_quotes,
         )
+        implementation, strengths, local = result[0], result[1], result[2]
+        highlight_paths = result[3] if len(result) > 3 else {}
         paragraphs = [
             f'<p class="text-sm leading-relaxed"><strong>静态实现：</strong>{_esc(implementation)}</p>'
         ]
         if strengths:
-            paragraphs.append(
-                f'<p class="text-sm leading-relaxed"><strong>实现亮点：</strong>{_esc(strengths)}</p>'
-            )
-        if local:
-            paragraphs.append(
-                f'<p class="text-sm leading-relaxed"><strong>局部问题：</strong>{_esc(local)}</p>'
-            )
+            hl_parts = [s.strip() for s in strengths.split("；") if s.strip()]
+            hl_lines = []
+            for quote_text in hl_parts:
+                path = highlight_paths.get(quote_text, "")
+                path_html = (
+                    f' <span class="text-xs text-slate-400">（{_resolve_path_anchor(path, resolver)}）</span>'
+                    if path else ""
+                )
+                hl_lines.append(f"<li>{_esc(quote_text)}{path_html}</li>")
+            if hl_lines:
+                paragraphs.append(
+                    '<div class="text-sm leading-relaxed"><strong>实现亮点：</strong>'
+                    f'<ul class="list-disc pl-4 mt-1 space-y-0.5">{"".join(hl_lines)}</ul></div>'
+                )
+        if local_issues:
+            local_lines = []
+            for item in local_issues:
+                if item.get("major"):
+                    continue
+                quote = str(item.get("quote") or "")
+                path_str = str(item.get("path") or "")
+                if not quote:
+                    continue
+                path_html = (
+                    f' <span class="text-xs text-slate-400">（{_resolve_path_anchor(path_str, resolver)}）</span>'
+                    if path_str else ""
+                )
+                local_lines.append(f"<li>{_esc(quote)}{path_html}</li>")
+            if local_lines:
+                paragraphs.append(
+                    '<div class="text-sm leading-relaxed"><strong>局部问题：</strong>'
+                    f'<ul class="list-disc pl-4 mt-1 space-y-0.5">{"".join(local_lines)}</ul></div>'
+                )
         implementation_evidence = _section_evidence(node, section["parent"])
-        issue_evidence = [
-            str(item.get("path") or "") for item in local_issues if not item.get("major")
-        ]
         analysis_chars = len(implementation) + len(strengths) + len(local)
         cards.append(
             f'<article class="core-card" data-subsystem="{_esc(name)}" '
@@ -1093,7 +1126,6 @@ def _render_all_subsystems(tree_json: dict, resolver) -> str:
             f'<h3 class="font-bold mb-1">{_esc(name)}</h3>'
             f'{"".join(paragraphs)}'
             f'{_render_evidence_list("实现依据", implementation_evidence, resolver)}'
-            f'{_render_evidence_list("问题依据", issue_evidence, resolver)}'
             '</article>'
         )
     return f"""
@@ -1159,7 +1191,7 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
         <span class="status-pill status-ok">准确性优先 · 精简呈现</span>
       </div>
       <div class="text-sm text-slate-500 mt-2">队伍：{_esc(meta.get('team_id','未记录'))} · 分析时间：{_esc(meta.get('ts',''))} · 索引源文件：{_esc(meta.get('indexed_files',0))} 个</div>
-      <div class="text-xs text-slate-500 mt-1">本报告完全由 AI 分析工具生成，参赛队未参与修改。</div>
+      <div class="text-xs text-slate-500 mt-1 ai-disclaimer">本报告由人工智能（AI）分析工具自动生成，参赛队伍不得修改。分析依据：源码结构分析与编译运行日志。AI 判断仅供评委参考，不构成违规认定。</div>
     </header>
     {conclusion_html}
     {usability_html}
