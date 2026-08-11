@@ -388,8 +388,14 @@ def _render_priority_summary(tree_json: dict, resolver) -> str:
     metrics = digest.metrics
     status_text = {
         "passed": "通过", "failed": "失败", "unknown": "未能确认",
-        "not_provided": "未提供", "missing": "文件缺失", "skipped": "不适用",
+        "not_provided": "未实测", "missing": "文件缺失", "skipped": "未执行",
     }
+    interface_text = {
+        "complete": "双架构入口完整（未实测）",
+        "partial": "双架构入口不完整",
+        "missing": "根目录 Make 入口缺失",
+        "unknown": "未采集",
+    }.get(str(metrics.get("build_interface_status") or "unknown"), "未采集")
     build_status = status_text.get(str(metrics.get("build_log_status")), "未能确认")
     run_status = status_text.get(str(metrics.get("run_log_status")), "未能确认")
     candidates = int(metrics.get("hardcode_candidates", metrics.get("hardcode_signals", 0)) or 0)
@@ -400,7 +406,7 @@ def _render_priority_summary(tree_json: dict, resolver) -> str:
         f"硬编码规则命中 {selected_signals} 条候选，"
     )
     coverage = (
-        f'编译日志：{build_status}；运行日志：{run_status}；'
+        f'构建接口：{interface_text}；实际编译：{build_status}；QEMU 启动 / 运行：{run_status}；'
         f'{hardcode_count_text}'
         f'AI 确认 {_esc(metrics.get("hardcode_confirmed", 0))} 条、'
         f'疑似 {_esc(metrics.get("hardcode_suspected", 0))} 条、'
@@ -545,13 +551,18 @@ def _status_label(status: str) -> tuple[str, str]:
     labels = {
         "passed": ("已验证通过", "status-ok"),
         "failed": ("失败", "status-bad"),
-        "skipped": ("未执行", "status-warn"),
-        "not_provided": ("未提供", "status-warn"),
+        "skipped": ("未执行", "status-info"),
+        "not_run": ("未实测", "status-info"),
+        "not_provided": ("未实测", "status-info"),
         "missing": ("文件缺失", "status-bad"),
         "unknown": ("结果不明确", "status-warn"),
         "configured": ("配置存在，未实测", "status-warn"),
         "warning": ("配置不一致", "status-bad"),
         "partial": ("仅部分配置", "status-warn"),
+        "complete": ("双架构入口完整", "status-info"),
+        "provided": ("已提供补充材料", "status-info"),
+        "nested": ("子目录补充材料", "status-info"),
+        "inconsistent": ("辅助入口不一致", "status-warn"),
     }
     return labels.get(str(status or "unknown"), ("未核验", "status-warn"))
 
@@ -729,7 +740,34 @@ def _render_judge_conclusion(tree_json: dict, resolver) -> str:
 def _render_usability(tree_json: dict, resolver) -> str:
     integrity = ((tree_json.get("facts") or {}).get("integrity") or {})
     rows: list[str] = []
-    for key, label in (("build_log", "构建"), ("run_log", "启动 / 运行")):
+
+    build_interface = integrity.get("build_interface") or {}
+    if not build_interface:
+        legacy = integrity.get("reproducibility") or {}
+        if legacy.get("required_targets"):
+            build_interface = legacy
+    interface_status = str(build_interface.get("status") or "unknown")
+    interface_text, interface_cls = _status_label(interface_status)
+    if interface_status == "missing":
+        interface_text = "根目录 Make 入口缺失"
+    elif interface_status == "partial":
+        interface_text = "双架构入口不完整"
+    interface_summary = str(
+        build_interface.get("summary")
+        or "旧报告未采集根目录 Makefile 与 kernel-rv/kernel-la 静态入口事实。"
+    )
+    interface_evidence = _first_evidence_link(build_interface.get("evidence") or [], resolver)
+    rows.append(
+        '<div class="grid grid-cols-1 md:grid-cols-[7rem_8rem_1fr] gap-2 py-2 border-b '
+        'border-slate-200 dark:border-slate-700">'
+        '<strong class="text-sm">构建接口</strong>'
+        f'<span><span class="status-pill {interface_cls}">{interface_text}</span></span>'
+        f'<p class="text-sm text-slate-600 dark:text-slate-300">'
+        f'{_esc(clip_at_sentence(interface_summary, 190))}'
+        f'{(" · 证据：" + interface_evidence) if interface_evidence else ""}</p></div>'
+    )
+
+    for key, label in (("build_log", "实际编译"), ("run_log", "QEMU 启动 / 运行")):
         fact = integrity.get(key) or {}
         status = str(fact.get("status") or "not_provided")
         status_text, status_cls = _status_label(status)
@@ -738,7 +776,7 @@ def _render_usability(tree_json: dict, resolver) -> str:
             if fact.get("errors"):
                 note = "；".join(str(value) for value in fact.get("errors")[:2])
             elif status == "not_provided":
-                note = "没有正式日志，不能判断结果。"
+                note = "本地描述报告未执行该步骤；未实测不等于作品失败。"
             else:
                 note = "当前材料不足以核验。"
         evidence = ""
@@ -753,24 +791,29 @@ def _render_usability(tree_json: dict, resolver) -> str:
             f'{(" · 日志：" + evidence) if evidence else ""}</p></div>'
         )
 
-    reproducibility = integrity.get("reproducibility") or {}
-    repro_status = str(reproducibility.get("status") or "unknown")
-    repro_text, repro_cls = _status_label(repro_status)
-    repro_summary = str(reproducibility.get("summary") or "未采集容器复现配置。")
-    repro_evidence = _first_evidence_link(reproducibility.get("evidence") or [], resolver)
+    container = build_interface.get("container") or {}
+    container_status = str(container.get("status") or "not_provided")
+    container_text, container_cls = _status_label(container_status)
+    if container_status == "not_provided":
+        container_text = "非必需 / 未提供"
+    container_summary = str(
+        container.get("summary")
+        or "Dockerfile 不是比赛规定的构建入口；缺少该文件不作为风险或扣分依据。"
+    )
+    container_evidence = _first_evidence_link(container.get("evidence") or [], resolver)
     rows.append(
         '<div class="grid grid-cols-1 md:grid-cols-[7rem_8rem_1fr] gap-2 py-2">'
-        '<strong class="text-sm">自动评测复现</strong>'
-        f'<span><span class="status-pill {repro_cls}">{repro_text}</span></span>'
+        '<strong class="text-sm">容器材料</strong>'
+        f'<span><span class="status-pill {container_cls}">{container_text}</span></span>'
         f'<p class="text-sm text-slate-600 dark:text-slate-300">'
-        f'{_esc(clip_at_sentence(repro_summary, 160))}'
-        f'{(" · 证据：" + repro_evidence) if repro_evidence else ""}</p></div>'
+        f'{_esc(clip_at_sentence(container_summary, 180))}'
+        f'{(" · 证据：" + container_evidence) if container_evidence else ""}</p></div>'
     )
     return f"""
 <section id="usability" data-section-id="usability" class="brief-card p-5 mb-5">
   <h2 class="text-xl font-bold mb-3">真实可用性</h2>
   <div>{"".join(rows)}</div>
-  <p class="text-xs text-slate-500 mt-3">分析边界：构建、启动和测试均未通过实测；静态代码不能证明评测通过或性能达标。</p>
+  <p class="text-xs text-slate-500 mt-3">分析边界：构建接口来自 Makefile 静态检查；实际编译与 QEMU 运行仅依据正式日志。未实测不等于失败，静态代码也不能证明评测通过或性能达标。</p>
 </section>
 """
 

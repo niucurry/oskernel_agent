@@ -6,7 +6,12 @@ import pytest
 
 from oskernel_agent.finals.digests import description_digest_from_tree
 from oskernel_agent.analysis.repo_facts import _probe_syscall_dispatch
-from oskernel_agent.finals.integrity import analyze_log, scan_hardcode_signals, scan_reproducibility
+from oskernel_agent.finals.integrity import (
+    analyze_log,
+    scan_build_interface,
+    scan_hardcode_signals,
+    scan_reproducibility,
+)
 from oskernel_agent.parsers.code_parser import classify_files_by_content
 from oskernel_agent.engines.path_c import TreeSitterEngine
 from oskernel_agent.pipeline.tree_builder import (
@@ -33,6 +38,26 @@ def _tree() -> dict:
                 "build_log": {"status": "failed", "path": "build.log",
                               "errors": ["error: missing symbol"]},
                 "run_log": {"status": "not_provided"},
+                "build_interface": {
+                    "status": "complete",
+                    "summary": (
+                        "根目录 Makefile 静态识别到 kernel-rv 与 kernel-la 双架构入口；"
+                        "本报告未执行 make。"
+                    ),
+                    "missing_targets": [],
+                    "evidence": [{
+                        "path": "Makefile", "line": 1,
+                        "excerpt": ".PHONY: kernel-rv kernel-la",
+                    }],
+                    "container": {
+                        "status": "not_provided",
+                        "summary": (
+                            "未提供 Dockerfile；比赛构建接口以根目录 Makefile 为准，"
+                            "因此不据此判定风险。"
+                        ),
+                        "evidence": [],
+                    },
+                },
                 "hardcode": {"findings": [{
                     "signal_id": "src/main.c:7:按测试名或 ELF 名称分支",
                     "category": "按测试名或 ELF 名称分支",
@@ -193,9 +218,90 @@ def test_early_success_exit_in_test_script_is_a_review_candidate(tmp_path):
     )
 
 
-def test_root_docker_build_without_root_dockerfile_is_a_reproducibility_risk(tmp_path):
+def test_mygo_style_makefile_is_complete_without_dockerfile(tmp_path):
     (tmp_path / "Makefile").write_text(
-        "build_docker:\n\tdocker build -t demo .\n", encoding="utf-8"
+        ".PHONY: all kernel-rv kernel-la\n"
+        "all: kernel-rv kernel-la\n"
+        "kernel-la:\n\tcargo build --target loongarch64-unknown-none\n"
+        "\tcp target/loongarch64-unknown-none/release/kernel kernel-la\n"
+        "kernel-rv:\n\tcargo build --target riscv64gc-unknown-none-elf\n"
+        "\tcp target/riscv64gc-unknown-none-elf/release/kernel kernel-rv\n",
+        encoding="utf-8",
+    )
+
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "complete"
+    assert result["missing_targets"] == []
+    assert all(item["declared"] for item in result["required_targets"].values())
+    assert result["verification"]["status"] == "not_run"
+    assert result["container"]["status"] == "not_provided"
+    assert "不据此判定风险" in result["container"]["summary"]
+    assert "不能据此判定编译通过" in result["summary"]
+
+
+def test_make_targets_declared_through_simple_variables_are_detected(tmp_path):
+    (tmp_path / "Makefile").write_text(
+        "KERNEL_RV := kernel-rv\n"
+        "KERNEL_LA := kernel-la\n"
+        "$(KERNEL_RV):\n\t@echo rv\n"
+        "$(KERNEL_LA):\n\t@echo la\n",
+        encoding="utf-8",
+    )
+
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "complete"
+    assert result["required_targets"]["kernel-rv"]["line"] == 3
+    assert result["required_targets"]["kernel-la"]["line"] == 5
+
+
+def test_literal_included_makefile_targets_are_detected_without_running_make(tmp_path):
+    rules = tmp_path / "mk" / "targets.mk"
+    rules.parent.mkdir()
+    rules.write_text(
+        "kernel-rv:\n\t@echo rv\n"
+        "kernel-la:\n\t@echo la\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "Makefile").write_text("include mk/targets.mk\n", encoding="utf-8")
+
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "complete"
+    assert result["required_targets"]["kernel-rv"]["path"] == "mk/targets.mk"
+
+
+def test_missing_one_architecture_is_reported_as_partial_interface(tmp_path):
+    (tmp_path / "Makefile").write_text(
+        "kernel-rv:\n\t@echo rv\n", encoding="utf-8"
+    )
+
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "partial"
+    assert result["missing_targets"] == ["kernel-la"]
+    assert "双架构比赛构建入口不完整" in result["summary"]
+
+
+def test_phony_names_without_real_rules_do_not_count_as_kernel_targets(tmp_path):
+    (tmp_path / "Makefile").write_text(
+        ".PHONY: kernel-rv kernel-la\nall: kernel-rv kernel-la\n",
+        encoding="utf-8",
+    )
+
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "partial"
+    assert result["missing_targets"] == ["kernel-rv", "kernel-la"]
+
+
+def test_root_docker_build_mismatch_is_only_an_auxiliary_warning(tmp_path):
+    (tmp_path / "Makefile").write_text(
+        "kernel-rv:\n\t@echo rv\n"
+        "kernel-la:\n\t@echo la\n"
+        "build_docker:\n\tdocker build -t demo .\n",
+        encoding="utf-8",
     )
     nested = tmp_path / "ci" / "Dockerfile"
     nested.parent.mkdir()
@@ -203,11 +309,21 @@ def test_root_docker_build_without_root_dockerfile_is_a_reproducibility_risk(tmp
 
     result = scan_reproducibility(tmp_path)
 
-    assert result["status"] == "warning"
-    assert "根目录没有 Dockerfile" in result["summary"]
-    assert {(item["path"], item["line"]) for item in result["evidence"]} == {
-        ("Makefile", 2), ("ci/Dockerfile", 1),
+    assert result["status"] == "complete"
+    assert result["container"]["status"] == "inconsistent"
+    assert "根目录没有 Dockerfile" in result["container"]["summary"]
+    assert {(item["path"], item["line"]) for item in result["container"]["evidence"]} == {
+        ("Makefile", 6), ("ci/Dockerfile", 1),
     }
+
+
+def test_missing_root_makefile_is_a_build_interface_problem_not_a_docker_problem(tmp_path):
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "missing"
+    assert result["missing_targets"] == ["kernel-rv", "kernel-la"]
+    assert "根目录未发现" in result["summary"]
+    assert result["container"]["status"] == "not_provided"
 
 
 def test_startup_code_is_classified_as_required_startup_module(tmp_path):
@@ -258,6 +374,31 @@ def test_description_digest_puts_runtime_and_hardcode_first():
     assert len(digest.modules[0].summary) <= 300
 
 
+def test_description_digest_flags_missing_arch_target_without_treating_no_docker_as_risk():
+    tree = _tree()
+    tree["facts"]["integrity"]["build_log"] = {"status": "not_provided"}
+    tree["facts"]["integrity"]["build_interface"] = {
+        "status": "partial",
+        "summary": "根目录 Makefile 未识别到 kernel-la，双架构比赛构建入口不完整。",
+        "missing_targets": ["kernel-la"],
+        "evidence": [{"path": "Makefile", "line": 1, "excerpt": "kernel-rv:"}],
+        "container": {
+            "status": "not_provided",
+            "summary": "未提供 Dockerfile；不据此判定风险。",
+            "evidence": [],
+        },
+    }
+
+    digest = description_digest_from_tree(tree)
+
+    interface = next(item for item in digest.findings if "构建入口" in item.title)
+    assert interface.title == "双架构 Make 构建入口不完整"
+    assert interface.severity == "medium"
+    assert not any("Dockerfile" in item.title for item in digest.findings)
+    compile_fact = next(item for item in digest.findings if item.title == "编译未实测")
+    assert compile_fact.severity == "info"
+
+
 def test_description_html_is_problem_first_and_module_text_is_bounded():
     rendered = render_tree_html(_tree())
     assert rendered.index('<section id="verdict"') < rendered.index('<section id="modules"')
@@ -267,8 +408,12 @@ def test_description_html_is_problem_first_and_module_text_is_bounded():
     assert "模块详细证据" not in rendered and "子系统详细证据" not in rendered
     assert rendered.count('data-subsystem="') == 1
     assert all(int(value) <= 300 for value in re.findall(r'data-analysis-chars="(\d+)"', rendered))
-    assert "构建</strong>" in rendered and "失败" in rendered
-    assert "启动 / 运行" in rendered and "未提供" in rendered
+    assert "构建接口</strong>" in rendered and "双架构入口完整" in rendered
+    assert "实际编译</strong>" in rendered and "失败" in rendered
+    assert "QEMU）启动 / 运行" in rendered and "未实测" in rendered
+    assert "非必需 / 未提供" in rendered
+    assert "缺少该文件不作为风险或扣分依据" not in rendered
+    assert "不据此判定风险" in rendered
     assert "修改测试脚本旁路失败" in rendered
     assert "src/main.c:7" in rendered and "确认问题" in rendered
     assert "参赛队未参与修改" in rendered
@@ -553,6 +698,9 @@ def test_description_links_use_target_repository_metadata(tmp_path):
     tree["facts"]["integrity"]["build_log"] = {"status": "not_provided"}
     repo = tmp_path / "repo"
     (repo / "src").mkdir(parents=True)
+    (repo / "Makefile").write_text(
+        "kernel-rv:\n\t@echo rv\nkernel-la:\n\t@echo la\n", encoding="utf-8"
+    )
     (repo / "src" / "main.c").write_text("\n" * 7, encoding="utf-8")
     (repo / "src" / "mm.c").write_text("\n" * 9, encoding="utf-8")
 
@@ -576,6 +724,9 @@ def test_description_file_only_evidence_gets_a_line_anchor(tmp_path):
     ]
     repo = tmp_path / "repo"
     (repo / "src").mkdir(parents=True)
+    (repo / "Makefile").write_text(
+        "kernel-rv:\n\t@echo rv\nkernel-la:\n\t@echo la\n", encoding="utf-8"
+    )
     (repo / "src" / "main.c").write_text("\n" * 7 + "int main(void) {}\n", encoding="utf-8")
     (repo / "src" / "mm.c").write_text("\n" * 9, encoding="utf-8")
 
