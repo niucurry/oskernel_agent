@@ -207,15 +207,22 @@ def deliverable_paths(team_id: str, final_dir: Path) -> tuple[Path, ...]:
     )
 
 
-def _report_digests_match_team(team_id: str, final_dir: Path) -> bool:
-    """确认三份结构化摘要属于当前队伍；失败时保持可重跑。"""
+def _report_digests_match_team(team_id: str, final_dir: Path, *, extra_ids: set[str] | None = None) -> bool:
+    """确认三份结构化摘要属于当前队伍；失败时保持可重跑。
+
+    comparison pipeline 内部用 clone 目录名作为 repo_id（即 storage key），
+    与 team_id 不同；extra_ids 用于接受这些别名。
+    """
+    valid = {team_id}
+    if extra_ids:
+        valid.update(extra_ids)
     for kind in ("comparison", "description", "development"):
         path = final_dir / f"{kind}.digest.json"
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return False
-        if str(payload.get("repo_id") or "") != team_id:
+        if str(payload.get("repo_id") or "") not in valid:
             return False
     return True
 
@@ -480,7 +487,7 @@ def main(argv: list[str] | None = None) -> None:
             tstate = st["teams"].setdefault(team_id, {})
             deliverables = deliverable_paths(team_id, final_dir)
 
-            if all(path.is_file() for path in deliverables) and _report_digests_match_team(team_id, final_dir):
+            if all(path.is_file() for path in deliverables) and _report_digests_match_team(team_id, final_dir, extra_ids={repo_name}):
                 cleanup_final_dir(team_id, final_dir)
                 cleanup_team(repo_name, final_dir=final_dir)
                 log(f"[{idx}/{total}] {team_id} 已完成，跳过")
@@ -562,7 +569,7 @@ def main(argv: list[str] | None = None) -> None:
 
             for kind, ready in readiness.items():
                 tstate[kind] = "done" if ready else "failed"
-            if not _report_digests_match_team(team_id, final_dir):
+            if not _report_digests_match_team(team_id, final_dir, extra_ids={repo_name}):
                 log(f"  {team_id} 报告摘要不属于当前队伍，拒绝标记完成")
                 for kind in readiness:
                     tstate[kind] = "failed"
