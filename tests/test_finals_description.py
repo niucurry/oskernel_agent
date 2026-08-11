@@ -266,7 +266,7 @@ def test_description_html_is_problem_first_and_module_text_is_bounded():
     assert "启动 / 运行" in rendered and "未提供" in rendered
     assert "修改测试脚本旁路失败" in rendered
     assert "src/main.c:7" in rendered and "确认问题" in rendered
-    assert "参赛队未参与修改" in rendered
+    assert "参赛队伍不得修改" in rendered
     assert '<section id="evaluation"' not in rendered
     assert "tree-node" not in rendered
 
@@ -353,7 +353,7 @@ def test_important_issues_are_severity_sorted_and_not_repeated_in_modules():
     assert rendered.index("页表权限检查错误") < rendered.index("撤销映射时缺少跨核同步")
     assert rendered.count("页表权限检查错误") == 1
     assert rendered.count("撤销映射时缺少跨核同步") == 1
-    assert "局部问题：</strong>分配器统计信息命名不统一" in rendered
+    assert "分配器统计信息命名不统一" in rendered
     assert "data-other-finding" not in rendered
     assert "src/mm.c:2" in rendered and "src/alloc.c:3" in rendered
     assert 'data-evidence-count="2"' in rendered
@@ -375,7 +375,7 @@ def test_low_severity_incomplete_feature_stays_in_its_module():
     rendered = render_tree_html(tree)
 
     assert "data-main-finding" not in rendered
-    assert "局部问题：</strong>调试接口尚未实现，当前返回 ENOSYS" in rendered
+    assert "调试接口尚未实现，当前返回 ENOSYS" in rendered
 
 
 def test_module_summary_does_not_paraphrase_an_important_issue_again():

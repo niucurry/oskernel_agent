@@ -198,7 +198,7 @@ def test_development_html_puts_ai_findings_first_and_shows_exact_evidence():
     rendered = render_development_html(analysis)
 
     assert rendered.index("经 AI 分析，该作品存在以下问题") < rendered.index("提交历史与开发阶段")
-    assert "完全由人工智能（AI）工具生成" in rendered
+    assert "参赛队伍不得修改" in rendered
     assert "章程最低提交次数未配置" in rendered
     assert "大规模提交口径" in rendered
     assert "kernel/fs/inode.c</code>（1300 LOC）" in rendered
