@@ -2729,44 +2729,77 @@ def _source_metrics(suspects: list[dict]) -> list[dict]:
     return sorted(metrics, key=lambda x: (-x["functions"], -x["effective_loc"], x["repo"]))
 
 
-def select_closest_historical_repo(
+def _historical_source_metrics(
     suspects: list[dict], file_matches: list[dict] | None = None,
-) -> dict:
-    """选择决赛报告唯一的主对比作品。
+) -> list[dict]:
+    """生成全历史库统一排名，供主对象选择、Top 5 图表和表格共同使用。
 
-    主排序使用高置信同源的唯一目标函数数，其次为有效相似行、整文件相同数、
-    涉及文件和子系统数；没有 confirmed 时才回退到 review/weak 的唯一目标函数数。
+    高置信函数按目标函数去重；复核难例也按目标函数去重，且不重复计算同仓库中已经
+    形成高置信证据的目标函数。整文件命中按“目标文件 + 历史仓库”去重。排名字段与
+    :func:`select_closest_historical_repo` 完全一致，避免首页第一名与详细报告对象不一致。
     """
-    rows = {row["repo"]: dict(row, exact_files=0) for row in _source_metrics(suspects)}
+    rows = {row["repo"]: dict(row) for row in _source_metrics(suspects)}
+    confirmed_keys: dict[str, set[tuple]] = defaultdict(set)
+    review_keys: dict[str, set[tuple]] = defaultdict(set)
+    review_incomplete_keys: dict[str, set[tuple]] = defaultdict(set)
+    for suspect in suspects:
+        if _is_excluded_pair(suspect):
+            continue
+        tier = suspect.get("tier")
+        if tier not in ("confirmed", "review", "weak"):
+            continue
+        repo = str((suspect.get("candidate_func") or {}).get("repo_id") or "")
+        if not repo:
+            continue
+        key = _query_key(suspect.get("query_func") or {})
+        if tier == "confirmed":
+            confirmed_keys[repo].add(key)
+        elif suspect.get("review_verdict") in ("借鉴", "疑似", "规则保留"):
+            review_keys[repo].add(key)
+        else:
+            review_incomplete_keys[repo].add(key)
+
+    all_repos = set(rows) | set(review_keys) | set(review_incomplete_keys)
+    for repo in all_repos:
+        row = rows.setdefault(repo, {
+            "repo": repo,
+            "functions": 0,
+            "effective_loc": 0,
+            "files": 0,
+            "modules": 0,
+            "multi_repo_functions": 0,
+        })
+        row["review_functions"] = len(
+            review_keys.get(repo, set()) - confirmed_keys.get(repo, set())
+        )
+        row["review_incomplete_functions"] = len(
+            review_incomplete_keys.get(repo, set())
+            - confirmed_keys.get(repo, set())
+            - review_keys.get(repo, set())
+        )
+        row["exact_files"] = 0
+
+    exact_files_by_repo: dict[str, set[str]] = defaultdict(set)
     for match in file_matches or []:
-        seen: set[str] = set()
+        query_file = str(match.get("query_file") or "")
         for candidate in match.get("matches") or []:
             repo = str(candidate.get("repo_id") or "")
-            if not repo or repo in seen:
-                continue
-            seen.add(repo)
-            rows.setdefault(repo, {
-                "repo": repo, "functions": 0, "effective_loc": 0,
-                "files": 0, "modules": 0, "multi_repo_functions": 0,
-                "exact_files": 0,
-            })["exact_files"] += 1
-
-    if not rows:
-        fallback: dict[str, set[tuple]] = defaultdict(set)
-        for suspect in suspects:
-            if suspect.get("tier") not in ("review", "weak") or _is_excluded_pair(suspect):
-                continue
-            repo = str((suspect.get("candidate_func") or {}).get("repo_id") or "")
             if repo:
-                fallback[repo].add(_query_key(suspect.get("query_func") or {}))
-        for repo, targets in fallback.items():
-            rows[repo] = {
-                "repo": repo, "functions": 0, "review_functions": len(targets),
-                "effective_loc": 0, "files": 0, "modules": 0,
-                "multi_repo_functions": 0, "exact_files": 0,
-            }
-    if not rows:
-        return {"repo": "", "functions": 0, "effective_loc": 0, "exact_files": 0}
+                exact_files_by_repo[repo].add(query_file)
+    for repo, query_files in exact_files_by_repo.items():
+        row = rows.setdefault(repo, {
+            "repo": repo,
+            "functions": 0,
+            "effective_loc": 0,
+            "files": 0,
+            "modules": 0,
+            "multi_repo_functions": 0,
+            "review_functions": 0,
+            "review_incomplete_functions": 0,
+            "exact_files": 0,
+        })
+        row["exact_files"] = len(query_files)
+
     return sorted(
         rows.values(),
         key=lambda row: (
@@ -2774,11 +2807,26 @@ def select_closest_historical_repo(
             -int(row.get("effective_loc") or 0),
             -int(row.get("exact_files") or 0),
             -int(row.get("review_functions") or 0),
+            -int(row.get("review_incomplete_functions") or 0),
             -int(row.get("files") or 0),
             -int(row.get("modules") or 0),
             str(row.get("repo") or ""),
         ),
-    )[0]
+    )
+
+
+def select_closest_historical_repo(
+    suspects: list[dict], file_matches: list[dict] | None = None,
+) -> dict:
+    """选择决赛报告唯一的主对比作品。
+
+    主排序依次使用高置信同源的唯一目标函数数、有效相似行、整文件相同数、
+    模型复核难例、复核未完成项、涉及文件和子系统数，最后以仓库名稳定打破平局。
+    """
+    rows = _historical_source_metrics(suspects, file_matches)
+    if not rows:
+        return {"repo": "", "functions": 0, "effective_loc": 0, "exact_files": 0}
+    return rows[0]
 
 
 def _suspects_for_source(suspects: list[dict], repo_id: str) -> list[dict]:
@@ -2811,9 +2859,15 @@ def _echarts_top_sources(metrics: list[dict], top: int = 8) -> str:
         return ""
     labels = [x["repo"] for x in order][::-1]
     conf = [x["functions"] for x in order][::-1]
+    review = [x.get("review_functions", 0) for x in order][::-1]
+    incomplete = [x.get("review_incomplete_functions", 0) for x in order][::-1]
     series = [
         ("高置信同源代码", conf, "#ef4444"),
     ]
+    if any(review):
+        series.append(("模型复核难例", review, "#f59e0b"))
+    if any(incomplete):
+        series.append(("复核失败/未完成", incomplete, "#94a3b8"))
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
         "legend": {"data": [s[0] for s in series]},
@@ -2833,6 +2887,45 @@ def _echarts_top_sources(metrics: list[dict], top: int = 8) -> str:
         f'<div class="echarts-chart mt-4" style="height:{height}px">'
         f'<script type="application/json">{json.dumps(option, ensure_ascii=False)}</script>'
         '</div>'
+    )
+
+
+def _historical_sources_table(
+    metrics: list[dict], linker, closest_source: str,
+) -> str:
+    """Top 历史匹配的常显表格；与柱图直接接收同一个已截断列表。"""
+    if not metrics:
+        return '<p class="section-intro">当前没有形成可展示的历史匹配作品。</p>'
+    rows = []
+    for index, item in enumerate(metrics, 1):
+        repo = str(item.get("repo") or "")
+        primary = (
+            '<span class="status-chip status-confirmed">主对比</span>'
+            if repo == closest_source else ""
+        )
+        rows.append(
+            '<tr>'
+            f'<td>{index}</td>'
+            f'<td><strong>{_ref_repo_anchor(linker, repo)}</strong> {primary}</td>'
+            f'<td class="text-right font-mono">{int(item.get("functions") or 0)}</td>'
+            f'<td class="text-right font-mono">{int(item.get("review_functions") or 0)}</td>'
+            f'<td class="text-right font-mono">{int(item.get("review_incomplete_functions") or 0)}</td>'
+            f'<td class="text-right font-mono">{int(item.get("effective_loc") or 0)}</td>'
+            f'<td class="text-right font-mono">{int(item.get("exact_files") or 0)}</td>'
+            f'<td class="text-right font-mono">{int(item.get("files") or 0)}</td>'
+            f'<td class="text-right font-mono">{int(item.get("modules") or 0)}</td>'
+            f'<td class="text-right font-mono">{int(item.get("multi_repo_functions") or 0)}</td>'
+            '</tr>'
+        )
+    return (
+        '<div class="overflow-x-auto source-metrics-table"><table>'
+        '<thead><tr><th>排名</th><th>历史匹配作品</th>'
+        '<th class="text-right">高置信函数</th><th class="text-right">复核难例</th>'
+        '<th class="text-right">复核未完成</th>'
+        '<th class="text-right">有效相似行</th><th class="text-right">整文件相同</th>'
+        '<th class="text-right">涉及文件</th><th class="text-right">涉及模块</th>'
+        '<th class="text-right">多仓重复函数</th>'
+        '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div>'
     )
 
 
@@ -2921,6 +3014,97 @@ def _exclusion_totals(suspects: list[dict], recall: dict | None = None, *,
         out[cat] += 1
     out["total_excluded"] = len(best)
     return out
+
+
+def _build_history_overview(
+    suspects: list[dict],
+    submodule_stats: dict,
+    *,
+    file_matches: list[dict] | None = None,
+    recall: dict | None = None,
+    library_context: LibraryContext | None = None,
+    source_metrics: list[dict] | None = None,
+) -> dict:
+    """构建一次、供全库图表/表格/摘要共同消费的客观统计数据。"""
+    confirmed = sum(int(stats.get("confirmed") or 0) for stats in submodule_stats.values())
+    review = sum(int(stats.get("review") or 0) for stats in submodule_stats.values())
+    review_failed = sum(
+        int(stats.get("review_failed") or 0) for stats in submodule_stats.values()
+    )
+    review_pending = sum(
+        int(stats.get("review_pending") or 0) for stats in submodule_stats.values()
+    )
+    review_incomplete = review_failed + review_pending
+    original = sum(int(stats.get("original") or 0) for stats in submodule_stats.values())
+    comparable = sum(int(stats.get("total") or 0) for stats in submodule_stats.values())
+    recall_function_count = None
+    if recall is not None:
+        recall_function_count = len({
+            _query_key(item.get("query", {}))
+            for item in recall.get("results", [])
+        })
+
+    exclusions = _exclusion_totals(
+        suspects, recall, library_context=library_context,
+    )
+    distribution_counts = {
+        "confirmed": confirmed,
+        "review": review,
+        "review_incomplete": review_incomplete,
+        "original": original,
+        "library": int(exclusions.get("library") or 0),
+        "baseline": int(exclusions.get("baseline") or 0),
+        "baseline_unverified": int(exclusions.get("baseline_unverified") or 0),
+        "upstream": int(exclusions.get("upstream") or 0),
+        "false_positive": int(exclusions.get("false_positive") or 0),
+        "common": int(exclusions.get("common") or 0),
+    }
+    classified = sum(distribution_counts.values())
+    total_functions = max(
+        int(recall_function_count or 0),
+        comparable + int(exclusions.get("total_excluded") or 0),
+        classified,
+    )
+    distribution_rows = _overall_distribution_rows(distribution_counts, total_functions)
+    if sum(int(row["count"]) for row in distribution_rows) != total_functions:
+        raise RuntimeError("全历史库分类数量无法与解析函数总数对账")
+
+    sources = [dict(row) for row in (
+        source_metrics
+        if source_metrics is not None
+        else _historical_source_metrics(suspects, file_matches)
+    )]
+    return {
+        "sources": sources,
+        "submodule_stats": submodule_stats,
+        "distribution_rows": distribution_rows,
+        "total_functions": total_functions,
+        "recall_function_count": recall_function_count,
+        "comparable_functions": comparable,
+        "confirmed_functions": confirmed,
+        "review_functions": review,
+        "review_failed_functions": review_failed,
+        "review_pending_functions": review_pending,
+        "original_functions": original,
+        "exclusions": exclusions,
+    }
+
+
+def _validate_finals_history_overview(overview: dict, closest_source: str) -> None:
+    """拒绝交付排名、图表、表格或主对比对象相互矛盾的报告。"""
+    sources = list(overview.get("sources") or [])
+    if closest_source:
+        if not sources:
+            raise RuntimeError("已选择主对比作品，但全历史库排名为空")
+        first = str(sources[0].get("repo") or "")
+        if first != closest_source:
+            raise RuntimeError(
+                f"全历史库排名第一（{first or '空'}）与主对比作品（{closest_source}）不一致"
+            )
+    rows = list(overview.get("distribution_rows") or [])
+    total = int(overview.get("total_functions") or 0)
+    if sum(int(row.get("count") or 0) for row in rows) != total:
+        raise RuntimeError("全历史库图表分类数量与总函数数不一致")
 
 
 def _retrieval_status(contract: dict | None) -> str:
@@ -3027,40 +3211,24 @@ def _summary_card(
     linker=None,
     library_context: LibraryContext | None = None,
 ) -> str:
-    # 按**函数**计（与各清单一致）：借鉴/疑似借鉴/原创 来自三类口径的统计
-    borrowed_n = sum(st["confirmed"] for st in submodule_stats.values())
-    review_n   = sum(st["review"] for st in submodule_stats.values())
-    review_failed_n = sum(st.get("review_failed", 0) for st in submodule_stats.values())
-    review_pending_n = sum(st.get("review_pending", 0) for st in submodule_stats.values())
+    overview = _build_history_overview(
+        suspects,
+        submodule_stats,
+        recall=recall,
+        library_context=library_context,
+    )
+    # 按**函数**计（与各清单一致）；图表、表格、KPI 共用同一个 overview。
+    borrowed_n = int(overview["confirmed_functions"])
+    review_n = int(overview["review_functions"])
+    review_failed_n = int(overview["review_failed_functions"])
+    review_pending_n = int(overview["review_pending_functions"])
     review_incomplete_n = review_failed_n + review_pending_n
-    original_n = sum(st["original"] for st in submodule_stats.values())
-    recall_function_count = None
-    if recall is not None:
-        recall_function_count = len({
-            _query_key(item.get("query", {}))
-            for item in recall.get("results", [])
-        })
-
-    # 整体占比按全部解析函数计，含复用与排除项；各目标函数只进入一个分类。
-    all_total = sum(st["total"] for st in submodule_stats.values())
-    excl = _exclusion_totals(suspects, recall, library_context=library_context)
+    original_n = int(overview["original_functions"])
+    recall_function_count = overview["recall_function_count"]
+    excl = overview["exclusions"]
     excl_total = int(excl.get("total_excluded") or 0)
-    full_total = recall_function_count if recall_function_count else (all_total + excl_total)
-    distribution_counts = {
-        "confirmed": borrowed_n,
-        "review": review_n,
-        "review_incomplete": review_incomplete_n,
-        "original": original_n,
-        "library": int(excl.get("library") or 0),
-        "baseline": int(excl.get("baseline") or 0),
-        "baseline_unverified": int(excl.get("baseline_unverified") or 0),
-        "upstream": int(excl.get("upstream") or 0),
-        "false_positive": int(excl.get("false_positive") or 0),
-        "common": int(excl.get("common") or 0),
-    }
-    # 防御旧产物中的统计口径不一致：图表分母不能小于互斥分类之和。
-    full_total = max(full_total, sum(distribution_counts.values()))
-    distribution_rows = _overall_distribution_rows(distribution_counts, full_total)
+    full_total = int(overview["total_functions"])
+    distribution_rows = overview["distribution_rows"]
     overall_copy_pct = round(borrowed_n / full_total * 100, 1) if full_total else 0.0
 
     # KPI 卡片（按函数；库复用 / 公共样板等可解释复用单独成卡，保证全部函数有归属）
@@ -3097,7 +3265,7 @@ def _summary_card(
     # 头部：环形图 + Top 历史匹配仓库，左右并排；不把相似关系表述为因果来源。
     donut = _echarts_overall_donut(distribution_rows)
     distribution_table = _overall_distribution_table(distribution_rows, full_total)
-    source_metrics = _source_metrics(suspects)
+    source_metrics = overview["sources"]
     top_src = _echarts_top_sources(source_metrics)
     head_charts = (
         '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 items-start">'
@@ -5778,6 +5946,14 @@ def _finals_comparison_summary(
             if institution else
             f'{html.escape(year)} 年 · {html.escape(team_label)} · 学校信息未提供'
         )
+    module_chart = _echarts_overview(submodule_stats)
+    module_visual = (
+        '<div class="chart-title mt-4">与主对比作品的模块级证据分布</div>'
+        + module_chart
+        + '<p class="text-xs text-slate-500 mt-1">本图只回答各模块与主对比作品的重合情况；'
+          '绿色部分表示未与该主对象形成相似证据，不代表在全部历史库中均未命中。</p>'
+        if module_chart else ""
+    )
     return f"""
 <section id="summary" data-section-id="summary" class="summary-card">
   <div class="summary-kicker">先看结论</div>
@@ -5790,7 +5966,56 @@ def _finals_comparison_summary(
   <ul class="summary-alerts">{findings}</ul>
   <div class="overflow-x-auto"><table><thead><tr><th>模块</th><th>高置信比例</th><th>结论</th><th>实现依据</th></tr></thead>
   <tbody>{module_rows_html}</tbody></table></div>
+  {module_visual}
 </section>
+"""
+
+
+def _finals_history_overview(
+    overview: dict,
+    linker,
+    closest_source: str,
+) -> str:
+    """全历史库概览：Top 5、整体分布及其常显数字表格。"""
+    _validate_finals_history_overview(overview, closest_source)
+    top_sources = list(overview.get("sources") or [])[:5]
+    distribution_rows = list(overview.get("distribution_rows") or [])
+    total = int(overview.get("total_functions") or 0)
+    comparable = int(overview.get("comparable_functions") or 0)
+    confirmed = int(overview.get("confirmed_functions") or 0)
+    review = int(overview.get("review_functions") or 0)
+    excluded = int((overview.get("exclusions") or {}).get("total_excluded") or 0)
+    source_chart = _echarts_top_sources(top_sources, top=len(top_sources))
+    donut = _echarts_overall_donut(distribution_rows)
+    source_table = _historical_sources_table(top_sources, linker, closest_source)
+    distribution_table = _overall_distribution_table(distribution_rows, total)
+    shown = len(top_sources)
+    return f"""
+<div class="summary-card history-overview-card">
+  <div class="summary-heading"><div><span class="summary-eyebrow">ALL-HISTORY OVERVIEW</span>
+  <h2>全历史库概览</h2></div><span class="summary-repo">展示 Top {shown}</span></div>
+  <p class="section-intro"><b>本节使用全部历史作品计算；下节只展开排名第一作品的详细证据。</b>
+  排名表示“在哪些历史仓库中找到相似实现”，不能单独证明直接来源、传播方向或抄袭关系。
+  同一目标函数可能命中多个历史作品，因此各仓库函数数不能相加当作全局命中总数。</p>
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+    {_kpi(total, "全部解析函数", "#2563eb")}
+    {_kpi(comparable, "全库可比函数", "#0f172a")}
+    {_kpi(confirmed, "全库高置信命中", "#ef4444")}
+    {_kpi(review, "全库复核难例", "#d97706")}
+    {_kpi(excluded, "可解释复用/排除", "#64748b")}
+  </div>
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4 items-start">
+    <div><div class="chart-title">全库整体结果分布（按全部解析函数）</div>
+      {donut}{distribution_table}
+    </div>
+    <div><div class="chart-title">历史匹配作品 Top {shown}（按统一排名；不代表直接来源）</div>
+      {source_chart}
+      <p class="text-xs text-slate-500 mt-1">柱图按唯一目标函数展示高置信证据、复核难例与复核未完成项；
+      有效相似行、整文件证据和覆盖范围以同一排名表为准。</p>
+    </div>
+  </div>
+  {source_table}
+</div>
 """
 
 
@@ -5816,13 +6041,22 @@ def generate_finals_comparison_html(
     file_similar: list[dict],
     retrieval_contract: dict | None,
     recall: dict | None,
+    history_overview: dict | None = None,
 ) -> tuple[str, object]:
-    """决赛版对比报告：只展示一个最近历史作品，先结论后证据。"""
+    """决赛版对比报告：全库 Top 5 概览 + 最近作品详细证据。"""
     from oskernel_agent.finals.digests import comparison_digest
 
+    overview = history_overview or _build_history_overview(
+        suspects,
+        submodule_stats,
+        file_matches=file_matches,
+        recall=recall,
+    )
+    _validate_finals_history_overview(overview, closest_source)
     digest = comparison_digest(
         query_repo_id, closest_source, submodule_stats,
         exact_file_matches=len(file_matches), ai_detect_data=ai_detect_data,
+        history_overview=overview,
     )
     anchored_modules = {
         str(cluster.get("module") or "")
@@ -5835,6 +6069,7 @@ def generate_finals_comparison_html(
         anchored_modules=anchored_modules,
         has_review_evidence=bool(review_pairs or cleared_review_pairs),
     )
+    history_html = _finals_history_overview(overview, linker, closest_source)
     _toc_lineage, sec_lineage = _lineage_section(query_repo_id, suspects, linker, recall)
     _toc_clusters, sec_clusters = _cluster_section(
         file_pairs, analysis_html, linker, query_repo_id)
@@ -5857,6 +6092,7 @@ def generate_finals_comparison_html(
         '<div class="toc-card"><div class="toc-header"><span class="toc-kicker">最终报告</span>'
         '<strong>报告目录</strong></div><div class="toc-scroll">'
         + _toc_group("先看结论", [_toc_link("summary", "结论与模块排序")])
+        + _toc_group("全库概览", [_toc_link("history-overview", "历史匹配 Top 5")])
         + _toc_group("最近作品证据", [_toc_link("closest-evidence", "同源代码证据")])
         + _toc_group("辅助核查", [_toc_link("ai-signal", "AI 生成代码信号")])
         + _toc_group("口径", [_toc_link("method", "方法与边界")])
@@ -5873,19 +6109,23 @@ def generate_finals_comparison_html(
 .closest-identity{{margin:.2rem 0 .7rem;color:#475569;font-weight:600}}
 </style></head><body><div class="layout"><nav class="toc">{toc_html}</nav><main class="main">
 <header class="report-header"><span class="report-kicker">完全由 AI 工具生成 · 参赛队不得修改</span>
-<h1>{title}</h1><p>只围绕历史上最接近的一个作品展开；问题先列，模块按高置信同源比例降序排列。</p></header>
+<h1>{title}</h1><p>先看全历史库 Top 5，再围绕排名第一的作品展开代码证据；模块按高置信同源比例降序排列。</p></header>
 {summary_html}
+<section id="history-overview" data-section-id="history-overview">
+{_chapter_heading("02", "全历史库匹配概览", "图表用于快速定位，常显表格保留全部对应数字；排名不代表直接来源。")}
+{history_html}</section>
 <section id="closest-evidence" data-section-id="closest-evidence">
-{_chapter_heading("02", "最近历史作品的证据", "先看模块结论；函数、文件和代码细节默认折叠，需要时再展开。")}
+{_chapter_heading("03", "最近历史作品的证据", "只深挖 Top 1；函数、文件和代码细节默认折叠，需要时再展开。")}
 {evidence_html}</section>
 <section id="ai-signal" data-section-id="ai-signal">
-{_chapter_heading("03", "AI 生成代码辅助信号", "仅检测未归入历史借鉴的函数；误报风险较高，不作单独认定。")}
+{_chapter_heading("04", "AI 生成代码辅助信号", "仅检测未归入历史借鉴的函数；误报风险较高，不作单独认定。")}
 {sec_ai}</section>
 <section id="method" data-section-id="method" class="report-section section-neutral">
-{_chapter_heading("04", "方法与边界", "说明百分比口径和证据覆盖，避免把未命中误写成原创。")}
+{_chapter_heading("05", "方法与边界", "说明全库概览与主对象详证的双口径，避免把未命中误写成原创。")}
 <div class="section-intro"><p><b>主对比对象：</b>{_ref_repo_anchor(linker, closest_source)}</p>
 <p><b>召回状态：</b>{html.escape(method_status)}</p>
-<p>系统内部仍使用全部历史库完成召回和排除，但交付报告只展示最近作品；其他候选不进入评委正文。</p></div>
+<p><b>全库概览口径：</b>使用全部历史作品，展示统一排名的前五项和全局互斥分类。</p>
+<p><b>详细证据口径：</b>只展开排名第一的主对比作品。Top 2–5 仅用于帮助评委识别多仓传播、共同上游或 fork 线索，不能据此认定直接来源。</p></div>
 </section>
 </main></div><a href="#summary" class="to-top" title="回到顶部">↑</a>{_INIT_SCRIPT}</body></html>"""
     return sanitize_html_controls(explain_terms_in_html(rendered)), digest
@@ -6245,12 +6485,34 @@ def run_semantic_compare(
         logger.info("[compare] 上游基线/ABI 降级：vendored 上游 {} / ABI 受限 {}（不计入借鉴，单列「上游基线/ABI 受限」节）",
                     ub_counts["upstream_vendored"], ub_counts["abi_constrained"])
 
-    # 决赛交付只围绕一个最近历史作品展开。内部仍用完整历史库完成召回、排除和
-    # 复核，但从这里开始把面向评委的统计与证据收敛到唯一主来源。
-    closest_source = select_closest_historical_repo(suspects, file_matches)
+    # 全库概览保留所有可报告历史作品；详细证据只围绕统一排名第一的作品展开。
+    # 先剔除第三方库和脚手架整文件，避免它们左右 Top 5 与主对象选择。
+    reportable_file_matches = [
+        match for match in file_matches
+        if not match_library(match.get("query_file"), context=library_context)
+        and not is_excluded_file_path(match.get("query_file", ""))
+    ]
+    history_sources = _historical_source_metrics(suspects, reportable_file_matches)
+    closest_source = (
+        history_sources[0]
+        if history_sources
+        else {"repo": "", "functions": 0, "effective_loc": 0, "exact_files": 0}
+    )
     closest_repo = str(closest_source.get("repo") or "")
+    global_submodule_stats = compute_submodule_stats(
+        suspects, recall, library_context=library_context,
+    )
+    history_overview = _build_history_overview(
+        suspects,
+        global_submodule_stats,
+        file_matches=reportable_file_matches,
+        recall=recall,
+        library_context=library_context,
+        source_metrics=history_sources,
+    )
+    _validate_finals_history_overview(history_overview, closest_repo)
     report_suspects = _suspects_for_source(suspects, closest_repo)
-    file_matches = _file_matches_for_source(file_matches, closest_repo)
+    file_matches = _file_matches_for_source(reportable_file_matches, closest_repo)
     logger.info(
         "[compare] 决赛主对比作品：{}（高置信函数 {}，有效相似行 {}，整文件 {}）",
         closest_repo or "未确定", closest_source.get("functions", 0),
@@ -6262,9 +6524,6 @@ def run_semantic_compare(
     # 报为整体相似。file_matches（逐字节整文件相同）按路径口径剔除同类脚手架。
     non_excluded = [s for s in report_suspects if not _is_excluded_pair(s)]
     file_similar = aggregate_file_similarity(non_excluded, recall, query_repo_path=query_repo_path)
-    file_matches = [m for m in file_matches
-                    if not match_library(m.get("query_file"), context=library_context)
-                    and not is_excluded_file_path(m.get("query_file", ""))]
     file_similar = [f for f in file_similar
                     if not match_library(f.get("file_path"), context=library_context)
                     and not is_excluded_file_path(f.get("file_path", ""))]
@@ -6332,6 +6591,9 @@ def run_semantic_compare(
     ref_repos = {c["ref_repo"] for g in file_pairs for c in g["candidates"]}
     ref_repos |= {m["repo_id"] for fm in file_matches for m in fm.get("matches", [])}
     ref_repos |= {
+        str(item.get("repo") or "") for item in history_sources if item.get("repo")
+    }
+    ref_repos |= {
         r.get("repo", "") for point in innovation_points
         for r in point.get("references", []) if r.get("repo")
     }
@@ -6358,6 +6620,7 @@ def run_semantic_compare(
         file_similar=file_similar,
         retrieval_contract=recall.get("retrieval_contract") if recall else None,
         recall=recall,
+        history_overview=history_overview,
     )
 
     # 档位标签统一（高置信同源代码 / 模型复核难例 / 暂未检出相似），避免各处叫法不一

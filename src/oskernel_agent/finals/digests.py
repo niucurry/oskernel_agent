@@ -494,8 +494,9 @@ def comparison_digest(
     exact_file_matches: int = 0,
     ai_detect_data: dict | None = None,
     closest_institution: str = "",
+    history_overview: dict | None = None,
 ) -> ReportDigest:
-    """生成“只对比一个最近历史作品”的短摘要。"""
+    """生成主对象短摘要，并附带全历史库概览的对账指标。"""
     modules: list[ModuleDigest] = []
     confirmed = review = total = 0
     for module, stats in submodule_stats.items():
@@ -571,6 +572,15 @@ def comparison_digest(
             severity="medium", confidence=0.7, source="comparison",
         ))
 
+    history = history_overview or {}
+    history_sources = list(history.get("sources") or [])
+    history_confirmed = int(history.get("confirmed_functions") or 0)
+    history_comparable = int(history.get("comparable_functions") or 0)
+    history_pct = (
+        round(history_confirmed / history_comparable * 100, 1)
+        if history_comparable else 0.0
+    )
+
     return ReportDigest(
         repo_id=repo_id,
         kind="comparison",
@@ -589,6 +599,12 @@ def comparison_digest(
             "comparable_functions": total,
             "exact_file_matches": exact_file_matches,
             "ai_llm_functions": llm_count,
+            "metric_scope": "closest_historical_repo",
+            "history_sources_shown": min(5, len(history_sources)),
+            "history_total_functions": int(history.get("total_functions") or 0),
+            "history_comparable_functions": history_comparable,
+            "history_confirmed_functions": history_confirmed,
+            "history_similarity_pct": history_pct,
         },
     )
 
