@@ -1,6 +1,6 @@
 """复用第三方库识别（报告层）。
 
-被各队 vendored 进内核的公开库（lwext4 / smoltcp / fatfs / virtio-drivers …）属多队
+被各队 vendored 进内核的公开库（lwext4、smoltcp、fatfs、virtio-drivers 等）属多队
 合法共用，不应计入「值得关注的借鉴/抄袭」。本模块综合路径、包清单与真实导入关系识别
 库本体及已登记的适配层，
 供对比报告：① 从图/清单中剔除库复用；② 单列「复用库统计」小节。

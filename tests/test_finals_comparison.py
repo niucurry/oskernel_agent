@@ -60,7 +60,7 @@ def test_comparison_digest_sorts_modules_and_states_percentage_basis():
     assert "2025 年 A 队作品" in digest.conclusion
 
 
-def test_finals_comparison_html_shows_history_overview_and_closest_evidence():
+def test_finals_comparison_html_shows_dynamic_overview_and_closest_evidence():
     suspect = _suspect("2025/A", "open")
     stats = {module: {
         "confirmed": 0, "review": 0, "review_failed": 0, "review_pending": 0,
@@ -91,8 +91,11 @@ def test_finals_comparison_html_shows_history_overview_and_closest_evidence():
     assert "Top 8" not in rendered
     assert ">候选创新<" not in rendered
     assert "最接近作品的证据" in rendered
+    assert 'id="history-overview"' in rendered
     assert "全历史库匹配概览" in rendered
-    assert "AI 生成代码辅助信号" in rendered
+    assert "Top 5" not in rendered
+    assert 'id="ai-signal"' not in rendered
+    assert "AI 生成代码辅助信号" not in rendered
     assert 'class="echarts-chart' in rendered
     assert 'data-retrieval-complete="false"' in rendered
     assert "&lt;span id=&quot;retrieval" not in rendered
@@ -124,7 +127,7 @@ def test_team_name_already_ending_in_team_suffix_is_not_duplicated():
     assert "2025 年 火箭队作品" in digest.conclusion
 
 
-def test_history_ranking_shows_top_five_but_only_primary_gets_detailed_evidence():
+def test_history_overview_selects_strong_sources_without_fixed_count():
     suspects = [
         _suspect("2025/A", "alpha"),
         _suspect("2025/A", "beta"),
@@ -132,13 +135,13 @@ def test_history_ranking_shows_top_five_but_only_primary_gets_detailed_evidence(
         _suspect("2024/B", "alpha"),
         _suspect("2024/B", "beta"),
         _suspect("2023/C", "delta", exact_lines=17),
-        _suspect("2022/D", "epsilon", exact_lines=16),
-        _suspect("2021/E", "zeta", exact_lines=15),
-        _suspect("2020/F", "eta", exact_lines=14),
+        {**_suspect("2022/D", "epsilon", exact_lines=16), "tier": "weak"},
+        {**_suspect("2021/E", "zeta", exact_lines=15), "tier": "weak"},
+        {**_suspect("2020/F", "eta", exact_lines=14), "tier": "weak"},
     ]
     sources = SC._historical_source_metrics(suspects)
     assert [item["repo"] for item in sources] == [
-        "2025/A", "2024/B", "2023/C", "2022/D", "2021/E", "2020/F",
+        "2025/A", "2024/B", "2023/C", "2020/F", "2021/E", "2022/D",
     ]
     assert SC.select_closest_historical_repo(suspects) == sources[0]
     assert sources[0]["functions"] == 3
@@ -150,6 +153,9 @@ def test_history_ranking_shows_top_five_but_only_primary_gets_detailed_evidence(
     overview = SC._build_history_overview(
         suspects, global_stats, source_metrics=sources,
     )
+    assert [item["repo"] for item in overview["similar_sources"]] == [
+        "2025/A", "2024/B", "2023/C",
+    ]
     rendered, digest = SC.generate_finals_comparison_html(
         query_repo_id="2026/new",
         closest_source="2025/A",
@@ -175,16 +181,33 @@ def test_history_ranking_shows_top_five_but_only_primary_gets_detailed_evidence(
     )
 
     assert "2025/A" in rendered
-    for repo in ("2024/B", "2023/C", "2022/D", "2021/E"):
+    for repo in ("2024/B", "2023/C"):
         assert repo in rendered
-    assert "2020/F" not in rendered
-    assert "展示 Top 5" in rendered
-    assert "全历史库" in rendered
-    assert "AI 生成代码辅助信号" in rendered
+    for repo in ("2022/D", "2021/E", "2020/F"):
+        assert repo not in rendered
+    assert "筛出 3 个相似仓库" in rendered
+    assert "Top 5" not in rendered
+    assert 'id="history-overview"' in rendered
+    assert "AI 生成代码辅助信号" not in rendered
     assert digest.metrics["closest_source"] == "2025/A"
-    assert digest.metrics["history_sources_shown"] == 5
+    assert digest.metrics["history_sources_shown"] == 3
     assert digest.metrics["confirmed_functions"] == 3
-    assert digest.metrics["history_confirmed_functions"] == 7
+    assert digest.metrics["history_confirmed_functions"] == 4
+
+
+def test_most_similar_sources_falls_back_to_completed_reviews_only():
+    metrics = [
+        {"repo": "2025/A", "functions": 0, "exact_files": 0,
+         "review_functions": 2, "review_incomplete_functions": 0},
+        {"repo": "2024/B", "functions": 0, "exact_files": 0,
+         "review_functions": 1, "review_incomplete_functions": 3},
+        {"repo": "2023/C", "functions": 0, "exact_files": 0,
+         "review_functions": 0, "review_incomplete_functions": 8},
+    ]
+
+    assert [item["repo"] for item in SC._most_similar_sources(metrics)] == [
+        "2025/A", "2024/B",
+    ]
 
 
 def test_finals_history_overview_rejects_primary_or_total_mismatch():

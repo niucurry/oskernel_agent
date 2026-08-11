@@ -54,6 +54,17 @@ _SIGNALS = (
     (
         "按测试名或 ELF 名称分支",
         re.compile(
+            r"(?:if|match)[^\n]{0,160}(?:is_err\s*\(|is_none\s*\(|enoent|not[_ ]found)"
+            r"[^\n]*\{[\s\S]{0,1200}(?:open_inode|open_file)\s*\(\s*[\"']"
+            r"[^\"'\n]*(?:test(?:case)?|ltp|benchmark|busybox|\.elf)[^\"'\n]*[\"']",
+            re.I,
+        ),
+        0.82,
+        "正常加载失败后改为装载特定测试程序或 busybox，可能改变待执行程序或失败语义。",
+    ),
+    (
+        "按测试名或 ELF 名称分支",
+        re.compile(
             r"(?:strcmp|strstr)\s*\([^\n]{0,160}[\"'][^\"'\n]*"
             r"(?:test(?:case)?|ltp|benchmark|busybox|\.elf)[^\"'\n]*[\"']|"
             r"(?:contains|starts_with|ends_with)\s*\(\s*[\"'][^\"'\n]*"

@@ -24,14 +24,49 @@ SYSTEM_PLACEHOLDER_MARKERS = (
     "AI 检测产物中没有整体统计",
 )
 
+_ELLIPSIS_RE = re.compile(r"…|(?<!\.)\.{3}(?!\.)")
+_VISUAL_TRUNCATION_PATTERNS = (
+    (re.compile(r"text-overflow\s*:\s*ellipsis", re.I), "CSS text-overflow: ellipsis"),
+    (re.compile(r"-webkit-line-clamp\s*:", re.I), "CSS line-clamp"),
+    (
+        re.compile(r'["\']overflow["\']\s*:\s*["\']truncate["\']', re.I),
+        "图表文字 truncate",
+    ),
+)
+
+
+def visible_report_text(rendered: str) -> str:
+    """提取报告自然语言正文；源码和脚本中的语言语法不参与省略号门禁。"""
+    visible = re.sub(
+        r"<(?:script|style|code|pre)\b[^>]*>.*?</(?:script|style|code|pre)>",
+        " ",
+        rendered or "",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return html.unescape(re.sub(r"<[^>]+>", " ", visible))
+
+
+def find_ellipsis_omissions(rendered: str) -> list[str]:
+    """定位正文中用省略号代替未说完内容的位置。"""
+    visible = re.sub(r"\s+", " ", visible_report_text(rendered)).strip()
+    contexts: list[str] = []
+    for match in _ELLIPSIS_RE.finditer(visible):
+        start = max(0, match.start() - 28)
+        end = min(len(visible), match.end() + 28)
+        contexts.append(visible[start:end].strip())
+    return contexts
+
+
+def find_visual_truncation_styles(rendered: str) -> list[str]:
+    """拒绝浏览器或图表组件以省略号、行数钳制隐藏报告文字。"""
+    return [label for pattern, label in _VISUAL_TRUNCATION_PATTERNS if pattern.search(rendered or "")]
+
 
 def find_system_placeholders(rendered: str) -> list[str]:
     """返回最终 HTML 可见内容中的系统占位标记；不检查用户源码中的普通 TODO。"""
     if not rendered:
         return []
-    visible = re.sub(r"<(?:script|style)\b[^>]*>.*?</(?:script|style)>", "", rendered,
-                     flags=re.IGNORECASE | re.DOTALL)
-    visible = html.unescape(re.sub(r"<[^>]+>", " ", visible))
+    visible = visible_report_text(rendered)
     return [marker for marker in SYSTEM_PLACEHOLDER_MARKERS if marker in visible]
 
 
@@ -54,6 +89,13 @@ def assert_report_complete(rendered: str, *, structured: object | None = None) -
     """发现结构化失败或占位正文时拒绝生成报告。"""
     errors = collect_error_markers(structured) if structured is not None else []
     markers = find_system_placeholders(rendered)
-    if errors or markers:
-        details = errors + [f"占位文本：{marker}" for marker in markers]
+    ellipses = find_ellipsis_omissions(rendered)
+    truncation_styles = find_visual_truncation_styles(rendered)
+    if errors or markers or ellipses or truncation_styles:
+        details = (
+            errors
+            + [f"占位文本：{marker}" for marker in markers]
+            + [f"省略号截断：{context}" for context in ellipses]
+            + [f"隐藏文字样式：{label}" for label in truncation_styles]
+        )
         raise IncompleteReportError("报告分析未完整完成：" + "；".join(details))

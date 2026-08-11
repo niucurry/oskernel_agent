@@ -4,6 +4,7 @@ from oskernel_agent.finals.models import EvidenceRef, Finding, ModuleDigest, Rep
 from oskernel_agent.pipeline.lang_guard import needs_translation
 from oskernel_agent.finals.readability import (
     concise_module_summary,
+    clip_at_sentence,
     explain_terms_in_html,
     explain_terms_on_first_use,
     readability_errors,
@@ -20,7 +21,8 @@ def test_module_summary_stops_at_sentence_and_obeys_limit():
     raw = "职责明确。" + "实现细节很多，" * 80
     summary = concise_module_summary(raw)
     assert len(summary) <= 300
-    assert summary.endswith(("。", "…"))
+    assert summary.endswith("。")
+    assert "…" not in summary and "..." not in summary
     assert not summary.endswith("，")
 
 
@@ -30,6 +32,21 @@ def test_term_expansion_cannot_push_module_summary_over_limit():
     summary = concise_module_summary(raw)
     assert len(summary) <= 300
     assert not summary.endswith("，")
+
+
+def test_sentence_clipping_does_not_cut_inside_term_parentheses_or_version():
+    raw = (
+        "网络实现覆盖 VirtIO VSOCK v1.1；"
+        + "架构采用操作系统（Operating System，OS）Socket 抽象，"
+        + "并提供回环通信路径。"
+    )
+
+    summary = clip_at_sentence(raw, 65)
+
+    assert len(summary) <= 65
+    assert summary.count("（") == summary.count("）")
+    assert "v1。" not in summary
+    assert "Operating System。" not in summary
 
 
 def test_common_term_is_explained_only_once():
@@ -89,6 +106,11 @@ def test_unexplained_term_and_ai_filler_are_reported():
     errors = readability_errors("值得注意的是，VFS 提供统一接口。")
     assert any("模板语" in error for error in errors)
     assert any("VFS" in error for error in errors)
+
+
+def test_ellipsis_is_reported_as_unfinished_content():
+    errors = readability_errors("开发过程覆盖了 RISC-V 移植到 LoongArch 移…")
+    assert any("省略号" in error for error in errors)
 
 
 def test_short_term_inside_a_larger_standard_name_is_not_a_false_first_use():

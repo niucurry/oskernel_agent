@@ -174,19 +174,52 @@ def remove_ai_filler(value: str) -> str:
 
 
 def clip_at_sentence(value: str, limit: int) -> str:
-    """优先在中文句末截断，避免输出半句话。"""
+    """在完整句子或分句边界收束，并严格遵守字符预算。"""
     text = remove_ai_filler(html_to_text(value))
     if len(text) <= limit:
         return text
-    prefix = text[: max(1, limit - 1)]
-    cuts = [prefix.rfind(mark) for mark in "。！？；"]
-    cut = max(cuts)
-    if cut >= max(20, limit // 2):
-        return prefix[: cut + 1]
-    comma = max(prefix.rfind("，"), prefix.rfind(","))
-    if comma >= max(20, limit * 2 // 3):
-        return prefix[:comma] + "。"
-    return prefix.rstrip("，,；;：:") + "…"
+    if limit <= 1:
+        return text[:limit]
+
+    def trim_unclosed(candidate: str) -> str:
+        """避免把“中文（English，TERM）”等解释从括号中间截断。"""
+        result = candidate.rstrip()
+        for opening, closing in (("（", "）"), ("(", ")"), ("[", "]")):
+            while result.count(opening) > result.count(closing):
+                open_at = result.rfind(opening)
+                if open_at < max(1, min(20, limit // 2)):
+                    break
+                result = result[:open_at].rstrip()
+        return result
+
+    # ASCII 句点只有在后接空白/末尾时才算句末，避免把 v1.1 等技术标识截断。
+    search_text = text[: limit + 1]
+    sentence_ends = [
+        match.end()
+        for match in re.finditer(r"[。！？]|[.!?](?=\s|$)", search_text)
+        if match.end() <= limit
+    ]
+    if sentence_ends:
+        candidate = trim_unclosed(text[: max(sentence_ends)])
+        if len(candidate) >= max(20, limit // 2):
+            return candidate
+
+    prefix = text[:limit]
+    clause = max(prefix.rfind(mark) for mark in "，,；;、")
+    if clause >= max(20, limit // 2):
+        candidate = trim_unclosed(prefix[:clause])
+        if candidate:
+            return candidate.rstrip("，,；;、：:") + "。"
+
+    # 极长单句没有自然边界时，在空格处收束；仍无空格则硬限长并补句号。
+    candidate = text[: limit - 1]
+    space = candidate.rfind(" ")
+    if space >= max(20, limit // 2):
+        candidate = candidate[:space]
+    candidate = trim_unclosed(candidate).rstrip("，,；;、：: ")
+    if not candidate:
+        candidate = text[: limit - 1].rstrip()
+    return candidate + "。"
 
 
 def explain_terms_on_first_use(value: str) -> str:
@@ -312,4 +345,6 @@ def readability_errors(value: str, *, max_chars: int | None = None) -> list[str]
             errors.append(f"术语 {term} 首次出现时未解释")
     if re.search(r"[。！？][。！？]+", text):
         errors.append("存在重复句末标点")
+    if re.search(r"…|(?<!\.)\.{3}(?!\.)", text):
+        errors.append("包含用来省略未完成内容的省略号")
     return errors

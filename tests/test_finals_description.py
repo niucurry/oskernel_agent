@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from oskernel_agent.finals import integrity as integrity_module
-from oskernel_agent.finals.digests import description_digest_from_tree
+from oskernel_agent.finals.digests import description_digest_from_tree, _reviewed_hardcode_findings
 from oskernel_agent.analysis.repo_facts import _probe_syscall_dispatch
 from oskernel_agent.finals.integrity import (
     analyze_log,
@@ -27,11 +27,14 @@ from oskernel_agent.pipeline.tree_builder import (
     _normalize_similarity_evidence,
     _validate_subsys_result,
     _validate_hardcode_reviews,
+    _hardcode_reviews_needing_repair,
+    _normalize_hardcode_repair_items,
     _validate_verdict_integrity_conclusion,
 )
 from oskernel_agent.report_quality import IncompleteReportError
 from oskernel_agent.reports.html_tree import (
     _clean_capability_claim,
+    _remove_assigned_issue_sentences,
     render_tree_html,
     write_tree_html,
 )
@@ -167,6 +170,91 @@ def test_hardcode_signal_keeps_real_path_and_line(tmp_path):
     assert result["findings"][0]["line"] == 2
     assert result["findings"][0]["signal_id"].startswith("main.c:2:")
     assert result["findings"][0]["confidence"] < 1
+
+
+def test_multiline_busybox_exec_fallback_is_review_candidate(tmp_path):
+    source = tmp_path / "process.rs"
+    source.write_text(
+        'let mut app_inode = open_inode(path, flags, true);\n'
+        'if app_inode.is_err() {\n'
+        '    let is_path_search = path.starts_with("/musl/");\n'
+        '    if is_path_search {\n'
+        '        app_inode = open_inode("/musl/busybox", flags, true);\n'
+        '    }\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    findings = scan_hardcode_signals(tmp_path)["findings"]
+
+    assert any(
+        item["category"] == "按测试名或 ELF 名称分支"
+        and item["path"] == "process.rs"
+        and item["line"] == 2
+        for item in findings
+    )
+
+
+def test_busybox_success_fallback_cannot_be_cleared_without_targeted_review(tmp_path):
+    source = tmp_path / "fs.rs"
+    source.write_text(
+        'match open_file(&path) {\n'
+        'Err(e) => {\n'
+        '    if path.starts_with("/musl/") {\n'
+        '        if open_inode("/musl/busybox", flags, true).is_ok() { return 0; }\n'
+        '    }\n'
+        '    e\n'
+        '}\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    hardcode = scan_hardcode_signals(tmp_path)
+    signal = next(
+        item for item in hardcode["findings"]
+        if item["category"] == "按测试名或 ELF 名称分支"
+    )
+    review = {
+        "signal_id": signal["signal_id"],
+        "category": signal["category"],
+        "path": signal["path"],
+        "line": signal["line"],
+        "status": "cleared",
+        "method": "兼容性路径",
+        "reason": "用于兼容 busybox。",
+        "confidence": 80,
+        "excerpt": signal["excerpt"],
+    }
+    parsed = {"hardcode_reviews": [review]}
+    facts = {"integrity": {"hardcode": hardcode}}
+
+    assert _hardcode_reviews_needing_repair(parsed, facts, tmp_path)
+    with pytest.raises(RuntimeError, match="不能直接标为 cleared"):
+        _validate_hardcode_reviews(parsed, facts, tmp_path)
+
+
+def test_hardcode_repair_normalizes_ai_field_drift():
+    target = {
+        "signal_id": "src/fs.rs:9:按测试名或 ELF 名称分支",
+        "category": "按测试名或 ELF 名称分支",
+        "path": "src/fs.rs",
+        "line": 9,
+        "excerpt": "return 0;",
+        "confidence": 0.72,
+    }
+    candidate = {"hardcode_reviews": [{
+        "signal_id": target["signal_id"],
+        "status": "suspected",
+        "method": "失败后返回成功",
+        "impact": "调用者误认为路径存在。",
+        "semantic_risk": "改变 faccessat 失败语义。",
+    }]}
+
+    item = _normalize_hardcode_repair_items(candidate, [target])[0]
+
+    assert item["reason"] == "改变 faccessat 失败语义。；调用者误认为路径存在。"
+    assert item["confidence"] == 72
+    assert item["excerpt"] == "return 0;"
+    assert item["path"] == "src/fs.rs" and item["line"] == 9
 
 
 def test_all_four_required_hardcode_methods_are_scanned(tmp_path):
@@ -436,6 +524,18 @@ def test_description_html_is_problem_first_and_module_text_is_bounded():
     assert '<section id="evaluation"' not in rendered
     assert "tree-node" not in rendered
 
+
+def test_module_issue_dedup_keeps_term_parentheses_intact():
+    value = (
+        "网络层包含操作系统（Operating System，OS）Socket 抽象；"
+        "其他实现说明。"
+    )
+    issues = [{"quote": "OS Socket 层无法连接真实网卡"}]
+
+    result = _remove_assigned_issue_sentences(value, issues)
+
+    assert result == "其他实现说明"
+    assert "Operating System，" not in result
 
 def test_contest_build_verification_uses_temporary_copy_and_records_artifacts(
     tmp_path, monkeypatch,
@@ -875,6 +975,25 @@ def test_syscall_count_is_labeled_as_a_static_signal_and_never_overclaims():
     assert "不代表语义可用或测试通过" in rendered
 
 
+def test_plus_syscall_number_claim_is_replaced_by_static_scan_wording():
+    tree = _tree()
+    tree["facts"]["syscall"] = {
+        "standard_count": 47, "standard_total": 60, "dispatch_count": 0,
+    }
+    tree["tree"]["children"][0]["summary"] = (
+        "该系统调用子系统支持 120+ 个调用号，并通过分发表路由 120+ 系统调用。"
+    )
+
+    rendered = render_tree_html(tree)
+    digest = description_digest_from_tree(tree)
+
+    assert "120+" not in rendered
+    assert "47/60 个标准系统调用名称" in rendered
+    assert "120+" not in digest.modules[0].summary
+    assert "47/60 个标准系统调用名称" in digest.modules[0].summary
+    assert "0 个不同分支" not in rendered
+
+
 def test_plain_syscall_count_is_also_replaced_by_static_scan_wording():
     tree = _tree()
     tree["facts"]["syscall"] = {
@@ -904,6 +1023,36 @@ def test_syscall_dispatch_probe_counts_unique_rust_and_c_arms(tmp_path):
     assert evidence == ["src/syscall.rs:2", "kernel.c:2"] or evidence == [
         "kernel.c:2", "src/syscall.rs:2",
     ]
+
+
+def test_hardcode_digest_separates_confirmed_and_suspected_same_category():
+    tree = _tree()
+    confirmed = tree["verdict"]["hardcode_reviews"][0]
+    suspected = {
+        **confirmed,
+        "signal_id": "src/main.c:9:按测试名或 ELF 名称分支",
+        "line": 9,
+        "status": "suspected",
+        "method": "缺失路径回退为固定程序",
+        "reason": "仍需运行确认获益范围。",
+    }
+    tree["verdict"]["hardcode_reviews"] = [confirmed, suspected]
+    tree["facts"]["integrity"]["hardcode"]["findings"].append({
+        "signal_id": suspected["signal_id"],
+        "category": suspected["category"],
+        "path": suspected["path"],
+        "line": suspected["line"],
+        "excerpt": suspected["excerpt"],
+    })
+
+    findings = _reviewed_hardcode_findings(
+        tree["verdict"], tree["facts"]["integrity"]
+    )
+
+    assert len(findings) == 2
+    assert {item.severity for item in findings} == {"high", "medium"}
+    assert any("硬编码问题" in item.title for item in findings)
+    assert any("硬编码线索" in item.title for item in findings)
 
 
 def test_hardcode_count_in_conclusion_comes_from_structured_reviews():

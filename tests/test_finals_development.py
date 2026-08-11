@@ -200,7 +200,10 @@ def test_development_html_puts_ai_findings_first_and_shows_exact_evidence():
     assert rendered.index("经 AI 分析，该作品存在以下问题") < rendered.index("提交历史与开发阶段")
     assert "参赛队伍不得修改" not in rendered
     assert "分析依据：Git 提交历史与代码变更记录" in rendered
-
+    assert "关键提交（标题原文）" in rendered
+    assert "不代表人工智能（AI）已验证编译、启动或测试成功" in rendered
+    assert "AI 排除的候选线索" not in rendered
+    assert "<details" not in rendered
 
     assert "章程最低提交次数未配置" in rendered
     assert "大规模提交口径" in rendered
@@ -216,6 +219,29 @@ def test_development_rejects_runtime_claims_derived_only_from_git_history():
     result["conclusion"] = "提交历史显示最终跑通LTP全量测试点。"
 
     with pytest.raises(RuntimeError, match="提交历史写成了当前版本"):
+        validate_ai_development_result(result, evidence, commits)
+
+
+def test_development_allows_explicit_runtime_evidence_limitation():
+    commits = _history()
+    evidence = build_development_evidence(commits)
+    result = _ai_result(commits, evidence)
+    result["conclusion"] = (
+        "提交历史显示持续开发；Git 历史不能证明当前版本可编译、可启动或测试通过。"
+    )
+
+    validated = validate_ai_development_result(result, evidence, commits)
+
+    assert "不能证明" in validated["conclusion"]
+
+
+def test_development_rejects_ellipsis_in_ai_text():
+    commits = _history()
+    evidence = build_development_evidence(commits)
+    result = _ai_result(commits, evidence)
+    result["conclusion"] = "提交历史显示开发覆盖了文件系统到 LoongArch 移…"
+
+    with pytest.raises(RuntimeError, match="包含省略号"):
         validate_ai_development_result(result, evidence, commits)
 
 

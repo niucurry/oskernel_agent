@@ -216,6 +216,62 @@ def test_summary_rejects_claim_that_recorded_build_target_is_unexplained(tmp_pat
         _validate_ai_summary_result(payload, digests)
 
 
+def test_summary_rejects_environment_interruption_as_build_failure(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    digests["description"].metrics.update({
+        "kernel_rv_build_status": "environment_error",
+        "kernel_la_build_status": "environment_error",
+    })
+    payload = _ai_summary().model_dump(mode="json")
+    payload["sections"][0]["conclusion"] = "双架构因环境限制未通过编译。"
+
+    with pytest.raises(SummaryPdfError, match="环境中断"):
+        _validate_ai_summary_result(payload, digests)
+
+
+def test_summary_rejects_code_identifier_not_in_referenced_finding(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    digests["description"].findings = [Finding(
+        title="人工智能（AI）复核硬编码线索：faccessat 路径分支",
+        detail="sys_faccessat2 对 /musl/ 路径返回成功。",
+        severity="medium",
+        confidence=.8,
+        source="description",
+    )]
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][0].update({
+        "source_finding": 1,
+        "severity": "medium",
+        "confidence": 80,
+        "title": "faccessat/fcntl 路径分支",
+        "judgment": "sys_faccessat2 与 fcntl 均改写错误返回。",
+    })
+
+    with pytest.raises(SummaryPdfError, match="不存在的代码标识符.*fcntl"):
+        _validate_ai_summary_result(payload, digests)
+
+
+def test_summary_rejects_suspected_hardcode_rewritten_as_confirmed(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    digests["description"].findings = [Finding(
+        title="人工智能（AI）复核硬编码线索：按测试名分支",
+        detail="缺失路径可能回退为固定程序。",
+        severity="medium",
+        confidence=.8,
+        source="description",
+    )]
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][0].update({
+        "source_finding": 1,
+        "severity": "medium",
+        "confidence": 80,
+        "judgment": "人工智能（AI）复核确认该实现构成硬编码行为。",
+    })
+
+    with pytest.raises(SummaryPdfError, match="疑似硬编码"):
+        _validate_ai_summary_result(payload, digests)
+
+
 def test_summary_rejects_complete_kernel_claim_without_dual_arch_build(tmp_path):
     digests = load_digests(_digests(tmp_path))
     payload = _ai_summary().model_dump(mode="json")
@@ -237,7 +293,47 @@ def test_summary_normalizes_contiguous_zero_based_finding_refs(tmp_path):
 
 
 
-def test_summary_compacts_overlong_ai_section_before_validation(tmp_path):
+def test_summary_normalizes_sparse_zero_based_finding_refs(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    digests["description"].findings.extend([
+        Finding(title="第二项", detail="第二项证据。", severity="high",
+                confidence=.95, source="description"),
+        Finding(title="第三项", detail="第三项证据。", severity="high",
+                confidence=.95, source="description"),
+    ])
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][0]["source_finding"] = 0
+    payload["issues"].append({
+        "source": "description", "source_finding": 2,
+        "title": "第三项风险", "judgment": "第三项证据需要进一步核查。",
+        "severity": "high", "confidence": 95,
+    })
+
+    summary = _validate_ai_summary_result(payload, digests)
+    description_refs = [
+        issue.source_finding for issue in summary.issues
+        if issue.source == "description"
+    ]
+
+    assert description_refs == [1, 3]
+
+
+def test_summary_compacts_only_at_complete_sentence_boundary(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    payload["sections"][1]["conclusion"] = (
+        "第一句说明提交历史。" * 12
+        + "最后一句不应被截断。"
+    )
+
+    summary = _validate_ai_summary_result(payload, digests)
+
+    assert len(summary.sections[1].conclusion) <= 180
+    assert summary.sections[1].conclusion.endswith("。")
+    assert "…" not in summary.sections[1].conclusion
+
+
+def test_summary_preserves_complete_section_within_schema_limit(tmp_path):
     digests = load_digests(_digests(tmp_path))
     payload = _ai_summary().model_dump(mode="json")
     original = payload["sections"][1]["conclusion"]
@@ -245,8 +341,18 @@ def test_summary_compacts_overlong_ai_section_before_validation(tmp_path):
 
     summary = _validate_ai_summary_result(payload, digests)
 
-    assert summary.sections[1].conclusion.startswith(original[:20])
-    assert len(summary.sections[1].conclusion) <= 120
+    assert summary.sections[1].conclusion == original * 4
+    assert len(summary.sections[1].conclusion) <= 180
+    assert summary.sections[1].conclusion.endswith("。")
+
+
+def test_summary_rejects_ai_ellipsis_instead_of_rendering_it(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    payload["sections"][1]["conclusion"] = "提交历史显示移植工作仍在继续…"
+
+    with pytest.raises(SummaryPdfError, match="省略号"):
+        _validate_ai_summary_result(payload, digests)
 
 def test_summary_rejects_test_success_claim_without_runtime_evidence(tmp_path):
     digests = load_digests(_digests(tmp_path))
@@ -257,6 +363,18 @@ def test_summary_rejects_test_success_claim_without_runtime_evidence(tmp_path):
 
     with pytest.raises(SummaryPdfError, match="\u672a\u7ecf\u6b63\u5f0f\u8fd0\u884c\u65e5\u5fd7"):
         _validate_ai_summary_result(payload, digests)
+
+
+def test_summary_allows_explicit_runtime_evidence_limitation(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    payload["sections"][1]["conclusion"] = (
+        "提交历史不能证明当前版本可编译、可启动或测试通过。"
+    )
+
+    summary = _validate_ai_summary_result(payload, digests)
+
+    assert "不能证明" in summary.sections[1].conclusion
 
 
 def test_summary_allows_warning_about_tests_passing_unexpectedly(tmp_path):
@@ -279,7 +397,7 @@ def test_summary_explains_term_before_length_validation(tmp_path):
     summary = _validate_ai_summary_result(payload, digests)
 
     assert "Linux \u6d4b\u8bd5\u9879\u76ee\uff08LTP\uff09" in summary.sections[0].conclusion
-    assert len(summary.sections[0].conclusion) <= 120
+    assert summary.sections[0].conclusion.endswith(".")
 
 def test_five_long_ai_issues_still_fit_one_page(tmp_path):
     payload = _ai_summary().model_dump(mode="json")
