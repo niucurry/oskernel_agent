@@ -44,6 +44,13 @@ from .readability import clip_at_sentence, readability_errors
 BODY_FONT_SIZE = 10.5
 _PAGE_MARGIN = 14 * mm
 _SUMMARY_SOURCES = ("description", "development", "comparison")
+_INTERNAL_HARDCODE_METRICS = {
+    "hardcode_candidates",
+    "hardcode_signals",
+    "hardcode_scan_truncated",
+    "hardcode_scanned_files",
+    "hardcode_cleared",
+}
 _SOURCE_LABELS = {
     "description": "作品描述与运行质量",
     "development": "开发过程",
@@ -190,6 +197,18 @@ def _safe(value: object) -> str:
     return html.escape(str(value or ""), quote=False)
 
 
+def _summary_input_digest(digest: ReportDigest) -> dict:
+    """Hide scanner noise; the judge summary only uses reviewed hardcode results."""
+    payload = digest.model_dump(mode="json")
+    if digest.kind != "description":
+        return payload
+    metrics = dict(payload.get("metrics") or {})
+    for key in _INTERNAL_HARDCODE_METRICS:
+        metrics.pop(key, None)
+    payload["metrics"] = metrics
+    return payload
+
+
 def _combined_findings(digests: dict[str, ReportDigest], limit: int) -> list[Finding]:
     """保留旧的跨报告候选归并能力，供事实准备与兼容调用使用。"""
     rank = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
@@ -323,7 +342,7 @@ def run_ai_summary_analysis(
     input_payload = {
         "repo_id": repo_id,
         "reports": {
-            source: digests[source].model_dump(mode="json")
+            source: _summary_input_digest(digests[source])
             for source in _SUMMARY_SOURCES
         },
     }
@@ -348,6 +367,8 @@ def run_ai_summary_analysis(
         "总体 confidence 不得高于三份报告 confidence 的最低值，每个 section confidence 不得高于"
         "对应来源报告 confidence。"
         "证据不足时降低置信度并使用审慎表述。文字要简洁、自然、无模板腔。\n"
+        "硬编码部分只使用 AI 复核后的 hardcode_confirmed 与 hardcode_suspected；"
+        "不得在摘要中引用原始扫描候选数、扫描命中数、排除数或扫描文件数。\n"
         f"repo_id: {repo_id}\n"
         f"input_file: {input_path.resolve()}\n"
         f"expected_schema: {schema_hint}\n"

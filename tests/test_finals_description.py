@@ -612,6 +612,31 @@ def test_hardcode_count_in_conclusion_comes_from_structured_reviews():
     assert "硬编码复核发现 7 条疑似线索、无确认项" in rendered
 
 
+def test_hardcode_brief_hides_raw_scanner_candidate_counts():
+    tree = _tree()
+    tree["facts"]["integrity"]["hardcode"].update({
+        "candidate_count": 46,
+        "scanned_files": 220,
+        "category_coverage": {
+            name: {"scanned": True}
+            for name in ("elf", "cache", "print", "script")
+        },
+    })
+    tree["verdict"]["hardcode_reviews"] = [
+        {**tree["verdict"]["hardcode_reviews"][0], "signal_id": f"s{i}", "status": "suspected"}
+        for i in range(7)
+    ]
+    tree["facts"]["integrity"]["hardcode"]["findings"] = [
+        {"signal_id": f"s{i}"} for i in range(7)
+    ]
+
+    rendered = render_tree_html(tree)
+
+    assert "AI 复核确认 0 条、疑似 7 条" in rendered
+    assert "命中 46 条候选" not in rendered
+    assert "扫描 220 个文件" not in rendered
+
+
 def test_every_scanner_signal_requires_structured_ai_review():
     tree = _tree()
     facts = tree["facts"]
