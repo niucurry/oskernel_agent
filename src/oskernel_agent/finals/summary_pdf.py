@@ -1,22 +1,33 @@
-"""生成决赛要求的一页 A4 摘要 PDF。"""
+"""生成由专用 AI 摘要智能体撰写的一页 A4 评审 PDF。"""
 
 from __future__ import annotations
 
 import html
 import io
+import json
 import os
 import re
 from pathlib import Path
+from typing import Literal
 
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pypdf import PdfReader
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.enums import TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
+    HRFlowable,
     KeepTogether,
     Paragraph,
     SimpleDocTemplate,
@@ -25,15 +36,102 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from .models import Finding, ReportDigest
-from .readability import clip_at_sentence, explain_terms_on_first_use, remove_ai_filler
+from oskernel_agent.engines.llm_batch import BatchTask, run_batch_task
+
+from .models import Finding, ReportDigest, Severity
+from .readability import clip_at_sentence, readability_errors
 
 BODY_FONT_SIZE = 10.5
-_PAGE_MARGIN = 15 * mm
+_PAGE_MARGIN = 14 * mm
+_SUMMARY_SOURCES = ("description", "development", "comparison")
+_SOURCE_LABELS = {
+    "description": "作品描述与运行质量",
+    "development": "开发过程",
+    "comparison": "历史作品对比",
+}
+_SEVERITY_LABELS = {
+    "critical": "严重",
+    "high": "高风险",
+    "medium": "需关注",
+    "low": "低风险",
+    "info": "提示",
+}
+_SEVERITY_COLORS = {
+    "critical": "#991b1b",
+    "high": "#b42318",
+    "medium": "#b54708",
+    "low": "#475467",
+    "info": "#475467",
+}
+
+SummarySource = Literal["description", "development", "comparison"]
 
 
 class SummaryPdfError(RuntimeError):
     pass
+
+
+def _single_line(value: str) -> str:
+    return " ".join(str(value or "").split())
+
+
+class AISummaryIssue(BaseModel):
+    """摘要智能体从来源报告中选出的一个评委复核项。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: SummarySource
+    source_finding: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=48)
+    judgment: str = Field(min_length=1, max_length=160)
+    severity: Severity
+    confidence: int = Field(ge=0, le=100)
+
+    @field_validator("title", "judgment")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        return _single_line(value)
+
+
+class AISummarySection(BaseModel):
+    """对应一份后续报告的 AI 结论。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: SummarySource
+    conclusion: str = Field(min_length=1, max_length=120)
+    confidence: int = Field(ge=0, le=100)
+
+    @field_validator("conclusion")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        return _single_line(value)
+
+
+class AISummary(BaseModel):
+    """直接进入 PDF 的全部作品相关文字。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    overall_judgment: str = Field(min_length=1, max_length=180)
+    confidence: int = Field(ge=0, le=100)
+    sections: list[AISummarySection] = Field(min_length=3, max_length=3)
+    issues: list[AISummaryIssue] = Field(default_factory=list, max_length=5)
+
+    @field_validator("overall_judgment")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        return _single_line(value)
+
+    @model_validator(mode="after")
+    def validate_structure(self) -> "AISummary":
+        sources = [section.source for section in self.sections]
+        if sources != list(_SUMMARY_SOURCES):
+            raise ValueError("sections 必须按 description、development、comparison 排列")
+        refs = [(issue.source, issue.source_finding) for issue in self.issues]
+        if len(refs) != len(set(refs)):
+            raise ValueError("issues 不得重复引用同一来源问题")
+        return self
 
 
 def _font_candidates() -> tuple[list[Path], list[Path]]:
@@ -82,7 +180,7 @@ def load_digests(paths: list[str | Path]) -> dict[str, ReportDigest]:
         if digest.kind in digests:
             raise SummaryPdfError(f"摘要输入重复：{digest.kind}")
         digests[digest.kind] = digest
-    missing = {"description", "development", "comparison"} - set(digests)
+    missing = set(_SUMMARY_SOURCES) - set(digests)
     if missing:
         raise SummaryPdfError("缺少摘要输入：" + "、".join(sorted(missing)))
     return digests
@@ -93,9 +191,10 @@ def _safe(value: object) -> str:
 
 
 def _combined_findings(digests: dict[str, ReportDigest], limit: int) -> list[Finding]:
+    """保留旧的跨报告候选归并能力，供事实准备与兼容调用使用。"""
     rank = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
     grouped: dict[tuple[str, str], list[Finding]] = {}
-    for kind in ("description", "development", "comparison"):
+    for kind in _SUMMARY_SOURCES:
         for finding in digests[kind].findings:
             grouped.setdefault((kind, finding.title), []).append(finding)
 
@@ -120,10 +219,8 @@ def _combined_findings(digests: dict[str, ReportDigest], limit: int) -> list[Fin
         collapsed,
         key=lambda item: (-rank[item.severity], -item.confidence, item.title),
     )
-    # 摘要不是问题数量排行榜。先让三份报告各保留一条代表判断，
-    # 再按风险补齐，避免同一类开发历史线索挤掉代码或对比结论。
     selected: list[Finding] = []
-    for kind in ("description", "development", "comparison"):
+    for kind in _SUMMARY_SOURCES:
         candidate = next((item for item in ordered if item.source == kind), None)
         if candidate is not None and len(selected) < limit:
             selected.append(candidate)
@@ -138,202 +235,358 @@ def _combined_findings(digests: dict[str, ReportDigest], limit: int) -> list[Fin
     )
 
 
-def _executive_conclusion(digests: dict[str, ReportDigest], repo_id: str) -> str:
-    development = digests["development"].metrics
-    comparison = digests["comparison"].metrics
-    high = sum(
-        1 for item in _combined_findings(digests, 24)
-        if item.severity in ("high", "critical")
-    )
-    source = str(comparison.get("closest_source") or "未确定")
-    pct = comparison.get("overall_similarity_pct", 0)
-    commits = development.get("commit_count", 0)
-    text = (
-        f"{repo_id} 有 {high} 类高风险线索需要优先复核。"
-        f"代码与 {source} 最接近，高置信同源函数比例为 {pct}%；"
-        f"当前可见开发历史包含 {commits} 次提交。"
-    )
-    return clip_at_sentence(explain_terms_on_first_use(remove_ai_filler(text)), 190)
-
-
-def _overview_lines(digests: dict[str, ReportDigest]) -> list[tuple[str, str]]:
-    desc = digests["description"]
-    dev = digests["development"]
-    comp = digests["comparison"]
-    desc_metrics, dev_metrics, comp_metrics = desc.metrics, dev.metrics, comp.metrics
-    top_modules = "、".join(
-        f"{module.name} {module.similarity_pct:.1f}%"
-        for module in comp.modules[:3]
-        if module.similarity_pct is not None
-    ) or "未形成模块级比例"
-    status_text = {
-        "passed": "通过",
-        "failed": "失败",
-        "unknown": "未能确认",
-        "not_provided": "未提供",
-        "missing": "文件缺失",
-        "skipped": "未执行",
-    }
-    build_status = status_text.get(
-        str(desc_metrics.get("build_log_status", "not_provided")), "未能确认"
-    )
-    run_status = status_text.get(
-        str(desc_metrics.get("run_log_status", "not_provided")), "未能确认"
-    )
-    return [
-        (
-            "作品描述",
-            clip_at_sentence(
-                f"{desc.conclusion} 编译日志：{build_status}；"
-                f"运行日志：{run_status}；"
-                f"硬编码线索 {desc_metrics.get('hardcode_signals', 0)} 条。",
-                170,
-            ),
-        ),
-        (
-            "开发过程",
-            clip_at_sentence(
-                f"{dev_metrics.get('commit_count', 0)} 次提交，"
-                f"时间跨度 {dev_metrics.get('start_date') or '未知'} 至 {dev_metrics.get('end_date') or '未知'}；"
-                f"大规模提交 {dev_metrics.get('large_commit_count', 0)} 次，"
-                f"阈值 {dev_metrics.get('large_commit_threshold', 0)} 代码行（LOC）。",
-                170,
-            ),
-        ),
-        (
-            "对比分析",
-            clip_at_sentence(
-                f"最近历史作品为 {comp_metrics.get('closest_source') or '未确定'}；"
-                f"整体高置信同源函数比例 {comp_metrics.get('overall_similarity_pct', 0)}%；"
-                f"模块前三项：{top_modules}。",
-                170,
-            ),
-        ),
-    ]
-
-
-def _styles(font: str, bold: str, *, detail_limit: int) -> dict[str, ParagraphStyle]:
-    return {
-        "title": ParagraphStyle("title", fontName=bold, fontSize=18, leading=22,
-                                textColor=colors.HexColor("#172033"), spaceAfter=3),
-        "meta": ParagraphStyle("meta", fontName=font, fontSize=8.5, leading=11,
-                               textColor=colors.HexColor("#667085")),
-        "lead": ParagraphStyle("lead", fontName=bold, fontSize=11.5, leading=17,
-                               textColor=colors.HexColor("#172033")),
-        "section": ParagraphStyle("section", fontName=bold, fontSize=12.5, leading=16,
-                                  textColor=colors.HexColor("#1d4ed8"), spaceBefore=3, spaceAfter=4),
-        "body": ParagraphStyle("body", fontName=font, fontSize=BODY_FONT_SIZE, leading=15,
-                               textColor=colors.HexColor("#27364b"), alignment=TA_LEFT),
-        "small": ParagraphStyle("small", fontName=font, fontSize=8.5, leading=12,
-                                textColor=colors.HexColor("#667085")),
-        "label": ParagraphStyle("label", fontName=bold, fontSize=BODY_FONT_SIZE, leading=15,
-                                textColor=colors.HexColor("#172033")),
-    }
-
-
 def _has_distinct_detail(title: str, detail: str) -> bool:
-    """Avoid repeating a finding title as an identical second line."""
+    """避免问题标题在判断行中原样重复。"""
     def normalized(value: str) -> str:
         return re.sub(r"[\s，。；：、,.!?！？:;]+", "", value).casefold()
 
     return bool(normalized(detail)) and normalized(detail) != normalized(title)
 
 
-def _story(
+def _render_order_text(summary: AISummary) -> str:
+    parts = [summary.overall_judgment]
+    by_source: dict[str, list[AISummaryIssue]] = {source: [] for source in _SUMMARY_SOURCES}
+    for issue in summary.issues:
+        by_source[issue.source].append(issue)
+    for section in summary.sections:
+        parts.append(section.conclusion)
+        for issue in by_source[section.source]:
+            parts.extend((issue.title, issue.judgment))
+    return "\n".join(parts)
+
+
+def _validate_ai_summary_result(
+    value: dict,
     digests: dict[str, ReportDigest],
+) -> AISummary:
+    if not isinstance(value, dict) or value.get("_error"):
+        raise SummaryPdfError("摘要智能体未返回可用结果")
+    try:
+        summary = AISummary.model_validate(value)
+    except ValidationError as exc:
+        raise SummaryPdfError(f"摘要智能体输出结构无效：{exc}") from exc
+
+    available = sum(len(digests[source].findings) for source in _SUMMARY_SOURCES)
+    if available and not summary.issues:
+        raise SummaryPdfError("摘要智能体遗漏了三份报告中的问题")
+
+    overall_cap = min(round(digests[source].confidence * 100) for source in _SUMMARY_SOURCES)
+    if summary.confidence > overall_cap:
+        raise SummaryPdfError("摘要智能体总体置信度高于三份来源报告的共同上限")
+    for section in summary.sections:
+        source_cap = round(digests[section.source].confidence * 100)
+        if section.confidence > source_cap:
+            raise SummaryPdfError(f"摘要智能体的 {section.source} 结论置信度高于来源报告")
+
+    refs = {(issue.source, issue.source_finding) for issue in summary.issues}
+    for issue in summary.issues:
+        findings = digests[issue.source].findings
+        if issue.source_finding > len(findings):
+            raise SummaryPdfError(
+                f"摘要智能体引用了不存在的问题：{issue.source}#{issue.source_finding}"
+            )
+        source_finding = findings[issue.source_finding - 1]
+        if issue.severity != source_finding.severity:
+            raise SummaryPdfError(
+                f"摘要智能体改变了来源严重度：{issue.source}#{issue.source_finding}"
+            )
+        source_confidence = round(source_finding.confidence * 100)
+        if issue.confidence > source_confidence:
+            raise SummaryPdfError(
+                f"摘要智能体置信度高于来源：{issue.source}#{issue.source_finding}"
+            )
+        if not _has_distinct_detail(issue.title, issue.judgment):
+            raise SummaryPdfError("摘要问题的标题与判断重复")
+
+    for source in _SUMMARY_SOURCES:
+        critical = [
+            index for index, finding in enumerate(digests[source].findings, start=1)
+            if finding.severity == "critical"
+        ]
+        if critical and not any((source, index) in refs for index in critical):
+            raise SummaryPdfError(f"摘要智能体遗漏了 {source} 的严重问题")
+
+    writing_errors = readability_errors(_render_order_text(summary), max_chars=1450)
+    if writing_errors:
+        raise SummaryPdfError("摘要智能体文字未通过可读性检查：" + "；".join(writing_errors))
+    return summary
+
+
+def run_ai_summary_analysis(
+    digests: dict[str, ReportDigest],
+    repo_id: str,
+    output_path: Path,
+) -> AISummary:
+    """让专用智能体完成取舍、判断和全部作品相关表述。"""
+    ai_path = output_path.with_suffix(".ai.json")
+    input_path = output_path.with_suffix(".input.json")
+    input_payload = {
+        "repo_id": repo_id,
+        "reports": {
+            source: digests[source].model_dump(mode="json")
+            for source in _SUMMARY_SOURCES
+        },
+    }
+    input_path.write_text(
+        json.dumps(input_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    schema_hint = (
+        '{"overall_judgment":str,"confidence":0-100,'
+        '"sections":[{"source":"description|development|comparison",'
+        '"conclusion":str,"confidence":0-100}],'
+        '"issues":[{"source":"description|development|comparison",'
+        '"source_finding":int,"title":str,"judgment":str,'
+        '"severity":"info|low|medium|high|critical","confidence":0-100}]}'
+    )
+    request = (
+        "请站在操作系统内核赛题评委角度，完整阅读随消息附加的 summary input JSON，"
+        "生成可直接进入一页 A4 PDF 的最终评审摘要。摘要的实质性文字必须全部由你生成，"
+        "参赛队不会做人工 review 或修改。先给总体判断，再按作品描述、开发过程、历史作品"
+        "对比的顺序适度展开；选择不超过五个最影响评审的问题，写清发现、影响、AI 判断和"
+        "置信度。只能使用输入事实，不能编造数字、日期、作品名或结论；每个 issue 必须引用"
+        "真实的 source_finding 一基序号，severity 与来源一致，confidence 不得高于来源 finding。"
+        "总体 confidence 不得高于三份报告 confidence 的最低值，每个 section confidence 不得高于"
+        "对应来源报告 confidence。"
+        "证据不足时降低置信度并使用审慎表述。文字要简洁、自然、无模板腔。\n"
+        f"repo_id: {repo_id}\n"
+        f"input_file: {input_path.resolve()}\n"
+        f"expected_schema: {schema_hint}\n"
+        f"output_path: {ai_path.resolve()}\n"
+        "只调用 write_report；content 为合法 JSON 字符串，output_path 必须使用上面的绝对路径。"
+    )
+
+    def _delivery_complete(value: dict) -> bool:
+        try:
+            _validate_ai_summary_result(value, digests)
+        except SummaryPdfError:
+            return False
+        return True
+
+    task = BatchTask(
+        batch_id=f"summary-{re.sub(r'[^A-Za-z0-9_.-]+', '-', repo_id)[:80]}",
+        agent_name="os-kernel-summary",
+        user_request=request,
+        output_path=ai_path,
+        cache_dir=output_path.parent,
+        cache_key="",
+        cache_enabled=False,
+        fallback={},
+        input_files=(input_path,),
+        cache_validator=_delivery_complete,
+    )
+    result = run_batch_task(task, schema_hint=schema_hint, timeout=300)
+    return _validate_ai_summary_result(result, digests)
+
+
+def _styles(font: str, bold: str, *, compact: bool) -> dict[str, ParagraphStyle]:
+    body_leading = 13.5 if compact else 14.4
+    return {
+        "title": ParagraphStyle(
+            "title", fontName=bold, fontSize=16.5, leading=20,
+            textColor=colors.HexColor("#101828"),
+        ),
+        "meta": ParagraphStyle(
+            "meta", fontName=font, fontSize=8.5, leading=10.5,
+            textColor=colors.HexColor("#667085"), alignment=TA_RIGHT,
+        ),
+        "meta_left": ParagraphStyle(
+            "meta_left", fontName=font, fontSize=8.5, leading=10.5,
+            textColor=colors.HexColor("#667085"),
+        ),
+        "lead": ParagraphStyle(
+            "lead", fontName=font, fontSize=11, leading=15.5 if compact else 16.2,
+            textColor=colors.HexColor("#172033"),
+        ),
+        "section": ParagraphStyle(
+            "section", fontName=bold, fontSize=11.5, leading=14,
+            textColor=colors.HexColor("#173b6c"),
+        ),
+        "body": ParagraphStyle(
+            "body", fontName=font, fontSize=BODY_FONT_SIZE, leading=body_leading,
+            textColor=colors.HexColor("#27364b"), alignment=TA_LEFT,
+        ),
+        "issue_title": ParagraphStyle(
+            "issue_title", fontName=font, fontSize=BODY_FONT_SIZE, leading=body_leading,
+            textColor=colors.HexColor("#172033"),
+        ),
+        "confidence": ParagraphStyle(
+            "confidence", fontName=font, fontSize=8.5, leading=body_leading,
+            textColor=colors.HexColor("#667085"), alignment=TA_RIGHT,
+        ),
+        "small": ParagraphStyle(
+            "small", fontName=font, fontSize=8.5, leading=10.5,
+            textColor=colors.HexColor("#667085"),
+        ),
+    }
+
+
+def _issue_card(
+    issue: AISummaryIssue,
+    style: dict[str, ParagraphStyle],
+    available_width: float,
+    *,
+    compact: bool,
+) -> Table:
+    accent = colors.HexColor(_SEVERITY_COLORS[issue.severity])
+    header = Paragraph(
+        f'<font color="{_SEVERITY_COLORS[issue.severity]}"><b>'
+        f'{_safe(_SEVERITY_LABELS[issue.severity])}</b></font>　'
+        f'<b>{_safe(issue.title)}</b>',
+        style["issue_title"],
+    )
+    confidence = Paragraph(f"置信度 {issue.confidence}%", style["confidence"])
+    judgment = Paragraph(_safe(issue.judgment), style["body"])
+    table = Table(
+        [[header, confidence], [judgment, ""]],
+        colWidths=[available_width - 28 * mm, 28 * mm],
+        style=TableStyle([
+            ("SPAN", (0, 1), (1, 1)),
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
+            ("LINEBEFORE", (0, 0), (0, -1), 2.2, accent),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 7),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+            ("TOPPADDING", (0, 0), (-1, 0), 3 if compact else 4),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 1),
+            ("TOPPADDING", (0, 1), (-1, 1), 0),
+            ("BOTTOMPADDING", (0, 1), (-1, 1), 4 if compact else 5),
+        ]),
+    )
+    table.hAlign = "LEFT"
+    return table
+
+
+def _story(
+    summary: AISummary,
     repo_id: str,
     font: str,
     bold: str,
     *,
-    finding_limit: int,
-    detail_limit: int,
+    compact: bool,
 ) -> list:
-    style = _styles(font, bold, detail_limit=detail_limit)
-    confidences = [digest.confidence for digest in digests.values()]
-    confidence = round(min(confidences) * 100)
-    story: list = [
-        Paragraph("决赛评审摘要", style["title"]),
-        Paragraph(f"作品：{_safe(repo_id)}　综合置信度：{confidence}%", style["meta"]),
-        Spacer(1, 5),
-        Table([[Paragraph(_safe(_executive_conclusion(digests, repo_id)), style["lead"])]],
-              colWidths=[A4[0] - 2 * _PAGE_MARGIN], style=TableStyle([
-                  ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#eef4ff")),
-                  ("BOX", (0, 0), (-1, -1), .7, colors.HexColor("#9bb8ef")),
-                  ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                  ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-                  ("TOPPADDING", (0, 0), (-1, -1), 8),
-                  ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-              ])),
-        Spacer(1, 7),
-        Paragraph("优先复核", style["section"]),
-    ]
-    severity_color = {
-        "critical": "#991b1b", "high": "#b91c1c", "medium": "#b45309",
-        "low": "#4b5563", "info": "#4b5563",
+    style = _styles(font, bold, compact=compact)
+    available_width = A4[0] - 2 * _PAGE_MARGIN
+    vertical = 3 if compact else 4
+    issues_by_source: dict[str, list[AISummaryIssue]] = {
+        source: [] for source in _SUMMARY_SOURCES
     }
-    findings = _combined_findings(digests, finding_limit)
-    for index, finding in enumerate(findings, start=1):
-        detail = clip_at_sentence(explain_terms_on_first_use(finding.detail), detail_limit)
-        title = explain_terms_on_first_use(finding.title)
-        blocks = [
-            Paragraph(
-                f'<font color="{severity_color[finding.severity]}"><b>{index}. {_safe(title)}</b></font>'
-                f'　<font color="#667085">置信度 {round(finding.confidence * 100)}%</font>',
-                style["body"],
-            ),
-        ]
-        if _has_distinct_detail(title, detail):
-            blocks.append(Paragraph(_safe(detail), style["body"]))
-        blocks.append(Spacer(1, 3))
-        story.append(KeepTogether(blocks))
+    for issue in summary.issues:
+        issues_by_source[issue.source].append(issue)
 
-    story.extend([Paragraph("三份报告速览", style["section"])])
-    rows = [
-        [Paragraph(_safe(label), style["label"]), Paragraph(_safe(text), style["body"])]
-        for label, text in _overview_lines(digests)
+    header = Table(
+        [[Paragraph("人工智能（AI）评审摘要", style["title"]),
+          Paragraph("单页决策视图", style["meta"])]],
+        colWidths=[available_width - 40 * mm, 40 * mm],
+        style=TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]),
+    )
+    story: list = [
+        header,
+        Spacer(1, 2),
+        HRFlowable(width="100%", thickness=1.2, color=colors.HexColor("#1d4ed8")),
+        Spacer(1, 3),
+        Table(
+            [[Paragraph(f"作品编号：{_safe(repo_id)}", style["meta_left"]),
+              Paragraph("AI 自动生成 · 未经人工修改", style["meta"])]],
+            colWidths=[available_width * .58, available_width * .42],
+            style=TableStyle([
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]),
+        ),
+        Spacer(1, 5 if compact else 6),
+        Table(
+            [[Paragraph(
+                f'<b>AI 总体判断</b>　<font color="#475467" size="8.5">'
+                f'置信度 {summary.confidence}%</font><br/>{_safe(summary.overall_judgment)}',
+                style["lead"],
+            )]],
+            colWidths=[available_width],
+            style=TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#eef4ff")),
+                ("BOX", (0, 0), (-1, -1), .7, colors.HexColor("#9bb8ef")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 9),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+                ("TOPPADDING", (0, 0), (-1, -1), 6 if compact else 7),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6 if compact else 7),
+            ]),
+        ),
+        Spacer(1, 5 if compact else 7),
+        Paragraph("AI 检出问题与判断", style["section"]),
+        Spacer(1, 2),
     ]
-    story.append(Table(rows, colWidths=[26 * mm, A4[0] - 2 * _PAGE_MARGIN - 26 * mm],
-                       style=TableStyle([
-                           ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                           ("GRID", (0, 0), (-1, -1), .45, colors.HexColor("#d8e0ea")),
-                           ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f3f6fa")),
-                           ("LEFTPADDING", (0, 0), (-1, -1), 7),
-                           ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-                           ("TOPPADDING", (0, 0), (-1, -1), 5),
-                           ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                       ])))
+
+    for index, section in enumerate(summary.sections, start=1):
+        source = section.source
+        section_heading: list = [
+            Table(
+                [[Paragraph(
+                    f'<b>{index}. {_safe(_SOURCE_LABELS[source])}</b>', style["section"]
+                ), Paragraph(f"结论置信度 {section.confidence}%", style["meta"])]],
+                colWidths=[available_width - 34 * mm, 34 * mm],
+                style=TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f1f5f9")),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ]),
+            ),
+            Spacer(1, 2),
+            Paragraph(_safe(section.conclusion), style["body"]),
+        ]
+        story.append(KeepTogether(section_heading))
+        for issue in issues_by_source[source]:
+            story.extend([
+                Spacer(1, 2 if compact else 3),
+                _issue_card(issue, style, available_width, compact=compact),
+            ])
+        story.append(Spacer(1, vertical))
+
     story.extend([
-        Spacer(1, 6),
+        Spacer(1, 1),
+        HRFlowable(width="100%", thickness=.6, color=colors.HexColor("#d0d5dd")),
+        Spacer(1, 3),
         Paragraph(
-            "判断边界：本摘要用于安排评委核查顺序。代码相似、硬编码和人工智能（AI）生成代码信号均需结合源码、"
-            "正式编译运行日志、比赛章程与现场说明复核，不能单独作为违规或扣分依据。",
+            "生成说明：本页作品相关判断由摘要智能体根据三份结构化报告自动生成，未经过参赛队"
+            "人工审阅或修改。内容仅用于安排评委核查顺序，不替代源码、正式编译运行日志、比赛章程与现场说明。",
             style["small"],
         ),
     ])
     return story
 
 
-def _build_pdf_bytes(digests: dict[str, ReportDigest], repo_id: str) -> bytes:
+def _build_pdf_bytes(digests: dict[str, ReportDigest], repo_id: str, summary: AISummary) -> bytes:
     font, bold = _register_fonts()
-    attempts = [(5, 120), (4, 105), (4, 85), (3, 75)]
     last_pages = 0
-    for finding_limit, detail_limit in attempts:
+    for compact in (False, True):
         buffer = io.BytesIO()
         document = SimpleDocTemplate(
-            buffer, pagesize=A4,
-            leftMargin=_PAGE_MARGIN, rightMargin=_PAGE_MARGIN,
-            topMargin=13 * mm, bottomMargin=12 * mm,
-            title=f"{repo_id} 决赛评审摘要", author="OS 内核代码分析 Agent",
+            buffer,
+            pagesize=A4,
+            leftMargin=_PAGE_MARGIN,
+            rightMargin=_PAGE_MARGIN,
+            topMargin=11 * mm if compact else 12 * mm,
+            bottomMargin=9 * mm if compact else 10 * mm,
+            title=f"{repo_id} AI 评审摘要",
+            author="OS 内核代码分析 Agent",
         )
-        document.build(_story(
-            digests, repo_id, font, bold,
-            finding_limit=finding_limit, detail_limit=detail_limit,
-        ))
+        document.build(_story(summary, repo_id, font, bold, compact=compact))
         data = buffer.getvalue()
         last_pages = len(PdfReader(io.BytesIO(data)).pages)
         if last_pages == 1:
             return data
-    raise SummaryPdfError(f"摘要内容无法在 10.5 磅正文字号下压缩到一页（当前 {last_pages} 页）")
+    raise SummaryPdfError(
+        f"AI 摘要无法在 {BODY_FONT_SIZE} 磅正文字号下完整排入一页（当前 {last_pages} 页）"
+    )
 
 
 def validate_summary_pdf(path: str | Path) -> dict:
@@ -352,8 +605,12 @@ def validate_summary_pdf(path: str | Path) -> dict:
             if str(annotation.get("/Subtype") or "") == "/Link" or annotation.get("/A"):
                 errors.append("PDF 含超链接注释")
     text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    if len(text.strip()) < 80:
+    if len(text.strip()) < 120:
         errors.append("PDF 可提取正文过短，可能渲染失败")
+    required = ("AI 总体判断", "AI 检出问题与判断", "作品描述与运行质量", "开发过程", "历史作品对比")
+    missing = [label for label in required if label not in text]
+    if missing:
+        errors.append("PDF 缺少评审层级：" + "、".join(missing))
     if errors:
         raise SummaryPdfError("；".join(errors))
     return {"pages": 1, "page_size": "A4", "links": 0, "text_chars": len(text.strip())}
@@ -367,8 +624,14 @@ def generate_summary_pdf(
 ) -> dict:
     digests = load_digests(digest_paths)
     resolved_repo_id = repo_id or digests["description"].repo_id
-    target = Path(output_path)
+    target = Path(output_path).resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(_build_pdf_bytes(digests, resolved_repo_id))
+    summary = run_ai_summary_analysis(digests, resolved_repo_id, target)
+    target.write_bytes(_build_pdf_bytes(digests, resolved_repo_id, summary))
     validation = validate_summary_pdf(target)
-    return {"pdf_path": str(target), "repo_id": resolved_repo_id, **validation}
+    return {
+        "pdf_path": str(target),
+        "ai_path": str(target.with_suffix(".ai.json")),
+        "repo_id": resolved_repo_id,
+        **validation,
+    }

@@ -24,7 +24,7 @@ _GLOBAL_CFG = (
 )
 
 
-# 共享：会话系统提示词构造（树状管道：3 个产出会话 + 1 个修复兜底）
+# 共享：会话系统提示词构造（4 个产出会话 + 1 个修复兜底）
 
 def _build_session_prompt(session_type) -> str:
     """为树状管道某个 SessionType 构建静态系统提示词。"""
@@ -209,7 +209,7 @@ def setup() -> None:
     ):
         existing["agent"].pop(stale, None)
 
-    # 报告管道：注册子系统、总评、开发过程会话和 JSON 修复兜底
+    # 报告管道：注册子系统、总评、开发过程、单页摘要会话和 JSON 修复兜底
     from ..prompts.builder import SessionType, SESSION_AGENT_NAMES
     for session_type in SessionType:
         agent_name = SESSION_AGENT_NAMES[session_type]
