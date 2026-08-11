@@ -374,8 +374,27 @@ def do_comparison(team_id: str, url: str, work_dir: Path, logfile: Path) -> tupl
             continue
         shutil.copy2(pair[0], dst)
         shutil.copy2(pair[1], dst_digest)
+        normalize_comparison_identity(dst, dst_digest, team_id, repo_name)
         return True, body
     return False, body + "\n对比报告命令虽返回成功，但未产生本轮新的 HTML 与摘要文件。"
+
+
+def normalize_comparison_identity(
+    html_path: Path, digest_path: Path, team_id: str, storage_key: str,
+) -> None:
+    """将内部防碰撞存储键替换为评委可见的比赛队伍编号。"""
+    payload = json.loads(digest_path.read_text(encoding="utf-8"))
+    original_repo_id = str(payload.get("repo_id") or "")
+    if original_repo_id not in {storage_key, team_id}:
+        raise RuntimeError(
+            f"comparison digest identity mismatch: {original_repo_id!r}"
+        )
+    payload["repo_id"] = team_id
+    digest_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8",
+    )
+    html = html_path.read_text(encoding="utf-8")
+    html_path.write_text(html.replace(storage_key, team_id), encoding="utf-8")
 
 
 def do_description(team_id: str, url: str, work_dir: Path, logfile: Path) -> tuple[bool, str]:
@@ -389,9 +408,10 @@ def do_description(team_id: str, url: str, work_dir: Path, logfile: Path) -> tup
     cmd = [
         PY, "-m", "oskernel_agent.cli.agent", *src_arg, "-o", str(dst),
         "--team-id", team_id, "--repository-url", url,
+        "--verify-build", "--pull-build-image",
         "--keep-intermediates",
     ]
-    ok, body = run_step("描述报告", cmd, logfile, timeout=2400)
+    ok, body = run_step("描述报告", cmd, logfile, timeout=7200)
     digest = dst.with_suffix(".digest.json")
     return ok and dst.exists() and digest.exists(), body
 

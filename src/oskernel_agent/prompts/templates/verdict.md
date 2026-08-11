@@ -26,10 +26,13 @@ similarity（`overlap_pct` 取代码综合相似度）。指纹库缺失或损�
 1. 读 user message 中的 repo_path / facts / subsys_summaries / outputs
 
 2. **先检查 facts.integrity**：
-   - build_log / run_log 的状态必须写入 one_line 与详细分析；首屏会直接展示日志事实，
+   - `build_verification.requested=true` 时必须原样采用比赛统一镜像中的双架构编译结果；
+     只有 passed 才能写实际编译通过，environment_error / timeout 不能归因于作品。未请求
+     真实编译时再依据 build_log。run_log 未提供时不要额外讨论本地无法复现的运行环境；
      issues 只列能回溯到仓库源码 path:line 的设计或实现问题，避免重复；
    - build_interface 只静态检查根目录 Makefile 是否声明比赛规定的 kernel-rv 与
-     kernel-la 双架构入口。目标完整只能写“入口完整、未实测”，不得写成编译通过；
+     kernel-la 双架构入口。目标完整只能写“入口完整”；是否编译通过完全服从
+     build_verification 或正式 build_log；
      partial/missing 可写成比赛构建入口问题，但只能说静态检查未识别到规定目标，不能
      外推为源码编译失败；
      缺少 Dockerfile 不是问题，也不得据此扣分。只有仓库自行声明的容器辅助命令与其
@@ -40,8 +43,8 @@ similarity（`overlap_pct` 取代码综合相似度）。指纹库缺失或损�
      替换策略、直接打印预期输出、修改测试脚本旁路失败。扫描未命中不代表不存在；
    - 每条硬编码复核必须说明实现方法、影响、真实 path:line 和置信度。证据不足时用
      suspected，禁止把关键词命中直接认定为作弊；
-   - 未提供日志时写“本报告未实测，无法核验”，不得推断作品能够正常编译或运行；
-     同时不得仅因本地报告系统未执行编译或 QEMU 而扣分。
+   - 未提供编译材料时写“本报告未实测，无法核验”，不得推断作品能够正常编译；
+     同时不得仅因本地报告系统未执行动态验证而扣分。
 
 3. 综合 subsys_summaries 中各子系统的 summary / highlights / issues，
    推断 6 维度评分（**评分只在本顶层会话产出**，子系统/模块本身不打分）：
