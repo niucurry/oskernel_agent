@@ -403,19 +403,10 @@ def _render_priority_summary(tree_json: dict, resolver) -> str:
     }.get(str(metrics.get("build_interface_status") or "unknown"), "未采集")
     build_status = status_text.get(str(metrics.get("build_log_status")), "未能确认")
     run_status = status_text.get(str(metrics.get("run_log_status")), "未能确认")
-    candidates = int(metrics.get("hardcode_candidates", metrics.get("hardcode_signals", 0)) or 0)
-    selected_signals = int(metrics.get("hardcode_signals", 0) or 0)
-    hardcode_count_text = (
-        f"硬编码规则命中 {candidates} 条候选，选取 {selected_signals} 条进入 AI 复核，"
-        if candidates != selected_signals else
-        f"硬编码规则命中 {selected_signals} 条候选，"
-    )
     coverage = (
         f'构建接口：{interface_text}；实际编译：{build_status}；QEMU 启动 / 运行：{run_status}；'
-        f'{hardcode_count_text}'
         f'AI 确认 {_esc(metrics.get("hardcode_confirmed", 0))} 条、'
-        f'疑似 {_esc(metrics.get("hardcode_suspected", 0))} 条、'
-        f'排除 {_esc(metrics.get("hardcode_cleared", 0))} 条。'
+        f'疑似 {_esc(metrics.get("hardcode_suspected", 0))} 条。'
     )
     hardcode_scope = (
         "硬编码专项检查范围：仓库第一方源码与测试/评测脚本中的按测试名或被加载的 ELF 文件名分支、"
@@ -831,9 +822,6 @@ def _render_hardcode_brief(tree_json: dict, resolver) -> str:
     reviews = (tree_json.get("verdict") or {}).get("hardcode_reviews") or []
     confirmed = [item for item in reviews if isinstance(item, dict) and item.get("status") == "confirmed"]
     suspected = [item for item in reviews if isinstance(item, dict) and item.get("status") == "suspected"]
-    cleared = [item for item in reviews if isinstance(item, dict) and item.get("status") == "cleared"]
-    scanned = int(hardcode.get("scanned_files") or 0)
-    candidates = int(hardcode.get("candidate_count") or len(hardcode.get("findings") or []))
     truncated = bool(hardcode.get("truncated"))
     category_coverage = hardcode.get("category_coverage") or {}
     scope_complete = len(category_coverage) >= 4 and all(
@@ -846,20 +834,18 @@ def _render_hardcode_brief(tree_json: dict, resolver) -> str:
         status_text, status_cls = "检查不完整", "status-warn"
     elif truncated:
         conclusion = (
-            f"扫描 {scanned} 个文件并抽取 {len(hardcode.get('findings') or [])}/{candidates} 条候选；"
-            "候选输出被截断，不能据此给出完整的无作弊结论。"
+            "规则扫描输出发生截断，尚未完成全部结构化 AI 复核，不能据此给出无作弊结论。"
         )
         status_text, status_cls = "范围不完整", "status-warn"
     elif confirmed or suspected:
         conclusion = (
-            f"扫描 {scanned} 个文件、命中 {candidates} 条候选；AI 复核确认 {len(confirmed)} 条、"
-            f"疑似 {len(suspected)} 条、排除 {len(cleared)} 条。"
+            f"AI 复核确认 {len(confirmed)} 条、疑似 {len(suspected)} 条；"
+            "正文仅展示需要评委关注的确认和疑似证据。"
         )
         status_text, status_cls = "需要核查", "status-bad"
     elif len(reviews) >= len(hardcode.get("findings") or []):
         conclusion = (
-            f"未发现作弊型硬编码。扫描 {scanned} 个文件、命中 {candidates} 条候选，"
-            f"AI 逐条复核后排除 {len(cleared)} 条。"
+            "AI 复核确认 0 条、疑似 0 条；未发现作弊型硬编码。"
         )
         status_text, status_cls = "未发现", "status-ok"
     else:

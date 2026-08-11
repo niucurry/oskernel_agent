@@ -152,6 +152,15 @@ def test_summary_merges_repeated_findings_and_localizes_status(tmp_path):
 
 def test_summary_runs_dedicated_ai_agent_and_validates_references(tmp_path, monkeypatch):
     digests = load_digests(_digests(tmp_path))
+    digests["description"].metrics.update({
+        "hardcode_candidates": 46,
+        "hardcode_signals": 46,
+        "hardcode_scan_truncated": False,
+        "hardcode_scanned_files": 220,
+        "hardcode_cleared": 39,
+        "hardcode_confirmed": 0,
+        "hardcode_suspected": 7,
+    })
     captured = {}
 
     def fake_run(task, *, schema_hint, timeout):
@@ -159,6 +168,7 @@ def test_summary_runs_dedicated_ai_agent_and_validates_references(tmp_path, monk
         captured["input_files"] = task.input_files
         captured["schema_hint"] = schema_hint
         captured["timeout"] = timeout
+        captured["input"] = json.loads(task.input_files[0].read_text(encoding="utf-8"))
         return _ai_summary().model_dump(mode="json")
 
     monkeypatch.setattr(summary_pdf, "run_batch_task", fake_run)
@@ -169,6 +179,16 @@ def test_summary_runs_dedicated_ai_agent_and_validates_references(tmp_path, monk
     assert captured["input_files"] == (tmp_path / "summary.input.json",)
     assert "source_finding" in captured["schema_hint"]
     assert captured["timeout"] == 300
+    description_metrics = captured["input"]["reports"]["description"]["metrics"]
+    assert description_metrics["hardcode_confirmed"] == 0
+    assert description_metrics["hardcode_suspected"] == 7
+    assert not ({
+        "hardcode_candidates",
+        "hardcode_signals",
+        "hardcode_scan_truncated",
+        "hardcode_scanned_files",
+        "hardcode_cleared",
+    } & description_metrics.keys())
 
 
 def test_summary_rejects_ai_confidence_above_source(tmp_path, monkeypatch):
