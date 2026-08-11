@@ -71,6 +71,7 @@ export class PipelineQueue {
     this.running = false;
     this.activeChildren = new Map();
     this.jobReportKinds = new Map();
+    this.cancelledJobs = new Set();
   }
 
   async enqueue(repoId, reportKinds = null) {
@@ -81,7 +82,6 @@ export class PipelineQueue {
     const existing = await syncExistingReports(this.db, repoId);
     const id = jobId();
     if (hasReportKinds(existing, requestedKinds)) {
-      await cleanupReportDirectory(repoId);
       await this.createJob(id, repoId, "skipped", `所选报告已存在，直接使用本地报告：${requestedKinds.join(", ")}`);
       return this.db.get("SELECT * FROM jobs WHERE id = ?", [id]);
     }
@@ -105,13 +105,16 @@ export class PipelineQueue {
   async drain() {
     if (this.running) return;
     this.running = true;
-    while (this.queue.length) {
-      const id = this.queue.shift();
-      const current = this.db.get("SELECT * FROM jobs WHERE id = ?", [id]);
-      if (!current || current.status !== "queued") continue;
-      await this.runJob(id);
+    try {
+      while (this.queue.length) {
+        const id = this.queue.shift();
+        const current = this.db.get("SELECT * FROM jobs WHERE id = ?", [id]);
+        if (!current || current.status !== "queued") continue;
+        await this.runJob(id);
+      }
+    } finally {
+      this.running = false;
     }
-    this.running = false;
   }
 
   async updateJob(id, patch) {
@@ -162,6 +165,7 @@ export class PipelineQueue {
     this.jobReportKinds.delete(id);
 
     if (wasRunning) {
+      this.cancelledJobs.add(id);
       await this.setRepoStatus(job.repo_id, "pending", "任务已取消，可重新生成。");
       await killProcessTree(this.activeChildren.get(id));
     }
@@ -244,11 +248,6 @@ export class PipelineQueue {
     }
 
     await this.db.save();
-    // 服务异常退出可能来不及执行任务 finally；每次启动恢复时再次执行四文件白名单。
-    const repositories = this.db.query("SELECT id FROM repositories");
-    for (const repo of repositories) {
-      await cleanupReportDirectory(repo.id);
-    }
     return {
       cancelledQueued: staleQueued.length,
       failedRunning: staleRunning.length
@@ -295,7 +294,7 @@ export class PipelineQueue {
     try {
       await this.runJobImplementation(id, job);
     } finally {
-      // 成功、失败、取消或抛出异常都不能把摘要、克隆和工作目录留在正式目录。
+      this.cancelledJobs.delete(id);
       await cleanupReportDirectory(job.repo_id);
     }
   }
@@ -331,10 +330,12 @@ export class PipelineQueue {
 
     const { log } = await this.runProcess(id, "report_jobs", python, args, "", []);
 
+    if (this.cancelledJobs.has(id)) return;
+
     if (!this.db.get("SELECT id FROM jobs WHERE id = ?", [id])) return;
 
-    const jsonStart = log.lastIndexOf('{"repo_id":');
-    if (jsonStart === -1) {
+    const jsonMatch = log.match(/\{(?:"repo_id"|"kinds"|"started_at"|"finished_at")[\s\S]*\}/);
+    if (!jsonMatch) {
       const reason = extractFailureReason(log);
       const error = `report_jobs 未输出有效 JSON（${reason}）`;
       await this.setRepoStatus(repo.id, "failed", error);
@@ -344,7 +345,7 @@ export class PipelineQueue {
 
     let result;
     try {
-      result = JSON.parse(log.slice(jsonStart));
+      result = JSON.parse(jsonMatch[0]);
     } catch {
       const error = "无法解析 report_jobs 输出，JSON 格式异常";
       await this.setRepoStatus(repo.id, "failed", error);
