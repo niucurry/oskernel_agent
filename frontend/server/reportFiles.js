@@ -9,9 +9,10 @@ export const REPORT_KINDS = ["summary", "description", "development", "compariso
 
 export const FINAL_REPORT_NAMES = new Set([
   "summary.pdf",
-  "description.html",
-  "development.html",
-  "comparison.html"
+  "description.html", "description.digest.json",
+  "development.html", "development.digest.json",
+  "comparison.html", "comparison.digest.json",
+  ".report_jobs_state.json",
 ]);
 
 const REPORT_KIND_ORDER = new Map(REPORT_KINDS.map((kind, index) => [kind, index]));
