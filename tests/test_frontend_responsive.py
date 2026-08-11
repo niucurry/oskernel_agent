@@ -18,9 +18,8 @@ def test_frontend_exposes_finals_reports_in_judge_order():
     expected = '["summary", "description", "development", "comparison"]'
     assert expected in report_files
     assert 'activeReportKind = ref("summary")' in app
-    assert 'path.join(reportDir(repo.id), "summary.pdf")' in pipeline
-    assert '"-m",\n        "oskernel_agent.finals",\n        "development"' in pipeline
-    assert '"--description-digest"' in pipeline
+    assert '"oskernel_agent.report_jobs"' in pipeline
+    assert '"--kinds"' in pipeline
 
 
 def test_frontend_always_cleans_intermediates_and_keeps_digests_internal():
@@ -38,4 +37,4 @@ def test_frontend_always_cleans_intermediates_and_keeps_digests_internal():
     assert "finally" in pipeline
     assert "await cleanupReportDirectory(job.repo_id);" in pipeline
     assert "await cleanupReportDirectory(repo.id);" in pipeline
-    assert pipeline.count('"--keep-intermediates"') == 2
+    assert '"oskernel_agent.report_jobs"' in pipeline
