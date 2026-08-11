@@ -4081,6 +4081,7 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
   font-weight:800;color:#3b82f6;text-transform:uppercase}
 .report-header h1{margin:.35rem 0 .2rem;font-size:1.72rem;line-height:1.25;font-weight:760;color:#0f172a}
 .report-header p{margin:0;color:var(--muted);font-size:.82rem}
+.ai-disclaimer{font-size:.72rem;color:#64748b;margin-top:4px;line-height:1.5}
 /* 左侧目录：固定宽度、分组、等高行和固定徽标列 */
 .toc{position:sticky;top:1.25rem;align-self:flex-start;width:278px;flex:0 0 278px;font-size:.82rem}
 .toc-card{overflow:hidden;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.96);
@@ -4192,6 +4193,7 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
 .cl.df{background:#fff1f2}
 .code-col:first-child .cl.df{background:#fef9c3}
 @media(max-width:720px){.code-pair{grid-template-columns:1fr}.code-col{border-left:none;border-top:1px solid #e2e8f0}}
+@media(max-width:414px){.layout{display:block;padding:.5rem}.toc{display:none}.main{padding:.5rem;min-width:0}body{font-size:14px}h1{font-size:1.3rem}h2{font-size:1.05rem}.report-header h1{font-size:1.25rem}.kpi-grid{grid-template-columns:repeat(2,1fr)}.summary-alert{padding:.5rem}.cluster-head{grid-template-columns:minmax(0,1fr)}.cluster-priority{display:none}}
 /* 回到顶部 */
 .to-top{position:fixed;right:1.1rem;bottom:1.1rem;width:2.4rem;height:2.4rem;border-radius:999px;background:#2563eb;color:#fff;
   display:flex;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 4px 14px rgba(37,99,235,.28);font-size:1.1rem;opacity:.9}
@@ -4234,7 +4236,7 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
   .module-summary-source{width:100%;margin-left:0}.lineage-summary,.compliance-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .cluster-head{grid-template-columns:2.2rem minmax(8rem,1fr) auto 1rem}.cluster-metrics{display:none}
 }
-@media(max-width:620px){.toc-scroll{grid-template-columns:1fr}.summary-heading{display:block}.summary-repo{display:block;max-width:none;text-align:left;margin-top:.4rem}.lineage-summary,.compliance-grid,.innovation-evidence-grid{grid-template-columns:1fr}.innovation-evidence-grid .innovation-counter{grid-column:auto}.cluster-head{grid-template-columns:2rem minmax(0,1fr) 1rem}.cluster-priority{display:none}}
+@media(max-width:620px){.toc-scroll{grid-template-columns:1fr}.summary-heading{display:block}.summary-repo{display:block;max-width:none;text-align:left;margin-top:.4rem}.lineage-summary,.compliance-grid,.innovation-evidence-grid{grid-template-columns:1fr}.innovation-evidence-grid .innovation-counter{grid-column:auto}.cluster-head{grid-template-columns:2rem minmax(0,1fr) 1rem}.cluster-priority{display:none}.kpi-grid{grid-template-columns:repeat(2,1fr)}.code-pair{grid-template-columns:1fr}body{font-size:15px}}
 @media print{
   .toc,.to-top{display:none!important}
   body{background:#fff}
@@ -5815,6 +5817,7 @@ def generate_finals_comparison_html(
     file_similar: list[dict],
     retrieval_contract: dict | None,
     recall: dict | None,
+    multi_repo_report_url: str = "",
 ) -> tuple[str, object]:
     """决赛版对比报告：只展示一个最近历史作品，先结论后证据。"""
     from oskernel_agent.finals.digests import comparison_digest
@@ -5862,6 +5865,15 @@ def generate_finals_comparison_html(
         + '</div></div>'
     )
     title = f"{html.escape(query_repo_id)} 对比分析报告"
+    multi_repo_link = ""
+    if multi_repo_report_url:
+        multi_repo_link = (
+            '<div style="float:right;margin-top:-2rem">'
+            f'<a href="{html.escape(multi_repo_report_url)}" '
+            'style="font-size:.78rem;color:#3b82f6;text-decoration:underline;'
+            'background:#eef4ff;padding:3px 10px;border-radius:6px">'
+            '和多个接近作品同时对比 &rarr;</a></div>'
+        )
     rendered = f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title>{_CDN_HEAD}{_STYLES}<style>
@@ -5871,7 +5883,9 @@ def generate_finals_comparison_html(
 .summary-alert>span{{float:right;color:#64748b;font-size:.72rem}}.summary-alert p{{margin:.25rem 0 0;font-size:.86rem}}
 .closest-identity{{margin:.2rem 0 .7rem;color:#475569;font-weight:600}}
 </style></head><body><div class="layout"><nav class="toc">{toc_html}</nav><main class="main">
-<header class="report-header"><span class="report-kicker">完全由 AI 工具生成 · 参赛队不得修改</span>
+<header class="report-header"><span class="report-kicker">AI 工具生成</span>
+<div class="ai-disclaimer">本报告由人工智能（AI）分析工具自动生成，参赛队伍不得修改。分析依据：历史作品向量检索与代码相似度比对。AI 判断仅供评委参考，不构成违规认定。</div>
+{multi_repo_link}
 <h1>{title}</h1><p>只围绕历史上最接近的一个作品展开；问题先列，模块按高置信同源比例降序排列。</p></header>
 {summary_html}
 <section id="closest-evidence" data-section-id="closest-evidence">
@@ -6053,6 +6067,7 @@ def run_semantic_compare(
     ai_detect_path: str | Path | None = None,
     functions_db_path: str | Path | None = None,
     require_complete_recall: bool = True,
+    multi_repo_report_url: str = "",
 ) -> dict:
     """主入口：suspects.json → LLM 语义分析 → 直接 HTML 报告。
 
@@ -6357,6 +6372,7 @@ def run_semantic_compare(
         file_similar=file_similar,
         retrieval_contract=recall.get("retrieval_contract") if recall else None,
         recall=recall,
+        multi_repo_report_url=multi_repo_report_url if multi_repo_report_url else "",
     )
 
     # 档位标签统一（高置信同源代码 / 模型复核难例 / 暂未检出相似），避免各处叫法不一
