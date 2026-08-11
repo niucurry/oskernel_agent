@@ -6118,8 +6118,7 @@ def generate_finals_comparison_html(
 .summary-alert>span{{float:right;color:#64748b;font-size:.72rem}}.summary-alert p{{margin:.25rem 0 0;font-size:.86rem}}
 .closest-identity{{margin:.2rem 0 .7rem;color:#475569;font-weight:600}}
 </style></head><body><div class="layout"><nav class="toc">{toc_html}</nav><main class="main">
-<header class="report-header"><span class="report-kicker">完全由 AI 工具生成 · 参赛队不得修改</span>
-<h1>{title}</h1><p>先看全历史 Top 5，再围绕排名第一的作品展开代码证据；模块按高置信同源比例降序排列。</p></header>
+<header class="report-header"><h1>{title}</h1><p>先看全历史 Top 5，再围绕排名第一的作品展开代码证据；模块按高置信同源比例降序排列。</p></header>
 {summary_html}
 <section id="history-overview" data-section-id="history-overview">
 {_chapter_heading("02", "全历史库匹配概览", "图表用于快速定位，常显表格保留全部对应数字；排名不代表直接来源。")}

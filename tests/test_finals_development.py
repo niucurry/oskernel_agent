@@ -198,7 +198,8 @@ def test_development_html_puts_ai_findings_first_and_shows_exact_evidence():
     rendered = render_development_html(analysis)
 
     assert rendered.index("经 AI 分析，该作品存在以下问题") < rendered.index("提交历史与开发阶段")
-    assert "参赛队伍不得修改" in rendered
+    assert "参赛队伍不得修改" not in rendered
+    assert "分析依据：Git 提交历史与代码变更记录" in rendered
 
 
     assert "章程最低提交次数未配置" in rendered
