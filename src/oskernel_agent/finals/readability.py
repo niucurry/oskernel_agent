@@ -10,6 +10,29 @@ import re
 
 MODULE_SUMMARY_LIMIT = 300
 
+_DEPENDENCY_SCOPE_ONLY_RE = re.compile(
+    r"(?:smoltcp|lwip|littlefs|fatfs|virtio|第三方|上游|依赖).{0,60}"
+    r"(?:不完整|非完整|不是完整|未实现全部|不支持全部)"
+    r"|(?:不完整|非完整|不是完整|未实现全部|不支持全部).{0,60}"
+    r"(?:Linux\s*)?(?:TCP(?:/IP)?|网络|协议|文件系统).{0,12}(?:栈|实现)?",
+    re.IGNORECASE,
+)
+_SYSTEM_VISIBLE_EFFECT_RE = re.compile(
+    r"(?:系统调用|syscall|ABI|错误码|errno|ENOSYS|EINTR|EAGAIN|"
+    r"阻塞|非阻塞|超时|信号|poll|epoll|select|backlog|路由|eth0|网卡|"
+    r"外部网络|收包|发包|连接失败|无法连接|崩溃|panic|"
+    r"socket|connect|listen|accept|send|recv|shutdown|sockopt)",
+    re.IGNORECASE,
+)
+
+
+def is_dependency_scope_only_issue(value: str) -> bool:
+    """Reject upstream-completeness criticism without an OS-visible consequence."""
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    return bool(_DEPENDENCY_SCOPE_ONLY_RE.search(text)) and not bool(
+        _SYSTEM_VISIBLE_EFFECT_RE.search(text)
+    )
+
 _EMPTY_PHRASES = (
     "综上所述，",
     "综上所述",
@@ -85,8 +108,10 @@ def _inside_source_path(text: str, start: int, end: int) -> bool:
     while right < len(text) and text[right] not in separators:
         right += 1
     token = text[left:right]
-    return "/" in token and bool(
-        re.search(r"\.[A-Za-z0-9_+-]+(?:(?::|#L)\d+(?:-L?\d+)?)?$", token)
+    separators_in_token = token.count("/") + token.count("\\")
+    return separators_in_token >= 2 or bool(
+        separators_in_token
+        and re.search(r"\.[A-Za-z0-9_+-]+(?:(?::|#L)\d+(?:-L?\d+)?)?$", token)
     )
 
 
@@ -102,9 +127,33 @@ def _tidy_term_expansions(text: str) -> str:
     return (
         text.replace("（IRQ）中断", "（IRQ）")
         .replace("（LTP）测试", "（LTP）")
+        .replace("虚拟输入输出设备规范（VirtIO）规范", "虚拟输入输出设备规范（VirtIO）")
+        .replace(
+            "写时复制（写时复制（Copy-on-Write，COW））",
+            "写时复制（Copy-on-Write，COW）",
+        )
         .replace("多核（对称多处理（SMP））", "对称多处理（SMP）多核")
         .replace("平台级中断控制器（PLIC）中断控制器", "平台级中断控制器（PLIC）")
         .replace("三级虚拟内存分页方案（SV39）分页", "三级虚拟内存分页方案（SV39）")
+    )
+
+
+def _term_replacement(text: str, match: re.Match, expansion: str) -> str:
+    """Avoid nesting a full expansion inside an already localized label."""
+    if "（" not in expansion or not expansion.endswith("）"):
+        return expansion
+    label, inner = expansion[:-1].split("（", 1)
+    if text[:match.start()].rstrip().endswith(label + "（"):
+        return inner
+    return expansion
+
+
+def sanitize_html_controls(value: str) -> str:
+    """Render forbidden C0 bytes visibly instead of emitting invalid HTML."""
+    return re.sub(
+        r"[\x00-\x08\x0b\x0c\x0e-\x1f]",
+        lambda match: f"\\x{ord(match.group(0)):02x}",
+        str(value or ""),
     )
 
 
@@ -152,7 +201,8 @@ def explain_terms_on_first_use(value: str) -> str:
         for match in pattern.finditer(text):
             if _inside_source_path(text, match.start(), match.end()):
                 continue
-            text = text[:match.start()] + expansion + text[match.end():]
+            replacement = _term_replacement(text, match, expansion)
+            text = text[:match.start()] + replacement + text[match.end():]
             break
     return _tidy_term_expansions(text)
 
@@ -214,7 +264,8 @@ def explain_terms_in_html(value: str) -> str:
             if 0 <= expansion_at <= term_match.start():
                 defined.add(term)
                 continue
-            text = text[:term_match.start()] + expansion + text[term_match.end():]
+            replacement = _term_replacement(text, term_match, expansion)
+            text = text[:term_match.start()] + replacement + text[term_match.end():]
             defined.add(term)
         output.append(_tidy_term_expansions(text))
     return "".join(output)

@@ -165,6 +165,8 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
                        output_dir=work_dir)
     if team_id:
         tree.setdefault("meta", {})["team_id"] = team_id
+        # Collision-safe clone names are private workspace keys, not report ids.
+        tree.setdefault("meta", {})["repo"] = team_id
     if repository_url:
         tree.setdefault("meta", {})["repository_url"] = repository_url.removesuffix(".git")
     if repository_ref:
