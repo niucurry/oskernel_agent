@@ -16,6 +16,7 @@ from oskernel_agent.engines.llm_batch import BatchTask, run_batch_task
 
 from .models import EvidenceRef, Finding, ModuleDigest, ReportDigest
 from .readability import (
+    ai_disclaimer_html,
     clip_at_sentence,
     concise_module_summary,
     explain_terms_in_html,
@@ -468,7 +469,24 @@ def analyze_history(
     for review in validated["issues"]:
         if review["status"] != "report":
             continue
-        detail = clip_at_sentence(f"{review['fact']} AI 分析：{review['analysis']}", 360)
+        # 大规模提交: 只展示被 AI 标记的具体提交证据，不列出所有超大提交
+        if review["candidate_id"] == "large-commits" and review.get("commit_shas"):
+            cited = []
+            for sha in review["commit_shas"][:6]:
+                c = commit_by_sha.get(sha)
+                if c:
+                    cited.append(
+                        f"{sha[:12]}（{_changes(c)} LOC，提交信息："
+                        f"{_short_text(c.get('subject'), 60)}）"
+                    )
+            fact_prefix = f"涉疑提交 {len(review['commit_shas'])} 次：{'；'.join(cited)}。"
+            detail = clip_at_sentence(
+                f"{fact_prefix} AI 分析：{review['analysis']}", 360
+            )
+        else:
+            detail = clip_at_sentence(
+                f"{review['fact']} AI 分析：{review['analysis']}", 360
+            )
         findings.append(
             Finding(
                 title=review["title"],
@@ -479,7 +497,9 @@ def analyze_history(
                 evidence=[
                     EvidenceRef(
                         path=f"commit:{sha}",
-                        excerpt=str(commit_by_sha[sha].get("subject") or ""),
+                        excerpt=str(
+                            _short_text(commit_by_sha.get(sha, {}).get("subject", ""), 80)
+                        ),
                         url=(
                             f"{repository_url.rstrip('/')}/-/commit/{sha}"
                             if repository_url else ""
@@ -677,12 +697,14 @@ def render_development_html(analysis: dict) -> str:
         else "章程最低提交次数未配置，本报告不判断“提交缺失”。"
     )
     title = f"{_esc(digest.repo_id)} 开发过程分析报告"
+    disclaimer = ai_disclaimer_html("development")
     rendered = f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title><style>
 body{{margin:0;background:#f8fafc;color:#172033;font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}}
 main{{max-width:980px;margin:auto;padding:32px 22px 70px}}h1{{font-size:28px;margin:0 0 6px}}h2{{margin-top:34px;font-size:21px}}
 .ai-mark{{display:inline-block;color:#075985;background:#e0f2fe;border-radius:999px;padding:3px 10px;font-size:13px;font-weight:700}}
+.ai-disclaimer{{font-size:12px;color:#64748b;margin-top:6px;line-height:1.5}}
 .lead{{font-size:18px;margin:10px 0 22px}}.metrics{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}}
 .metric,.stage,.panel{{background:white;border:1px solid #dbe3ee;border-radius:10px;padding:16px}}.metric b{{display:block;font-size:24px}}
 .findings{{display:grid;gap:10px;padding:0;list-style:none}}.finding{{background:white;border-left:4px solid #f59e0b;padding:12px 14px}}
@@ -693,11 +715,12 @@ main{{max-width:980px;margin:auto;padding:32px 22px 70px}}h1{{font-size:28px;mar
 .stage-evidence ul,.stage-evidence p{{margin:.35rem 0;padding-left:1.2rem}}.stage-evidence p{{padding-left:0}}
 details summary{{cursor:pointer;color:#475569;font-weight:600}}.more-files{{margin-top:.4rem}}code{{font-family:ui-monospace,Consolas,monospace}}
 a{{color:#075985;text-decoration:none}}a:hover{{text-decoration:underline}}
-@media(max-width:640px){{main{{padding:20px 14px}}.finding>div,.stage-head{{display:block}}.stage-evidence{{grid-template-columns:1fr}}}}
+@media(max-width:640px){{main{{padding:20px 14px}}.finding>div,.stage-head{{display:block}}.stage-evidence{{grid-template-columns:1fr}}.metrics{{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}}h1{{font-size:22px}}}}
+@media(max-width:414px){{main{{padding:14px 10px}}h1{{font-size:18px}}h2{{font-size:16px}}.lead{{font-size:15px}}.metric b{{font-size:18px}}body{{font-size:14px}}code{{word-break:break-all}}.stage-evidence{{display:block}}.stage{{padding:10px}}}}
 </style></head><body><main>
-<header><span class="ai-mark">完全由 AI 工具生成</span><h1>{title}</h1>
+<header><span class="ai-mark">AI 工具生成</span><h1>{title}</h1>
 <p class="lead">{_esc(digest.conclusion)}</p>
-<p>AI 负责问题判断和阶段归纳；提交次数、日期、LOC 与文件明细均由程序依据 Git 复算，参赛队不得修改本报告。</p></header>
+{disclaimer}</header>
 <section id="findings"><h2>经 AI 分析，该作品存在以下问题</h2><ol class="findings">{finding_html}</ol>{dismissed_html}</section>
 <section><h2>历史概况</h2><div class="metrics">
 <div class="metric"><b>{_esc(metrics.get('commit_count', 0))}</b><span>可见提交</span></div>
