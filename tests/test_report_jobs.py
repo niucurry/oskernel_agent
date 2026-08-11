@@ -252,8 +252,8 @@ def test_run_all_four_kinds(monkeypatch) -> None:
     assert (output_dir / "description.html").exists()
     assert (output_dir / "development.html").exists()
     assert (output_dir / "summary.pdf").exists()
-    assert not (output_dir / "comparison.digest.json").exists()
-    assert not (output_dir / "description.digest.json").exists()
+    assert (output_dir / "comparison.digest.json").exists()
+    assert (output_dir / "description.digest.json").exists()
 
 
 # ---- CLI ----
@@ -269,6 +269,44 @@ def test_cli_help() -> None:
     assert result.returncode == 0
     assert "--repo" in (result.stdout or "")
     assert "--kinds" in (result.stdout or "")
+
+
+# ---- final-files whitelist ----
+
+def test_final_files_includes_all_deliverables_and_digests() -> None:
+    from oskernel_agent.report_jobs._runner import _FINAL_FILES
+
+    assert "summary.pdf" in _FINAL_FILES
+    assert "description.html" in _FINAL_FILES
+    assert "description.digest.json" in _FINAL_FILES
+    assert "development.html" in _FINAL_FILES
+    assert "development.digest.json" in _FINAL_FILES
+    assert "comparison.html" in _FINAL_FILES
+    assert "comparison.digest.json" in _FINAL_FILES
+    assert ".report_jobs_state.json" in _FINAL_FILES
+
+
+def test_cleanup_non_final_preserves_whitelist() -> None:
+    from oskernel_agent.report_jobs._runner import _cleanup_non_final, _FINAL_FILES
+
+    d = _tdir()
+    try:
+        for name in _FINAL_FILES:
+            (d / name).write_text("")
+        (d / "junk.html").write_text("")
+        subdir = d / "_repos"
+        subdir.mkdir()
+        (subdir / "clone").write_text("")
+
+        _cleanup_non_final(d)
+
+        for name in _FINAL_FILES:
+            assert (d / name).exists(), f"{name} should survive cleanup"
+        assert not (d / "junk.html").exists()
+        assert not subdir.exists()
+    finally:
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
 
 
 # ---- remove unused imports from pytest ----

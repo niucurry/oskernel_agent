@@ -36,5 +36,30 @@ def test_frontend_always_cleans_intermediates_and_keeps_digests_internal():
     assert "await this.runJobImplementation(id, job);" in pipeline
     assert "finally" in pipeline
     assert "await cleanupReportDirectory(job.repo_id);" in pipeline
-    assert "await cleanupReportDirectory(repo.id);" in pipeline
+    assert "await cleanupReportDirectory(repo.id);" not in pipeline
     assert '"oskernel_agent.report_jobs"' in pipeline
+
+
+def test_drain_protected_by_try_finally():
+    pipeline = (ROOT / "frontend/server/pipeline.js").read_text(encoding="utf-8")
+    start = pipeline.find("async drain()")
+    assert start != -1, "drain() not found"
+    # next class method at same indentation
+    end_marker = pipeline.find("\n  async ", start + 1)
+    drain_body = pipeline[start:end_marker] if end_marker != -1 else pipeline[start:]
+    assert "try {" in drain_body, "drain() should have try block"
+    assert "} finally {" in drain_body, "drain() should have finally block"
+    assert "this.running = false" in drain_body
+
+
+def test_final_report_names_includes_digests():
+    report_files = (ROOT / "frontend/server/reportFiles.js").read_text(encoding="utf-8")
+    for name in ("description.digest.json", "development.digest.json", "comparison.digest.json"):
+        assert f'"{name}"' in report_files, f"{name} should be in FINAL_REPORT_NAMES"
+    assert '".report_jobs_state.json"' in report_files
+
+
+def test_recover_interrupted_jobs_no_longer_calls_cleanup_on_all_repos():
+    pipeline = (ROOT / "frontend/server/pipeline.js").read_text(encoding="utf-8")
+    assert "for (const repo of repositories)" not in pipeline, \
+        "recoverInterruptedJobs should not iterate all repos for cleanup"
