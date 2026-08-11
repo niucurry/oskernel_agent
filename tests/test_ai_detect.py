@@ -13,6 +13,9 @@ from oskernel_agent.comparison.ai_detect.extract import extract_blocks
 from oskernel_agent.comparison.ai_detect.runner import run_ai_detect
 from oskernel_agent.comparison.ai_detect.settings import AIDetectSettings, load_ai_detect_settings
 from oskernel_agent.comparison.ai_detect.vendor.ai_code_detector.models import Language
+from oskernel_agent.comparison.ai_detect.vendor.ai_code_detector.perplexity import (
+    _auto_device_memory_limits,
+)
 from oskernel_agent.comparison.pipeline.__main__ import build_parser
 
 
@@ -198,6 +201,19 @@ def test_settings_env_override(monkeypatch):
     st = load_ai_detect_settings()
     assert st.log_rank_llm_threshold == 1.2 and st.model_id == "bigcode/starcoder2-3b"
     load_ai_detect_settings.cache_clear()
+
+
+def test_cuda_memory_limits_reserve_inference_headroom(monkeypatch):
+    monkeypatch.delenv("AI_DETECT_CUDA_MAX_MEMORY", raising=False)
+    monkeypatch.setenv("AI_DETECT_CUDA_RESERVE_GIB", "2")
+    monkeypatch.setenv("AI_DETECT_CPU_MAX_MEMORY", "12GiB")
+    monkeypatch.setattr("torch.cuda.mem_get_info", lambda _device: (8 * 1024 ** 3, 8 * 1024 ** 3))
+    monkeypatch.setattr("torch.cuda.current_device", lambda: 0)
+
+    assert _auto_device_memory_limits(__import__("torch").device("cuda")) == {
+        0: "6GiB",
+        "cpu": "12GiB",
+    }
 
 
 def test_pipeline_runs_ai_model_by_default_and_allows_explicit_skip():

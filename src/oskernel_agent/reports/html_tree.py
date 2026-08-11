@@ -1056,7 +1056,7 @@ def _clean_capability_claim(value: str, tree_json: dict) -> str:
 
 def _fit_section_parts(raw_parts: list[str], limit: int = 300) -> list[str]:
     """在 300 字总预算内保留实现、亮点和局部问题，并把空余预算让给有内容的部分。"""
-    base_limits = [160, 80, 120]
+    base_limits = [140, 60, 100]
     parts = [clip_at_sentence(raw, cap) if raw else "" for raw, cap in zip(raw_parts, base_limits)]
     remaining = limit - sum(len(part) for part in parts)
     if remaining <= 0:

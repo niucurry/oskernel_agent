@@ -16,6 +16,7 @@ _SKIP_DIRS: frozenset[str] = frozenset({
     ".git", "target", "build", "node_modules",
     "__pycache__", ".cargo", "vendor",
     "third_party", "thirdparty", "external",
+    "example", "examples", "test", "tests", "bench", "benches", "demo", "demos",
 })
 
 _SRC_EXTS: frozenset[str] = frozenset({".c", ".rs", ".h", ".S", ".asm"})
@@ -302,14 +303,15 @@ def _format_symbol(tag: dict, lang: str) -> str:
 
 
 _SUBSYSTEM_ORDER = [
-    "启动模块",
-    "系统调用",
-    "进程管理",
-    "内存管理",
-    "文件系统",
-    "设备管理",
-    "硬件抽象",
-    "同步原语",
+    "\u542f\u52a8\u6a21\u5757",
+    "\u7cfb\u7edf\u8c03\u7528",
+    "\u8fdb\u7a0b\u7ba1\u7406",
+    "\u5185\u5b58\u7ba1\u7406",
+    "\u6587\u4ef6\u7cfb\u7edf",
+    "\u7f51\u7edc",
+    "\u8bbe\u5907\u7ba1\u7406",
+    "\u786c\u4ef6\u62bd\u8c61",
+    "\u540c\u6b65\u539f\u8bed",
 ]
 
 
@@ -388,6 +390,10 @@ SUBSYSTEM_FINGERPRINTS = {
     "文件系统": [
         "fat32", "ext4", "inode", "dentry", "vfs", "open_file",
         "FileDescriptor", "FAT", "superblock", "block_device"
+    ],
+    "\u7f51\u7edc": [
+        "socket", "af_inet", "tcp", "udp", "bind", "listen", "accept",
+        "connect", "sendto", "recvfrom", "smoltcp", "net_device", "vsock",
     ],
     "系统调用": [
         "sys_read", "sys_write", "sys_fork", "ecall",

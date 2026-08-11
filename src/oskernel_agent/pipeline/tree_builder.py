@@ -44,6 +44,7 @@ MAX_FILES_IN_SUBSYS_PROMPT = 80
 
 _DEPENDENCY_PATH_PARTS = {
     "vendor", "third_party", "thirdparty", "external", "node_modules", "target",
+    "example", "examples", "test", "tests", "bench", "benches", "demo", "demos",
 }
 
 
@@ -88,8 +89,8 @@ _VERDICT_DUPLICATE_SCORE_RE = re.compile(
 
 # 与 code_parser.SUBSYSTEM_FINGERPRINTS 同口径；保留显示顺序
 _SUBSYS_DISPLAY_ORDER = [
-    "启动模块", "内存管理", "进程管理", "文件系统", "设备管理",
-    "系统调用", "硬件抽象", "其他",
+    "启动模块", "内存管理", "进程管理", "文件系统", "\u7f51\u7edc",
+    "设备管理", "系统调用", "硬件抽象", "其他",
 ]
 
 
@@ -103,7 +104,8 @@ _PATH_SUBSYSTEM_TOKENS = [
         "ipc", "process", "proc", "sched", "scheduler", "signal", "sync", "task", "thread",
     }),
     ("文件系统", {"file", "filesystem", "fs", "inode", "vfs"}),
-    ("设备管理", {"device", "devices", "driver", "drivers", "net", "network"}),
+    ("\u7f51\u7edc", {"net", "network", "socket", "tcp", "udp", "vsock"}),
+    ("设备管理", {"device", "devices", "driver", "drivers"}),
     ("系统调用", {"syscall", "syscalls"}),
     ("硬件抽象", {"arch", "hal", "platform"}),
 ]
@@ -177,6 +179,8 @@ def enumerate_subsystems(repo_path: Path) -> tuple[dict, int]:
             st = abs_p.stat()
             rel = abs_p.resolve().relative_to(repo_path)
         except (OSError, ValueError):
+            continue
+        if _is_dependency_evidence_path(rel.as_posix()):
             continue
         lang = _detect_lang(abs_p)
         if lang in _SKIP_LANGS:
@@ -567,16 +571,31 @@ def load_subsys_stage_from_artifacts(
 def _normalize_adjacent_module_paths(paths: list, repo_path: Path) -> list[str]:
     """把模型省略目录的相邻文件名补成仓库内真实路径。"""
     normalized: list[str] = []
+    repo_root = repo_path.resolve()
     for value in paths or []:
         raw = str(value or "").strip().replace("\\", "/")
         if not raw:
             continue
         candidate = raw
-        if "/" not in raw and normalized:
+        exact = repo_root / Path(raw)
+        if not exact.is_file() and "/" not in raw and normalized:
             parent = Path(normalized[-1]).parent
             adjacent = (parent / raw).as_posix()
-            if (repo_path / Path(adjacent)).exists():
+            if (repo_root / Path(adjacent)).is_file():
                 candidate = adjacent
+        if not exact.is_file() and candidate == raw:
+            suffix = "/" + raw.lstrip("./")
+            matches: list[str] = []
+            for match in repo_root.rglob(Path(raw).name):
+                if not match.is_file() or ".git" in match.parts:
+                    continue
+                relative = match.relative_to(repo_root).as_posix()
+                if relative == raw or relative.endswith(suffix):
+                    matches.append(relative)
+                    if len(matches) > 1:
+                        break
+            if len(matches) == 1:
+                candidate = matches[0]
         normalized.append(candidate)
     return normalized
 
@@ -881,6 +900,17 @@ def _validate_verdict_integrity_conclusion(parsed: dict, facts: dict | None) -> 
         raise RuntimeError("顶层一句话结论未明确说明未形成硬编码问题")
 
 
+def _verdict_one_line_requires_repair(parsed: dict, facts: dict | None) -> bool:
+    one_line = str(parsed.get("one_line") or "").strip()
+    if not one_line or len(one_line) > 80:
+        return True
+    try:
+        _validate_verdict_integrity_conclusion(parsed, facts)
+    except RuntimeError:
+        return True
+    return False
+
+
 def _validate_verdict_result(
     parsed: dict,
     repo_path: Path | None = None,
@@ -889,6 +919,14 @@ def _validate_verdict_result(
     enforce_one_line_length: bool = True,
 ) -> None:
     """总评必须包含真实正文、六维评分和理由，不允许用固定分数补位。"""
+    parsed["highlights"] = [
+        item for item in (parsed.get("highlights") or [])
+        if isinstance(item, dict)
+        and not _is_dependency_evidence_path(str(item.get("path") or ""))
+    ]
+    parsed["issues"] = [
+        item for item in (parsed.get("issues") or []) if _keep_system_level_issue(item)
+    ]
     if parsed.get("_error"):
         raise RuntimeError(f"顶层评判失败：{parsed['_error']}")
     if not str(parsed.get("content") or "").strip():
@@ -1224,6 +1262,71 @@ def _collect_subsys_summaries(tree_root: dict) -> list[dict]:
     return out
 
 
+def _deterministic_verdict_one_line(
+    parsed: dict,
+    facts: dict | None,
+    *,
+    limit: int = 80,
+) -> str:
+    """在模型压缩失败时，从已校验事实构造可再次校验的短结论。"""
+    integrity = ((facts or {}).get("integrity") or {})
+    status_text = {
+        "passed": "通过",
+        "failed": "失败",
+        "unknown": "未确认",
+        "not_provided": "日志未提供",
+        "missing": "缺失",
+        "skipped": "未执行",
+        "partial": "未全部通过",
+        "timeout": "超时",
+        "environment_error": "环境异常",
+    }
+
+    build_status = _effective_build_status(integrity)
+    clauses = [f"编译{status_text.get(build_status, '无法确认')}"]
+
+    run_status = str((integrity.get("run_log") or {}).get("status") or "not_provided")
+    run_available = run_status not in {"not_provided", "missing", "skipped"}
+    if run_available:
+        clauses.append(f"运行{status_text.get(run_status, '无法确认')}")
+
+    reviews = [
+        item for item in (parsed.get("hardcode_reviews") or [])
+        if isinstance(item, dict)
+    ]
+    confirmed = sum(item.get("status") == "confirmed" for item in reviews)
+    suspected = sum(item.get("status") == "suspected" for item in reviews)
+    if confirmed and suspected:
+        clauses.append(f"发现{confirmed}项确认、{suspected}项疑似硬编码")
+    elif confirmed:
+        clauses.append(f"确认发现{confirmed}项硬编码")
+    elif suspected:
+        clauses.append(f"发现{suspected}项疑似硬编码")
+    else:
+        clauses.append("未发现硬编码")
+
+    issues = [item for item in (parsed.get("issues") or []) if isinstance(item, dict)]
+    issue = str((issues[0] if issues else {}).get("quote") or "最严重设计问题未说明")
+    issue = re.sub(r"<[^>]+>", "", issue)
+    issue = re.sub(r"\s+", " ", issue).strip(" ，,；;。")
+    if not run_available:
+        issue = re.sub(
+            r"运行(?:日志)?(?:未提供|未实测|未核验|无法核验|环境不可用)[，,；;。]?",
+            "",
+            issue,
+        ).strip(" ，,；;。")
+    if not issue:
+        issue = "最严重设计问题未说明"
+
+    prefix = "；".join(clauses)
+    label = "；主要问题："
+    budget = limit - len(prefix) - len(label)
+    if budget <= 0:
+        return prefix[:limit]
+    shortened = issue[:budget].rstrip(" ，,；;。")
+    return f"{prefix}{label}{shortened}" if shortened else prefix
+
+
 def repair_verdict_one_line(
     parsed: dict,
     facts: dict | None,
@@ -1286,6 +1389,10 @@ def repair_verdict_one_line(
         schema_hint='{"one_line":"不超过70个字符的中文结论"}',
         timeout=180,
     )
+    if not _complete(candidate):
+        candidate = {
+            "one_line": _deterministic_verdict_one_line(parsed, facts),
+        }
     if not _complete(candidate):
         raise RuntimeError("AI 未能把顶层一句话结论压缩到 80 字以内")
     parsed["one_line"] = str(candidate["one_line"]).strip()
@@ -1391,7 +1498,7 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
     _ensure_reference_database(facts)
     outputs = {
         "json_path":    str(work_dir / "verdict.json"),
-        "content_path": str(work_dir / "verdict.content.md"),
+        "content_path": str(work_dir / "verdict.html"),
     }
     out_path = Path(outputs["json_path"])
 
@@ -1445,7 +1552,7 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                     '"one_line":str}',
         timeout=600,
     )
-    if len(str(parsed.get("one_line") or "")) > 80:
+    if _verdict_one_line_requires_repair(parsed, facts):
         repair_verdict_one_line(
             parsed, facts, work_dir, repo_path or Path("."),
         )

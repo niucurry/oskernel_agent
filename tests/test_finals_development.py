@@ -199,6 +199,8 @@ def test_development_html_puts_ai_findings_first_and_shows_exact_evidence():
 
     assert rendered.index("经 AI 分析，该作品存在以下问题") < rendered.index("提交历史与开发阶段")
     assert "参赛队伍不得修改" in rendered
+
+
     assert "章程最低提交次数未配置" in rendered
     assert "大规模提交口径" in rendered
     assert "kernel/fs/inode.c</code>（1300 LOC）" in rendered
@@ -206,7 +208,17 @@ def test_development_html_puts_ai_findings_first_and_shows_exact_evidence():
     assert rendered.index("关键提交") < rendered.index("kernel/fs/inode.c")
 
 
-def test_development_keeps_all_stage_files_and_links_commit_evidence():
+def test_development_rejects_runtime_claims_derived_only_from_git_history():
+    commits = _history()
+    evidence = build_development_evidence(commits)
+    result = _ai_result(commits, evidence)
+    result["conclusion"] = "提交历史显示最终跑通LTP全量测试点。"
+
+    with pytest.raises(RuntimeError, match="提交历史写成了当前版本"):
+        validate_ai_development_result(result, evidence, commits)
+
+
+def test_development_lists_only_primary_stage_files_and_links_commit_evidence():
     commits = _history()
     for index in range(8):
         commits[2]["files"].append({
@@ -225,8 +237,8 @@ def test_development_keeps_all_stage_files_and_links_commit_evidence():
 
     rendered = render_development_html(analysis)
 
-    assert "其余 4 个涉及文件" in rendered
-    assert "kernel/extra/0.c" in rendered
+    assert "另有 4 个文件已纳入阶段统计" in rendered
+    assert "kernel/extra/0.c" not in rendered
     assert "kernel/extra/7.c" in rendered
     assert f'https://gitlab.example/team/demo/-/commit/{commits[1]["sha"]}' in rendered
 
@@ -251,3 +263,4 @@ def test_large_development_evidence_is_attached_instead_of_put_on_command_line(
     assert task.input_files == (output.with_suffix(".evidence.json"),)
     assert task.input_files[0].exists()
     assert "x" * 1000 not in task.user_request
+    assert "Git 历史不能证明当前版本可编译" in task.user_request

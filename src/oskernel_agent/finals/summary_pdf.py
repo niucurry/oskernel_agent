@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import html
 import io
 import json
@@ -39,7 +40,11 @@ from reportlab.platypus import (
 from oskernel_agent.engines.llm_batch import BatchTask, run_batch_task
 
 from .models import Finding, ReportDigest, Severity
-from .readability import clip_at_sentence, readability_errors
+from .readability import (
+    clip_at_sentence,
+    explain_terms_on_first_use,
+    readability_errors,
+)
 
 BODY_FONT_SIZE = 10.5
 _PAGE_MARGIN = 14 * mm
@@ -51,6 +56,15 @@ _INTERNAL_HARDCODE_METRICS = {
     "hardcode_scanned_files",
     "hardcode_cleared",
 }
+_UNVERIFIED_TEST_SUCCESS_RE = re.compile(
+    r"(?:LTP|\u6d4b\u8bd5\u5957\u4ef6|\u6d4b\u8bd5|\u7528\u4f8b).{0,18}(?:\u5168\u91cf|\u5168\u90e8)?.{0,6}(?:\u901a\u8fc7|\u8dd1\u901a|\u6210\u529f)"
+    r"|(?:\u901a\u8fc7|\u8dd1\u901a).{0,18}(?:LTP|\u6d4b\u8bd5\u5957\u4ef6|\u6d4b\u8bd5|\u7528\u4f8b)",
+    re.I,
+)
+_UNVERIFIED_KERNEL_COMPLETENESS_RE = re.compile(
+    r"(?:完整|完备|完善).{0,24}(?:双架构|操作系统|内核|内核框架)",
+    re.I,
+)
 _SOURCE_LABELS = {
     "description": "作品描述与运行质量",
     "development": "开发过程",
@@ -200,11 +214,18 @@ def _safe(value: object) -> str:
 def _summary_input_digest(digest: ReportDigest) -> dict:
     """Hide scanner noise; the judge summary only uses reviewed hardcode results."""
     payload = digest.model_dump(mode="json")
-    if digest.kind != "description":
-        return payload
     metrics = dict(payload.get("metrics") or {})
-    for key in _INTERNAL_HARDCODE_METRICS:
-        metrics.pop(key, None)
+    if digest.kind == "description":
+        for key in _INTERNAL_HARDCODE_METRICS:
+            metrics.pop(key, None)
+    elif digest.kind == "comparison":
+        for key in list(metrics):
+            if key == "ai_llm_functions" or key.startswith("history_"):
+                metrics.pop(key, None)
+        payload["modules"] = [
+            module for module in (payload.get("modules") or [])
+            if int(module.get("evidence_count") or 0) > 0
+        ]
     payload["metrics"] = metrics
     return payload
 
@@ -273,6 +294,53 @@ def _render_order_text(summary: AISummary) -> str:
             parts.extend((issue.title, issue.judgment))
     return "\n".join(parts)
 
+def _compact_ai_summary_fields(value: dict) -> dict:
+    compacted = copy.deepcopy(value)
+    compacted["overall_judgment"] = clip_at_sentence(
+        explain_terms_on_first_use(compacted.get("overall_judgment", "")), 180
+    )
+    for section in compacted.get("sections") or []:
+        if isinstance(section, dict):
+            section["conclusion"] = clip_at_sentence(
+                explain_terms_on_first_use(section.get("conclusion", "")), 120
+            )
+    for issue in compacted.get("issues") or []:
+        if not isinstance(issue, dict):
+            continue
+        issue["title"] = _single_line(
+            explain_terms_on_first_use(issue.get("title", ""))
+        )[:48].rstrip()
+        issue["judgment"] = clip_at_sentence(
+            explain_terms_on_first_use(issue.get("judgment", "")), 160
+        )
+    return compacted
+
+
+def _normalize_zero_based_finding_refs(
+    value: dict,
+    digests: dict[str, ReportDigest],
+) -> dict:
+    """Repair a clearly zero-based sequence; later checks still verify every mapping."""
+    normalized = copy.deepcopy(value)
+    issues = normalized.get("issues") or []
+    for source in _SUMMARY_SOURCES:
+        source_issues = [
+            issue for issue in issues
+            if isinstance(issue, dict) and issue.get("source") == source
+        ]
+        refs = [issue.get("source_finding") for issue in source_issues]
+        if not refs or not all(isinstance(ref, int) for ref in refs) or 0 not in refs:
+            continue
+        unique_refs = sorted(set(refs))
+        if unique_refs != list(range(unique_refs[-1] + 1)):
+            continue
+        if unique_refs[-1] >= len(digests[source].findings):
+            continue
+        for issue in source_issues:
+            issue["source_finding"] += 1
+    return normalized
+
+
 
 def _validate_ai_summary_result(
     value: dict,
@@ -280,6 +348,9 @@ def _validate_ai_summary_result(
 ) -> AISummary:
     if not isinstance(value, dict) or value.get("_error"):
         raise SummaryPdfError("摘要智能体未返回可用结果")
+    value = _normalize_zero_based_finding_refs(
+        _compact_ai_summary_fields(value), digests
+    )
     try:
         summary = AISummary.model_validate(value)
     except ValidationError as exc:
@@ -325,6 +396,44 @@ def _validate_ai_summary_result(
         if critical and not any((source, index) in refs for index in critical):
             raise SummaryPdfError(f"摘要智能体遗漏了 {source} 的严重问题")
 
+    description_metrics = digests["description"].metrics
+    target_statuses = {
+        "kernel-rv": str(description_metrics.get("kernel_rv_build_status") or "not_run"),
+        "kernel-la": str(description_metrics.get("kernel_la_build_status") or "not_run"),
+    }
+    rendered_text = _render_order_text(summary)
+    aliases = {
+        "kernel-rv": r"(?:kernel-rv|RISC-V)",
+        "kernel-la": r"(?:kernel-la|LoongArch)",
+    }
+    for target, status in target_statuses.items():
+        if status in {"", "not_run", "unknown"}:
+            continue
+        if re.search(
+            rf"{aliases[target]}.{{0,24}}(?:未单独说明|未说明|没有说明|结果不明)",
+            rendered_text,
+            re.I,
+        ):
+            raise SummaryPdfError(f"摘要忽略了已记录的 {target} 编译状态")
+
+    if (
+        set(target_statuses.values()) != {"passed"}
+        and _UNVERIFIED_KERNEL_COMPLETENESS_RE.search(summary.overall_judgment)
+    ):
+        raise SummaryPdfError("摘要把未经双架构编译验证的源码框架写成了完整内核")
+
+    test_claim_text = re.sub(
+        r"(?:非预期|错误地|异常地|不应|本应失败却)通过",
+        "异常命中",
+        rendered_text,
+    )
+    if (
+        str(description_metrics.get("run_log_status") or "not_provided") != "passed"
+        and _UNVERIFIED_TEST_SUCCESS_RE.search(test_claim_text)
+    ):
+        raise SummaryPdfError(
+            "摘要把开发提交信息改写成了未经正式运行日志证明的测试通过结论"
+        )
     writing_errors = readability_errors(_render_order_text(summary), max_chars=1450)
     if writing_errors:
         raise SummaryPdfError("摘要智能体文字未通过可读性检查：" + "；".join(writing_errors))
@@ -369,6 +478,11 @@ def run_ai_summary_analysis(
         "证据不足时降低置信度并使用审慎表述。文字要简洁、自然、无模板腔。\n"
         "硬编码部分只使用 AI 复核后的 hardcode_confirmed 与 hardcode_suspected；"
         "不得在摘要中引用原始扫描候选数、扫描命中数、排除数或扫描文件数。\n"
+        "开发过程报告只证明提交历史；除非作品描述报告的正式运行日志明确通过，否则不得写 LTP 或其他测试已通过、跑通或成功。\n"
+        "若 metrics 已给出 kernel_rv_build_status 或 kernel_la_build_status，必须采用该状态；"
+        "不得把已记录的架构写成未说明、结果不明或未执行。\n"
+        "若 kernel-rv 与 kernel-la 未全部 passed，只能说源码框架覆盖了哪些模块；"
+        "不得称其为完整、完备、可运行或已经验证的双架构操作系统内核。\n"
         f"repo_id: {repo_id}\n"
         f"input_file: {input_path.resolve()}\n"
         f"expected_schema: {schema_hint}\n"

@@ -28,6 +28,11 @@ _MAX_STAGES = 12
 _MAX_KEY_COMMITS = 3
 _PRIMARY_STAGE_FILES = 6
 _SEVERITIES = {"info", "low", "medium", "high", "critical"}
+_UNVERIFIED_RUNTIME_CLAIM_RE = re.compile(
+    r"(?:可|能够|能)(?:正常|成功)?(?:编译|启动|运行)"
+    r"|(?:测试套件|测试|用例|LTP).{0,12}(?:全部)?(?:通过|跑通|成功)"
+    r"|(?:通过|跑通).{0,12}(?:测试套件|测试|用例|LTP)"
+)
 _THRESHOLD_DEFINITION = (
     "有变更的提交少于 8 次时，阈值固定为 1000 LOC；否则取 1000 与"
     "提交变更量中位数的 5 倍向上取整后的较大值。"
@@ -291,6 +296,14 @@ def _confidence(value: object, context: str) -> float:
     return result / 100
 
 
+def _validate_development_claim_scope(value: str, context: str) -> None:
+    """Git 历史只证明开发活动，不能替代当前版本的编译或运行验证。"""
+    if _UNVERIFIED_RUNTIME_CLAIM_RE.search(value):
+        raise RuntimeError(
+            f"{context} 把提交历史写成了当前版本的编译、运行或测试通过结论"
+        )
+
+
 def validate_ai_development_result(
     result: dict,
     evidence: dict,
@@ -302,6 +315,7 @@ def validate_ai_development_result(
     conclusion = _humanize_ai_text(result.get("conclusion"), 240)
     if not conclusion:
         raise RuntimeError("开发过程 AI 分析缺少总体结论")
+    _validate_development_claim_scope(conclusion, "开发过程总体结论")
 
     candidates = {
         str(item["candidate_id"]): item for item in evidence.get("candidates") or []
@@ -381,6 +395,7 @@ def validate_ai_development_result(
         reason = _humanize_ai_text(stage.get("reason"), 180)
         if not name or not stage_conclusion or not reason:
             raise RuntimeError(f"第 {number} 个开发阶段缺少名称、结论或划分依据")
+        _validate_development_claim_scope(stage_conclusion, f"第 {number} 个开发阶段结论")
         start_sha, start_index = _resolve_sha(stage.get("start_sha"), commits)
         if number == 1 and start_index != 0:
             raise RuntimeError("第 1 个开发阶段必须从首个可见提交开始")
@@ -662,16 +677,11 @@ def render_development_html(analysis: dict) -> str:
             f'<code>{_esc(item["path"])}</code>（{_esc(item["loc"])} LOC）'
             for item in primary_files
         ) or "无可统计文件"
-        extra_files_html = ""
-        if extra_files:
-            extra_files_html = (
-                f'<details class="more-files"><summary>其余 {len(extra_files)} 个涉及文件</summary><p>'
-                + "、".join(
-                    f'<code>{_esc(item["path"])}</code>（{_esc(item["loc"])} LOC）'
-                    for item in extra_files
-                )
-                + "</p></details>"
-            )
+        extra_files_html = (
+            f'<p class="reason">另有 {len(extra_files)} 个文件已纳入阶段统计；正文仅列变更量前 '
+            f'{_PRIMARY_STAGE_FILES} 项。</p>'
+            if extra_files else ""
+        )
         stage_html.append(
             f'<article class="stage"><div class="stage-head"><h3>阶段 {stage["number"]}：{_esc(stage["name"])}</h3>'
             f'<span>AI 置信度 {round(stage["confidence"] * 100)}%</span></div>'
@@ -764,8 +774,10 @@ def run_ai_development_analysis(
         "阶段必须覆盖全部 timeline，不能重叠或留空。只有证据足以影响真实性、过程可信度或"
         "章程符合性时才标为 report；不能仅因提交较大就下负面结论。问题标题直接点明性质，"
         "analysis 用可复算数字说明为何需要评委复核；严重度按对评审结论的影响填写。"
-        "阶段按功能目标合并，避免逐提交复述；conclusion 先写本阶段形成的能力，再写主要限制，"
-        "reason 只说明划分依据。文字必须精炼，不写套话。\n"
+        "阶段按功能目标合并，避免逐提交复述；conclusion 先写提交历史呈现的开发目标或代码变更，"
+        "再写主要限制，reason 只说明划分依据。Git 历史不能证明当前版本可编译、可启动、可运行或"
+        "测试通过；总体和阶段结论只能写‘提交历史显示/呈现围绕某目标开发’，禁止把提交主题或文件"
+        "变更改写为动态验证结论。文字必须精炼，不写套话。\n"
         f"repo_id: {repo_id}\n"
         f"evidence_file: {evidence_path.resolve()}\n"
         f"expected_schema: {schema_hint}\n"
