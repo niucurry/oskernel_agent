@@ -16,6 +16,7 @@ from oskernel_agent.comparison.report import semantic_compare as SC
 from oskernel_agent.comparison.report.audit import audit_reports
 from oskernel_agent.comparison.report.label_normalize import normalize_labels
 from oskernel_agent.comparison.retrieval_contract import build_retrieval_contract
+from oskernel_agent.report_quality import IncompleteReportError
 
 
 # ---------- 语义对比报告（M2：U1-U8 + 文件级） ----------
@@ -147,12 +148,14 @@ def test_review_payload_requires_role_reason_review_reason_and_real_code_anchor(
     assert parsed["evidence_anchors"] == ["bitmap", "alloc_block"]
 
 
-def test_review_text_truncation_is_marked_instead_of_leaving_half_sentence():
+def test_review_text_rejects_truncation_instead_of_leaving_half_sentence():
     value = "证据" * 100
-    bounded = SC._bounded_review_text(value, 120)
-    assert len(bounded) == 120
-    assert bounded.endswith("…")
-    assert SC._legacy_review_text_for_display("字" * 120, 120).endswith("…")
+    with pytest.raises(ValueError, match="超过 120 字"):
+        SC._bounded_review_text(value, 120)
+    with pytest.raises(ValueError, match="省略号"):
+        SC._bounded_review_text("依据尚未说明完整…", 120)
+    with pytest.raises(IncompleteReportError, match="疑似在长度上限处截断"):
+        SC._legacy_review_text_for_display("字" * 120, 120)
 
 
 def test_review_payload_format_or_unverifiable_reason_fails_instead_of_becoming_suspect():
@@ -541,7 +544,8 @@ def test_long_review_context_retains_matched_region_and_function_tail():
 
     assert "statement_120();" in compact
     assert "statement_239();" in compact
-    assert "代码已省略" in compact
+    assert "中间代码未纳入模型输入" in compact
+    assert "…" not in compact and "..." not in compact
 
 
 def test_review_evidence_gate_requires_multiple_code_signals_not_single_literal():

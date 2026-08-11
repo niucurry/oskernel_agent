@@ -24,7 +24,7 @@ class Finding(BaseModel):
     """面向评委的问题或重要判断。"""
 
     title: str = Field(min_length=1, max_length=80)
-    detail: str = Field(min_length=1, max_length=500)
+    detail: str = Field(min_length=1, max_length=2000)
     severity: Severity = "info"
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     source: ReportKind
@@ -51,7 +51,7 @@ class ReportDigest(BaseModel):
     schema_version: int = 1
     repo_id: str = Field(min_length=1, max_length=240)
     kind: ReportKind
-    conclusion: str = Field(min_length=1, max_length=240)
+    conclusion: str = Field(min_length=1, max_length=1000)
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     # 描述报告不得因为版面配额静默丢失严重问题或一级子系统。
     findings: list[Finding] = Field(default_factory=list, max_length=64)

@@ -40,11 +40,7 @@ from reportlab.platypus import (
 from oskernel_agent.engines.llm_batch import BatchTask, run_batch_task
 
 from .models import Finding, ReportDigest, Severity
-from .readability import (
-    clip_at_sentence,
-    explain_terms_on_first_use,
-    readability_errors,
-)
+from .readability import explain_terms_on_first_use, readability_errors
 
 BODY_FONT_SIZE = 10.5
 _PAGE_MARGIN = 14 * mm
@@ -59,6 +55,11 @@ _INTERNAL_HARDCODE_METRICS = {
 _UNVERIFIED_TEST_SUCCESS_RE = re.compile(
     r"(?:LTP|\u6d4b\u8bd5\u5957\u4ef6|\u6d4b\u8bd5|\u7528\u4f8b).{0,18}(?:\u5168\u91cf|\u5168\u90e8)?.{0,6}(?:\u901a\u8fc7|\u8dd1\u901a|\u6210\u529f)"
     r"|(?:\u901a\u8fc7|\u8dd1\u901a).{0,18}(?:LTP|\u6d4b\u8bd5\u5957\u4ef6|\u6d4b\u8bd5|\u7528\u4f8b)",
+    re.I,
+)
+_ENVIRONMENT_BUILD_FAILURE_RE = re.compile(
+    r"(?:双架构|kernel-rv|kernel-la|RISC-V|LoongArch).{0,30}"
+    r"(?:未通过编译|编译(?:未通过|失败))|编译(?:未通过|失败)",
     re.I,
 )
 _UNVERIFIED_KERNEL_COMPLETENESS_RE = re.compile(
@@ -96,6 +97,33 @@ def _single_line(value: str) -> str:
     return " ".join(str(value or "").split())
 
 
+def _complete_sentence(value: str) -> str:
+    """Normalize generated prose without silently clipping unfinished content."""
+    text = _single_line(value)
+    if text and text[-1] not in "。！？；.!?;：:":
+        text += "。"
+    return text
+
+
+def _complete_sentences_within(value: str, limit: int) -> str:
+    """只在完整句边界压缩；绝不截断词组，也不添加省略号。"""
+    text = _complete_sentence(value)
+    if len(text) <= limit:
+        return text
+    sentences = re.findall(r".*?[。！？；.!?;](?:\s+|$)", text)
+    kept: list[str] = []
+    used = 0
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        if used + len(sentence) > limit:
+            break
+        kept.append(sentence)
+        used += len(sentence)
+    return "".join(kept) if kept else text
+
+
 class AISummaryIssue(BaseModel):
     """摘要智能体从来源报告中选出的一个评委复核项。"""
 
@@ -103,8 +131,8 @@ class AISummaryIssue(BaseModel):
 
     source: SummarySource
     source_finding: int = Field(ge=1)
-    title: str = Field(min_length=1, max_length=48)
-    judgment: str = Field(min_length=1, max_length=160)
+    title: str = Field(min_length=1, max_length=80)
+    judgment: str = Field(min_length=1, max_length=240)
     severity: Severity
     confidence: int = Field(ge=0, le=100)
 
@@ -120,7 +148,7 @@ class AISummarySection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: SummarySource
-    conclusion: str = Field(min_length=1, max_length=120)
+    conclusion: str = Field(min_length=1, max_length=180)
     confidence: int = Field(ge=0, le=100)
 
     @field_validator("conclusion")
@@ -134,7 +162,7 @@ class AISummary(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    overall_judgment: str = Field(min_length=1, max_length=180)
+    overall_judgment: str = Field(min_length=1, max_length=280)
     confidence: int = Field(ge=0, le=100)
     sections: list[AISummarySection] = Field(min_length=3, max_length=3)
     issues: list[AISummaryIssue] = Field(default_factory=list, max_length=5)
@@ -249,9 +277,8 @@ def _combined_findings(digests: dict[str, ReportDigest], limit: int) -> list[Fin
             continue
         collapsed.append(representative.model_copy(update={
             "title": f"{title}（{len(items)}次）",
-            "detail": clip_at_sentence(
-                f"发现 {len(items)} 次同类线索；代表项：{representative.detail}",
-                360,
+            "detail": (
+                f"发现 {len(items)} 次同类线索；代表项：{representative.detail}"
             ),
         }))
 
@@ -296,25 +323,24 @@ def _render_order_text(summary: AISummary) -> str:
 
 def _compact_ai_summary_fields(value: dict) -> dict:
     compacted = copy.deepcopy(value)
-    compacted["overall_judgment"] = clip_at_sentence(
-        explain_terms_on_first_use(compacted.get("overall_judgment", "")), 180
+    compacted["overall_judgment"] = _complete_sentences_within(
+        explain_terms_on_first_use(compacted.get("overall_judgment", "")), 280
     )
     for section in compacted.get("sections") or []:
         if isinstance(section, dict):
-            section["conclusion"] = clip_at_sentence(
-                explain_terms_on_first_use(section.get("conclusion", "")), 120
+            section["conclusion"] = _complete_sentences_within(
+                explain_terms_on_first_use(section.get("conclusion", "")), 180
             )
     for issue in compacted.get("issues") or []:
         if not isinstance(issue, dict):
             continue
         issue["title"] = _single_line(
             explain_terms_on_first_use(issue.get("title", ""))
-        )[:48].rstrip()
-        issue["judgment"] = clip_at_sentence(
-            explain_terms_on_first_use(issue.get("judgment", "")), 160
+        )
+        issue["judgment"] = _complete_sentences_within(
+            explain_terms_on_first_use(issue.get("judgment", "")), 240
         )
     return compacted
-
 
 def _normalize_zero_based_finding_refs(
     value: dict,
@@ -331,15 +357,44 @@ def _normalize_zero_based_finding_refs(
         refs = [issue.get("source_finding") for issue in source_issues]
         if not refs or not all(isinstance(ref, int) for ref in refs) or 0 not in refs:
             continue
-        unique_refs = sorted(set(refs))
-        if unique_refs != list(range(unique_refs[-1] + 1)):
-            continue
-        if unique_refs[-1] >= len(digests[source].findings):
+        # 零基序号可以是稀疏选择（如 0、2、18），不要求连续；只要每个值都能
+        # 在来源 finding 数组中合法映射，统一加一。后续仍校验严重度和置信度，
+        # 混用零基/一基的结果会因引用事实不一致而被拒绝。
+        if any(ref < 0 or ref >= len(digests[source].findings) for ref in refs):
             continue
         for issue in source_issues:
             issue["source_finding"] += 1
     return normalized
 
+
+
+_SUMMARY_IDENTIFIER_ALLOWLIST = {
+    "code", "file", "files", "function", "functions", "hardcode", "input",
+    "kernel", "linux", "module", "output", "path", "return", "runtime", "standard",
+    "status", "system", "test", "tests",
+}
+
+
+def _unattributed_issue_identifiers(issue: AISummaryIssue, finding: Finding) -> list[str]:
+    """发现摘要问题中没有出现在其所引用 finding 的代码标识符。"""
+    generated = f"{issue.title} {issue.judgment}"
+    source = " ".join([
+        finding.title,
+        finding.detail,
+        *(
+            f"{evidence.path} {evidence.excerpt}"
+            for evidence in finding.evidence
+        ),
+    ]).casefold()
+    identifiers = set(re.findall(
+        r"(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]{3,}(?![A-Za-z0-9_])",
+        generated,
+    ))
+    return sorted(
+        token for token in identifiers
+        if token.casefold() not in _SUMMARY_IDENTIFIER_ALLOWLIST
+        and token.casefold() not in source
+    )
 
 
 def _validate_ai_summary_result(
@@ -387,6 +442,18 @@ def _validate_ai_summary_result(
             )
         if not _has_distinct_detail(issue.title, issue.judgment):
             raise SummaryPdfError("摘要问题的标题与判断重复")
+        unattributed = _unattributed_issue_identifiers(issue, source_finding)
+        if unattributed:
+            raise SummaryPdfError(
+                "摘要问题引入了来源 finding 中不存在的代码标识符："
+                + "、".join(unattributed)
+            )
+        if (
+            issue.source == "description"
+            and "硬编码线索" in source_finding.title
+            and re.search(r"(?:已|人工智能（AI）复核)?确认|构成(?:作弊|硬编码)", issue.judgment)
+        ):
+            raise SummaryPdfError("摘要把疑似硬编码线索改写成了确认结论")
 
     for source in _SUMMARY_SOURCES:
         critical = [
@@ -417,6 +484,12 @@ def _validate_ai_summary_result(
             raise SummaryPdfError(f"摘要忽略了已记录的 {target} 编译状态")
 
     if (
+        any(status in {"environment_error", "timeout"} for status in target_statuses.values())
+        and _ENVIRONMENT_BUILD_FAILURE_RE.search(rendered_text)
+    ):
+        raise SummaryPdfError("摘要把环境中断改写成了作品编译失败或未通过")
+
+    if (
         set(target_statuses.values()) != {"passed"}
         and _UNVERIFIED_KERNEL_COMPLETENESS_RE.search(summary.overall_judgment)
     ):
@@ -426,6 +499,11 @@ def _validate_ai_summary_result(
         r"(?:非预期|错误地|异常地|不应|本应失败却)通过",
         "异常命中",
         rendered_text,
+    )
+    test_claim_text = re.sub(
+        r"(?:不能|无法|不足以|不代表|不得)[^。！？；]{0,80}",
+        "",
+        test_claim_text,
     )
     if (
         str(description_metrics.get("run_log_status") or "not_provided") != "passed"
@@ -476,13 +554,16 @@ def run_ai_summary_analysis(
         "总体 confidence 不得高于三份报告 confidence 的最低值，每个 section confidence 不得高于"
         "对应来源报告 confidence。"
         "证据不足时降低置信度并使用审慎表述。文字要简洁、自然、无模板腔。\n"
-        "硬编码部分只使用 AI 复核后的 hardcode_confirmed 与 hardcode_suspected；"
+        "硬编码部分只使用 AI 复核后的 hardcode_confirmed 与 hardcode_suspected；确认项与疑似项必须分开表述，不得把疑似证据并入确认结论；"
         "不得在摘要中引用原始扫描候选数、扫描命中数、排除数或扫描文件数。\n"
         "开发过程报告只证明提交历史；除非作品描述报告的正式运行日志明确通过，否则不得写 LTP 或其他测试已通过、跑通或成功。\n"
         "若 metrics 已给出 kernel_rv_build_status 或 kernel_la_build_status，必须采用该状态；"
-        "不得把已记录的架构写成未说明、结果不明或未执行。\n"
+        "不得把已记录的架构写成未说明、结果不明或未执行；environment_error 或 timeout 只能写编译未形成结论，不得写编译失败或未通过。\n"
         "若 kernel-rv 与 kernel-la 未全部 passed，只能说源码框架覆盖了哪些模块；"
         "不得称其为完整、完备、可运行或已经验证的双架构操作系统内核。\n"
+        "所有文字必须使用完整句子，禁止使用‘…’或‘...’省略内容；不得提交被截断的词组。"
+        "overall_judgment 不超过 280 字，每个 section conclusion 不超过 180 字，"
+        "每个 issue title 不超过 80 字、judgment 不超过 240 字；issue 中的函数名、路径名和代码标识符必须来自其引用的 source_finding，禁止改写或补造相近名称。\n"
         f"repo_id: {repo_id}\n"
         f"input_file: {input_path.resolve()}\n"
         f"expected_schema: {schema_hint}\n"
@@ -744,6 +825,8 @@ def validate_summary_pdf(path: str | Path) -> dict:
     missing = [label for label in required if label not in text]
     if missing:
         errors.append("PDF 缺少评审层级：" + "、".join(missing))
+    if re.search(r"…|(?<!\.)\.{3}(?!\.)", text):
+        errors.append("PDF 正文含省略号截断")
     if errors:
         raise SummaryPdfError("；".join(errors))
     return {"pages": 1, "page_size": "A4", "links": 0, "text_chars": len(text.strip())}

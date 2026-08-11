@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from oskernel_agent.engines.llm_batch import BatchTask, run_batch_task
+from oskernel_agent.report_quality import assert_report_complete
 
 from .models import EvidenceRef, Finding, ModuleDigest, ReportDigest
 from .readability import (
@@ -123,12 +124,14 @@ def _large_threshold(commits: list[dict]) -> int:
 
 def _short_text(value: object, limit: int) -> str:
     text = " ".join(str(value or "").split())
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+    return clip_at_sentence(text, limit)
 
 
 def _humanize_ai_text(value: object, limit: int) -> str:
     """把结构化状态码改成评委可直接阅读的中文，不改变分析判断。"""
-    text = _short_text(value, limit)
+    text = " ".join(str(value or "").split())
+    if re.search(r"…|(?<!\.)\.{3}(?!\.)", text):
+        raise RuntimeError("开发过程 AI 文字包含省略号，必须改写为完整句子")
     text = re.sub(r"(?<![A-Za-z])dismiss(?![A-Za-z])", "排除", text, flags=re.I)
     text = re.sub(r"(?<![A-Za-z])report(?![A-Za-z])", "列为问题", text, flags=re.I)
     return text
@@ -298,7 +301,12 @@ def _confidence(value: object, context: str) -> float:
 
 def _validate_development_claim_scope(value: str, context: str) -> None:
     """Git 历史只证明开发活动，不能替代当前版本的编译或运行验证。"""
-    if _UNVERIFIED_RUNTIME_CLAIM_RE.search(value):
+    screened = re.sub(
+        r"(?:不能|无法|不足以|不代表|不得)[^。！？；]{0,80}",
+        "",
+        value,
+    )
+    if _UNVERIFIED_RUNTIME_CLAIM_RE.search(screened):
         raise RuntimeError(
             f"{context} 把提交历史写成了当前版本的编译、运行或测试通过结论"
         )
@@ -495,13 +503,9 @@ def analyze_history(
                         f"{_short_text(c.get('subject'), 60)}）"
                     )
             fact_prefix = f"涉疑提交 {len(review['commit_shas'])} 次：{'；'.join(cited)}。"
-            detail = clip_at_sentence(
-                f"{fact_prefix} AI 分析：{review['analysis']}", 360
-            )
+            detail = f"{fact_prefix} AI 分析：{review['analysis']}"
         else:
-            detail = clip_at_sentence(
-                f"{review['fact']} AI 分析：{review['analysis']}", 360
-            )
+            detail = f"{review['fact']} AI 分析：{review['analysis']}"
         findings.append(
             Finding(
                 title=review["title"],
@@ -646,18 +650,8 @@ def render_development_html(analysis: dict) -> str:
         '<p>这只表示当前 Git 证据不足以支持问题结论，不代表作品通过全部审查。</p></li>'
     )
 
-    dismissed = [review for review in analysis.get("reviews") or [] if review["status"] == "dismiss"]
+    # 被排除候选不属于评委需要核查的问题，不进入最终报告。
     dismissed_html = ""
-    if dismissed:
-        dismissed_html = (
-            '<details class="panel"><summary>AI 排除的候选线索（'
-            f'{len(dismissed)} 项）</summary><ul>'
-            + "".join(
-                f'<li><strong>{_esc(item["title"])}</strong>：{_esc(item["analysis"])}</li>'
-                for item in dismissed
-            )
-            + "</ul></details>"
-        )
 
     stage_html: list[str] = []
     for stage in analysis.get("stages") or []:
@@ -689,7 +683,7 @@ def render_development_html(analysis: dict) -> str:
             f'<p>{_esc(stage["start"])} 至 {_esc(stage["end"])}；'
             f'{stage["commit_count"]} 次提交；变更 {stage["loc"]} LOC。</p>'
             f'<p class="reason"><strong>划分依据：</strong>{_esc(stage["reason"])}</p>'
-            f'<div class="stage-evidence"><div><strong>关键提交</strong><ul>{commits}</ul></div>'
+            f'<div class="stage-evidence"><div><strong>关键提交（标题原文）</strong><ul>{commits}</ul></div>'
             f'<div><strong>主要文件</strong><p>{files}</p>{extra_files_html}</div></div></article>'
         )
 
@@ -730,7 +724,8 @@ a{{color:#075985;text-decoration:none}}a:hover{{text-decoration:underline}}
 </style></head><body><main>
 <header><span class="ai-mark">AI 工具生成</span><h1>{title}</h1>
 <p class="lead">{_esc(digest.conclusion)}</p>
-{disclaimer}</header>
+{disclaimer}
+<div class="ai-disclaimer">证据口径：“关键提交”中的文字为 Git 提交标题原文，只用于还原开发意图与阶段，不代表人工智能（AI）已验证编译、启动或测试成功；运行结论须以正式日志为准。</div></header>
 <section id="findings"><h2>经 AI 分析，该作品存在以下问题</h2><ol class="findings">{finding_html}</ol>{dismissed_html}</section>
 <section><h2>历史概况</h2><div class="metrics">
 <div class="metric"><b>{_esc(metrics.get('commit_count', 0))}</b><span>可见提交</span></div>
@@ -777,7 +772,8 @@ def run_ai_development_analysis(
         "阶段按功能目标合并，避免逐提交复述；conclusion 先写提交历史呈现的开发目标或代码变更，"
         "再写主要限制，reason 只说明划分依据。Git 历史不能证明当前版本可编译、可启动、可运行或"
         "测试通过；总体和阶段结论只能写‘提交历史显示/呈现围绕某目标开发’，禁止把提交主题或文件"
-        "变更改写为动态验证结论。文字必须精炼，不写套话。\n"
+        "变更改写为动态验证结论。文字必须精炼，不写套话。所有结论和分析必须写成完整句子，"
+        "禁止使用‘…’或‘...’省略未说完的内容。\n"
         f"repo_id: {repo_id}\n"
         f"evidence_file: {evidence_path.resolve()}\n"
         f"expected_schema: {schema_hint}\n"
@@ -845,7 +841,9 @@ def generate_development_report(
         min_commits=min_commits,
         repository_url=repository_url,
     )
-    output.write_text(render_development_html(analysis), encoding="utf-8")
+    rendered = render_development_html(analysis)
+    assert_report_complete(rendered)
+    output.write_text(rendered, encoding="utf-8")
     digest_path = output.with_suffix(".digest.json")
     digest_path.write_text(
         json.dumps(analysis["digest"].model_dump(mode="json"), ensure_ascii=False, indent=2),

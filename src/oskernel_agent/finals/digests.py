@@ -120,19 +120,20 @@ def _reviewed_hardcode_findings(verdict: dict, integrity: dict) -> list[Finding]
                 "excerpt": str(raw.get("excerpt") or "")[:500],
             })
 
-    grouped: dict[str, list[dict]] = {}
+    # 同一类别中的 confirmed 与 suspected 必须分开，避免摘要把疑似项并入确认项。
+    grouped: dict[tuple[str, str], list[dict]] = {}
     for item in candidates:
-        grouped.setdefault(item["category"], []).append(item)
+        grouped.setdefault((item["category"], item["status"]), []).append(item)
 
     findings: list[Finding] = []
-    for category, items in grouped.items():
+    for (category, status), items in grouped.items():
         representative = sorted(
             items,
             key=lambda item: (
                 item["status"] != "confirmed", -item["confidence"], item["path"],
             ),
         )[0]
-        confirmed = representative["status"] == "confirmed"
+        confirmed = status == "confirmed"
         if not representative["reviewed"]:
             label = "自动扫描硬编码线索（待 AI 复核）"
         else:
@@ -173,7 +174,7 @@ def normalize_description_claim(value: str, path: str, facts: dict) -> str:
     except (TypeError, ValueError):
         return text
     has_count_claim = bool(re.search(
-        r"\b\d+\s*/\s*\d+\b|(?<!\d)\d+\s*个(?:标准\s*)?(?:Linux\s*)?(?:系统调用|syscall)",
+        r"\b\d+\s*/\s*\d+\b|(?<!\d)\d+\s*\+?\s*(?:个\s*)?(?:标准\s*)?(?:Linux\s*)?(?:系统调用|syscall|调用号)",
         text,
         re.I,
     ))
@@ -187,7 +188,7 @@ def normalize_description_claim(value: str, path: str, facts: dict) -> str:
     dispatch = syscall.get("dispatch_count")
     dispatch_note = (
         f"；SYS_* 分发表静态识别到 {int(dispatch)} 个不同分支"
-        if isinstance(dispatch, int) and dispatch >= 0 else ""
+        if isinstance(dispatch, int) and dispatch > 0 else ""
     )
     return (
         f"函数定义正则扫描识别到 {count}/{total} 个标准系统调用名称；"
@@ -654,7 +655,7 @@ def comparison_digest(
         ))
 
     history = history_overview or {}
-    history_sources = list(history.get("sources") or [])
+    similar_sources = list(history.get("similar_sources") or [])
     history_confirmed = int(history.get("confirmed_functions") or 0)
     history_comparable = int(history.get("comparable_functions") or 0)
     history_pct = (
@@ -680,7 +681,7 @@ def comparison_digest(
             "comparable_functions": total,
             "exact_file_matches": exact_file_matches,
             "metric_scope": "closest_historical_repo",
-            "history_sources_shown": min(5, len(history_sources)),
+            "history_sources_shown": len(similar_sources),
             "history_total_functions": int(history.get("total_functions") or 0),
             "history_comparable_functions": history_comparable,
             "history_confirmed_functions": history_confirmed,

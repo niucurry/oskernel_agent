@@ -23,6 +23,8 @@ from oskernel_agent.finals.readability import (
     concise_module_summary,
     explain_terms_in_html,
     is_dependency_scope_only_issue,
+    html_to_text,
+    remove_ai_filler,
 )
 
 from ..report_quality import IncompleteReportError, assert_report_complete
@@ -99,7 +101,7 @@ html, body {
   display: block; padding: 0.2rem 0.6rem; border-radius: 0.375rem;
   font-size: 0.8rem; line-height: 1.4; color: rgb(100 116 139);
   border-left: 2px solid transparent; text-decoration: none;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow-wrap: anywhere; white-space: normal;
 }
 .toc-nav a.toc-link:hover { color: rgb(15 23 42); background: rgb(148 163 184 / 0.12); }
 .toc-nav a.toc-link.toc-sub { padding-left: 1.4rem; font-size: 0.75rem; }
@@ -733,7 +735,7 @@ def _render_judge_conclusion(tree_json: dict, resolver) -> str:
 <section id="verdict" data-section-id="verdict" class="brief-card p-5 mb-5">
   <div class="text-xs font-semibold tracking-wider text-blue-700 dark:text-blue-300 mb-2">先看结论</div>
   <h2 class="text-xl font-bold mb-2">AI 分析结论</h2>
-  <p class="text-base leading-relaxed mb-5">{_esc(clip_at_sentence(digest.conclusion, 180))}</p>
+  <p class="text-base leading-relaxed mb-5">{_esc(digest.conclusion)}</p>
   <div id="findings" data-section-id="findings">
     <h3 class="font-semibold mb-1">AI 检测到的重要问题</h3>
     <p class="text-xs text-slate-500 mb-3">严格按严重程度排序；全部高、中风险及影响语义正确性的缺失均直接展示，不设数量上限。低风险局部问题下沉到对应模块，不在这里重复。</p>
@@ -769,7 +771,7 @@ def _render_usability(tree_json: dict, resolver) -> str:
         '<strong class="text-sm">构建接口</strong>'
         f'<span><span class="status-pill {interface_cls}">{interface_text}</span></span>'
         f'<p class="text-sm text-slate-600 dark:text-slate-300">'
-        f'{_esc(clip_at_sentence(interface_summary, 190))}'
+        f'{_esc(interface_summary)}'
         f'{(" · 证据：" + interface_evidence) if interface_evidence else ""}</p></div>'
     )
 
@@ -835,7 +837,7 @@ def _render_usability(tree_json: dict, resolver) -> str:
                 f'<strong class="text-sm">{target_labels[target]}</strong>'
                 f'<span><span class="status-pill {status_cls}">{status_text}</span></span>'
                 f'<p class="text-sm text-slate-600 dark:text-slate-300">'
-                f'{_esc(clip_at_sentence("；".join(parts), 220))}</p></div>'
+                f'{_esc("；".join(parts))}</p></div>'
             )
     elif str((integrity.get("build_log") or {}).get("status") or "not_provided") != "not_provided":
         fact = integrity.get("build_log") or {}
@@ -857,7 +859,7 @@ def _render_usability(tree_json: dict, resolver) -> str:
             'border-slate-200 dark:border-slate-700">'
             '<strong class="text-sm">提交编译日志</strong>'
             f'<span><span class="status-pill {status_cls}">{status_text}</span></span>'
-            f'<p class="text-sm text-slate-600 dark:text-slate-300">{_esc(clip_at_sentence(note, 150))}'
+            f'<p class="text-sm text-slate-600 dark:text-slate-300">{_esc(note)}'
             f'{(" · 日志：" + evidence) if evidence else ""}</p></div>'
         )
 
@@ -880,7 +882,7 @@ def _render_usability(tree_json: dict, resolver) -> str:
             'border-slate-200 dark:border-slate-700">'
             '<strong class="text-sm">运行日志</strong>'
             f'<span><span class="status-pill {status_cls}">{status_text}</span></span>'
-            f'<p class="text-sm text-slate-600 dark:text-slate-300">{_esc(clip_at_sentence(note, 150))}'
+            f'<p class="text-sm text-slate-600 dark:text-slate-300">{_esc(note)}'
             f'{(" · 日志：" + evidence) if evidence else ""}</p></div>'
         )
 
@@ -899,7 +901,7 @@ def _render_usability(tree_json: dict, resolver) -> str:
         '<strong class="text-sm">容器材料</strong>'
         f'<span><span class="status-pill {container_cls}">{container_text}</span></span>'
         f'<p class="text-sm text-slate-600 dark:text-slate-300">'
-        f'{_esc(clip_at_sentence(container_summary, 180))}'
+        f'{_esc(container_summary)}'
         f'{(" · 证据：" + container_evidence) if container_evidence else ""}</p></div>'
     )
     return f"""
@@ -953,8 +955,8 @@ def _render_hardcode_brief(tree_json: dict, resolver) -> str:
         if item.get("line"):
             location += f':{int(item["line"])}'
         evidence = _resolve_path_anchor(location, resolver) if location else ""
-        method = clip_at_sentence(str(item.get("method") or "未说明实现方法。"), 100)
-        reason = clip_at_sentence(str(item.get("reason") or "证据需要复核。"), 100)
+        method = str(item.get("method") or "未说明实现方法。")
+        reason = str(item.get("reason") or "证据需要复核。")
         review_status = "确认问题" if item.get("status") == "confirmed" else "疑似问题"
         risky_rows.append(
             '<li class="finding-row text-sm">'
@@ -1056,15 +1058,51 @@ def _clean_capability_claim(value: str, tree_json: dict) -> str:
 
 def _fit_section_parts(raw_parts: list[str], limit: int = 300) -> list[str]:
     """在 300 字总预算内保留实现、亮点和局部问题，并把空余预算让给有内容的部分。"""
+    def fit_complete_part(raw: str, cap: int) -> str:
+        """按完整句/分句收束，并保证单个部分绝不突破预算。"""
+        text = remove_ai_filler(html_to_text(raw))
+        if not text or cap <= 0:
+            return ""
+        if len(text) <= cap:
+            return text
+
+        # 优先保留完整的句子或分号分句，避免在术语括号、路径或标识符中间截断。
+        kept = ""
+        for unit in re.split(r"(?<=[。！？；;])", text):
+            if not unit:
+                continue
+            if len(kept) + len(unit) > cap:
+                break
+            kept += unit
+        if kept:
+            return kept.rstrip("；;") + ("。" if kept.endswith(("；", ";")) else "")
+
+        clipped = clip_at_sentence(text, cap)
+        if len(clipped) <= cap:
+            return clipped
+
+        # 单个超长分句没有安全句末时，退到逗号/空格边界并补成完整句。
+        prefix = text[: max(1, cap - 1)]
+        cut = max(prefix.rfind(mark) for mark in "，,、 ")
+        if cut >= max(20, cap // 2):
+            prefix = prefix[:cut]
+        # 若截点落在未闭合括号内，舍弃整个未闭合括号片段。
+        for opening, closing in (("（", "）"), ("(", ")"), ("[", "]")):
+            if prefix.count(opening) > prefix.count(closing):
+                open_at = prefix.rfind(opening)
+                if open_at >= max(20, cap // 2):
+                    prefix = prefix[:open_at]
+        return prefix.rstrip("，,；;、：: ") + "。"
+
     base_limits = [140, 60, 100]
-    parts = [clip_at_sentence(raw, cap) if raw else "" for raw, cap in zip(raw_parts, base_limits)]
+    parts = [fit_complete_part(raw, cap) for raw, cap in zip(raw_parts, base_limits)]
     remaining = limit - sum(len(part) for part in parts)
     if remaining <= 0:
         return parts
     for index, raw in enumerate(raw_parts):
         if not raw or len(parts[index]) >= len(raw):
             continue
-        expanded = clip_at_sentence(raw, len(parts[index]) + remaining)
+        expanded = fit_complete_part(raw, len(parts[index]) + remaining)
         gained = len(expanded) - len(parts[index])
         parts[index] = expanded
         remaining -= gained
@@ -1093,7 +1131,9 @@ def _remove_assigned_issue_sentences(value: str, issues: list[dict]) -> str:
         if any(term in str(issue.get("quote") or "") for issue in issues)
     }
     kept: list[str] = []
-    for clause in re.split(r"(?<=[，,。！？；;])", value):
+    # 逗号可能位于“操作系统（Operating System，OS）”等术语解释内部，
+    # 只按完整句或分号分句去重，避免留下半个括号或残缺语义。
+    for clause in re.split(r"(?<=[。！？；;])", value):
         lowered = clause.casefold()
         identifiers = set(re.findall(r"[a-z_][a-z0-9_]{3,}", lowered))
         repeats_identifier = bool(identifiers & issue_identifiers)
@@ -1127,6 +1167,8 @@ def _section_analysis_parts(
     for quote in major_quotes:
         implementation = implementation.replace(quote, "")
     implementation = _remove_assigned_issue_sentences(implementation, assigned_issues)
+    implementation = re.sub(r"(?:\s*[；;]\s*){2,}", "；", implementation)
+    implementation = re.sub(r"。\s*[；;]|[；;]\s*。", "。", implementation)
 
     highlights: list[str] = []
     highlight_evidence: dict[str, str] = {}  # quote → path for flashcard anchors

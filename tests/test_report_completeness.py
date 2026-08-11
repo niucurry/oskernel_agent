@@ -6,7 +6,9 @@ from oskernel_agent.pipeline import tree_builder
 from oskernel_agent.report_quality import (
     IncompleteReportError,
     assert_report_complete,
+    find_ellipsis_omissions,
     find_system_placeholders,
+    find_visual_truncation_styles,
 )
 from oskernel_agent.comparison.report import semantic_compare as SC
 from oskernel_agent.comparison.report.__main__ import build_parser as build_report_parser
@@ -23,6 +25,28 @@ def test_ai_failure_placeholder_text_is_a_hard_report_error():
     rendered = "<section><p>AI 模型检测未完成。</p></section>"
     assert find_system_placeholders(rendered) == ["AI 模型检测未完成"]
     with pytest.raises(IncompleteReportError):
+        assert_report_complete(rendered)
+
+
+def test_visible_ellipsis_is_a_hard_report_error_but_source_code_is_allowed():
+    rendered = "<p>开发过程仍有内容未说明…</p><code>fn demo(...) {}</code>"
+    assert find_ellipsis_omissions(rendered) == ["开发过程仍有内容未说明…"]
+    with pytest.raises(IncompleteReportError, match="省略号截断"):
+        assert_report_complete(rendered)
+    assert_report_complete("<p>结论已完整说明。</p><code>fn demo(...) {}</code>")
+
+
+@pytest.mark.parametrize(
+    "rendered, expected",
+    [
+        ("<style>.x{text-overflow:ellipsis}</style>", "CSS text-overflow: ellipsis"),
+        ("<style>.x{-webkit-line-clamp:2}</style>", "CSS line-clamp"),
+        ('<script>{"overflow":"truncate"}</script>', "图表文字 truncate"),
+    ],
+)
+def test_visual_text_truncation_is_a_hard_report_error(rendered, expected):
+    assert find_visual_truncation_styles(rendered) == [expected]
+    with pytest.raises(IncompleteReportError, match="隐藏文字样式"):
         assert_report_complete(rendered)
 
 

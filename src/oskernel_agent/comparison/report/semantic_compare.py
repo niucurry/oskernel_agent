@@ -44,6 +44,7 @@ from oskernel_agent.comparison.normalize.discovery import is_test_or_benchmark_p
 from oskernel_agent.comparison.retrieval_contract import (CONTRACT_VERSION, contract_errors,
                                     require_complete_contract)
 from oskernel_agent.finals.readability import explain_terms_in_html, sanitize_html_controls
+from oskernel_agent.report_quality import IncompleteReportError
 
 from .false_positives import (FP_REASON_DISP, false_positive_stats,
                               tag_false_positives, tag_internal_arch_dups)
@@ -56,8 +57,8 @@ if TYPE_CHECKING:
     from .gitlab_links import GitLabLinker
 
 DEFAULT_OUTPUT_DIR = "data/output"
-_SEMANTIC_PROMPT_VERSION = "semantic-cn-v4-cluster-complete-batched"
-_INNOVATION_PROMPT_VERSION = "innovation-map-cn-v6-targeted-reference"
+_SEMANTIC_PROMPT_VERSION = "semantic-cn-v5-no-ellipsis"
+_INNOVATION_PROMPT_VERSION = "innovation-map-cn-v7-no-ellipsis"
 DEFAULT_FUNCTIONS_DB = PROJECT_ROOT / "data" / "db" / "functions.db"
 MIN_INNOVATION_REFERENCE_SCORE = 0.30
 
@@ -2020,6 +2021,7 @@ _ANALYSIS_SYSTEM = """\
 - **不要写文件路径和行号**：报告表格已逐函数给出 文件:行 与可点击链接，分析正文只讲
   「借鉴了什么功能、借鉴到什么程度、做了哪些改动」，专注语义，不重复罗列地址。
 - 用词中性专业：用「借鉴/复制/相似」，不要用「抄袭」等定性指控词。
+- 所有分析必须写成完整句子，禁止用“…”或“...”省略未说完的内容。
 
 输出格式（严格遵守）：
 - 只输出 HTML 标签，不要输出 Markdown
@@ -2294,7 +2296,7 @@ _INNOVATION_SYSTEM = """你是 OS 内核代码差异分析助手。你的任务�
 }]}
 
 输出所有有实质代码差异且证据完整的条目，最多 8 个；证据不足时可以返回空数组，不能凑数。每个自然语言字段不超过
-160 个汉字，所有自然语言字段使用简体中文，必须结束全部 JSON 字符串并闭合对象。
+160 个汉字，所有自然语言字段使用简体中文并写成完整句子，禁止使用“…”或“...”，必须结束全部 JSON 字符串并闭合对象。
 """
 
 
@@ -2514,7 +2516,7 @@ def _echarts_overview(submodule_stats: dict) -> str:
                    + (["模型复核难例"] if show_rev else [])
                    + (["复核失败/未完成"] if show_inc else [])
                    + ["暂未检出相似"]},
-        "grid": {"left": "25%", "right": "12%", "top": "8%", "bottom": "6%"},
+        "grid": {"left": "4%", "right": "12%", "top": "8%", "bottom": "6%", "containLabel": True},
         "xAxis": {"type": "value", "max": 100,
                   "axisLabel": {"formatter": "{value}%"}},
         "yAxis": {"type": "category", "data": labels[::-1]},
@@ -2542,7 +2544,7 @@ def _echarts_tier_distribution(submodule_stats: dict) -> str:
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
         "legend": {"data": [s[0] for s in series]},
-        "grid": {"left": "25%", "right": "8%", "top": "12%", "bottom": "6%"},
+        "grid": {"left": "4%", "right": "8%", "top": "12%", "bottom": "6%", "containLabel": True},
         "xAxis": {"type": "value", "name": "函数数", "minInterval": 1},
         "yAxis": {"type": "category", "data": labels[::-1]},
         "series": [
@@ -2732,7 +2734,7 @@ def _source_metrics(suspects: list[dict]) -> list[dict]:
 def _historical_source_metrics(
     suspects: list[dict], file_matches: list[dict] | None = None,
 ) -> list[dict]:
-    """生成全历史库统一排名，供主对象选择、Top 5 图表和表格共同使用。
+    """生成全历史库统一排名，供主对象选择、相似仓库图表和表格共同使用。
 
     高置信函数按目标函数去重；复核难例也按目标函数去重，且不重复计算同仓库中已经
     形成高置信证据的目标函数。整文件命中按“目标文件 + 历史仓库”去重。排名字段与
@@ -2815,6 +2817,27 @@ def _historical_source_metrics(
     )
 
 
+def _most_similar_sources(source_metrics: list[dict]) -> list[dict]:
+    """按最强可用证据档位选出相似仓库，不用固定条数补齐列表。
+
+    只要存在高置信函数或整文件相同证据，就仅展示具备这类确定性证据的仓库；
+    如果没有，才退到已经完成模型复核且仍存疑的仓库。复核失败或尚未完成的候选
+    不会被包装成“最相似仓库”。输入已经采用全库统一排名，因此筛选后仍保持原顺序。
+    """
+    ranked = [dict(row) for row in source_metrics]
+    strong = [
+        row for row in ranked
+        if int(row.get("functions") or 0) > 0
+        or int(row.get("exact_files") or 0) > 0
+    ]
+    if strong:
+        return strong
+    return [
+        row for row in ranked
+        if int(row.get("review_functions") or 0) > 0
+    ]
+
+
 def select_closest_historical_repo(
     suspects: list[dict], file_matches: list[dict] | None = None,
 ) -> dict:
@@ -2871,10 +2894,10 @@ def _echarts_top_sources(metrics: list[dict], top: int = 8) -> str:
     option = {
         "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
         "legend": {"data": [s[0] for s in series]},
-        "grid": {"left": "33%", "right": "8%", "top": "14%", "bottom": "6%"},
+        "grid": {"left": "4%", "right": "8%", "top": "14%", "bottom": "6%", "containLabel": True},
         "xAxis": {"type": "value", "minInterval": 1},
         "yAxis": {"type": "category", "data": labels,
-                  "axisLabel": {"fontSize": 10, "width": 150, "overflow": "truncate"}},
+                  "axisLabel": {"fontSize": 10}},
         "series": [
             {"name": name, "type": "bar", "stack": "src", "data": vals,
              "itemStyle": {"color": color},
@@ -3074,8 +3097,10 @@ def _build_history_overview(
         if source_metrics is not None
         else _historical_source_metrics(suspects, file_matches)
     )]
+    similar_sources = _most_similar_sources(sources)
     return {
         "sources": sources,
+        "similar_sources": similar_sources,
         "submodule_stats": submodule_stats,
         "distribution_rows": distribution_rows,
         "total_functions": total_functions,
@@ -3105,6 +3130,10 @@ def _validate_finals_history_overview(overview: dict, closest_source: str) -> No
     total = int(overview.get("total_functions") or 0)
     if sum(int(row.get("count") or 0) for row in rows) != total:
         raise RuntimeError("全历史库图表分类数量与总函数数不一致")
+    selected = list(overview.get("similar_sources") or [])
+    expected = _most_similar_sources(sources)
+    if selected != expected:
+        raise RuntimeError("最相似仓库筛选结果与全历史库统一排名不一致")
 
 
 def _retrieval_status(contract: dict | None) -> str:
@@ -3364,7 +3393,10 @@ def _candidates_cell(group: dict, linker) -> str:
             + f' <span class="text-slate-400">{html.escape(ck)}</span>'
             '</li>'
         )
-    more = f'<li class="text-slate-400">…另有 {extra} 个候选</li>' if extra > 0 else ""
+    more = (
+        f'<li class="text-slate-400">另有 {extra} 个候选未在主列表逐项展开，候选总数已完整计入统计。</li>'
+        if extra > 0 else ""
+    )
     return f'<ul class="text-xs list-disc pl-4 space-y-0.5">{"".join(items)}{more}</ul>'
 
 
@@ -4256,14 +4288,14 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
 .toc-header{padding:1rem 1rem .85rem;border-bottom:1px solid var(--line-soft);background:linear-gradient(145deg,#fff,#f8fbff)}
 .toc-header strong{display:block;margin-top:.28rem;font-size:1rem;color:#0f172a}
 .toc-repo{display:block;margin-top:.3rem;color:#64748b;font:500 .7rem/1.35 ui-monospace,SFMono-Regular,Consolas,monospace;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  white-space:normal;overflow-wrap:anywhere}
 .toc-scroll{max-height:calc(100vh - 4rem);overflow-y:auto;padding:.55rem .55rem .8rem;scrollbar-width:thin}
 .toc-group+.toc-group{margin-top:.5rem;padding-top:.45rem;border-top:1px solid #edf1f5}
 .toc-group-title{padding:.35rem .55rem .28rem;color:#94a3b8;font-size:.64rem;font-weight:800;letter-spacing:.12em}
 .toc .toc-link{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:.55rem;
-  height:42px;margin:2px 0;padding:.4rem .55rem .4rem .7rem;border-radius:8px;color:#475569;text-decoration:none;overflow:hidden}
+  min-height:42px;margin:2px 0;padding:.4rem .55rem .4rem .7rem;border-radius:8px;color:#475569;text-decoration:none}
 .toc .toc-link:before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:3px;background:transparent}
-.toc-link-label{min-width:0;line-height:1.25;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.toc-link-label{min-width:0;line-height:1.25;overflow-wrap:anywhere;display:block}
 .toc .toc-link:hover{background:#f1f5f9;color:#1e3a5f}
 .toc .toc-active{background:#eaf2ff;color:#1d4ed8;font-weight:700}
 .toc .toc-active:before{background:#3b82f6}
@@ -4597,7 +4629,7 @@ def _file_level_section(file_matches: list[dict], file_similar: list[dict],
 def _reused_libraries_section(lib_stats: list[dict], query_repo_id: str) -> tuple[str, str]:
     """复用库统计：列出新作品复用的公开第三方库组件及规模。
 
-    这些库本体及经包清单/导入关系确认的适配层（lwext4 / smoltcp / fatfs …）为多队
+    这些库本体及经包清单/导入关系确认的适配层（lwext4、smoltcp、fatfs 等）为多队
     合法共用，已从借鉴图/清单中剔除，此处单列说明，避免「数字凭空消失」。
     无复用库时返回空（不渲染本节）。
     """
@@ -4806,7 +4838,7 @@ def _false_positive_section(fp_funcs: list[dict], linker, query_repo_id: str) ->
         '保留来源以便人工复核：</p>'
         '<ul class="text-xs text-slate-500 list-disc pl-5 mb-3 space-y-0.5">'
         '<li><b>短内联汇编掩码伪相似</b>：如龙芯 <code>csrwr</code> 与 RISC-V <code>csrrw</code>，指令本体在 '
-        '<code>asm!("…")</code> 字符串里、被归一化掩码成占位符，只剩内联汇编外壳相同——面向不同 CPU，'
+        '<code>asm!("指令模板")</code> 字符串里、被归一化掩码成占位符，只剩内联汇编外壳相同——面向不同 CPU，'
         '不可能逐字借鉴。</li>'
         '<li><b>不自动排除</b>：不同架构、不同语言或 <code>__switch</code> 样板名称本身都可能存在移植/'
         '直接复制，只有具体 pair 的掩码伪相似证据成立才排除。</li>'
@@ -4826,7 +4858,7 @@ def _false_positive_section(fp_funcs: list[dict], linker, query_repo_id: str) ->
 def _upstream_baseline_section(ub_funcs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
     """上游基线 / ABI 受限代码 小节：vendored 上游 OS + Linux/POSIX ABI 受限实现（不计入借鉴）。
 
-    ① 双方 file_path 在同一 upstream_root（arceos/rcore/…）下且相对路径相同 → 双方 vendored
+    ① 双方 file_path 在同一 upstream_root（例如 arceos 或 rcore）下且相对路径相同 → 双方 vendored
     了同一份上游文件，非跨队抄袭；② 受 ABI 规范硬性限制的唯一性实现（stat 转换、syscall
     shim、build.rs 等），只有一种正确写法。两类已从借鉴 KPI/清单剔除，此处分组单列供核对。
     """
@@ -4927,7 +4959,7 @@ def _upstream_baseline_section(ub_funcs: list[dict], linker, query_repo_id: str)
     return _toc_link(sid, "上游基线 / ABI 受限代码", str(len(ub_funcs)), "excluded"), section
 
 
-_REVIEW_PROMPT_VERSION = "v7-json-mode-retry"  # 改 prompt 即 bump，使旧缓存自动失效
+_REVIEW_PROMPT_VERSION = "v8-json-mode-no-ellipsis"  # 改 prompt 即 bump，使旧缓存自动失效
 
 _REVIEW_ROLE_SYSTEM = """你是代码函数职责分析助手。只判断给定两个函数的职责是否一致，不判断代码借鉴。
 职责必须综合输入、输出、主要副作用、核心操作对象和调用契约，不能只看函数名、类型名或局部语句。
@@ -4936,6 +4968,7 @@ _REVIEW_ROLE_SYSTEM = """你是代码函数职责分析助手。只判断给定�
 - 只输出一个单行 JSON 对象，禁止 Markdown 和额外文字；
 - responsibility 只能是“一致”“部分一致”或“不一致”；
 - responsibility_reason 必须非空，并具体说明双方各自做什么；
+- responsibility_reason 必须是完整句子，禁止使用“…”或“...”省略内容；
 - evidence_anchors 必须包含 1～4 个从代码中逐字复制、可定位的标识符、常量或短表达式。
 严格格式：
 {"responsibility":"一致|部分一致|不一致","responsibility_reason":"不超过80字的中文职责依据","evidence_anchors":["代码中的原文锚点"]}"""
@@ -4956,6 +4989,7 @@ _REVIEW_SIM_SYSTEM = """你是跨语言代码同源复核助手。职责分析�
 输出必须满足以下全部要求：
 - 只输出一个单行 JSON 对象，禁止 Markdown 代码块和任何额外文字；
 - 所有字段必须存在且非空；reason 必须写出可由代码直接核验的事实；
+- reason 必须是完整句子，禁止使用“…”或“...”省略内容；
 - 若 verdict 为“借鉴”或“疑似”，evidence_anchors 必须包含 2～4 个在两段代码中都逐字出现的
   标识符、常量或短表达式；若 verdict 为“非借鉴”，可提供 1～4 个来自任一侧的定位锚点；
 严格格式：
@@ -4963,18 +4997,22 @@ _REVIEW_SIM_SYSTEM = """你是跨语言代码同源复核助手。职责分析�
 
 
 def _bounded_review_text(value: object, limit: int) -> str:
-    """限制模型说明长度且显式标出截断，避免报告出现半句话却看似完整。"""
+    """严格校验模型说明长度；超限时重试，禁止截断后进入报告。"""
     text = str(value or "").strip()
-    if len(text) <= limit:
-        return text
-    return text[:max(1, limit - 1)].rstrip() + "…"
+    if re.search(r"…|(?<!\.)\.{3}(?!\.)", text):
+        raise ValueError("模型说明包含省略号，必须改写为完整句子")
+    if len(text) > limit:
+        raise ValueError(f"模型说明超过 {limit} 字，必须完整精炼后重试")
+    return text
 
 
 def _legacy_review_text_for_display(value: object, limit: int) -> str:
-    """旧缓存曾直接切片；对疑似正好卡在旧上限的半句补截断标记。"""
+    """拒绝展示旧缓存中的截断文本，要求重新取得完整复核结论。"""
     text = str(value or "").strip()
-    if len(text) == limit and text[-1:] not in "。！？；….!?;":
-        return text + "…"
+    if re.search(r"…|(?<!\.)\.{3}(?!\.)", text):
+        raise IncompleteReportError("旧复核缓存包含省略号，需要重新复核")
+    if len(text) == limit and text[-1:] not in "。！？；.!?;":
+        raise IncompleteReportError("旧复核缓存疑似在长度上限处截断，需要重新复核")
     return text
 
 
@@ -4982,7 +5020,7 @@ def _review_failure(detail: str) -> dict:
     """构造明确的复核失败结果；失败不等价于模型仍存疑。"""
     return {
         "verdict": "复核失败",
-        "reason": _bounded_review_text(f"复核失败：{detail}", 180),
+        "reason": f"复核失败：{detail}",
         "responsibility": "未判定",
         "responsibility_reason": "",
         "evidence_anchors": [],
@@ -5143,7 +5181,7 @@ def _compact_code_for_review(
     previous = -2
     for index in sorted(selected):
         if index != previous + 1:
-            rendered.append("… [中间代码已省略，保留函数头尾及匹配区上下文] …")
+            rendered.append("[中间代码未纳入模型输入；以下继续展示函数头尾和匹配区上下文]")
         rendered.append(lines[index])
         previous = index
     compact = "\n".join(rendered)
@@ -5152,7 +5190,7 @@ def _compact_code_for_review(
     half = max_chars // 2
     return (
         compact[:half]
-        + "\n… [上下文超过模型输入预算，已从中部截断] …\n"
+        + "\n[中部上下文未纳入模型输入；以下继续展示末尾上下文]\n"
         + compact[-half:]
     )
 
@@ -5983,27 +6021,28 @@ def _finals_history_overview(
     linker,
     closest_source: str,
 ) -> str:
-    """全历史库概览：Top 5、整体分布及其常显数字表格。"""
+    """全历史库概览：动态筛选最相似仓库，并展示整体分布和数字表格。"""
     _validate_finals_history_overview(overview, closest_source)
-    top_sources = list(overview.get("sources") or [])[:5]
+    similar_sources = list(overview.get("similar_sources") or [])
     distribution_rows = list(overview.get("distribution_rows") or [])
     total = int(overview.get("total_functions") or 0)
     comparable = int(overview.get("comparable_functions") or 0)
     confirmed = int(overview.get("confirmed_functions") or 0)
     review = int(overview.get("review_functions") or 0)
     excluded = int((overview.get("exclusions") or {}).get("total_excluded") or 0)
-    source_chart = _echarts_top_sources(top_sources, top=len(top_sources))
+    source_chart = _echarts_top_sources(similar_sources, top=len(similar_sources))
     donut = _echarts_overall_donut(distribution_rows)
-    source_table = _historical_sources_table(top_sources, linker, closest_source)
+    source_table = _historical_sources_table(similar_sources, linker, closest_source)
     distribution_table = _overall_distribution_table(distribution_rows, total)
-    shown = len(top_sources)
+    shown = len(similar_sources)
     return f"""
 <div class="summary-card history-overview-card">
   <div class="summary-heading"><div><span class="summary-eyebrow">ALL-HISTORY OVERVIEW</span>
-  <h2>全历史库概览</h2></div><span class="summary-repo">展示 Top {shown}</span></div>
+  <h2>全历史库概览</h2></div><span class="summary-repo">筛出 {shown} 个相似仓库</span></div>
   <p class="section-intro"><b>本节使用全部历史作品计算；下节只展开排名第一作品的详细证据。</b>
   排名表示“在哪些历史仓库中找到相似实现”，不能单独证明直接来源、传播方向或抄袭关系。
-  同一目标函数可能命中多个历史作品，因此各仓库函数数不能相加当作全局命中总数。</p>
+  同一目标函数可能命中多个历史作品，因此各仓库函数数不能相加当作全局命中总数。
+  仓库数量不固定：优先保留有高置信函数或整文件证据的仓库；仅当这类证据为空时，才展示已完成的复核难例。</p>
   <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
     {_kpi(total, "全部解析函数", "#2563eb")}
     {_kpi(comparable, "全库可比函数", "#0f172a")}
@@ -6015,7 +6054,7 @@ def _finals_history_overview(
     <div><div class="chart-title">全库整体结果分布（按全部解析函数）</div>
       {donut}{distribution_table}
     </div>
-    <div><div class="chart-title">历史匹配作品 Top {shown}（按统一排名；不代表直接来源）</div>
+    <div><div class="chart-title">最相似历史作品（{shown} 个，按统一排名；不代表直接来源）</div>
       {source_chart}
       <p class="text-xs text-slate-500 mt-1">柱图按唯一目标函数展示高置信证据、复核难例与复核未完成项；
       有效相似行、整文件证据和覆盖范围以同一排名表为准。</p>
@@ -6050,7 +6089,7 @@ def generate_finals_comparison_html(
     recall: dict | None,
     history_overview: dict | None = None,
 ) -> tuple[str, object]:
-    """评委版对比报告：Top 5 给出全库位置，第一名保留可下钻详证。"""
+    """评委版对比报告：动态展示最相似仓库，并对第一名保留可下钻详证。"""
     from oskernel_agent.finals.digests import comparison_digest
 
     overview = history_overview or _build_history_overview(
@@ -6091,7 +6130,6 @@ def generate_finals_comparison_html(
         _closed_by_default(sec_files),
     ]
     evidence_html = "\n".join(part for part in evidence_parts if part)
-    _toc_ai, sec_ai = _ai_detect_section(ai_detect_data, linker, query_repo_id)
     method_status = _retrieval_status(retrieval_contract)
     method_status_text = (
         "历史库召回完整。" if not contract_errors(retrieval_contract)
@@ -6102,9 +6140,8 @@ def generate_finals_comparison_html(
         '<div class="toc-card"><div class="toc-header"><span class="toc-kicker">最终报告</span>'
         '<strong>报告目录</strong></div><div class="toc-scroll">'
         + _toc_group("先看结论", [_toc_link("summary", "结论与模块排序")])
-        + _toc_group("全库概览", [_toc_link("history-overview", "历史匹配 Top 5")])
-        + _toc_group("最近作品证据", [_toc_link("closest-evidence", "同源代码证据")])
-        + _toc_group("辅助核查", [_toc_link("ai-signal", "AI 生成代码信号")])
+        + _toc_group("全库概览", [_toc_link("history-overview", "最相似历史作品")])
+        + _toc_group("最接近作品", [_toc_link("closest-evidence", "同源代码证据")])
         + _toc_group("口径", [_toc_link("method", "方法与边界")])
         + '</div></div>'
     )
@@ -6118,25 +6155,21 @@ def generate_finals_comparison_html(
 .summary-alert>span{{float:right;color:#64748b;font-size:.72rem}}.summary-alert p{{margin:.25rem 0 0;font-size:.86rem}}
 .closest-identity{{margin:.2rem 0 .7rem;color:#475569;font-weight:600}}
 </style></head><body><div class="layout"><nav class="toc">{toc_html}</nav><main class="main">
-<header class="report-header"><h1>{title}</h1><p>先看全历史 Top 5，再围绕排名第一的作品展开代码证据；模块按高置信同源比例降序排列。</p></header>
+<header class="report-header"><h1>{title}</h1><p>先查看按证据动态筛选的最相似历史作品，再围绕排名第一的作品展开代码证据；仓库数量不固定。</p></header>
 {summary_html}
-<section id="history-overview" data-section-id="history-overview">
-{_chapter_heading("02", "全历史库匹配概览", "图表用于快速定位，常显表格保留全部对应数字；排名不代表直接来源。")}
-{history_html}
-</section>
+<section id="history-overview" data-section-id="history-overview" class="report-section section-neutral">
+{_chapter_heading("02", "全历史库匹配概览", "按证据强度动态筛选相似仓库，不固定数量，也不为凑数纳入未完成复核项。")}
+{history_html}</section>
 <section id="closest-evidence" data-section-id="closest-evidence">
-{_chapter_heading("03", "最接近作品的证据", "只展开主对比作品；函数、文件和代码细节默认折叠，需要时再查看。")}
+{_chapter_heading("03", "最接近作品的证据", "只展开排名第一的主对比作品；函数、文件和代码细节默认折叠，需要时再查看。")}
 {evidence_html}</section>
-<section id="ai-signal" data-section-id="ai-signal">
-{_chapter_heading("04", "AI 生成代码辅助信号", "仅检测未归入历史借鉴的函数；误报风险较高，不作单独认定。")}
-{sec_ai}</section>
 <section id="method" data-section-id="method" class="report-section section-neutral">
-{_chapter_heading("05", "方法与边界", "说明全库概览与主对象详证的双口径，避免把未命中误写成原创。")}
+{_chapter_heading("04", "方法与边界", "说明相似仓库筛选、主对象选择和证据口径，避免把未命中误写成原创。")}
 {method_status}
 <div class="section-intro"><p><b>主对比对象：</b>{_ref_repo_anchor(linker, closest_source)}</p>
 <p><b>召回状态：</b>{method_status_text}</p>
-<p><b>全库概览口径：</b>使用全部历史作品，展示统一排名的前五项和全局互斥分类。</p>
-<p><b>详细证据口径：</b>只展开排名第一的主对比作品。Top 2–5 仅用于帮助评委识别多仓传播、共同上游或 fork 线索，不能据此认定直接来源。</p></div>
+<p><b>选择口径：</b>系统在全部历史作品中完成召回、共同上游与第三方排除，再优先展示具备高置信函数或整文件证据的仓库；仅当强证据为空时，才展示已经完成模型复核且仍存疑的仓库。排名第一的作品作为主对比对象展开详细证据。</p>
+<p><b>证据口径：</b>相似比例按唯一主对比作品的可比函数计算；相似关系只用于人工核查，不单独证明直接来源、传播方向或抄袭。</p></div>
 </section>
 </main></div><a href="#summary" class="to-top" title="回到顶部">↑</a>{_INIT_SCRIPT}</body></html>"""
     return sanitize_html_controls(explain_terms_in_html(rendered)), digest
@@ -6497,7 +6530,7 @@ def run_semantic_compare(
                     ub_counts["upstream_vendored"], ub_counts["abi_constrained"])
 
     # 全库概览保留所有可报告历史作品；详细证据只围绕统一排名第一的作品展开。
-    # 先剔除第三方库和脚手架整文件，避免它们左右 Top 5 与主对象选择。
+    # 先剔除第三方库和脚手架整文件，避免它们左右相似仓库筛选与主对象选择。
     reportable_file_matches = [
         match for match in file_matches
         if not match_library(match.get("query_file"), context=library_context)

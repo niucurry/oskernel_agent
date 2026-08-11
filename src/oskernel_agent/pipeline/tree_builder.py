@@ -1143,6 +1143,83 @@ def _actual_source_excerpt(repo_path: Path, relative_path: str, line: int) -> st
     return " ".join(part.strip() for part in source_lines[start:end] if part.strip())[:500]
 
 
+def _hardcode_source_context(
+    repo_path: Path,
+    signal: dict,
+    *,
+    radius: int = 24,
+) -> str:
+    """读取规则命中附近的真实源码，供高风险语义校验和定向 AI 复核使用。"""
+    relative = str(signal.get("path") or "").replace("\\", "/").lstrip("./")
+    try:
+        line = int(signal.get("line") or 0)
+        lines = (Path(repo_path).resolve() / relative).read_text(
+            encoding="utf-8", errors="replace",
+        ).splitlines()
+    except (OSError, TypeError, ValueError):
+        return ""
+    start = max(0, line - radius - 1)
+    end = min(len(lines), line + radius)
+    return "\n".join(
+        f"{index + 1}: {lines[index]}" for index in range(start, end)
+    )
+
+
+def _semantic_hardcode_risk(signal: dict, repo_path: Path) -> str:
+    """识别不能仅以“兼容性代码”为由清除的系统调用语义兜底。"""
+    if str(signal.get("category") or "") != "按测试名或 ELF 名称分支":
+        return ""
+    context = _hardcode_source_context(repo_path, signal).casefold()
+    if not context or "/musl/busybox" not in context:
+        return ""
+    if (
+        ('starts_with("/musl/")' in context or 'path == "/musl"' in context)
+        and "return 0" in context
+        and ("open_inode" in context or "open_file" in context)
+    ):
+        return (
+            "目标路径访问失败后，仅因 /musl/busybox 存在便返回成功，可能把 "
+            "ENOENT 等失败改写为成功，改变 faccessat/faccessat2 语义。"
+        )
+    excerpt = str(signal.get("excerpt") or "").casefold()
+    if (
+        "is_err()" in excerpt
+        and 'open_inode("/musl/busybox"' in context
+        and "is_path_search" in context
+    ):
+        return (
+            "待执行文件打开失败后，代码按固定目录把程序替换为 /musl/busybox；"
+            "这可能让缺失程序执行另一 ELF，必须作为系统级定向路径复核。"
+        )
+    return ""
+
+
+def _hardcode_reviews_needing_repair(
+    parsed: dict,
+    facts: dict | None,
+    repo_path: Path,
+) -> list[dict]:
+    hardcode = (((facts or {}).get("integrity") or {}).get("hardcode") or {})
+    reviews = {
+        str(item.get("signal_id") or ""): item
+        for item in (parsed.get("hardcode_reviews") or [])
+        if isinstance(item, dict)
+    }
+    targets: list[dict] = []
+    for signal in hardcode.get("findings") or []:
+        signal_id = str(signal.get("signal_id") or "")
+        review = reviews.get(signal_id)
+        risk = _semantic_hardcode_risk(signal, repo_path)
+        if review is None or (risk and review.get("status") == "cleared"):
+            targets.append({
+                **signal,
+                "semantic_risk": risk,
+                "source_context": _hardcode_source_context(repo_path, signal),
+                "previous_review": review or {},
+            })
+    return targets
+
+
 def _validate_hardcode_reviews(
     parsed: dict,
     facts: dict | None,
@@ -1229,6 +1306,12 @@ def _validate_hardcode_reviews(
         if abs(int(review.get("line") or 0) - int(signal.get("line") or 0)) > 2:
             raise RuntimeError(f"硬编码复核 {signal_id} 的行号与扫描证据不一致")
         if repo_path is not None:
+            semantic_risk = _semantic_hardcode_risk(signal, repo_path)
+            if semantic_risk and review.get("status") == "cleared":
+                raise RuntimeError(
+                    f"硬编码复核 {signal_id} 涉及系统调用语义兜底，不能直接标为 cleared："
+                    f"{semantic_risk}"
+                )
             # 对规则扫描命中以扫描器的真实位置为准；AI 只负责解释上下文和作出结论。
             canonical_path, canonical_line = _validate_repo_location(
                 repo_path, str(signal.get("path") or ""),
@@ -1325,6 +1408,156 @@ def _deterministic_verdict_one_line(
         return prefix[:limit]
     shortened = issue[:budget].rstrip(" ，,；;。")
     return f"{prefix}{label}{shortened}" if shortened else prefix
+
+
+def _normalize_hardcode_repair_items(
+    candidate: dict,
+    targets: list[dict],
+) -> list[dict]:
+    """把模型常见的 impact/semantic_risk 字段漂移归一为正式复核 schema。"""
+    returned = candidate.get("hardcode_reviews") or []
+    if not isinstance(returned, list):
+        return []
+    sources = {str(item.get("signal_id") or ""): item for item in targets}
+    normalized_items: list[dict] = []
+    seen: set[str] = set()
+    for item in returned:
+        if not isinstance(item, dict):
+            return []
+        signal_id = str(item.get("signal_id") or "")
+        source = sources.get(signal_id)
+        if source is None or signal_id in seen:
+            return []
+        seen.add(signal_id)
+        normalized = dict(item)
+        normalized.update({
+            "signal_id": signal_id,
+            "category": source.get("category"),
+            "path": source.get("path"),
+            "line": source.get("line"),
+            "excerpt": source.get("excerpt"),
+        })
+        if not str(normalized.get("reason") or "").strip():
+            normalized["reason"] = "；".join(
+                str(normalized.get(field) or "").strip()
+                for field in ("semantic_risk", "impact")
+                if str(normalized.get(field) or "").strip()
+            )
+        if normalized.get("confidence") is None:
+            try:
+                confidence = float(source.get("confidence") or 0)
+            except (TypeError, ValueError):
+                confidence = 0
+            normalized["confidence"] = confidence * 100 if 0 < confidence <= 1 else confidence
+        normalized_items.append(normalized)
+    return normalized_items if seen == set(sources) else []
+
+
+def repair_verdict_hardcode_reviews(
+    parsed: dict,
+    facts: dict | None,
+    work_dir: Path,
+    repo_path: Path,
+) -> dict:
+    """只让 AI 重审缺失项及被错误清除的系统级高风险硬编码线索。"""
+    targets = _hardcode_reviews_needing_repair(parsed, facts, repo_path)
+    if not targets:
+        return parsed
+    out_path = work_dir / "verdict-hardcode.repair.json"
+    target_ids = {str(item.get("signal_id") or "") for item in targets}
+    risk_ids = {
+        str(item.get("signal_id") or "")
+        for item in targets if str(item.get("semantic_risk") or "").strip()
+    }
+
+    def _merged_reviews(candidate: dict) -> list[dict]:
+        returned = _normalize_hardcode_repair_items(candidate, targets)
+        if not returned:
+            return []
+        replacements: dict[str, dict] = {}
+        for item in returned:
+            signal_id = str(item.get("signal_id") or "")
+            if signal_id not in target_ids or signal_id in replacements:
+                return []
+            if signal_id in risk_ids and item.get("status") == "cleared":
+                return []
+            replacements[signal_id] = item
+        if set(replacements) != target_ids:
+            return []
+        existing = {
+            str(item.get("signal_id") or ""): item
+            for item in (parsed.get("hardcode_reviews") or [])
+            if isinstance(item, dict)
+        }
+        signals = ((((facts or {}).get("integrity") or {}).get("hardcode") or {}).get(
+            "findings"
+        ) or [])
+        merged = [
+            replacements.get(str(signal.get("signal_id") or ""))
+            or existing.get(str(signal.get("signal_id") or ""))
+            for signal in signals
+        ]
+        if any(item is None for item in merged):
+            return []
+        merged.extend(
+            item for signal_id, item in existing.items()
+            if signal_id.startswith("ai-new-")
+        )
+        return merged
+
+    def _complete(candidate: dict) -> bool:
+        merged_reviews = _merged_reviews(candidate)
+        if not merged_reviews:
+            return False
+        merged = dict(parsed)
+        merged["hardcode_reviews"] = merged_reviews
+        try:
+            _validate_hardcode_reviews(merged, facts, repo_path)
+        except RuntimeError:
+            return False
+        return True
+
+    payload = {
+        "复核规则": (
+            "先判断代码是否会针对固定程序/路径改变正常失败或执行语义，再区分 confirmed、"
+            "suspected、cleared。semantic_risk 非空的项目不得写 cleared；证据足以确定行为时"
+            "写 confirmed，仍需运行验证影响范围时写 suspected。兼容性目的不能抵消语义变化。"
+        ),
+        "待复核线索": targets,
+        "输出路径": str(out_path),
+    }
+    task = BatchTask(
+        batch_id="verdict-hardcode-repair",
+        agent_name="os-kernel-verdict",
+        user_request=(
+            "你是操作系统内核赛评委，只重审输入中的硬编码线索，不修改报告其他内容。"
+            "逐项阅读 source_context，说明触发方法、实际输出/返回值变化及其对正常内核语义的"
+            "影响。必须原样返回每个 signal_id/category/path/line；status 只能是 confirmed、"
+            "suspected、cleared，semantic_risk 非空时不得 cleared。不得把普通第三方库实现当作"
+            "作品问题。调用 write_report，把仅含 hardcode_reviews 的 JSON 写到指定路径。\n\n"
+            + json.dumps(payload, ensure_ascii=False, indent=2)
+        ),
+        output_path=out_path,
+        cache_dir=work_dir,
+        cache_key="",
+        cache_enabled=False,
+        fallback={"hardcode_reviews": []},
+        repo_path=repo_path,
+        cache_validator=_complete,
+    )
+    candidate = run_batch_task(
+        task,
+        schema_hint=(
+            '{"hardcode_reviews":[{"signal_id":str,"category":str,"path":str,'
+            '"line":int,"status":"confirmed|suspected|cleared","method":str,'
+            '"reason":str,"confidence":int,"excerpt":str}]}'
+        ),
+        timeout=300,
+    )
+    if not _complete(candidate):
+        raise RuntimeError("AI 未能完成系统级高风险硬编码线索的定向复核")
+    parsed["hardcode_reviews"] = _merged_reviews(candidate)
+    return parsed
 
 
 def repair_verdict_one_line(
@@ -1523,7 +1756,6 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                 parsed, repo_path or Path("."), facts,
                 enforce_one_line_length=False,
             )
-            _validate_hardcode_reviews(parsed, facts, repo_path or Path("."))
         except RuntimeError:
             return False
         return True
@@ -1552,6 +1784,10 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                     '"one_line":str}',
         timeout=600,
     )
+    if _hardcode_reviews_needing_repair(parsed, facts, repo_path or Path(".")):
+        repair_verdict_hardcode_reviews(
+            parsed, facts, work_dir, repo_path or Path("."),
+        )
     if _verdict_one_line_requires_repair(parsed, facts):
         repair_verdict_one_line(
             parsed, facts, work_dir, repo_path or Path("."),
