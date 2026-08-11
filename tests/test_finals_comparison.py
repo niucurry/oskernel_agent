@@ -77,7 +77,7 @@ def test_finals_comparison_html_has_one_source_and_no_top_five_noise():
     )
     assert "经 AI 分析，与 2025/A 最接近" in rendered
     assert "2025 年 · A 队 · 学校信息未提供" in rendered
-    assert "完全由人工智能（AI）工具生成 · 参赛队不得修改" in rendered
+    assert "参赛队伍不得修改" in rendered
     assert "实现依据" in rendered
     assert 'href="#sec-clusters">高置信证据</a>' in rendered
     assert 'id="sec-lineage"' in rendered and 'x-data="{open: false}"' in rendered
