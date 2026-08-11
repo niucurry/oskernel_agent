@@ -16,7 +16,7 @@ from .readability import (
 
 
 DESCRIPTION_SUBSYSTEM_ORDER = (
-    "启动模块", "内存管理", "进程管理", "文件系统", "设备管理",
+    "启动模块", "内存管理", "进程管理", "文件系统", "\u7f51\u7edc", "设备管理",
     "系统调用", "硬件抽象", "其他",
 )
 
@@ -252,6 +252,41 @@ def description_priority_findings(
     return ordered if limit is None else ordered[: max(0, limit)]
 
 
+def build_verification_target_detail(build_verification: dict) -> str:
+    """Keep both contest build targets visible without copying enormous tool logs."""
+    target_results = build_verification.get("targets") or {}
+    details: list[str] = []
+    status_labels = {
+        "failed": "失败",
+        "timeout": "超时",
+        "environment_error": "环境异常",
+        "not_run": "未执行",
+        "unknown": "状态未知",
+    }
+    for target in ("kernel-rv", "kernel-la"):
+        item = target_results.get(target) or {}
+        status = str(item.get("status") or "unknown")
+        if status == "passed":
+            details.append(f"{target}：编译成功")
+            continue
+
+        raw_error = " ".join(
+            " ".join(str(value).split()) for value in (item.get("errors") or [])[:1]
+        )
+        if re.search(r"static\.rust-lang\.org|channel-rust-nightly|rustup", raw_error, re.I):
+            version = re.search(r"/dist/(\d{4}-\d{2}-\d{2})/", raw_error)
+            toolchain = f"nightly-{version.group(1)} " if version else ""
+            reason = f"rustup 同步 {toolchain}工具链失败（比赛编译容器禁用网络）"
+        elif raw_error:
+            reason = re.sub(r"https?://\S+", "远程地址", raw_error)
+            reason = re.sub(r"/root/\.rustup/tmp/\S+", "rustup 临时文件", reason)
+            reason = clip_at_sentence(reason, 105)
+        else:
+            reason = "未生成可用内核产物" if status == "failed" else "未提供进一步错误"
+        details.append(f"{target}：{status_labels.get(status, status)}（{reason}）")
+    return concise_module_summary("；".join(details))
+
+
 def description_digest_from_tree(tree: dict) -> ReportDigest:
     meta = tree.get("meta") or {}
     verdict = tree.get("verdict") or {}
@@ -271,21 +306,12 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
         or {}
     )
     verification_requested = bool(build_verification.get("requested"))
+    verification_status = str(build_verification.get("status") or "unknown")
     if verification_requested:
-        verification_status = str(build_verification.get("status") or "unknown")
-        target_results = build_verification.get("targets") or {}
         if verification_status in {"failed", "partial"}:
-            details = []
-            for target in ("kernel-rv", "kernel-la"):
-                item = target_results.get(target) or {}
-                if item.get("status") == "passed":
-                    details.append(f"{target} 编译成功")
-                    continue
-                error = "；".join(str(value) for value in (item.get("errors") or [])[:2])
-                details.append(f"{target} {error or '编译未通过'}")
             findings.append(Finding(
                 title="比赛镜像双架构编译未全部通过",
-                detail=concise_module_summary("；".join(details)),
+                detail=build_verification_target_detail(build_verification),
                 severity="high",
                 confidence=1.0,
                 source="description",
@@ -293,10 +319,10 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
         elif verification_status in {"environment_error", "timeout"}:
             findings.append(Finding(
                 title="比赛镜像编译未形成结论",
-                detail=concise_module_summary(str(
-                    build_verification.get("summary")
-                    or "Docker 或宿主环境未能完成编译验证；不能据此判断作品失败。"
-                )),
+                detail=concise_module_summary(
+                    f"{build_verification.get('summary') or 'Docker 或宿主环境未能完成编译验证；不能据此判断作品失败。'}"
+                    f" {build_verification_target_detail(build_verification)}"
+                ),
                 severity="info",
                 confidence=1.0,
                 source="description",
@@ -524,6 +550,10 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
                 ((build_verification.get("targets") or {}).get("kernel-la") or {}).get("status")
                 or "not_run"
             ),
+            "build_target_summary": (
+                build_verification_target_detail(build_verification)
+                if verification_requested and verification_status != "passed" else ""
+            ),
             "build_interface_status": build_interface.get("status", "unknown"),
             "build_interface_summary": str(build_interface.get("summary") or ""),
             "build_interface_missing_targets": "、".join(
@@ -623,16 +653,6 @@ def comparison_digest(
             severity="high", confidence=0.99, source="comparison",
         ))
 
-    ai_overall = ((ai_detect_data or {}).get("aggregated") or {}).get("overall") or {}
-    llm_count = int(ai_overall.get("llm_count") or 0)
-    if llm_count:
-        findings.append(Finding(
-            title="AI 生成代码检测出现高风险信号",
-            detail=(f"实际模型将 {llm_count} 个未归入历史借鉴的函数标为 AI 倾向。"
-                    "该结果误报风险较高，只用于人工复核。"),
-            severity="medium", confidence=0.7, source="comparison",
-        ))
-
     history = history_overview or {}
     history_sources = list(history.get("sources") or [])
     history_confirmed = int(history.get("confirmed_functions") or 0)
@@ -659,7 +679,6 @@ def comparison_digest(
             "review_functions": review,
             "comparable_functions": total,
             "exact_file_matches": exact_file_matches,
-            "ai_llm_functions": llm_count,
             "metric_scope": "closest_historical_repo",
             "history_sources_shown": min(5, len(history_sources)),
             "history_total_functions": int(history.get("total_functions") or 0),

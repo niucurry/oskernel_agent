@@ -75,11 +75,22 @@ def test_repo_key_case_mismatch_still_collides(tmp_path):
         load_repos(path)
 
 
-def test_invalid_repo_key_character_raises(tmp_path):
+def test_repo_key_allows_internal_space(tmp_path):
     path = tmp_path / "repos.yaml"
     path.write_text(
         'repos:\n'
         '- {repo_url: "https://g.example/x", year: 2023, team_name: "a", repo_key: "key with space"}\n',
+        encoding="utf-8",
+    )
+    entries = load_repos(path)
+    assert entries[0].repo_id == "2023/key with space"
+
+
+def test_invalid_repo_key_character_raises(tmp_path):
+    path = tmp_path / "repos.yaml"
+    path.write_text(
+        'repos:\n'
+        '- {repo_url: "https://g.example/x", year: 2023, team_name: "a", repo_key: "key/with/slash"}\n',
         encoding="utf-8",
     )
     with pytest.raises(ValueError):

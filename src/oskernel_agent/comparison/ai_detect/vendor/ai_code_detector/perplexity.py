@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -57,6 +58,27 @@ def _resolve_device(device: str) -> torch.device:
             return torch.device("mps")
         return torch.device("cpu")
     return torch.device(device)
+
+
+def _auto_device_memory_limits(device: torch.device) -> dict | None:
+    """为 CUDA 推理预留激活显存，避免权重恰好放满显卡后首轮前向退出。"""
+    if device.type != "cuda":
+        return None
+    gpu_override = os.getenv("AI_DETECT_CUDA_MAX_MEMORY", "").strip()
+    if gpu_override:
+        gpu_limit = gpu_override
+    else:
+        free_bytes, _ = torch.cuda.mem_get_info(device)
+        try:
+            reserve_gib = max(
+                1.0, float(os.getenv("AI_DETECT_CUDA_RESERVE_GIB", "2"))
+            )
+        except ValueError:
+            reserve_gib = 2.0
+        available_gib = free_bytes / (1024 ** 3)
+        gpu_limit = f"{max(1, int(available_gib - reserve_gib))}GiB"
+    cpu_limit = os.getenv("AI_DETECT_CPU_MAX_MEMORY", "16GiB").strip() or "16GiB"
+    return {torch.cuda.current_device(): gpu_limit, "cpu": cpu_limit}
 
 
 # ---------------------------------------------------------------------------
@@ -129,9 +151,13 @@ class PerplexityScorer:
         )
         # device_map="auto"：让 accelerate 把放不下的层卸载到 CPU，避免 7B 在 8GB 卡上
         # OOM（放得下的小模型则整模型留在 GPU）。无 accelerate 时退回单设备 .to()。
+        auto_memory = _auto_device_memory_limits(self._device)
         try:
             self._model = AutoModelForCausalLM.from_pretrained(
-                self.model_id, device_map="auto", **common
+                self.model_id,
+                device_map="auto",
+                **({"max_memory": auto_memory} if auto_memory else {}),
+                **common,
             ).eval()
         except (ImportError, ValueError):
             self._model = AutoModelForCausalLM.from_pretrained(

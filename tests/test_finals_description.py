@@ -19,8 +19,11 @@ from oskernel_agent.finals.integrity import (
 from oskernel_agent.parsers.code_parser import classify_files_by_content
 from oskernel_agent.engines.path_c import TreeSitterEngine
 from oskernel_agent.pipeline.tree_builder import (
+    _deterministic_verdict_one_line,
     _fallback_subsystem_for_path,
+    _verdict_one_line_requires_repair,
     _normalize_verdict_content_paths,
+    _normalize_adjacent_module_paths,
     _normalize_similarity_evidence,
     _validate_subsys_result,
     _validate_hardcode_reviews,
@@ -206,8 +209,13 @@ def test_hardcode_limit_does_not_let_first_category_hide_other_methods(tmp_path)
         "测试专用缓存策略",
         "疑似写死测试结果",
         "脚本强制忽略失败",
+
     }
     assert all(item["scanned"] for item in result["category_coverage"].values())
+
+def test_default_hardcode_review_capacity_handles_large_kernel():
+    assert integrity_module.DEFAULT_HARDCODE_SIGNAL_LIMIT >= 100
+
 
 
 def test_early_success_exit_in_test_script_is_a_review_candidate(tmp_path):
@@ -347,6 +355,7 @@ def test_startup_code_is_classified_as_required_startup_module(tmp_path):
     ("os/src/mm/address.rs", "内存管理"),
     ("os/src/task/scheduler.rs", "进程管理"),
     ("fs/src/ext4/layout.rs", "文件系统"),
+    ("os/src/net/socket.rs", "\u7f51\u7edc"),
     ("os/src/drivers/block.rs", "设备管理"),
     ("os/src/syscall/mod.rs", "系统调用"),
     ("os/src/arch/riscv/address.rs", "硬件抽象"),
@@ -559,6 +568,37 @@ def test_contest_build_verification_separates_compile_failure_from_environment_e
     assert "linker failed" in result["targets"]["kernel-la"]["errors"][0]
 
 
+def test_contest_build_verification_treats_offline_toolchain_download_as_environment_error(
+    tmp_path, monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "Makefile").write_text("all:\n\t@true\n", encoding="utf-8")
+    monkeypatch.setattr(integrity_module.shutil, "which", lambda _name: "docker")
+
+    def fake_docker(command, *, timeout):
+        if command[1] == "version":
+            return subprocess.CompletedProcess(command, 0, '{"Version":"1"}\n')
+        if command[1] == "image":
+            return subprocess.CompletedProcess(
+                command, 0, '{"Id":"id","RepoDigests":[],"Size":1}\n',
+            )
+        return subprocess.CompletedProcess(
+            command,
+            2,
+            "error: could not download file from https://static.rust-lang.org: "
+            "failed to lookup address\n",
+        )
+
+    monkeypatch.setattr(integrity_module, "_docker_result", fake_docker)
+    result = verify_contest_build(repo, image="contest:test", timeout_seconds=60)
+
+    assert result["status"] == "environment_error"
+    assert {
+        item["status"] for item in result["targets"].values()
+    } == {"environment_error"}
+    assert "\u4e0d\u80fd\u636e\u6b64\u5224\u65ad\u4f5c\u54c1\u5931\u8d25" in result["summary"]
+
 def test_contest_build_verification_reports_missing_docker_as_environment_error(
     tmp_path, monkeypatch,
 ):
@@ -636,6 +676,35 @@ def test_description_prefers_real_build_verification_and_omits_unprovided_run():
     assert not any(item.title == "编译失败" for item in digest.findings)
 
 
+def test_description_build_failure_digest_keeps_both_architectures():
+    tree = _tree()
+    rustup_error = (
+        "error: could not download file from "
+        "'https://static.rust-lang.org/dist/2024-05-01/channel-rust-nightly.toml.sha256' "
+        "to '/root/.rustup/tmp/random_file': error downloading file"
+    )
+    verification = {
+        "requested": True,
+        "status": "failed",
+        "summary": "比赛统一镜像中 kernel-rv 与 kernel-la 均未编译成功。",
+        "targets": {
+            "kernel-rv": {"status": "failed", "errors": [rustup_error]},
+            "kernel-la": {"status": "failed", "errors": [rustup_error]},
+        },
+    }
+    tree["facts"]["integrity"]["build_verification"] = verification
+    tree["facts"]["integrity"]["build_interface"]["verification"] = verification
+
+    digest = description_digest_from_tree(tree)
+
+    finding = next(item for item in digest.findings if item.title == "比赛镜像双架构编译未全部通过")
+    assert "kernel-rv：失败" in finding.detail
+    assert "kernel-la：失败" in finding.detail
+    assert finding.detail.count("nightly-2024-05-01") == 2
+    assert "random_file" not in finding.detail
+    assert digest.metrics["build_target_summary"] == finding.detail
+
+
 def test_description_labels_build_environment_error_without_blame():
     tree = _tree()
     verification = {
@@ -644,7 +713,10 @@ def test_description_labels_build_environment_error_without_blame():
         "summary": "本机没有可用的比赛镜像，未执行编译。",
         "image": "contest:test",
         "limits": {"cpus": "8", "memory": "12g", "pids": 2048},
-        "targets": {},
+        "targets": {
+            "kernel-rv": {"status": "environment_error", "errors": ["failed to fetch toolchain"]},
+            "kernel-la": {"status": "environment_error", "errors": ["failed to fetch toolchain"]},
+        },
     }
     tree["facts"]["integrity"]["build_verification"] = verification
     tree["facts"]["integrity"]["build_interface"]["verification"] = verification
@@ -656,6 +728,8 @@ def test_description_labels_build_environment_error_without_blame():
     assert "本机没有可用的比赛镜像" in rendered
     finding = next(item for item in digest.findings if item.title == "比赛镜像编译未形成结论")
     assert finding.severity == "info"
+    assert "kernel-rv：环境异常" in finding.detail
+    assert "kernel-la：环境异常" in finding.detail
 
 
 def test_description_has_no_problem_count_cap_and_keeps_every_serious_issue():
@@ -949,6 +1023,43 @@ def test_one_line_prefers_real_build_and_omits_unprovided_run():
         _validate_verdict_integrity_conclusion(parsed, facts)
 
 
+def test_deterministic_one_line_fallback_keeps_verified_statuses_under_limit():
+    parsed = {
+        "issues": [{"quote": "块设备容量硬编码为 4194304 * 1024 字节（4GB），未从设备读取容量。"}],
+        "hardcode_reviews": [
+            {"status": "suspected"},
+            {"status": "suspected"},
+            {"status": "cleared"},
+        ],
+    }
+    facts = {"integrity": {
+        "build_verification": {"requested": True, "status": "failed"},
+        "run_log": {"status": "not_provided"},
+    }}
+    one_line = _deterministic_verdict_one_line(parsed, facts)
+    parsed["one_line"] = one_line
+    assert len(one_line) <= 80
+    assert "编译失败" in one_line
+    assert "发现2项疑似硬编码" in one_line
+    assert "主要问题" in one_line
+    assert "运行" not in one_line
+    _validate_verdict_integrity_conclusion(parsed, facts)
+
+
+def test_short_one_line_with_inconsistent_run_status_still_requires_repair():
+    facts = {"integrity": {
+        "build_verification": {"requested": True, "status": "failed"},
+        "run_log": {"status": "not_provided"},
+    }}
+    parsed = {
+        "one_line": "\u7f16\u8bd1\u5931\u8d25\uff1b\u8fd0\u884c\u672a\u5b9e\u6d4b\uff1b\u672a\u53d1\u73b0\u786c\u7f16\u7801\u3002",
+        "hardcode_reviews": [{"status": "cleared"}],
+    }
+    assert _verdict_one_line_requires_repair(parsed, facts) is True
+    parsed["one_line"] = "\u7f16\u8bd1\u5931\u8d25\uff1b\u672a\u53d1\u73b0\u786c\u7f16\u7801\u3002"
+    assert _verdict_one_line_requires_repair(parsed, facts) is False
+
+
 def test_verdict_content_uses_full_path_from_structured_evidence():
     parsed = {
         "issues": [{"path": "os/src/arch/loongarch64/paging.rs:8"}],
@@ -1033,6 +1144,26 @@ def test_description_softens_unverified_absolute_capability_claims():
     assert "为用户程序二进制兼容提供接口基础" in cleaned
 
 
+def test_module_path_normalization_recovers_unique_omitted_repo_root(tmp_path):
+    repo = tmp_path / "repo"
+    target = repo / "r-core" / "virtio-drivers" / "src" / "hal.rs"
+    target.parent.mkdir(parents=True)
+    target.write_text("pub struct Hal;\n", encoding="utf-8")
+
+    assert _normalize_adjacent_module_paths(
+        ["virtio-drivers/src/hal.rs"], repo
+    ) == ["r-core/virtio-drivers/src/hal.rs"]
+
+
+def test_module_path_normalization_refuses_ambiguous_suffix(tmp_path):
+    repo = tmp_path / "repo"
+    for root in ("a", "b"):
+        target = repo / root / "virtio-drivers" / "src" / "hal.rs"
+        target.parent.mkdir(parents=True)
+        target.write_text("pub struct Hal;\n", encoding="utf-8")
+    assert _normalize_adjacent_module_paths(["virtio-drivers/src/hal.rs"], repo) == ["virtio-drivers/src/hal.rs"]
+
+
 def test_subsystem_analysis_excludes_dependency_scope_only_issues(tmp_path):
     repo = tmp_path / "repo"
     source = repo / "os" / "src" / "net" / "tcp.rs"
@@ -1049,6 +1180,7 @@ def test_subsystem_analysis_excludes_dependency_scope_only_issues(tmp_path):
         "issues": [
             {
                 "path": "os/src/net/tcp.rs:1",
+
                 "severity": "low",
                 "quote": "TCP 实现声明为 loopback-oriented 兼容层，非完整 Linux TCP 栈",
             },
@@ -1062,12 +1194,17 @@ def test_subsystem_analysis_excludes_dependency_scope_only_issues(tmp_path):
                 "severity": "medium",
                 "quote": "第三方协议库内部实现不完整",
             },
+            {
+                "path": "r-core/lwext4_rust/examples/src/vfs_ops.rs:17",
+                "severity": "medium",
+                "quote": "示例工程中的 VfsOps 没有实现 format",
+            },
         ],
         "modules": [{
             "name": "TCP 适配层",
             "summary": "连接接口",
             "content": "<p>连接接口。</p>",
-            "file_paths": ["os/src/net/tcp.rs"],
+            "file_paths": ["os/src/net/tcp.rs", "examples/tcp_demo.rs"],
         }],
     }
 
@@ -1078,6 +1215,8 @@ def test_subsystem_analysis_excludes_dependency_scope_only_issues(tmp_path):
         "severity": "high",
         "quote": "connect 系统调用直接返回错误码 -111，导致外部连接失败",
     }]
+    assert parsed["modules"][0]["file_paths"] == ["os/src/net/tcp.rs"]
+
 
 
 def test_description_renderer_hides_dependency_scope_only_issue():

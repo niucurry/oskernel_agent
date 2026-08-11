@@ -29,14 +29,17 @@ _ROOT_MAKEFILE_NAMES = ("GNUmakefile", "makefile", "Makefile")
 _REQUIRED_KERNEL_TARGETS = ("kernel-rv", "kernel-la")
 _MAX_FILE_BYTES = 2 * 1024 * 1024
 DEFAULT_CONTEST_BUILD_IMAGE = "zhouzhouyi/os-contest:20260510"
+DEFAULT_HARDCODE_SIGNAL_LIMIT = 100
 _BUILD_COPY_SKIP_DIRS = {
     ".git", ".venv", "node_modules", "target", "build", "dist", "__pycache__",
 }
-_DOCKER_ENV_ERROR_RE = re.compile(
+_BUILD_ENV_ERROR_RE = re.compile(
     r"cannot connect to the docker daemon|docker desktop.*not running|"
     r"error during connect|no space left on device|mounts denied|drive is not shared|"
     r"manifest unknown|pull access denied|no matching manifest|oci runtime|"
-    r"failed to create task for container",
+    r"failed to create task for container|"
+    r"could not download file|error sending request for url|failed to lookup address|"
+    r"network is unreachable|failed to download|failed to fetch|download of .+ failed",
     re.I,
 )
 
@@ -751,7 +754,7 @@ def verify_contest_build(
                     # 生成目标产物时不能在结构化结果中同时保留“错误”列表。
                     errors = []
                 if status == "failed" and (
-                    exit_code == 125 or _DOCKER_ENV_ERROR_RE.search(output)
+                    exit_code == 125 or _BUILD_ENV_ERROR_RE.search(output)
                 ):
                     status = "environment_error"
                 base["targets"][target] = {
@@ -784,7 +787,7 @@ def verify_contest_build(
         summary = "比赛统一镜像中仅有一个架构完成编译，双架构编译未全部通过。"
     elif any(item == "environment_error" for item in statuses):
         status = "environment_error"
-        summary = "比赛镜像编译受到 Docker 或宿主环境错误影响，不能据此判断作品失败。"
+        summary = "比赛镜像编译受到环境或构建前置依赖影响，未进入可归因于源码的编译阶段；不能据此判断作品失败。"
     elif any(item == "timeout" for item in statuses):
         status = "timeout"
         summary = "比赛镜像编译超时，未形成双架构编译结论。"
@@ -915,9 +918,9 @@ def collect_integrity_facts(
     pull_build_image: bool = False,
 ) -> dict:
     try:
-        signal_limit = max(4, int(os.environ.get("AGENT_HARDCODE_SIGNAL_LIMIT", "40")))
+        signal_limit = max(4, int(os.environ.get("AGENT_HARDCODE_SIGNAL_LIMIT", str(DEFAULT_HARDCODE_SIGNAL_LIMIT))))
     except ValueError:
-        signal_limit = 40
+        signal_limit = DEFAULT_HARDCODE_SIGNAL_LIMIT
     build_interface = scan_build_interface(repo_path)
     build_verification = (
         verify_contest_build(

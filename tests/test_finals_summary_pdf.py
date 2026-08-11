@@ -18,6 +18,7 @@ from oskernel_agent.finals.summary_pdf import (
     generate_summary_pdf,
     load_digests,
     run_ai_summary_analysis,
+    _validate_ai_summary_result,
 )
 
 
@@ -200,6 +201,84 @@ def test_summary_rejects_ai_confidence_above_source(tmp_path, monkeypatch):
     with pytest.raises(SummaryPdfError, match="置信度高于来源"):
         run_ai_summary_analysis(digests, "T2026-demo", tmp_path / "summary.pdf")
 
+
+def test_summary_rejects_claim_that_recorded_build_target_is_unexplained(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    digests["description"].metrics.update({
+        "kernel_rv_build_status": "failed",
+        "kernel_la_build_status": "failed",
+    })
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][0]["judgment"] = "kernel-la 结果未单独说明。"
+
+    with pytest.raises(SummaryPdfError, match="kernel-la 编译状态"):
+        _validate_ai_summary_result(payload, digests)
+
+
+def test_summary_rejects_complete_kernel_claim_without_dual_arch_build(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    payload["overall_judgment"] = "作品具有完整的 RISC-V 与 LoongArch 双架构操作系统内核框架。"
+
+    with pytest.raises(SummaryPdfError, match="未经双架构编译验证"):
+        _validate_ai_summary_result(payload, digests)
+
+
+def test_summary_normalizes_contiguous_zero_based_finding_refs(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][0]["source_finding"] = 0
+
+    summary = _validate_ai_summary_result(payload, digests)
+
+    assert summary.issues[0].source_finding == 1
+    assert summary.issues[1].source_finding == 1
+
+
+
+def test_summary_compacts_overlong_ai_section_before_validation(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    original = payload["sections"][1]["conclusion"]
+    payload["sections"][1]["conclusion"] = original * 4
+
+    summary = _validate_ai_summary_result(payload, digests)
+
+    assert summary.sections[1].conclusion.startswith(original[:20])
+    assert len(summary.sections[1].conclusion) <= 120
+
+def test_summary_rejects_test_success_claim_without_runtime_evidence(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    payload["sections"][1]["conclusion"] = (
+        "LTP \u5168\u91cf\u6d4b\u8bd5\u5df2\u901a\u8fc7\u3002"
+    )
+
+    with pytest.raises(SummaryPdfError, match="\u672a\u7ecf\u6b63\u5f0f\u8fd0\u884c\u65e5\u5fd7"):
+        _validate_ai_summary_result(payload, digests)
+
+
+def test_summary_allows_warning_about_tests_passing_unexpectedly(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][0]["judgment"] = (
+        "条件回退可能使 LTP 测试非预期通过，需要评委核对实际返回值。"
+    )
+
+    summary = _validate_ai_summary_result(payload, digests)
+
+    assert "非预期通过" in summary.issues[0].judgment
+
+
+def test_summary_explains_term_before_length_validation(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    payload["sections"][0]["conclusion"] = "LTP result is unavailable."
+
+    summary = _validate_ai_summary_result(payload, digests)
+
+    assert "Linux \u6d4b\u8bd5\u9879\u76ee\uff08LTP\uff09" in summary.sections[0].conclusion
+    assert len(summary.sections[0].conclusion) <= 120
 
 def test_five_long_ai_issues_still_fit_one_page(tmp_path):
     payload = _ai_summary().model_dump(mode="json")

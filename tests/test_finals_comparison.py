@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import re
 
 import pytest
 
@@ -62,7 +60,7 @@ def test_comparison_digest_sorts_modules_and_states_percentage_basis():
     assert "2025 年 A 队作品" in digest.conclusion
 
 
-def test_finals_comparison_html_has_all_history_overview_and_one_detailed_source():
+def test_finals_comparison_html_shows_history_overview_and_closest_evidence():
     suspect = _suspect("2025/A", "open")
     stats = {module: {
         "confirmed": 0, "review": 0, "review_failed": 0, "review_pending": 0,
@@ -91,10 +89,12 @@ def test_finals_comparison_html_has_all_history_overview_and_one_detailed_source
     assert 'id="sec-lineage"' in rendered and 'x-data="{open: false}"' in rendered
     assert "Top 8" not in rendered
     assert ">候选创新<" not in rendered
+    assert "最接近作品的证据" in rendered
     assert "全历史库匹配概览" in rendered
-    assert "历史匹配作品 Top 1" in rendered
-    assert "详细证据口径" in rendered
-    assert "其他候选不进入评委正文" not in rendered
+    assert "AI 生成代码辅助信号" in rendered
+    assert 'class="echarts-chart' in rendered
+    assert 'data-retrieval-complete="false"' in rendered
+    assert "&lt;span id=&quot;retrieval" not in rendered
 
 
 def test_team_name_already_ending_in_team_suffix_is_not_duplicated():
@@ -123,7 +123,7 @@ def test_team_name_already_ending_in_team_suffix_is_not_duplicated():
     assert "2025 年 火箭队作品" in digest.conclusion
 
 
-def test_history_source_ranking_drives_top_five_chart_table_and_primary_digest():
+def test_history_ranking_shows_top_five_but_only_primary_gets_detailed_evidence():
     suspects = [
         _suspect("2025/A", "alpha"),
         _suspect("2025/A", "beta"),
@@ -173,32 +173,17 @@ def test_history_source_ranking_drives_top_five_chart_table_and_primary_digest()
         history_overview=overview,
     )
 
-    assert "历史匹配作品 Top 5" in rendered
-    for repo in ("2025/A", "2024/B", "2023/C", "2022/D", "2021/E"):
+    assert "2025/A" in rendered
+    for repo in ("2024/B", "2023/C", "2022/D", "2021/E"):
         assert repo in rendered
     assert "2020/F" not in rendered
-    assert "多仓重复函数" in rendered
+    assert "展示 Top 5" in rendered
+    assert "全历史库" in rendered
+    assert "AI 生成代码辅助信号" in rendered
     assert digest.metrics["closest_source"] == "2025/A"
+    assert digest.metrics["history_sources_shown"] == 5
     assert digest.metrics["confirmed_functions"] == 3
     assert digest.metrics["history_confirmed_functions"] == 7
-    assert digest.metrics["history_sources_shown"] == 5
-
-    chart_payloads = [
-        json.loads(blob)
-        for blob in re.findall(
-            r'<script type="application/json">(.*?)</script>', rendered, re.DOTALL,
-        )
-    ]
-    source_chart = next(
-        payload for payload in chart_payloads
-        if (payload.get("yAxis") or {}).get("data")
-        == ["2021/E", "2022/D", "2023/C", "2024/B", "2025/A"]
-    )
-    confirmed_series = next(
-        series for series in source_chart["series"]
-        if series["name"] == "高置信同源代码"
-    )
-    assert confirmed_series["data"] == [1, 1, 1, 2, 3]
 
 
 def test_finals_history_overview_rejects_primary_or_total_mismatch():

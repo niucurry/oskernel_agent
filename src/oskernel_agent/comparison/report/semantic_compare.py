@@ -5903,7 +5903,10 @@ def _finals_comparison_summary(
     closest = str(metrics.get("closest_source") or "未确定")
     tag_by_name = {name: tag for tag, name in _MODULE_DISPLAY.items()}
     module_rows: list[str] = []
-    for index, module in enumerate(digest.modules, 1):
+    for module in digest.modules:
+        if int(module.evidence_count or 0) <= 0:
+            continue
+        index = len(module_rows) + 1
         tag = tag_by_name.get(module.name, "")
         stats = submodule_stats.get(tag) or {}
         evidence_links: list[str] = []
@@ -5946,7 +5949,11 @@ def _finals_comparison_summary(
             if institution else
             f'{html.escape(year)} 年 · {html.escape(team_label)} · 学校信息未提供'
         )
-    module_chart = _echarts_overview(submodule_stats)
+    evidence_stats = {
+        tag: stats for tag, stats in submodule_stats.items()
+        if int(stats.get("confirmed") or 0) + int(stats.get("review") or 0) > 0
+    }
+    module_chart = _echarts_overview(evidence_stats)
     module_visual = (
         '<div class="chart-title mt-4">与主对比作品的模块级证据分布</div>'
         + module_chart
@@ -6043,7 +6050,7 @@ def generate_finals_comparison_html(
     recall: dict | None,
     history_overview: dict | None = None,
 ) -> tuple[str, object]:
-    """决赛版对比报告：全库 Top 5 概览 + 最近作品详细证据。"""
+    """评委版对比报告：Top 5 给出全库位置，第一名保留可下钻详证。"""
     from oskernel_agent.finals.digests import comparison_digest
 
     overview = history_overview or _build_history_overview(
@@ -6069,7 +6076,6 @@ def generate_finals_comparison_html(
         anchored_modules=anchored_modules,
         has_review_evidence=bool(review_pairs or cleared_review_pairs),
     )
-    history_html = _finals_history_overview(overview, linker, closest_source)
     _toc_lineage, sec_lineage = _lineage_section(query_repo_id, suspects, linker, recall)
     _toc_clusters, sec_clusters = _cluster_section(
         file_pairs, analysis_html, linker, query_repo_id)
@@ -6077,7 +6083,6 @@ def generate_finals_comparison_html(
         review_pairs, linker, query_repo_id, cleared_review_pairs)
     _toc_files, sec_files = _file_level_section(
         file_matches, file_similar, linker, query_repo_id)
-    _toc_ai, sec_ai = _ai_detect_section(ai_detect_data, linker, query_repo_id)
 
     evidence_parts = [
         _closed_by_default(sec_lineage),
@@ -6086,8 +6091,13 @@ def generate_finals_comparison_html(
         _closed_by_default(sec_files),
     ]
     evidence_html = "\n".join(part for part in evidence_parts if part)
-    sec_ai = _closed_by_default(sec_ai)
+    _toc_ai, sec_ai = _ai_detect_section(ai_detect_data, linker, query_repo_id)
     method_status = _retrieval_status(retrieval_contract)
+    method_status_text = (
+        "历史库召回完整。" if not contract_errors(retrieval_contract)
+        else "历史库召回不完整，本报告不应作为正式交付。"
+    )
+    history_html = _finals_history_overview(overview, linker, closest_source)
     toc_html = (
         '<div class="toc-card"><div class="toc-header"><span class="toc-kicker">最终报告</span>'
         '<strong>报告目录</strong></div><div class="toc-scroll">'
@@ -6109,21 +6119,23 @@ def generate_finals_comparison_html(
 .closest-identity{{margin:.2rem 0 .7rem;color:#475569;font-weight:600}}
 </style></head><body><div class="layout"><nav class="toc">{toc_html}</nav><main class="main">
 <header class="report-header"><span class="report-kicker">完全由 AI 工具生成 · 参赛队不得修改</span>
-<h1>{title}</h1><p>先看全历史库 Top 5，再围绕排名第一的作品展开代码证据；模块按高置信同源比例降序排列。</p></header>
+<h1>{title}</h1><p>先看全历史 Top 5，再围绕排名第一的作品展开代码证据；模块按高置信同源比例降序排列。</p></header>
 {summary_html}
 <section id="history-overview" data-section-id="history-overview">
 {_chapter_heading("02", "全历史库匹配概览", "图表用于快速定位，常显表格保留全部对应数字；排名不代表直接来源。")}
-{history_html}</section>
+{history_html}
+</section>
 <section id="closest-evidence" data-section-id="closest-evidence">
-{_chapter_heading("03", "最近历史作品的证据", "只深挖 Top 1；函数、文件和代码细节默认折叠，需要时再展开。")}
+{_chapter_heading("03", "最接近作品的证据", "只展开主对比作品；函数、文件和代码细节默认折叠，需要时再查看。")}
 {evidence_html}</section>
 <section id="ai-signal" data-section-id="ai-signal">
 {_chapter_heading("04", "AI 生成代码辅助信号", "仅检测未归入历史借鉴的函数；误报风险较高，不作单独认定。")}
 {sec_ai}</section>
 <section id="method" data-section-id="method" class="report-section section-neutral">
 {_chapter_heading("05", "方法与边界", "说明全库概览与主对象详证的双口径，避免把未命中误写成原创。")}
+{method_status}
 <div class="section-intro"><p><b>主对比对象：</b>{_ref_repo_anchor(linker, closest_source)}</p>
-<p><b>召回状态：</b>{html.escape(method_status)}</p>
+<p><b>召回状态：</b>{method_status_text}</p>
 <p><b>全库概览口径：</b>使用全部历史作品，展示统一排名的前五项和全局互斥分类。</p>
 <p><b>详细证据口径：</b>只展开排名第一的主对比作品。Top 2–5 仅用于帮助评委识别多仓传播、共同上游或 fork 线索，不能据此认定直接来源。</p></div>
 </section>
