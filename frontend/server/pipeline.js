@@ -22,71 +22,30 @@ function trimLog(log) {
   return log.length > 60000 ? log.slice(-60000) : log;
 }
 
-function oneLine(text, maxLength = 700) {
-  const value = String(text || "").replace(/\s+/g, " ").trim();
-  return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
-}
-
-function logLines(log) {
-  return String(log || "")
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-function findLastLine(lines, tester) {
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    if (tester(lines[i])) return lines[i];
-  }
-  return "";
-}
-
-export function extractFailureReason(log, exitCode = null) {
-  const lines = logLines(log);
-  if (!lines.length) return exitCode === null ? "流水线未输出错误日志" : `流水线退出码 ${exitCode}`;
-
-  const moduleError = findLastLine(lines, (line) => /^ModuleNotFoundError:/.test(line));
-  if (moduleError) return oneLine(`缺少 Python 依赖：${moduleError.replace(/^ModuleNotFoundError:\s*/, "")}`);
-
-  const importError = findLastLine(lines, (line) => /^(ImportError|FileNotFoundError|PermissionError|ValueError|RuntimeError):/.test(line));
-  if (importError) return oneLine(importError);
-
-  const calledProcessError = findLastLine(lines, (line) => /CalledProcessError:/.test(line));
-  if (calledProcessError) {
-    const gitError = findLastLine(lines, (line) => /^(fatal|error|remote):\s+/i.test(line));
-    return oneLine(gitError ? `${calledProcessError}；${gitError}` : calledProcessError);
-  }
-
-  const directError = findLastLine(lines, (line) => /^(fatal|error|exception):\s+/i.test(line));
-  if (directError) return oneLine(directError);
-
-  const tracebackIndex = lines.lastIndexOf("Traceback (most recent call last):");
-  if (tracebackIndex >= 0) {
-    const tracebackTail = lines.slice(tracebackIndex + 1).findLast((line) => /^[A-Za-z_][\w.]*Error:/.test(line));
-    if (tracebackTail) return oneLine(tracebackTail);
-  }
-
-  return oneLine(lines.at(-1) || `流水线退出码 ${exitCode ?? "未知"}`);
-}
-
-function failureMessage(log, exitCode) {
-  const reason = extractFailureReason(log, exitCode);
-  return `流水线失败（退出码 ${exitCode}）：${reason}`;
-}
-
-function parseExitCode(error) {
-  const match = String(error || "").match(/退出码\s+(-?\d+)/);
-  return match ? Number(match[1]) : null;
-}
-
 function pipelineEnv() {
   return {
     ...process.env,
     PYTHONUTF8: "1",
     AGENT_SUBSYS_CONCURRENCY: process.env.AGENT_SUBSYS_CONCURRENCY || "4",
-    AGENT_LLM_CONCURRENCY: process.env.AGENT_LLM_CONCURRENCY || "4"
+    AGENT_LLM_CONCURRENCY: process.env.AGENT_LLM_CONCURRENCY || "4",
   };
+}
+
+function extractFailureReason(log) {
+  const lines = String(log || "").split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    if (/^ModuleNotFoundError:\s*(.+)/.test(line)) {
+      return `缺少 Python 依赖：${RegExp.$1}`;
+    }
+    if (/^(ImportError|FileNotFoundError|PermissionError):\s*(.+)/.test(line)) {
+      return line;
+    }
+    if (/^(fatal|error|remote):\s+/i.test(line)) return line;
+    if (/^[A-Za-z_]\w*(Error|Exception):/.test(line)) return line;
+  }
+  return "进程异常退出，请查看日志详情";
 }
 
 async function killProcessTree(child) {
@@ -103,84 +62,6 @@ async function killProcessTree(child) {
     return;
   }
   child.kill("SIGTERM");
-}
-
-async function findFilesBySuffix(dir, suffix, skipDirs = new Set(["_repos", "node_modules", ".git"])) {
-  const results = [];
-  async function walk(current) {
-    const entries = await fs.readdir(current, { withFileTypes: true }).catch(() => []);
-    for (const entry of entries) {
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        if (!skipDirs.has(entry.name)) await walk(full);
-      } else if (entry.isFile() && entry.name.toLowerCase().endsWith(suffix)) {
-        results.push(full);
-      }
-    }
-  }
-  await walk(dir);
-  return results;
-}
-
-async function findGeneratedComparisonHtml(repoId) {
-  // 查重流水线会把最终报告归档到
-  //   <output-dir>/<仓库名>/<仓库名>_comparison.html
-  // 的子目录，而不是直接放在 output-dir 顶层，所以这里递归查找 *_comparison.html，
-  // 取最新的一个（promoteReport 随后会拷贝为顶层 comparison.html）。
-  const candidates = await findFilesBySuffix(reportDir(repoId), "_comparison.html");
-  if (!candidates.length) {
-    // 兜底：兼容已 promote 到顶层的旧报告
-    const reports = await findExistingReports(repoId);
-    return reports.find((report) => report.kind === "comparison")?.absPath || null;
-  }
-  const withStat = await Promise.all(
-    candidates.map(async (absPath) => ({ absPath, mtime: (await fs.stat(absPath)).mtimeMs }))
-  );
-  withStat.sort((a, b) => b.mtime - a.mtime);
-  return withStat[0].absPath;
-}
-
-async function findGeneratedComparisonDigest(repoId) {
-  const candidates = await findFilesBySuffix(reportDir(repoId), "_comparison.digest.json");
-  if (!candidates.length) return null;
-  const withStat = await Promise.all(
-    candidates.map(async (absPath) => ({ absPath, mtime: (await fs.stat(absPath)).mtimeMs }))
-  );
-  withStat.sort((a, b) => b.mtime - a.mtime);
-  return withStat[0].absPath;
-}
-
-async function pathExists(target) {
-  try {
-    await fs.access(target);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function safeRepoDirectoryName(repoUrl, fallback) {
-  const raw = (() => {
-    try {
-      const url = new URL(repoUrl);
-      return url.pathname.split("/").filter(Boolean).at(-1) || fallback;
-    } catch {
-      return String(repoUrl || fallback).split(/[\\/]/).filter(Boolean).at(-1) || fallback;
-    }
-  })();
-  const withoutGit = raw.replace(/\.git$/i, "");
-  return withoutGit.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_") || fallback;
-}
-
-async function findClonedRepoPath(repoId) {
-  const reposDir = path.join(reportDir(repoId), "_repos");
-  const entries = await fs.readdir(reposDir, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const candidate = path.join(reposDir, entry.name);
-    if (await pathExists(path.join(candidate, ".git"))) return candidate;
-  }
-  return null;
 }
 
 export class PipelineQueue {
@@ -348,18 +229,17 @@ export class PipelineQueue {
       }
     }
 
-    const failedJobs = this.db.query("SELECT id, repo_id, log, error FROM jobs WHERE status = 'failed' AND log != ''");
+    const failedJobs = this.db.query(
+      "SELECT id, repo_id, error FROM jobs WHERE status = 'failed' AND (error IS NULL OR error = '')"
+    );
     for (const job of failedJobs) {
-      const currentError = String(job.error || "");
-      if (currentError && !/^流水线退出码\s+-?\d+$/.test(currentError)) continue;
-      const exitCode = parseExitCode(currentError) ?? 1;
-      const improved = failureMessage(job.log, exitCode);
-      this.db.db.run("UPDATE jobs SET error = ? WHERE id = ?", [improved, job.id]);
+      const genericError = "流水线进程异常退出，请检查日志并重新生成。";
+      this.db.db.run("UPDATE jobs SET error = ? WHERE id = ?", [genericError, job.id]);
       this.db.db.run(
         `UPDATE repositories
          SET last_error = ?, updated_at = ?
-         WHERE id = ? AND status = 'failed' AND (last_error IS NULL OR last_error = ? OR last_error LIKE '流水线退出码 %')`,
-        [improved, now, job.repo_id, currentError]
+         WHERE id = ? AND status = 'failed' AND (last_error IS NULL OR last_error = '')`,
+        [genericError, now, job.repo_id]
       );
     }
 
@@ -431,251 +311,64 @@ export class PipelineQueue {
     this.jobReportKinds.delete(id);
     await fs.mkdir(reportDir(repo.id), { recursive: true });
     const python = findPython();
+
     await this.setRepoStatus(repo.id, "generating");
     await this.updateJob(id, {
-      status: "running",
-      command: "",
-      started_at: nowIso(),
+      status: "running", command: "", started_at: nowIso(),
       log: `请求生成报告：${requestedKinds.join(", ")}\n`
     });
 
-    let existing = await syncExistingReports(this.db, repo.id);
-    const summaryRequested = requestedKinds.includes("summary");
-    const requiredKinds = summaryRequested
-      ? ["comparison", "description", "development", "summary"]
-      : requestedKinds;
-    const missingSet = new Set(
-      requiredKinds.filter((kind) => !hasReportKinds(existing, [kind]))
-    );
-    const digestPaths = {
-      comparison: path.join(reportDir(repo.id), "comparison.digest.json"),
-      description: path.join(reportDir(repo.id), "description.digest.json"),
-      development: path.join(reportDir(repo.id), "development.digest.json")
-    };
-    if (summaryRequested) {
-      for (const kind of ["comparison", "description", "development"]) {
-        if (!(await pathExists(digestPaths[kind]))) missingSet.add(kind);
-      }
-      if (["comparison", "description", "development"].some((kind) => missingSet.has(kind))) {
-        missingSet.add("summary");
-      }
+    const args = [
+      "-X", "utf8", "-m", "oskernel_agent.report_jobs",
+      "--repo", repo.repo_url,
+      "--repo-id", repo.id,
+      "--output-dir", reportDir(repo.id),
+      "--kinds", requestedKinds.join(","),
+    ];
+    if (process.env.FINALS_MIN_COMMITS) {
+      args.push("--min-commits", process.env.FINALS_MIN_COMMITS);
     }
-    const missingKinds = ["comparison", "description", "development", "summary"]
-      .filter((kind) => missingSet.has(kind));
-    if (!missingKinds.length) {
-      await cleanupReportDirectory(repo.id);
-      await this.updateJob(id, { status: "skipped", log: "所选报告已存在，直接使用本地报告。", finished_at: nowIso() });
+
+    const { log } = await this.runProcess(id, "report_jobs", python, args, "", []);
+
+    if (!this.db.get("SELECT id FROM jobs WHERE id = ?", [id])) return;
+
+    const jsonStart = log.lastIndexOf('{"repo_id":');
+    if (jsonStart === -1) {
+      const reason = extractFailureReason(log);
+      const error = `report_jobs 未输出有效 JSON（${reason}）`;
+      await this.setRepoStatus(repo.id, "failed", error);
+      await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
       return;
     }
 
-    let log = `请求生成报告：${requestedKinds.join(", ")}\n`;
-    let commandLines = [];
-
-    if (missingKinds.includes("comparison")) {
-      const args = [
-        "-X",
-        "utf8",
-        "-m",
-        "oskernel_agent.comparison.pipeline",
-        "--repo",
-        repo.repo_url,
-        "--output-dir",
-        reportDir(repo.id),
-        // 与后端「正确全流程」对齐：启用基线扣除，否则 confirmed 会因未扣上游基线而虚高
-        // （实测某作品 confirmed 749→33 全靠此项）。缺基线数据时后端会自动降级为无操作。
-        // 不加 --skip-ai-detect：AI 生成代码检测由流水线内部的 ai_detect 步产出，
-        // 并入对比报告第六章（与后端一致，只测非借鉴函数）。无 GPU/模型时后端会优雅跳过。
-        "--baselines"
-      ];
-      const result = await this.runProcess(id, "comparison", python, args, log, commandLines);
-      log = result.log;
-      commandLines = result.commandLines;
-
-      if (!this.db.get("SELECT id FROM jobs WHERE id = ?", [id])) return;
-
-      if (result.exitCode !== 0) {
-        const error = failureMessage(log, result.exitCode);
-        await this.setRepoStatus(repo.id, "failed", error);
-        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
-        return;
-      }
-
-      const generated = await findGeneratedComparisonHtml(repo.id);
-      if (!generated) {
-        const error = "查重流水线完成但未发现 HTML 报告";
-        await this.setRepoStatus(repo.id, "failed", error);
-        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
-        return;
-      }
-
-      const canonical = await promoteReport(repo.id, generated, "comparison.html");
-      const generatedDigest = await findGeneratedComparisonDigest(repo.id);
-      if (!generatedDigest) {
-        const error = "对比流水线完成但未发现摘要数据";
-        await this.setRepoStatus(repo.id, "failed", error);
-        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
-        return;
-      }
-      await promoteReport(repo.id, generatedDigest, "comparison.digest.json");
-      await registerReport(this.db, repo.id, canonical, "pipeline", "comparison");
-      existing = await syncExistingReports(this.db, repo.id);
+    let result;
+    try {
+      result = JSON.parse(log.slice(jsonStart));
+    } catch {
+      const error = "无法解析 report_jobs 输出，JSON 格式异常";
+      await this.setRepoStatus(repo.id, "failed", error);
+      await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
+      return;
     }
 
-    const needsLocalRepo = missingKinds.includes("description") || missingKinds.includes("development");
-    let clonedRepoPath = needsLocalRepo ? await findClonedRepoPath(repo.id) : null;
-    if (needsLocalRepo && !clonedRepoPath) {
-      const reposDir = path.join(reportDir(repo.id), "_repos");
-      await fs.mkdir(reposDir, { recursive: true });
-      const repoName = safeRepoDirectoryName(repo.repo_url, repo.id);
-      let cloneTarget = path.join(reposDir, repoName);
-      if (await pathExists(cloneTarget)) {
-        cloneTarget = path.join(reposDir, `${repoName}_${Date.now()}`);
+    const kindsOutput = result.kinds || {};
+    for (const [kind, kr] of Object.entries(kindsOutput)) {
+      if (kr.status === "ok" && kr.html_path) {
+        await registerReport(this.db, repo.id,
+          path.join(reportDir(repo.id), kr.html_path), "pipeline", kind);
       }
-      const cloneArgs = [
-        "-X",
-        "utf8",
-        "-m",
-        "oskernel_agent.comparison.ingest.clone_cli",
-        "--repo",
-        repo.repo_url,
-        "--dest",
-        cloneTarget,
-        "--depth",
-        "200"
-      ];
-      const result = await this.runProcess(id, "clone", python, cloneArgs, log, commandLines);
-      log = result.log;
-      commandLines = result.commandLines;
-
-      if (!this.db.get("SELECT id FROM jobs WHERE id = ?", [id])) return;
-
-      if (result.exitCode !== 0) {
-        const error = failureMessage(log, result.exitCode);
-        await this.setRepoStatus(repo.id, "failed", error);
-        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
-        return;
-      }
-      clonedRepoPath = cloneTarget;
     }
 
-    if (missingKinds.includes("description")) {
-      const descriptionPath = path.join(reportDir(repo.id), "description.html");
-      const descriptionArgs = [
-        "-X",
-        "utf8",
-        "-m",
-        "oskernel_agent.cli.agent",
-        "--repo-path",
-        clonedRepoPath,
-        "--output",
-        descriptionPath,
-        "--keep-intermediates"
-      ];
-      const result = await this.runProcess(id, "description", python, descriptionArgs, log, commandLines);
-      log = result.log;
-      commandLines = result.commandLines;
+    const existing = await syncExistingReports(this.db, repo.id);
+    const allOk = requestedKinds.every(k => kindsOutput[k]?.status === "ok");
 
-      if (!this.db.get("SELECT id FROM jobs WHERE id = ?", [id])) return;
-
-      if (result.exitCode !== 0 || !(await pathExists(digestPaths.description))) {
-        const error = result.exitCode !== 0
-          ? failureMessage(log, result.exitCode)
-          : "作品描述报告完成但未发现摘要数据";
-        await this.setRepoStatus(repo.id, "failed", error);
-        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
-        return;
-      }
-
-      await registerReport(this.db, repo.id, descriptionPath, "pipeline", "description");
-      existing = await syncExistingReports(this.db, repo.id);
-    }
-
-    if (missingKinds.includes("development")) {
-      const developmentPath = path.join(reportDir(repo.id), "development.html");
-      const developmentArgs = [
-        "-X",
-        "utf8",
-        "-m",
-        "oskernel_agent.finals",
-        "development",
-        "--repo",
-        clonedRepoPath,
-        "--repo-id",
-        repo.id,
-        "--output",
-        developmentPath,
-        "--keep-intermediates"
-      ];
-      const minimumCommits = String(process.env.FINALS_MIN_COMMITS || "").trim();
-      if (minimumCommits) {
-        developmentArgs.push("--min-commits", minimumCommits);
-      }
-      const result = await this.runProcess(id, "development", python, developmentArgs, log, commandLines);
-      log = result.log;
-      commandLines = result.commandLines;
-
-      if (!this.db.get("SELECT id FROM jobs WHERE id = ?", [id])) return;
-
-      if (result.exitCode !== 0 || !(await pathExists(digestPaths.development))) {
-        const error = result.exitCode !== 0
-          ? failureMessage(log, result.exitCode)
-          : "开发过程报告完成但未发现摘要数据";
-        await this.setRepoStatus(repo.id, "failed", error);
-        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
-        return;
-      }
-
-      await registerReport(this.db, repo.id, developmentPath, "pipeline", "development");
-      existing = await syncExistingReports(this.db, repo.id);
-    }
-
-    if (missingKinds.includes("summary")) {
-      const unavailable = [];
-      for (const [kind, digestPath] of Object.entries(digestPaths)) {
-        if (!(await pathExists(digestPath))) unavailable.push(kind);
-      }
-      if (unavailable.length) {
-        const error = `无法生成摘要，缺少上游数据：${unavailable.join(", ")}`;
-        await this.setRepoStatus(repo.id, "failed", error);
-        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
-        return;
-      }
-
-      const summaryPath = path.join(reportDir(repo.id), "summary.pdf");
-      const summaryArgs = [
-        "-X",
-        "utf8",
-        "-m",
-        "oskernel_agent.finals",
-        "summary",
-        "--description-digest",
-        digestPaths.description,
-        "--development-digest",
-        digestPaths.development,
-        "--comparison-digest",
-        digestPaths.comparison,
-        "--repo-id",
-        repo.id,
-        "--output",
-        summaryPath
-      ];
-      const result = await this.runProcess(id, "summary", python, summaryArgs, log, commandLines);
-      log = result.log;
-      commandLines = result.commandLines;
-
-      if (!this.db.get("SELECT id FROM jobs WHERE id = ?", [id])) return;
-
-      if (result.exitCode !== 0 || !(await pathExists(summaryPath))) {
-        const error = result.exitCode !== 0
-          ? failureMessage(log, result.exitCode)
-          : "摘要生成完成但未发现 PDF";
-        await this.setRepoStatus(repo.id, "failed", error);
-        await this.updateJob(id, { status: "failed", error, log, finished_at: nowIso() });
-        return;
-      }
-
-      await registerReport(this.db, repo.id, summaryPath, "pipeline", "summary");
-      existing = await syncExistingReports(this.db, repo.id);
+    if (!allOk) {
+      const failures = requestedKinds.filter(k => kindsOutput[k]?.status !== "ok");
+      const errors = failures.map(k => `${k}: ${kindsOutput[k]?.error || "未知错误"}`).join("; ");
+      await this.setRepoStatus(repo.id, "failed", errors);
+      await this.updateJob(id, { status: "failed", error: errors, log, finished_at: nowIso() });
+      return;
     }
 
     if (!hasReportKinds(existing, requestedKinds)) {
@@ -685,7 +378,6 @@ export class PipelineQueue {
       return;
     }
 
-    await cleanupReportDirectory(repo.id);
     await this.updateJob(id, { status: "succeeded", log, finished_at: nowIso() });
   }
 }
