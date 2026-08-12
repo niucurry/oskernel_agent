@@ -1,20 +1,15 @@
 # -*- coding: utf-8 -*-
-"""批量为 作品.txt 里的作品生成决赛四件套。
+"""决赛四报告的单步执行库（不再提供整批编排）。
 
-每个作品的四份报告归档到 data/output/<队伍编号>/：
-    summary.pdf
-    description.html
-    development.html
-    comparison.html
+每个步骤（对比 / 描述 / 开发过程 / 一页摘要）独立执行、独立发布，供一对一驱动
+（如 run_incremental_1931.py）调用：任一报告成功即发布，失败只影响它自身，其余
+步骤照常进行。不再有批处理的事务式“四份齐全才发布”。
 
-特性：
-- 事务式发布：临时区内四份报告全部成功后，才一次性发布到正式目录。
-- 逐个作品串行（显存/磁盘友好），运行日志和摘要数据在进程结束时删除。
-- API key 额度不足时自动切换到备用 key（改写 config.toml + .env + 重跑 setup_opencode）。
+- do_comparison / do_description / do_development / do_summary 复用完整交付门禁。
+- API key 额度切换、网络/门禁抖动重试、克隆、清理与发布等辅助函数供各驱动复用。
 """
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import os
@@ -22,7 +17,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -185,6 +179,57 @@ def quota_exhausted(body: str) -> bool:
     return any(tok in body for tok in QUOTA_TOKENS)
 
 
+# 网络/供应商瞬时故障的日志特征（非代码缺陷，重试即可恢复）
+NETWORK_TOKENS = [
+    "APIConnectionError", "ConnectionError", "Connection reset",
+    "Connection aborted", "RemoteDisconnected", "BrokenPipe",
+    "Read timed out", "timed out", "Timeout", "超时",
+    "No route to host", "name resolution failed", "resolve",
+    "TLS", "SSL", "handshake", "schannel", "网络", "连接",
+]
+
+
+def network_flaked(body: str) -> bool:
+    return any(tok in body for tok in NETWORK_TOKENS)
+
+
+# 报告期 LLM 交付门禁的偶发失败特征：模型漏段、格式抖动等，非代码缺陷；
+# 重跑时确定性阶段几分钟即可完成，复核/语义缓存命中后模型调用极少。
+REPORT_FLAKE_TOKENS = [
+    "IncompleteReportError", "模型复核未完整完成",
+    "语义级分析模型未返回", "语义级分析功能簇内容不完整",
+    "语义级分析模型调用失败", "语义级分析未通过中文交付校验",
+    "创新实现语义归纳模型调用失败", "创新实现语义归纳模型未返回合法 JSON",
+]
+
+
+def report_flaked(body: str) -> bool:
+    return any(tok in body for tok in REPORT_FLAKE_TOKENS)
+
+
+# 描述报告的 LLM 门禁偶发失败特征（步骤约 16 分钟，只兜底重试 1 次）
+DESCRIPTION_FLAKE_TOKENS = [
+    "AI 未能完成系统级高风险硬编码线索的定向复核",
+    "未通过交付校验，不入缓存",
+]
+
+
+def description_flaked(body: str) -> bool:
+    return any(tok in body for tok in DESCRIPTION_FLAKE_TOKENS)
+
+
+def retry_step(name: str, body: str, step_thunk, retries: int = 3) -> tuple[bool, str]:
+    """LLM 步骤偶发网络抖动时按指数退避整体重跑；报告重跑可增量续跑缓存。"""
+    ok = False  # 本函数只在步骤失败后被调用；必须从失败态开始，否则不重试且误报成功
+    attempt = 0
+    while not ok and attempt < retries:
+        attempt += 1
+        log(f"  {name} 网络中断，等待后重试（第 {attempt}/{retries} 次）")
+        time.sleep(20 * attempt)
+        ok, body = step_thunk()
+    return ok, body
+
+
 MIN_FREE_GB = 3.0                         # 剩余空间低于此值即中止，避免撑爆磁盘
 
 
@@ -336,11 +381,29 @@ def ensure_clone(url: str, repo_name: str, retries: int = 4) -> bool:
     return (dest / ".git").exists()
 
 
+def _comparison_resume_ready(repo_name: str) -> bool:
+    """resume-from report 所需前序产物是否完整落盘。
+
+    AI 检测会加载约 14GB 参考模型，内存不足时原生崩溃且无 traceback；此时若
+    确定性阶段产物与存档 ai_detect 已齐备，用 --resume-from report 续跑报告
+    阶段即可复用存档产物（按源码指纹校验），不再触碰模型加载。
+    """
+    for suffix in ("_filematch.json", "_recall.json", "_suspects.json",
+                   "_suspects_v2.json", "_suspects_final.json"):
+        path = OUT / f"{repo_name}{suffix}"
+        if not path.is_file() or path.stat().st_size == 0:
+            return False
+    return (OUT / repo_name / f"{repo_name}_ai_detect.json").is_file()
+
+
 def do_comparison(team_id: str, url: str, work_dir: Path, logfile: Path) -> tuple[bool, str]:
     repo_name = fork_to_repo_name(url)
     cmd = [PY, "-m", "oskernel_agent.comparison.pipeline", "--repo", url + ".git", "--baselines"]
     if os.environ.get("BATCH_ENABLE_AI_DETECT", "").strip().lower() in {"1", "true", "yes"}:
         cmd.append("--ai-detect")
+    if _comparison_resume_ready(repo_name):
+        cmd.extend(["--resume-from", "report"])
+        log(f"  对比报告前序产物齐备，续跑报告阶段（跳过模型加载）")
     cmp_timeout = int(os.environ.get("BATCH_CMP_TIMEOUT", "3600"))  # 巨型仓库可调大
     source_pairs = (
         (
@@ -445,174 +508,3 @@ def do_summary(team_id: str, work_dir: Path, logfile: Path) -> tuple[bool, str]:
     return ok and dst.exists(), body
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="oskernel-batch",
-        description="为作品清单事务式生成决赛四报告。",
-    )
-    parser.add_argument(
-        "--works",
-        type=Path,
-        default=ROOT / "作品.txt",
-        help="作品 JSON 清单（默认：项目根目录/作品.txt）",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=ROOT / "data" / "output",
-        help="报告输出根目录（默认：data/output）",
-    )
-    parser.add_argument(
-        "--min-free-gb",
-        type=float,
-        default=MIN_FREE_GB,
-        help="低于该可用磁盘空间时停止启动新任务",
-    )
-    return parser
-
-
-def main(argv: list[str] | None = None) -> None:
-    global WORKS, OUT, REPOS, LOGDIR, PROGRESS, STATE, MIN_FREE_GB
-
-    args = build_parser().parse_args(argv)
-    WORKS = args.works.resolve()
-    OUT = args.output_dir.resolve()
-    REPOS = OUT / "_repos"
-    LOGDIR = OUT / "_batch"
-    PROGRESS = LOGDIR / "progress.log"
-    STATE = LOGDIR / "state.json"
-    MIN_FREE_GB = args.min_free_gb
-    if not WORKS.is_file():
-        raise SystemExit(f"[batch] 作品清单不存在：{WORKS}")
-
-    from dotenv import load_dotenv
-
-    load_dotenv(ROOT / ".env", override=False)
-    teams = json.loads(WORKS.read_text(encoding="utf-8"))
-    st = load_state()
-    active_key = st.get("key") if st.get("key") in {"primary", "fallback"} else "primary"
-    st["key"] = active_key
-    try:
-        set_api_key(active_key)
-        total = len(teams)
-        log(f"==== 批处理启动，共 {total} 个作品 ====")
-
-        for entry in teams:
-            idx = entry["序号"]
-            team_id = entry["队伍编号"]
-            url = entry["Fork地址"]
-            repo_name = fork_to_repo_name(url)
-            final_dir = OUT / team_id
-            final_dir.mkdir(parents=True, exist_ok=True)
-            tstate = st["teams"].setdefault(team_id, {})
-            deliverables = deliverable_paths(team_id, final_dir)
-
-            if all(path.is_file() for path in deliverables) and _report_digests_match_team(team_id, final_dir, extra_ids={repo_name}):
-                cleanup_final_dir(team_id, final_dir)
-                cleanup_team(repo_name, final_dir=final_dir)
-                log(f"[{idx}/{total}] {team_id} 已完成，跳过")
-                for kind in ("comparison", "description", "development", "summary"):
-                    tstate[kind] = "done"
-                save_state(st)
-                continue
-
-            # 不完整的旧结果不可与本次结果混用；正式目录先回到空状态。
-            purge_final_dir(team_id, final_dir)
-            fg = free_gb()
-            if fg < MIN_FREE_GB:
-                log(f"⚠ 剩余磁盘 {fg:.1f}GB < {MIN_FREE_GB}GB，中止批处理（请先清理磁盘再重跑）")
-                break
-
-            log(f"[{idx}/{total}] {team_id}  {url}  (剩余 {fg:.1f}GB)")
-            if not ensure_clone(url, repo_name):
-                log(f"  克隆最终失败，未发布 {team_id}")
-                for kind in ("comparison", "description", "development", "summary"):
-                    tstate[kind] = "failed"
-                save_state(st)
-                cleanup_team(repo_name, final_dir=final_dir)
-                continue
-
-            readiness = {
-                "comparison": False,
-                "description": False,
-                "development": False,
-                "summary": False,
-            }
-            try:
-                with tempfile.TemporaryDirectory(prefix=f"oskernel_reports_{team_id}_") as temporary:
-                    work_dir = Path(temporary)
-
-                    lf = LOGDIR / f"{team_id}_comparison.log"
-                    ok, body = do_comparison(team_id, url, work_dir, lf)
-                    if not ok and quota_exhausted(body) and st["key"] == "primary":
-                        log("  检测到额度/鉴权问题，切换备用 key 后重试对比报告")
-                        if switch_to_fallback(st):
-                            ok, body = do_comparison(team_id, url, work_dir, lf)
-                    readiness["comparison"] = ok
-                    log(f"  对比报告 {'成功' if ok else '失败'}")
-
-                    lf = LOGDIR / f"{team_id}_description.log"
-                    ok, body = do_description(team_id, url, work_dir, lf)
-                    if not ok and quota_exhausted(body) and st["key"] == "primary":
-                        log("  检测到额度/鉴权问题，切换备用 key 后重试描述报告")
-                        if switch_to_fallback(st):
-                            ok, body = do_description(team_id, url, work_dir, lf)
-                    readiness["description"] = ok
-                    log(f"  描述报告 {'成功' if ok else '失败'}")
-
-                    lf = LOGDIR / f"{team_id}_development.log"
-                    ok, _body = do_development(team_id, url, work_dir, lf)
-                    readiness["development"] = ok
-                    log(f"  开发过程报告 {'成功' if ok else '失败'}")
-
-                    digest_inputs = (
-                        work_dir / "comparison.digest.json",
-                        work_dir / "description.digest.json",
-                        work_dir / "development.digest.json",
-                    )
-                    if all(path.is_file() for path in digest_inputs):
-                        lf = LOGDIR / f"{team_id}_summary.log"
-                        ok, _body = do_summary(team_id, work_dir, lf)
-                    else:
-                        ok = False
-                        missing = "、".join(path.name for path in digest_inputs if not path.is_file())
-                        log(f"  一页摘要未生成，缺少临时输入：{missing}")
-                    readiness["summary"] = ok
-                    log(f"  一页摘要 {'成功' if ok else '失败'}")
-
-                    if all(readiness.values()):
-                        publish_final_reports(team_id, work_dir, final_dir)
-                    else:
-                        purge_final_dir(team_id, final_dir)
-            finally:
-                cleanup_team(repo_name, final_dir=final_dir)
-
-            for kind, ready in readiness.items():
-                tstate[kind] = "done" if ready else "failed"
-            if not _report_digests_match_team(team_id, final_dir, extra_ids={repo_name}):
-                log(f"  {team_id} 报告摘要不属于当前队伍，拒绝标记完成")
-                for kind in readiness:
-                    tstate[kind] = "failed"
-            save_state(st)
-            log(f"[{idx}/{total}] {team_id} 处理完毕 "
-                f"(summary={tstate.get('summary')}, desc={tstate.get('description')}, "
-                f"dev={tstate.get('development')}, cmp={tstate.get('comparison')}, "
-                f"剩余 {free_gb():.1f}GB)")
-
-        done = sum(1 for t in st["teams"].values()
-                   if all(t.get(kind) == "done" for kind in
-                          ("summary", "description", "development", "comparison")))
-        log(f"==== 批处理结束：{done}/{total} 完整完成 ====")
-    except BatchConfigurationError as exc:
-        raise SystemExit(f"[batch] 配置错误：{exc}") from None
-    finally:
-        # 无论成功、失败还是异常退出，运行日志、状态和克隆都不属于交付物。
-        for entry in teams:
-            final_dir = OUT / entry["队伍编号"]
-            cleanup_team(fork_to_repo_name(entry["Fork地址"]), final_dir=final_dir)
-            remove_empty_final_dir(entry["队伍编号"], final_dir)
-        cleanup_batch_runtime()
-
-
-if __name__ == "__main__":
-    main()

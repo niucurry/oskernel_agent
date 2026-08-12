@@ -19,7 +19,6 @@ dev = [
 [project.scripts]
 oskernel-agent = "oskernel_agent.cli.agent:main"
 oskernel-setup = "oskernel_agent.cli.setup_opencode:setup"
-oskernel-batch = "oskernel_agent.cli.batch:main"
 oskernel-compare = "oskernel_agent.comparison.pipeline.__main__:main"
 oskernel-finals = "oskernel_agent.finals.__main__:main"
 

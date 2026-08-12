@@ -22,6 +22,7 @@ import os
 import re
 import sqlite3
 from collections import Counter, defaultdict
+from functools import lru_cache
 from pathlib import Path
 
 from oskernel_agent.paths import PROJECT_ROOT
@@ -428,8 +429,8 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None, *,
     """各子模块同源、明确存疑、复核未完成、暂未检出四类**函数数**统计。
 
     按 query 函数去重、取最高档归类：
-      借鉴(confirmed)：confirmed 且非库复用、非公共/样板；
-      模型复核难例(review)：review/weak 且模型返回有效“借鉴/疑似”；
+      借鉴(confirmed)：confirmed 且非库复用、非公共/样板（含模型复核判「借鉴」升入的）；
+      模型复核难例(review)：review/weak 且模型返回有效“疑似/规则保留”（“借鉴”已升入 confirmed）；
       复核未完成：模型调用/格式校验失败，或已入队但未配置模型；绝不计入“模型仍存疑”；
       暂未检出(original)：recall 中（非库）完全未进入嫌疑清单的函数。
     库复用 / 公共样板 / baseline 既不算借鉴也不算暂未检出，**不计入 total**（在各自小节单列），
@@ -1577,6 +1578,17 @@ def collect_file_pairs(
             }
             groups[key] = g
         g["candidates"].append(_candidate_from_suspect(s))
+        # 教学/公共基线溯源：该目标函数与某个基线（rCore/uCore/xv6/ArceOS 等）最相似的
+        # 向量命中。query 级属性，同一目标函数的所有候选对一致；取相似度最高的一条。
+        bv = (s.get("evidence") or {}).get("baseline_vector_query") or {}
+        if bv.get("function_id") is not None:
+            sim = float(bv.get("similarity") or 0.0)
+            cur = g.get("baseline_lineage")
+            if cur is None or sim > cur.get("similarity", 0.0):
+                g["baseline_lineage"] = {
+                    "function_id": int(bv["function_id"]),
+                    "similarity": round(sim, 3),
+                }
 
     for g in groups.values():
         cands = g["candidates"]
@@ -1879,6 +1891,10 @@ def _secondary_candidate_has_independent_strong_evidence(candidate: dict) -> boo
 
 
 def _target_has_active_review_result(suspect: dict) -> bool:
+    if suspect.get("tier") == "confirmed" and suspect.get("confirm_via") == "review_llm":
+        # 模型判定「借鉴」后升入高置信同源的目标，其同目标次级候选仍按已激活目标收口，
+        # 避免形成独立的“未复核”遗留。
+        return True
     if suspect.get("tier") not in ("review", "weak"):
         return False
     if suspect.get("review_verdict") in ("借鉴", "疑似", "规则保留", "复核失败"):
@@ -2208,53 +2224,72 @@ def run_semantic_analysis(
         len(expected_clusters), len(messages), sum(map(len, messages)),
     )
 
-    try:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
 
-        def request_batch(batch_index: int) -> tuple[int, str]:
-            response = client.chat.completions.create(
-                model=semantic_model,
-                messages=[
-                    {"role": "system", "content": _ANALYSIS_SYSTEM},
-                    {"role": "user", "content": messages[batch_index]},
-                ],
-                temperature=0.2,
-                max_tokens=8000,
-            )
-            return batch_index, (response.choices[0].message.content or "").strip()
+    def request_batch(batch_index: int) -> tuple[int, str]:
+        response = client.chat.completions.create(
+            model=semantic_model,
+            messages=[
+                {"role": "system", "content": _ANALYSIS_SYSTEM},
+                {"role": "user", "content": messages[batch_index]},
+            ],
+            temperature=0.2,
+            max_tokens=8000,
+        )
+        return batch_index, (response.choices[0].message.content or "").strip()
+
+    try:
+        configured_workers = int(os.getenv("SEMANTIC_WORKERS", "3"))
+    except ValueError:
+        configured_workers = 3
+    workers = max(1, min(configured_workers, len(messages)))
+
+    # 模型偶发漏回个别功能簇、返回残缺片段或瞬时调用失败；每轮都是全新请求，
+    # 整轮重试最多 3 次，仍不完整则维持 RuntimeError 拒绝交付（与复核门禁一致）。
+    from oskernel_agent.pipeline.lang_guard import normalize_html_language
+    html_content = ""
+    last_error: RuntimeError | None = None
+    for attempt in range(1, 4):
+        try:
+            responses = [""] * len(messages)
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [pool.submit(request_batch, index) for index in range(len(messages))]
+                for future in as_completed(futures):
+                    index, response_text = future.result()
+                    responses[index] = response_text
+        except Exception as e:
+            last_error = RuntimeError(f"语义级分析模型调用失败：{type(e).__name__}: {e}")
+            logger.warning("[semantic] 第 {}/3 轮模型调用失败：{}", attempt, last_error)
+            continue
+
+        # 提取各批 HTML 片段（模型可能在 markdown 代码块里），按原功能簇顺序合并。
+        merged = "\n".join(
+            _extract_html_from_text(response_text) or response_text
+            for response_text in responses
+        )
+
+        # 首轮直接生成中文；只有确实检测到英文正文时才保留一次翻译兜底。
+        merged, lang_stats = normalize_html_language(merged)
+        if not lang_stats["complete"]:
+            last_error = RuntimeError(
+                f"语义级分析未通过中文交付校验：仍有 {lang_stats['remaining']} 处")
+            logger.warning("[semantic] 第 {}/3 轮{}", attempt, last_error)
+            continue
+        elif lang_stats["translated"]:
+            logger.warning("[semantic] 首轮残留英文，已启用保留的翻译兜底")
 
         try:
-            configured_workers = int(os.getenv("SEMANTIC_WORKERS", "3"))
-        except ValueError:
-            configured_workers = 3
-        workers = max(1, min(configured_workers, len(messages)))
-        responses = [""] * len(messages)
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(request_batch, index) for index in range(len(messages))]
-            for future in as_completed(futures):
-                index, response_text = future.result()
-                responses[index] = response_text
-    except Exception as e:
-        raise RuntimeError(f"语义级分析模型调用失败：{type(e).__name__}: {e}") from e
-
-    # 提取各批 HTML 片段（模型可能在 markdown 代码块里），按原功能簇顺序合并。
-    html_content = "\n".join(
-        _extract_html_from_text(response_text) or response_text
-        for response_text in responses
-    )
-
-    # 首轮直接生成中文；只有确实检测到英文正文时才保留一次翻译兜底。
-    from oskernel_agent.pipeline.lang_guard import normalize_html_language
-    html_content, lang_stats = normalize_html_language(html_content)
-    if not lang_stats["complete"]:
-        raise RuntimeError(
-            f"语义级分析未通过中文交付校验：仍有 {lang_stats['remaining']} 处")
-    elif lang_stats["translated"]:
-        logger.warning("[semantic] 首轮残留英文，已启用保留的翻译兜底")
-
-    validate_complete(html_content)
+            validate_complete(merged)
+        except RuntimeError as exc:
+            last_error = exc
+            logger.warning("[semantic] 第 {}/3 轮完整性校验未过：{}", attempt, exc)
+            continue
+        html_content = merged
+        break
+    if not html_content:
+        raise last_error
 
     output_path.write_text(html_content, encoding="utf-8")
     html_cache.write_text(html_content, encoding="utf-8")
@@ -3207,12 +3242,12 @@ def _reading_guide(query_repo_id: str, borrowed_n: int, review_n: int,
         f'style="background:{vcolor}1a;color:{vcolor}">'
         f'<span class="inline-flex items-center justify-center w-5 h-5 rounded-full text-white text-xs" '
         f'style="background:{vcolor}">{vicon}</span>'
-        f'证据概览：{verdict}（确定性高置信同源 {borrowed_n} 个函数）</div>'
+        f'证据概览：{verdict}（高置信同源代码 {borrowed_n} 个函数）</div>'
         f'<p class="text-sm text-slate-600 mt-2 mb-0">{vtext}</p>'
         # 透明度：扣除了多少误报
         '<div class="mt-3 text-xs text-slate-500 bg-white/70 rounded px-3 py-2 border border-slate-200">'
         f'📊 <b>过滤透明度</b>：系统纳入统计 <b>{total_kept}</b> 个函数，其中 '
-        f'<b>{borrowed_n}</b> 个确定性高置信同源代码、<b>{review_n}</b> 个模型复核难例、'
+        f'<b>{borrowed_n}</b> 个高置信同源代码、<b>{review_n}</b> 个模型复核难例、'
         f'<b>{review_failed_n}</b> 个复核失败、<b>{review_pending_n}</b> 个复核未完成；'
         f'另按规则单列 <b>{excl_total}</b> 个可解释复用/受约束函数（{excl_detail}），这些不计入上方同源统计，'
         '在第 7 节「合法复用与许可证合规」分类列出，可点开核对。'
@@ -3309,7 +3344,7 @@ def _summary_card(
         '<div class="chart-title mt-4">各模块高置信同源函数数</div>'
         + _echarts_tier_distribution(submodule_stats)
     )
-    pct_title = '各模块：确定性高置信同源 / 模型复核难例 / 复核未完成 / 暂未检出 占比'
+    pct_title = '各模块：高置信同源 / 模型复核难例 / 复核未完成 / 暂未检出 占比'
     pct_chart = (
         f'<div class="chart-title mt-4">{pct_title}</div>'
         + _echarts_overview(submodule_stats)
@@ -3330,8 +3365,8 @@ def _summary_card(
         f'{_ref_repo_anchor(linker, query_repo_id)}</span></div>'
         '<p class="text-xs text-slate-500 mt-1 mb-0">高置信同源与模型复核数字采用'
         '<b>扣除上游框架/库/规范受限代码后的待评估口径</b>；'
-        '「高置信同源代码」由确定性代码证据形成；模型结论只进入「复核难例」，不自动升为高置信；'
-        '复核失败/未完成是流程状态，不是风险结论。'
+        '「高置信同源代码」由确定性代码证据或模型复核认定「借鉴」形成（后者在清单中带「模型复核认定」标记）；'
+        '模型复核后仍无法定论的才留在「复核难例」；复核失败/未完成是流程状态，不是风险结论。'
         '整体分布图、分类明细表与对账行按全部解析函数计，并分别列出复用库、基线衍生等归属；'
         '各模块分布图的分母为待评估函数，'
         '任何比例都不是赛事扣分比例。'
@@ -3489,7 +3524,7 @@ def _verdict_cell(g: dict) -> str:
     v = g.get("review_verdict", "未复核")
     cls, lbl = _REVIEW_VERDICT_STYLE.get(v, _REVIEW_VERDICT_STYLE["未复核"])
     reason = html.escape(_legacy_review_text_for_display(
-        g.get("review_reason", "") or "", 120))
+        g.get("review_reason", "") or "", _REVIEW_REASON_CHAR_LIMIT))
     responsibility = html.escape(g.get("review_responsibility", "未判定") or "未判定")
     responsibility_reason = html.escape(_legacy_review_text_for_display(
         g.get("review_responsibility_reason", "") or "", 80))
@@ -3690,7 +3725,78 @@ _FEATURE_LABELS = {
     "virtio": "VirtIO 驱动", "uart": "串口驱动", "block": "块设备",
     "socket": "套接字", "tcp": "TCP 协议", "udp": "UDP 协议",
     "net": "网络栈", "backtrace": "堆栈回溯", "debug": "调试与诊断",
-    "security": "安全与权限", "fs": "文件系统", "mm": "内存管理",
+    "security": "安全与权限",
+    # 文件系统目录/文件操作：只对 fs（及未识别）模块生效，见 _feature_label 的 module 门禁。
+    # 同类别多个关键词共享 _FEATURE_CATEGORY 中的簇键，同类函数合并为一个功能簇。
+    "lookup": "目录查找", "search": "目录查找", "child": "目录查找",
+    "dir": "目录操作", "readdir": "目录操作", "directory": "目录操作",
+    "mkdir": "目录与文件创建", "create": "目录与文件创建", "maker": "目录与文件创建",
+    "entry": "目录与文件创建", "new_file": "目录与文件创建", "mkfile": "目录与文件创建",
+    "unlink": "目录删除", "rmdir": "目录删除", "remove": "目录删除", "delete": "目录删除",
+    "rename": "目录重命名",
+    "link": "硬链接", "hardlink": "硬链接", "symlink": "硬链接",
+    "metadata": "文件元数据", "getattr": "文件元数据", "setattr": "文件元数据",
+    "fstat": "文件元数据", "stat": "文件元数据",
+    "truncate": "文件截断", "ftruncate": "文件截断",
+    "pread": "文件读写", "pwrite": "文件读写", "read": "文件读写", "write": "文件读写",
+    "fs": "文件系统", "mm": "内存管理",
+}
+
+# 教学/公共基线仓库 → 展示名。rCore/uCore/xv6/ArceOS 是教学操作系统；lwext4/rust-fatfs/
+# virtio-drivers 是课程/公共库，一并纳入溯源但标出性质。报告据此标注借用代码最接近的基线。
+_BASELINE_OS_LABELS = {
+    "data/repos/0/baseline_rcore_v1": "rCore",
+    "data/repos/0/baseline_rcore_v3": "rCore-Tutorial-v3",
+    "data/repos/0/baseline_ucore_lab": "uCore",
+    "data/repos/0/baseline_xv6_riscv": "xv6-riscv",
+    "data/repos/0/baseline_arceos": "ArceOS",
+    "data/repos/0/baseline_lwext4": "lwext4（文件系统库）",
+    "data/repos/0/baseline_rust_fatfs": "rust-fatfs（FAT 库）",
+    "data/repos/0/baseline_virtio_drivers": "virtio-drivers（驱动库）",
+}
+
+
+@lru_cache(maxsize=4)
+def load_baseline_os_registry(db_path: str | Path | None = None) -> dict[int, tuple[str, str, str]]:
+    """functions.db 中全部基线函数 id → (基线展示名, 归一文件路径, 函数名)。
+
+    供「教学 OS 溯源」把 suspects 里的 baseline_vector_query.function_id 解析成具体的
+    教学操作系统来源。数据库不可用时安静降级为空映射。
+    """
+    path = Path(db_path) if db_path else DEFAULT_FUNCTIONS_DB
+    result: dict[int, tuple[str, str, str]] = {}
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT id, repo_id, file_path, func_name FROM functions "
+                "WHERE repo_id LIKE 'data/repos/0/baseline_%'").fetchall()
+    except (OSError, sqlite3.Error):
+        return result
+    for row in rows:
+        label = _BASELINE_OS_LABELS.get(
+            str(row["repo_id"]), str(row["repo_id"]).rsplit("/", 1)[-1])
+        result[int(row["id"])] = (
+            label,
+            str(row["file_path"]).replace("\\", "/"),
+            str(row["func_name"]),
+        )
+    return result
+
+# 文件系统目录/文件操作关键词 → 共享功能簇键。命中不同关键词但同一操作种类的函数
+# 必须并入同一簇；_feature_label 返回类别键而不是原始 token。
+_FEATURE_CATEGORY = {
+    "lookup": "目录查找", "search": "目录查找", "child": "目录查找",
+    "dir": "目录操作", "readdir": "目录操作", "directory": "目录操作",
+    "mkdir": "目录与文件创建", "create": "目录与文件创建", "maker": "目录与文件创建",
+    "entry": "目录与文件创建", "new_file": "目录与文件创建", "mkfile": "目录与文件创建",
+    "unlink": "目录删除", "rmdir": "目录删除", "remove": "目录删除", "delete": "目录删除",
+    "rename": "目录重命名",
+    "link": "硬链接", "hardlink": "硬链接", "symlink": "硬链接",
+    "metadata": "文件元数据", "getattr": "文件元数据", "setattr": "文件元数据",
+    "fstat": "文件元数据", "stat": "文件元数据",
+    "truncate": "文件截断", "ftruncate": "文件截断",
+    "pread": "文件读写", "pwrite": "文件读写", "read": "文件读写", "write": "文件读写",
 }
 _MODULE_PRIORITY = {
     "sched": 1.0, "mm": 1.0, "fs": 1.0, "trap": .95, "syscall": .95,
@@ -3709,10 +3815,15 @@ def _feature_label(group: dict) -> tuple[str, str]:
     path = str(group.get("query_file") or "").replace("\\", "/").lower()
     func = str(group.get("query_func") or "").lower()
     words = [w for w in re.split(r"[^a-z0-9]+", path + "/" + func) if w]
+    mod = group.get("module", "other")
     for token in _FEATURE_LABELS:
         if token in words:
-            return token, _FEATURE_LABELS[token]
-    mod = group.get("module", "other")
+            # 目录/文件操作类关键词只对 fs（及未识别）模块生效，避免把其它子系统里
+            # 恰好含 remove/read/create 等词的函数误并入文件系统功能簇（如 ipc 的
+            # remove_shmaddr、mm 的 create_buffer）。跳过后继续查后续更合适的 token。
+            if token in _FEATURE_CATEGORY and mod not in ("fs", "other"):
+                continue
+            return _FEATURE_CATEGORY.get(token, token), _FEATURE_LABELS[token]
     location = "|".join((
         path,
         str(group.get("query_start") or 0),
@@ -3769,6 +3880,12 @@ def build_similarity_clusters(file_pairs: list[dict]) -> list[dict]:
         ) - ambiguity_penalty))
         c["priority"] = "重点核查" if c["priority_score"] >= 78 else (
             "优先核查" if c["priority_score"] >= 62 else "常规核查")
+        # 教学/公共基线溯源：取簇内函数与基线最相似的命中，供报告标注借用代码最接近的
+        # 教学操作系统（rCore/uCore/xv6/ArceOS 等）。
+        c["baseline_lineage"] = max(
+            (g.get("baseline_lineage") for g in c["groups"] if g.get("baseline_lineage")),
+            key=lambda x: x.get("similarity", 0.0), default=None,
+        )
         identity = json.dumps(
             [c["source"], c["module"], c["feature_key"]],
             ensure_ascii=False, separators=(",", ":"),
@@ -3813,6 +3930,25 @@ def _semantic_cluster_batches(
     return batches
 
 
+def _cluster_lineage_html(cluster: dict) -> str:
+    """簇内函数与教学/公共基线的溯源行（教学 OS 溯源）；无基线命中时返回空串。"""
+    lineage = cluster.get("baseline_lineage") or {}
+    fid = lineage.get("function_id")
+    if fid is None:
+        return ""
+    os_info = load_baseline_os_registry().get(int(fid))
+    if os_info is None:
+        return ""
+    os_label, file, func = os_info
+    sim = float(lineage.get("similarity") or 0.0)
+    return (
+        '<div class="text-xs text-slate-500 mb-2">教学 OS 溯源：本簇代码与'
+        f' <b>{html.escape(os_label)}</b> 基线的 '
+        f'<code>{html.escape(file)}:{html.escape(func)}</code> 最相似'
+        f'（相似度 {sim:.2f}），提示其教学/公共代码来源。</div>'
+    )
+
+
 def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
                      query_repo_id: str) -> tuple[str, str]:
     clusters = build_similarity_clusters(file_pairs)
@@ -3853,13 +3989,15 @@ def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
                 '<span class="cluster-chevron" x-text="open?\'▾\':\'▸\'"></span></button>'
                 f'<div class="cluster-body" x-show="open" x-cloak>'
                 f'<div class="text-xs text-slate-500 mb-2">主要匹配仓库：'
-                f'{_ref_repo_anchor(linker, str(c["source"]))}</div>{table}{analysis}</div></article>'
+                f'{_ref_repo_anchor(linker, str(c["source"]))}</div>'
+                f'{_cluster_lineage_html(c)}{table}{analysis}</div></article>'
             )
         intro = (
             '<div class="section-intro">系统将同一匹配仓库、同一子系统且属于同一功能域的函数合并为一个'
             '“同源事件”。优先级综合代码相似度、有效相似行和内核子系统重要度，并对多仓高频出现的'
             '来源歧义降权；函数级链接与并排代码'
-            '仍保留在簇内。</div>'
+            '仍保留在簇内。每个簇额外标注<b>教学 OS 溯源</b>：本簇借用代码最接近的'
+            '教学/公共基线（rCore / uCore / xv6 / ArceOS 等），提示其公共代码来源。</div>'
         )
         body = intro + "".join(cards)
     section = _collapsible_html(
@@ -4993,7 +5131,13 @@ _REVIEW_SIM_SYSTEM = """你是跨语言代码同源复核助手。职责分析�
 - 若 verdict 为“借鉴”或“疑似”，evidence_anchors 必须包含 2～4 个在两段代码中都逐字出现的
   标识符、常量或短表达式；若 verdict 为“非借鉴”，可提供 1～4 个来自任一侧的定位锚点；
 严格格式：
-{"verdict":"借鉴|疑似|非借鉴","reason":"不超过120字的中文复核理由","evidence_anchors":["代码中的原文锚点"]}"""
+{"verdict":"借鉴|疑似|非借鉴","reason":"精炼完整的中文复核理由（勿超300字）","evidence_anchors":["代码中的原文锚点"]}"""
+
+
+# 复核理由长度上限：用于防止模型输出被截断/跑飞，而非强制惜字。穷尽核对复杂函数时，
+# 模型会给出 120 字以上的完整说明，120 字过紧会让合格结论被误判为“复核失败”。300 字仍
+# 是硬上限，既挡截断又容纳完整说明；展示端与存储端必须用同一上限以便做截断嫌疑校验。
+_REVIEW_REASON_CHAR_LIMIT = 300
 
 
 def _bounded_review_text(value: object, limit: int) -> str:
@@ -5110,7 +5254,7 @@ def _parse_verdict_payload(text: str, query_code: str, ref_code: str) -> dict:
         raise ValueError("复核理由为空或过于笼统")
     return {
         "verdict": verdict,
-        "reason": _bounded_review_text(reason, 120),
+        "reason": _bounded_review_text(reason, _REVIEW_REASON_CHAR_LIMIT),
         "evidence_anchors": _validate_evidence_anchors(
             data.get("evidence_anchors"), query_code, ref_code,
             min_count=2 if verdict in ("借鉴", "疑似") else 1,
@@ -5149,7 +5293,7 @@ def _parse_review_payload(text: str, query_code: str, ref_code: str) -> dict:
 
     return {
         "verdict": verdict,
-        "reason": _bounded_review_text(reason, 120),
+        "reason": _bounded_review_text(reason, _REVIEW_REASON_CHAR_LIMIT),
         "responsibility": responsibility,
         "responsibility_reason": _bounded_review_text(responsibility_reason, 80),
         "evidence_anchors": clean_anchors,
@@ -5453,14 +5597,19 @@ def run_review_judgment(review_pairs: list[dict], work_dir: Path,
                     _save_cache()
         _save_cache()
 
-        # 两阶段内部的格式纠正已处理“同一次对话”的偶发偏差；若最终仍失败，再发起一次
+        # 两阶段内部的格式纠正已处理“同一次对话”的偶发偏差；若最终仍失败，再发起
         # 独立对话，避免模型沿用上轮错误锚点。只重试失败项，不重复调用有效结果。
-        retry_failed = [
-            g for g in pending
-            if (cache.get(_key(g)) or {}).get("verdict") == "复核失败"
-        ]
-        if retry_failed:
-            logger.info("[review] {} 对格式失败，启动一次独立复核重试", len(retry_failed))
+        # 独立重试最多 3 轮：单轮常救不回模型输出抖动，而交付门禁要求全部入选候选
+        # 都有合格结论；每轮都是全新对话，仍失败则交由 completeness 门禁拒绝交付。
+        for retry_round in range(1, 4):
+            retry_failed = [
+                g for g in pending
+                if (cache.get(_key(g)) or {}).get("verdict") == "复核失败"
+            ]
+            if not retry_failed:
+                break
+            logger.info("[review] {} 对格式失败，启动第 {}/3 轮独立复核重试",
+                        len(retry_failed), retry_round)
             with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
                 futures = [ex.submit(_work, g) for g in retry_failed]
                 for future in as_completed(futures):
@@ -5506,12 +5655,14 @@ def _model_negative_requires_human_review(suspect: dict, responsibility: str) ->
 
 
 def _apply_review_verdicts(suspects: list[dict], groups: list[dict]) -> tuple[int, int]:
-    """据 LLM 复核结论保守标注难例，不把模型意见伪装成确定性证据。
-      - review/weak：借鉴/疑似 → 保留原证据档位；非借鉴通常 → dismissed
+    """据 LLM 复核结论标注档位。
+      - review/weak：模型判「借鉴」→ 升入 confirmed（标记 confirm_via=review_llm，
+        清单中带「模型复核认定」标记，进入「高置信同源功能簇」参与语义分析）；
+        「疑似」→ 保留原证据档位；非借鉴通常 → dismissed
       - 若模型认为职责一致，且函数身份与强逐行/指纹证据均成立，
         模型阴性不得把它改写为“未命中”，改为规则保留人工复核
       - 复核失败 / 未复核 → 保持原档不动，并单独记录状态，绝不折算为“疑似”
-    返回 (模型支持数, 明确排除数)。
+    返回 (模型认定借鉴升入高置信同源数, 明确排除数)。
     """
     result_map = {_review_group_pair_key(g): g for g in groups}
     # 相同目标代码 + 相同候选函数内容在镜像仓库、分支或年份快照中只调用一次模型，
@@ -5545,8 +5696,10 @@ def _apply_review_verdicts(suspects: list[dict], groups: list[dict]) -> tuple[in
         s["review_evidence_anchors"] = result.get("review_evidence_anchors", [])
         if v == "借鉴":
             if tier != "confirmed":
-                # 模型意见只能提高人工核查优先级，不能把低逐行覆盖自动升级成
-                # 与指纹/高覆盖逐行证据同档的“高置信同源”。
+                # 模型完成复核并认定「借鉴」：升入高置信同源档，进入功能簇参与语义分析。
+                # confirm_via=review_llm 让清单保留「模型复核认定」标记，与逐行铁证区分。
+                s["tier"] = "confirmed"
+                s["confirm_via"] = "review_llm"
                 s["model_supported"] = True
                 up += 1
         elif v == "非借鉴":
@@ -5614,6 +5767,7 @@ def _review_section(review_pairs: list[dict], linker, query_repo_id: str,
     if not review_pairs:
         body = (
             '<p class="text-sm text-slate-500">当前没有需要人工继续处理的模型复核难例。'
+            '模型复核认定「借鉴」的函数已升入「高置信同源功能簇」（带「模型复核认定」标记）。'
             + (f'高精度准入队列中另有 <b>{n_cleared}</b> 个函数已被模型明确排除，'
                '不进入风险统计，也不在报告中展开无关代码对。' if n_cleared else '')
             + '</p>'
@@ -5639,7 +5793,6 @@ def _review_section(review_pairs: list[dict], linker, query_repo_id: str,
             g,
         )
     rows = list(unique_review.values())
-    supported = [g for g in rows if g.get("review_verdict") == "借鉴"]
     uncertain = [g for g in rows if g.get("review_verdict") == "疑似"]
     retained = [g for g in rows if g.get("review_verdict") == "规则保留"]
     failed = [g for g in rows if g.get("review_verdict") == "复核失败"]
@@ -5649,27 +5802,28 @@ def _review_section(review_pairs: list[dict], linker, query_repo_id: str,
         (g.get("query_file", ""), int(g.get("query_start") or 0),
          g.get("query_func", "")) for g in rows
     }
-    n_funcs, n_supported, n_uncertain, n_retained, n_failed, n_pending = (
-        len(active_keys), len(supported), len(uncertain), len(retained),
+    n_funcs, n_uncertain, n_retained, n_failed, n_pending = (
+        len(active_keys), len(uncertain), len(retained),
         len(failed), len(pending),
     )
 
     intro = ('<p class="text-sm text-slate-600 mb-3">'
-             f'下列 <b>{n_funcs}</b> 个函数通过了多证据准入且仍需继续判断。模型先判断双方职责，'
-             '职责一致或部分一致时才继续代码相似判断，并提供能在代码中定位的证据锚点。'
-             f'其中模型认为“借鉴”但仍待人工确认 <b>{n_supported}</b> 个、'
-             f'返回“疑似” <b>{n_uncertain}</b> 个、复核失败 <b>{n_failed}</b> 个、'
+             f'下列 <b>{n_funcs}</b> 个函数通过了多证据准入且模型复核后仍无法定论。'
+             '模型先判断双方职责，职责一致或部分一致时才继续代码相似判断，'
+             '并提供能在代码中定位的证据锚点。'
+             f'其中模型返回“疑似” <b>{n_uncertain}</b> 个、'
              f'模型阴性但强直接证据保留 <b>{n_retained}</b> 个、'
-             f'未复核 <b>{n_pending}</b> 个。'
+             f'复核失败 <b>{n_failed}</b> 个、未复核 <b>{n_pending}</b> 个。'
              '复核失败和未复核只是流程状态，<b>不计入模型仍存疑</b>。'
+             '模型复核认定「借鉴」的函数已升入「高置信同源功能簇」并带「模型复核认定」标记，'
+             '不在本节重复列出。'
              + (f'另有 <b>{n_cleared}</b> 个准入函数已被模型明确排除，'
                 '不进入风险统计，也不展开其无关代码。' if n_cleared else '')
              + '本节按综合相似度、有效代码规模、子系统重要度与克隆类型排序。</p>')
 
     chips = []
-    for verdict, count in (("借鉴", n_supported), ("疑似", n_uncertain),
-                           ("规则保留", n_retained), ("复核失败", n_failed),
-                           ("未复核", n_pending)):
+    for verdict, count in (("疑似", n_uncertain), ("规则保留", n_retained),
+                           ("复核失败", n_failed), ("未复核", n_pending)):
         if count:
             cls, label = _REVIEW_VERDICT_STYLE[verdict]
             chips.append(f'<span class="px-2 py-0.5 rounded {cls}">{label} {count}</span>')
@@ -5680,9 +5834,7 @@ def _review_section(review_pairs: list[dict], linker, query_repo_id: str,
                + "".join(chips) + '</div></div>')
 
     tables = (
-        _groups_table("模型认为借鉴（仍需人工确认）", supported, linker, query_repo_id,
-                      "text-red-700", show_verdict=True, show_priority=True)
-        + _groups_table("模型有效复核后仍存疑", uncertain, linker, query_repo_id,
+        _groups_table("模型有效复核后仍存疑", uncertain, linker, query_repo_id,
                       "text-amber-700", show_verdict=True, show_priority=True)
         + _groups_table("模型阴性与强直接证据冲突（人工复核）", retained,
                         linker, query_repo_id, "text-amber-800",
@@ -6130,11 +6282,8 @@ def generate_finals_comparison_html(
         _closed_by_default(sec_files),
     ]
     evidence_html = "\n".join(part for part in evidence_parts if part)
+    # 机器可审计的召回完整性标记（隐藏 span），供 audit/label_normalize 校验；不占正文。
     method_status = _retrieval_status(retrieval_contract)
-    method_status_text = (
-        "历史库召回完整。" if not contract_errors(retrieval_contract)
-        else "历史库召回不完整，本报告不应作为正式交付。"
-    )
     history_html = _finals_history_overview(overview, linker, closest_source)
     toc_html = (
         '<div class="toc-card"><div class="toc-header"><span class="toc-kicker">最终报告</span>'
@@ -6142,7 +6291,6 @@ def generate_finals_comparison_html(
         + _toc_group("先看结论", [_toc_link("summary", "结论与模块排序")])
         + _toc_group("全库概览", [_toc_link("history-overview", "最相似历史作品")])
         + _toc_group("最接近作品", [_toc_link("closest-evidence", "同源代码证据")])
-        + _toc_group("口径", [_toc_link("method", "方法与边界")])
         + '</div></div>'
     )
     title = f"{html.escape(query_repo_id)} 对比分析报告"
@@ -6156,6 +6304,7 @@ def generate_finals_comparison_html(
 .closest-identity{{margin:.2rem 0 .7rem;color:#475569;font-weight:600}}
 </style></head><body><div class="layout"><nav class="toc">{toc_html}</nav><main class="main">
 <header class="report-header"><h1>{title}</h1><p>先查看按证据动态筛选的最相似历史作品，再围绕排名第一的作品展开代码证据；仓库数量不固定。</p></header>
+{method_status}
 {summary_html}
 <section id="history-overview" data-section-id="history-overview" class="report-section section-neutral">
 {_chapter_heading("02", "全历史库匹配概览", "按证据强度动态筛选相似仓库，不固定数量，也不为凑数纳入未完成复核项。")}
@@ -6163,14 +6312,6 @@ def generate_finals_comparison_html(
 <section id="closest-evidence" data-section-id="closest-evidence">
 {_chapter_heading("03", "最接近作品的证据", "只展开排名第一的主对比作品；函数、文件和代码细节默认折叠，需要时再查看。")}
 {evidence_html}</section>
-<section id="method" data-section-id="method" class="report-section section-neutral">
-{_chapter_heading("04", "方法与边界", "说明相似仓库筛选、主对象选择和证据口径，避免把未命中误写成原创。")}
-{method_status}
-<div class="section-intro"><p><b>主对比对象：</b>{_ref_repo_anchor(linker, closest_source)}</p>
-<p><b>召回状态：</b>{method_status_text}</p>
-<p><b>选择口径：</b>系统在全部历史作品中完成召回、共同上游与第三方排除，再优先展示具备高置信函数或整文件证据的仓库；仅当强证据为空时，才展示已经完成模型复核且仍存疑的仓库。排名第一的作品作为主对比对象展开详细证据。</p>
-<p><b>证据口径：</b>相似比例按唯一主对比作品的可比函数计算；相似关系只用于人工核查，不单独证明直接来源、传播方向或抄袭。</p></div>
-</section>
 </main></div><a href="#summary" class="to-top" title="回到顶部">↑</a>{_INIT_SCRIPT}</body></html>"""
     return sanitize_html_controls(explain_terms_in_html(rendered)), digest
 
@@ -6434,8 +6575,8 @@ def run_semantic_compare(
 
     # 只对 review/weak 中通过多证据准入的难例做两阶段模型复核；confirmed 已有确定性证据，
     # 不再重复消耗模型。职责不一致直接排除；职责门控通过后才做同源判断。
-    # 判「借鉴」只提高人工核查优先级，不能升为确定性 confirmed；“非借鉴”降为 dismissed，
-    # 格式有效的“疑似”保留信号，
+    # 判「借鉴」升入 confirmed（带模型复核认定标记，进入功能簇参与语义分析）；
+    # “非借鉴”降为 dismissed，格式有效的“疑似”保留信号，
     # 格式/调用失败单列状态，不能冒充“模型仍存疑”。
     # 必须在统计 / file_pairs / 未检出清单计算之前。
     pairing_mismatches = _suppress_dominated_candidate_mismatches(suspects)
@@ -6484,7 +6625,7 @@ def run_semantic_compare(
         )
         up, dn = _apply_review_verdicts(suspects, review_judgments)
         if up or dn:
-            logger.info("[review] 复核：模型支持借鉴 {} 对（保留难例档），明确非借鉴 {} 对移出相似清单",
+            logger.info("[review] 复核：模型认定借鉴升入高置信同源 {} 对，明确非借鉴 {} 对移出相似清单",
                         up, dn)
         try:
             fallback_rounds = max(0, int(os.getenv(
@@ -6506,7 +6647,7 @@ def run_semantic_compare(
             fallback_up, fallback_down = _apply_review_verdicts(
                 suspects, fallback_results)
             logger.info(
-                "[review] 次级强证据补充结果：支持借鉴 {} 对，明确排除 {} 对",
+                "[review] 次级强证据补充结果：认定借鉴升入高置信同源 {} 对，明确排除 {} 对",
                 fallback_up, fallback_down,
             )
         secondary_resolution = finalize_secondary_review_candidates(suspects)

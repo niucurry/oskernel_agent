@@ -90,15 +90,19 @@ python -m oskernel_agent.finals development \
 
 Git 提交次数、日期、代码变更行数（LOC）和文件明细由程序复算；AI 只负责问题判断和阶段归纳。虚假提交、阶段重叠、历史缺口或模型输出不完整都会触发交付失败。
 
-### 四报告批处理
+### 一对一报告产出
 
-`作品.txt` 为 JSON 数组，每项包含 `队伍编号` 与 `Fork地址`。配置 `.env` 后执行：
+报告改为**逐个产出**，不再有事务式批处理（`oskernel-batch` 已移除）。对单个队伍，运行
+`run_incremental_1931.py`（改脚本头部的 `TEAM_ID` / `URL` 即可适配其他队伍）：
 
 ```bash
-oskernel-batch
+python run_incremental_1931.py
 ```
 
-批处理采用事务式发布：四份报告先在系统临时目录中完成，全部成功后再发布到 `data/output/<队伍编号>/`。运行结束后删除克隆、模型原始输出、摘要 JSON、日志和状态文件，正式目录只保留四个报告。
+每份报告（对比 / 描述 / 开发过程 / 一页摘要）独立执行、独立发布：任一报告成功即发布到
+`data/output/<队伍编号>/`，失败只影响它自身，其余步骤照常进行。步骤复用
+`oskernel_agent.cli.batch` 的单步函数与交付门禁；也可以直接调用单个命令
+（`oskernel-compare` / `oskernel-agent` / `oskernel-finals`）逐一生成。
 
 ## 前端控制台
 
@@ -124,7 +128,7 @@ npm run dev:all
 ├── scripts/                        # 离线数据准备和故障恢复工具
 ├── src/oskernel_agent/
 │   ├── analysis/                   # 单仓库事实抽取
-│   ├── cli/                        # 正式命令入口和批处理编排
+│   ├── cli/                        # 正式命令入口（含单步报告函数库）
 │   ├── comparison/                 # 历史入库、召回、精确比对和对比报告
 │   ├── engines/                    # LLM 与语言服务引擎
 │   ├── finals/                     # 四报告摘要模型、开发报告与清理门禁

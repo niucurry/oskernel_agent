@@ -56,6 +56,11 @@ reports_by_work_id.zip
 云端报告/
 作品.txt
 作品进展汇报.pptx
+cmp_backup_*/
+# 一对一产出驱动的临时克隆与中间产物
+data/output/_repos/
+data/output/_batch/
+data/output/_incremental/
 
 # 本地工具二进制
 tools_bin/

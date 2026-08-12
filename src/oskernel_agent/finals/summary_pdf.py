@@ -564,6 +564,8 @@ def run_ai_summary_analysis(
         "所有文字必须使用完整句子，禁止使用‘…’或‘...’省略内容；不得提交被截断的词组。"
         "overall_judgment 不超过 280 字，每个 section conclusion 不超过 180 字，"
         "每个 issue title 不超过 80 字、judgment 不超过 240 字；issue 中的函数名、路径名和代码标识符必须来自其引用的 source_finding，禁止改写或补造相近名称。\n"
+        "不要在 issue 文字中裸写与代码标识符写法相同的专有缩写或术语（如 POSIX、ABI、MMIO、ELF）；"
+        "表达标准或接口语义时用自然语言描述，必要时只使用来源 finding 明文中确实出现的写法。\n"
         f"repo_id: {repo_id}\n"
         f"input_file: {input_path.resolve()}\n"
         f"expected_schema: {schema_hint}\n"

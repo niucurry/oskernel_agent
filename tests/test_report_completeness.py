@@ -36,6 +36,25 @@ def test_visible_ellipsis_is_a_hard_report_error_but_source_code_is_allowed():
     assert_report_complete("<p>结论已完整说明。</p><code>fn demo(...) {}</code>")
 
 
+def test_cl_div_source_code_ellipsis_is_not_a_report_error():
+    # 对比报告把逐行源码证据渲染成 <div class="cl">/`<div class="cl df">`（非 <code>/<pre>）。
+    # 源码字符串字面量里的省略号不是报告截断，必须豁免；正文里的省略号仍要拦截。
+    code_only = (
+        '<div class="code-body">'
+        '<div class="cl df">pub fn sys_waitpid(pid: i32) -&gt; isize {</div>'
+        '<div class="cl df">    debug!("计入省略号…");</div>'
+        '<div class="cl df">    continue;</div>'
+        '<div class="cl">}</div>'
+        '</div>'
+    )
+    assert find_ellipsis_omissions(code_only) == []
+    assert_report_complete(code_only)
+    with_prose = code_only + "<p>系统调用仍有一段未说明…</p>"
+    assert find_ellipsis_omissions(with_prose) == ["系统调用仍有一段未说明…"]
+    with pytest.raises(IncompleteReportError, match="省略号截断"):
+        assert_report_complete(with_prose)
+
+
 @pytest.mark.parametrize(
     "rendered, expected",
     [
