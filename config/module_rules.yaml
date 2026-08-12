@@ -51,7 +51,7 @@ rules:
     code_keywords: [pagetable, page_table, pagefault, frameallocator, frame_allocator]
 
   - tag: fs
-    path_keywords: [fs, filesystem, file, files, inode, vfs, ext2, ext4, fat, fat32, procfs, devfs]
+    path_keywords: [fs, filesystem, file, files, inode, vfs, ext2, ext4, fat, fat32, procfs, devfs, pseudofs]
     symbol_keywords: [path2abs, canonicalize_path, copy_file_range, statfs, mount, umount]
     code_keywords: [f_bsize, f_blocks, st_mode, st_ino, st_nlink, st_size, dirent, superblock]
 

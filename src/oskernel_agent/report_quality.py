@@ -43,6 +43,16 @@ def visible_report_text(rendered: str) -> str:
         rendered or "",
         flags=re.IGNORECASE | re.DOTALL,
     )
+    # 对比报告把逐行源码证据渲染成 <div class="cl">/`<div class="cl df">`（非 <pre>/<code>）。
+    # 这些行是真实源码而非正文，其中字符串字面量里的省略号（如 debug!("...重试...")）不是
+    # 报告截断，必须按代码剥离，否则会被误判为正文省略号。每个 cl 行经 html.escape 转义、
+    # 不含嵌套 div，故可安全整行匹配。
+    visible = re.sub(
+        r'<div class="cl[^"]*">.*?</div>',
+        " ",
+        visible,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
     return html.unescape(re.sub(r"<[^>]+>", " ", visible))
 
 

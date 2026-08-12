@@ -275,6 +275,19 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         vector_store = None
         gc.collect()
 
+    def release_embedder() -> None:
+        """释放召回/分段阶段加载的嵌入模型（torch），给后续重量级模型腾出内存。
+
+        ai_detect 会再加载约 3B 参数的检测模型；本机内存紧张时，两套模型同驻进程
+        会触发原生分配失败——进程无 traceback 直接退出，任何 Python 异常都捕不住。
+        报告阶段不再使用嵌入向量，可在 ai_detect 前安全释放。
+        """
+        nonlocal embedder
+        if embedder is None:
+            return
+        embedder = None
+        gc.collect()
+
     # ---- fastpath (L0 文件指纹层) ----
     skip_files: set[str] = set()
     if _should_run("fastpath", args.resume_from):
@@ -381,6 +394,7 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
 
     # ---- ai_detect（AI 生成代码检测，独立于查重漏斗；失败状态不得进入交付报告）----
     if args.ai_detect and _should_run("ai_detect", args.resume_from):
+        release_embedder()   # 报告阶段不再需要嵌入模型，先腾出内存给检测模型
         from oskernel_agent.comparison.ai_detect.runner import run_ai_detect
         from oskernel_agent.comparison.report.libraries import discover_library_context, match_library
         # 排除借鉴代码：文件级（fastpath 整文件命中）+ 函数级（查重命中的可疑函数），

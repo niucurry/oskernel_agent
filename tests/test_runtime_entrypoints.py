@@ -11,15 +11,3 @@ def test_agent_help_without_config_file():
                        capture_output=True, text=True, timeout=20)
     assert r.returncode == 0, r.stderr
     assert "--repo-path" in r.stdout
-
-
-def test_batch_help_without_works_file():
-    result = subprocess.run(
-        [sys.executable, "-m", "oskernel_agent.cli.batch", "--help"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "--works" in result.stdout

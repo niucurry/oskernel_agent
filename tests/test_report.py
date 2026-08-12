@@ -865,6 +865,8 @@ def test_review_group_prefers_completed_candidate_over_deferred_secondary():
     )
     deferred["model_review_selection"] = "deferred_secondary"
     deferred["model_review_note"] = "未进入本轮模型预算"
+    # 次级候选与首选候选内容不同，避免复核结论通过“同内容”兜底跨候选传播。
+    deferred["candidate_func"].update({"raw_code": "fn deferred_impl(x: u8) -> u8 { x }"})
     reviewed = _sc_suspect(
         "os/mm.rs", "from_elf", "2024/reviewed", "mm.rs", "from_elf",
         "review", .80, exact=18,
@@ -880,20 +882,29 @@ def test_review_group_prefers_completed_candidate_over_deferred_secondary():
 
     group = SC.collect_file_pairs(
         [deferred, reviewed], keep_tiers=("review", "weak"))[0]
+    up, down = SC._apply_review_verdicts([deferred, reviewed], [group])
+    # 模型复核认定「借鉴」→ 升入高置信同源，带「模型复核认定」标记，进入功能簇分析
+    assert up == 1 and down == 0
+    assert reviewed["tier"] == "confirmed"
+    assert reviewed["confirm_via"] == "review_llm"
     resolution = SC.finalize_secondary_review_candidates([deferred, reviewed])
-    # 新分类器会纠正测试夹具中与 os/mm.rs 路径冲突的旧 fs 标签。
-    stats = SC.compute_submodule_stats([deferred, reviewed], None)["mm"]
-    _toc, section = SC._review_section([group], None, "2024/new")
-
-    assert group["review_verdict"] == "借鉴"
-    assert group["candidates"][0]["ref_repo"] == "2024/reviewed"
-    assert group["overall_sim"] == .80
+    confirmed_group = SC.collect_file_pairs([deferred, reviewed])[0]
+    assert confirmed_group["review_verdict"] == "借鉴"
+    assert confirmed_group["via_review"] is True
+    assert confirmed_group["overall_sim"] == .80
     assert resolution == {"supplemental": 1, "dismissed": 0}
     assert deferred["model_review_selection"] == "supplemental_source"
-    assert stats["review"] == 1
+    # 新分类器会纠正测试夹具中与 os/mm.rs 路径冲突的旧 fs 标签。
+    stats = SC.compute_submodule_stats([deferred, reviewed], None)["mm"]
+    assert stats["confirmed"] == 1
+    assert stats["review"] == 0
     assert stats["review_pending"] == 0
-    assert "模型认为借鉴（仍需人工确认）" in section
-    assert "次级候选未送模型（人工核验）" not in section
+    _toc, section = SC._review_section(
+        SC.collect_file_pairs([deferred, reviewed], keep_tiers=("review", "weak")),
+        None, "2024/new")
+    # 升入高置信同源后，该函数不再留作复核难例；复核节为空。
+    assert "模型认为借鉴" not in section
+    assert "当前没有需要人工继续处理的模型复核难例" in section
 
 
 def test_weak_deferred_secondary_is_removed_after_primary_is_cleared():
@@ -1172,6 +1183,94 @@ def test_unknown_functions_do_not_collapse_into_one_other_cluster():
     assert len(clusters) == 2
     assert len({cluster["feature_key"] for cluster in clusters}) == 2
     assert all(cluster["function_count"] == 1 for cluster in clusters)
+
+
+def test_same_kind_fs_functions_merge_into_shared_cluster():
+    # 同一文件系统里同一种类的目录/文件操作函数必须并入同一功能簇：
+    # read_dir（tmp.rs 与 dir.rs）→ 目录操作；lookup → 目录查找；metadata → 文件元数据。
+    suspects = [
+        _sc_suspect("kernel/src/pseudofs/tmp.rs", "read_dir", "2024/ref",
+                    "tmp.rs", "read_dir", "confirmed", .98,
+                    module="fs", exact=20),
+        _sc_suspect("kernel/src/pseudofs/dir.rs", "read_dir", "2024/ref",
+                    "dir.rs", "read_dir", "confirmed", .97,
+                    module="fs", exact=18),
+        _sc_suspect("kernel/src/pseudofs/dir.rs", "lookup", "2024/ref",
+                    "dir.rs", "lookup", "confirmed", .96,
+                    module="fs", exact=16),
+        _sc_suspect("kernel/src/pseudofs/tmp.rs", "metadata", "2024/ref",
+                    "tmp.rs", "metadata", "confirmed", .95,
+                    module="fs", exact=14),
+    ]
+
+    clusters = SC.build_similarity_clusters(SC.collect_file_pairs(suspects))
+    by_feature = {c["feature_key"]: c for c in clusters}
+
+    assert by_feature["目录操作"]["function_count"] == 2
+    assert {g["query_func"] for g in by_feature["目录操作"]["groups"]} == {"read_dir"}
+    assert by_feature["目录查找"]["function_count"] == 1
+    assert by_feature["文件元数据"]["function_count"] == 1
+
+
+def test_fs_op_keywords_do_not_capture_other_modules():
+    # 目录/文件操作关键词只对 fs（及未识别）模块生效；mm 模块里恰含 create 的函数
+    # 不能被误并入「目录与文件创建」功能簇，必须继续落到 mm 兜底。
+    suspects = [
+        _sc_suspect("kernel/src/mm/alloc.rs", "create_buffer", "2024/ref",
+                    "alloc.rs", "create_buffer", "confirmed", .98,
+                    module="mm", exact=20),
+    ]
+
+    clusters = SC.build_similarity_clusters(SC.collect_file_pairs(suspects))
+
+    assert len(clusters) == 1
+    assert clusters[0]["feature_key"] == "mm"
+    assert clusters[0]["feature"] == "内存管理"
+
+
+def test_group_carries_baseline_lineage_from_suspect_evidence():
+    # 教学 OS 溯源：目标函数的 baseline_vector_query（与教学/公共基线最相似的命中）须随
+    # collect_file_pairs 带到函数组上，供聚类与报告标注使用。
+    suspect = _sc_suspect("kernel/src/pseudofs/dir.rs", "read_dir", "2024/ref",
+                          "dir.rs", "read_dir", "confirmed", .98,
+                          module="fs", exact=20)
+    suspect["evidence"]["baseline_vector_query"] = {"function_id": 12345, "similarity": 0.914}
+
+    groups = SC.collect_file_pairs([suspect])
+
+    assert groups[0]["baseline_lineage"] == {"function_id": 12345, "similarity": 0.914}
+
+
+def test_cluster_aggregates_strongest_baseline_lineage_and_renders(monkeypatch):
+    suspects = [
+        _sc_suspect("kernel/src/pseudofs/tmp.rs", "read_dir", "2024/ref",
+                    "tmp.rs", "read_dir", "confirmed", .98,
+                    module="fs", exact=20),
+        _sc_suspect("kernel/src/pseudofs/dir.rs", "read_dir", "2024/ref",
+                    "dir.rs", "read_dir", "confirmed", .97,
+                    module="fs", exact=18),
+    ]
+    suspects[0]["evidence"]["baseline_vector_query"] = {"function_id": 101, "similarity": 0.85}
+    suspects[1]["evidence"]["baseline_vector_query"] = {"function_id": 102, "similarity": 0.90}
+
+    clusters = SC.build_similarity_clusters(SC.collect_file_pairs(suspects))
+
+    assert len(clusters) == 1
+    assert clusters[0]["baseline_lineage"] == {"function_id": 102, "similarity": 0.90}
+
+    monkeypatch.setattr(
+        SC, "load_baseline_os_registry",
+        lambda db_path=None: {102: ("ArceOS", "modules/axfs/src/fs/fatfs.rs", "read_dir")},
+    )
+    lineage_html = SC._cluster_lineage_html(clusters[0])
+    assert "教学 OS 溯源" in lineage_html
+    assert "ArceOS" in lineage_html
+    assert "fatfs.rs:read_dir" in lineage_html
+
+
+def test_cluster_lineage_html_empty_without_baseline_hit():
+    assert SC._cluster_lineage_html({"baseline_lineage": None}) == ""
+    assert SC._cluster_lineage_html({"baseline_lineage": {"similarity": 0.8}}) == ""
 
 
 def test_every_function_cluster_renders_its_own_semantic_explanation():
