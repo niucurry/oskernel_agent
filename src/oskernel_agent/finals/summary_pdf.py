@@ -53,8 +53,8 @@ _INTERNAL_HARDCODE_METRICS = {
     "hardcode_cleared",
 }
 _UNVERIFIED_TEST_SUCCESS_RE = re.compile(
-    r"(?:LTP|\u6d4b\u8bd5\u5957\u4ef6|\u6d4b\u8bd5|\u7528\u4f8b).{0,18}(?:\u5168\u91cf|\u5168\u90e8)?.{0,6}(?:\u901a\u8fc7|\u8dd1\u901a|\u6210\u529f)"
-    r"|(?:\u901a\u8fc7|\u8dd1\u901a).{0,18}(?:LTP|\u6d4b\u8bd5\u5957\u4ef6|\u6d4b\u8bd5|\u7528\u4f8b)",
+    r"(?:LTP|\u6d4b\u8bd5\u5957\u4ef6|\u6d4b\u8bd5|\u7528\u4f8b).{0,18}(?:\u5168\u91cf|\u5168\u90e8)?.{0,6}(?:\u901a\u8fc7|\u8dd1\u901a|\u6210\u529f)(?!\u7387)"
+    r"|(?:\u901a\u8fc7|\u8dd1\u901a)(?!\u7387).{0,18}(?:LTP|\u6d4b\u8bd5\u5957\u4ef6|\u6d4b\u8bd5|\u7528\u4f8b)",
     re.I,
 )
 _ENVIRONMENT_BUILD_FAILURE_RE = re.compile(
@@ -375,17 +375,27 @@ _SUMMARY_IDENTIFIER_ALLOWLIST = {
 }
 
 
-def _unattributed_issue_identifiers(issue: AISummaryIssue, finding: Finding) -> list[str]:
-    """发现摘要问题中没有出现在其所引用 finding 的代码标识符。"""
+def _source_report_corpus(source: str, digests: dict[str, ReportDigest]) -> str:
+    """整份来源报告的可核对语料：全部 finding 及其证据。
+
+    跨 finding 引用同一真实标识符是合法合并（如同一根因的构建失败常拆成多条
+    finding，一条给错误输出、一条给根因），护栏只应拦截在整份报告里都不存在的
+    幻觉标识符。
+    """
+    digest = digests[source]
+    parts: list[str] = []
+    for finding in digest.findings:
+        parts.append(finding.title)
+        parts.append(finding.detail)
+        for evidence in finding.evidence:
+            parts.append(f"{evidence.path} {evidence.excerpt}")
+    return " ".join(parts)
+
+
+def _unattributed_issue_identifiers(issue: AISummaryIssue, corpus: str) -> list[str]:
+    """发现摘要问题中没有出现在来源报告语料的代码标识符。"""
     generated = f"{issue.title} {issue.judgment}"
-    source = " ".join([
-        finding.title,
-        finding.detail,
-        *(
-            f"{evidence.path} {evidence.excerpt}"
-            for evidence in finding.evidence
-        ),
-    ]).casefold()
+    source = corpus.casefold()
     identifiers = set(re.findall(
         r"(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]{3,}(?![A-Za-z0-9_])",
         generated,
@@ -424,6 +434,10 @@ def _validate_ai_summary_result(
             raise SummaryPdfError(f"摘要智能体的 {section.source} 结论置信度高于来源报告")
 
     refs = {(issue.source, issue.source_finding) for issue in summary.issues}
+    source_corpora = {
+        source: _source_report_corpus(source, digests)
+        for source in _SUMMARY_SOURCES
+    }
     for issue in summary.issues:
         findings = digests[issue.source].findings
         if issue.source_finding > len(findings):
@@ -442,7 +456,7 @@ def _validate_ai_summary_result(
             )
         if not _has_distinct_detail(issue.title, issue.judgment):
             raise SummaryPdfError("摘要问题的标题与判断重复")
-        unattributed = _unattributed_issue_identifiers(issue, source_finding)
+        unattributed = _unattributed_issue_identifiers(issue, source_corpora[issue.source])
         if unattributed:
             raise SummaryPdfError(
                 "摘要问题引入了来源 finding 中不存在的代码标识符："

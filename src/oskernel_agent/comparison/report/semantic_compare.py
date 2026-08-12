@@ -434,6 +434,8 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None, *,
       模型复核难例(review)：review/weak 且模型返回有效“疑似/规则保留”（“借鉴”已升入 confirmed）；
       复核未完成：模型调用/格式校验失败，或已入队但未配置模型；绝不计入“模型仍存疑”；
       暂未检出(original)：recall 中（非库）完全未进入嫌疑清单的函数。
+    supplemental_source 候选已随该目标函数在已复核来源的结论处理，不占任何档位，
+    只把目标键留在“已命中”集合里避免误归为暂未检出。
     库复用 / 公共样板 / baseline 既不算借鉴也不算暂未检出，**不计入 total**（在各自小节单列），
     所以 total = 同源 + 存疑 + 复核未完成 + 暂未检出，占比相加为 100%。
 
@@ -462,6 +464,10 @@ def compute_submodule_stats(suspects: list[dict], recall: dict | None = None, *,
             category = "review"
         elif s.get("review_verdict") == "复核失败":
             category = "review_failed"
+        elif s.get("model_review_selection") == "supplemental_source":
+            # 补充来源候选已随该目标函数在已复核来源的结论处理（见 _review_section），
+            # 不构成独立的复核未完成项，也不占用模块分母。
+            continue
         else:
             category = "review_pending"
         r = category_rank[category]
@@ -2866,6 +2872,10 @@ def _historical_source_metrics(
             confirmed_keys[repo].add(key)
         elif suspect.get("review_verdict") in ("借鉴", "疑似", "规则保留"):
             review_keys[repo].add(key)
+        elif suspect.get("model_review_selection") == "supplemental_source":
+            # 补充来源候选已随该目标函数在已复核来源的结论处理，不构成该仓库的
+            # 独立复核未完成项（与 _review_section 口径一致）。
+            continue
         else:
             review_incomplete_keys[repo].add(key)
 
@@ -3040,7 +3050,6 @@ def _historical_sources_table(
             f'<td><strong>{_ref_repo_anchor(linker, repo)}</strong> {primary}</td>'
             f'<td class="text-right font-mono">{int(item.get("functions") or 0)}</td>'
             f'<td class="text-right font-mono">{int(item.get("review_functions") or 0)}</td>'
-            f'<td class="text-right font-mono">{int(item.get("review_incomplete_functions") or 0)}</td>'
             f'<td class="text-right font-mono">{int(item.get("effective_loc") or 0)}</td>'
             f'<td class="text-right font-mono">{int(item.get("exact_files") or 0)}</td>'
             f'<td class="text-right font-mono">{int(item.get("files") or 0)}</td>'
@@ -3052,7 +3061,6 @@ def _historical_sources_table(
         '<div class="overflow-x-auto source-metrics-table"><table>'
         '<thead><tr><th>排名</th><th>历史匹配作品</th>'
         '<th class="text-right">高置信函数</th><th class="text-right">复核难例</th>'
-        '<th class="text-right">复核未完成</th>'
         '<th class="text-right">有效相似行</th><th class="text-right">整文件相同</th>'
         '<th class="text-right">涉及文件</th><th class="text-right">涉及模块</th>'
         '<th class="text-right">多仓重复函数</th>'
@@ -5295,7 +5303,12 @@ def _validate_evidence_anchors(
         # 模型从紧凑化代码抄锚点时可能把多行表达式折成一行、带入行回绕空白；折叠空白
         # 后仍能定位即视为有效，避免一次空白差异直接落成「复核失败」。
         folded = _normalize_ws(anchor)
-        return len(folded) >= 2 and folded in _normalize_ws(code)
+        if len(folded) >= 2 and folded in _normalize_ws(code):
+            return True
+        # 方法链常被格式化器折行（process<换行>.threads()），空白折叠会插进一个空格
+        # 仍对不上；再去掉全部空白匹配一次，避免跨行表达式被误判为「无法定位」。
+        compact = re.sub(r"\s+", "", anchor)
+        return len(compact) >= 2 and compact in re.sub(r"\s+", "", code)
 
     clean_anchors: list[str] = []
     for raw in raw_anchors:
@@ -6568,7 +6581,7 @@ def _finals_history_overview(
     </div>
     <div><div class="chart-title">最相似历史作品（{shown} 个，按统一排名；不代表直接来源）</div>
       {source_chart}
-      <p class="text-xs text-slate-500 mt-1">柱图按唯一目标函数展示高置信证据、复核难例与复核未完成项；
+      <p class="text-xs text-slate-500 mt-1">柱图按唯一目标函数展示高置信证据与模型复核难例；
       有效相似行、整文件证据和覆盖范围以同一排名表为准。</p>
     </div>
   </div>

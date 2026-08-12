@@ -2242,6 +2242,29 @@ def test_evidence_anchor_whitespace_folding_accepts_wrapped_anchor():
     assert clean == [wrapped]
 
 
+def test_evidence_anchor_cross_line_method_chain_matches_after_stripping_ws():
+    # 格式化器把 process.threads() 折行成 process<换行>.threads()；模型抄锚点时
+    # 合并成 process.threads()。空白折叠会插进空格仍对不上，去掉全部空白后才命中。
+    code = ("fn child_names() {\n"
+            "    let Some(process) = self.process.upgrade() else { return; };\n"
+            "    process\n        .threads()\n        .into_iter()\n"
+            "        .map(|tid| tid.to_string().into())\n"
+            "}")
+    anchor = "process.threads()"
+    clean = SC._validate_evidence_anchors([anchor], code, code, min_count=1)
+    assert clean == [anchor]
+    # 共享两侧校验（借鉴/疑似路径）也应通过
+    clean2 = SC._validate_evidence_anchors(
+        [anchor, "self.process.upgrade()"], code, code, min_count=2, require_shared=True)
+    assert anchor in clean2
+    # 纯幻觉锚点仍被拒绝，不会因去空白兜底被放行
+    try:
+        SC._validate_evidence_anchors(["bogus_nonexistent_fn()"], code, code, min_count=1)
+        raise AssertionError("幻觉锚点不应通过校验")
+    except ValueError:
+        pass
+
+
 def test_request_review_json_retries_transient_api_error(monkeypatch):
     monkeypatch.setattr(SC.time, "sleep", lambda _s: None)
     payload = ('{"responsibility":"一致","responsibility_reason":"双方都管理同一类定时器，'
