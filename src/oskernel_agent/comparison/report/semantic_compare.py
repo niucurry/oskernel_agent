@@ -21,6 +21,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 from collections import Counter, defaultdict
 from functools import lru_cache
 from pathlib import Path
@@ -1472,6 +1473,8 @@ def _candidate_from_suspect(s: dict) -> dict:
     return {
         "tier": tier,
         "via_review": s.get("confirm_via") == "review_llm",
+        "via_hard_evidence": s.get("confirm_via") == "hard_evidence_override",
+        "via_comment_identity": s.get("confirm_via") == "comment_identity",
         "sim": _pair_sim(s),
         "line_similarity": _raw_line_sim(s),
         "clone_type": _clone_kind(s),
@@ -1597,6 +1600,12 @@ def collect_file_pairs(
         # 该 confirmed 是否「仅由模型复核认定」（无逐行铁证候选）——供清单加标记区分
         conf_cands = [c for c in cands if c["tier"] == "confirmed"]
         g["via_review"] = bool(conf_cands) and all(c.get("via_review") for c in conf_cands)
+        # 是否「硬证据覆盖模型阴性」升档（模型判非借鉴、规则覆盖）——供清单加标记区分
+        g["via_hard_evidence"] = bool(conf_cands) and all(
+            c.get("via_hard_evidence") for c in conf_cands)
+        # 是否「注释逐字一致」升档（两侧函数体存在逐字相同的非平凡注释）——供清单加标记区分
+        g["via_comment_identity"] = bool(conf_cands) and all(
+            c.get("via_comment_identity") for c in conf_cands)
         # 先按最终档位，再优先已经完成的候选复核，最后按直接证据强度排序。否则一个
         # deferred_secondary 候选可能排在已复核候选之前，把整个目标函数误报成“未复核”。
         cands.sort(key=lambda x: (
@@ -1622,6 +1631,10 @@ def collect_file_pairs(
                           if candidate["tier"] == "confirmed"]
             g["via_review"] = bool(conf_cands) and all(
                 candidate.get("via_review") for candidate in conf_cands)
+            g["via_hard_evidence"] = bool(conf_cands) and all(
+                candidate.get("via_hard_evidence") for candidate in conf_cands)
+            g["via_comment_identity"] = bool(conf_cands) and all(
+                candidate.get("via_comment_identity") for candidate in conf_cands)
             best = strong[0]
             g["overall_sim"] = best["sim"]
             g["clone_type"] = best["clone_type"]
@@ -1891,9 +1904,11 @@ def _secondary_candidate_has_independent_strong_evidence(candidate: dict) -> boo
 
 
 def _target_has_active_review_result(suspect: dict) -> bool:
-    if suspect.get("tier") == "confirmed" and suspect.get("confirm_via") == "review_llm":
-        # 模型判定「借鉴」后升入高置信同源的目标，其同目标次级候选仍按已激活目标收口，
-        # 避免形成独立的“未复核”遗留。
+    if (suspect.get("tier") == "confirmed"
+            and suspect.get("confirm_via") in (
+                "review_llm", "hard_evidence_override", "comment_identity")):
+        # 模型判定「借鉴」、硬证据覆盖或注释逐字一致后升入高置信同源的目标，其同目标次级
+        # 候选仍按已激活目标收口，避免形成独立的“未复核”遗留。
         return True
     if suspect.get("tier") not in ("review", "weak"):
         return False
@@ -2002,6 +2017,64 @@ def finalize_secondary_review_candidates(suspects: list[dict]) -> dict[str, int]
             suspect.pop("model_review_note", None)
             dismissed += 1
     return {"supplemental": supplemental, "dismissed": dismissed}
+
+
+def _promote_strong_report_pairs_from_target_verdict(suspects: list[dict]) -> int:
+    """把「同目标函数已有他源复核判借鉴」的报告侧补充候选收进高置信同源。
+
+    复核结论按 (目标函数, 候选内容) 键回填（见 `_apply_review_verdicts` 的
+    `content_result_map`），因此最相似仓库里同一函数的候选不会自动继承他源结论，
+    会被 `finalize_secondary_review_candidates` 收口为 `supplemental_source`，再在
+    复核节残留成「复核未完成」误导评委。本函数在收口之后补齐：同目标已有模型/硬证据/
+    注释一致升档结论时，若补充候选与已复核代表代码等价（归一化空白后相同），或自身逐行/
+    短侧覆盖达 `_hard_evidence_overrides_model_negative` 门槛，则沿用该结论升档。
+    结论沿用只发生在同目标、同函数身份的候选之间，不跨函数传播。
+    """
+    confirmed_by_target: dict[tuple, dict] = {}
+    for s in suspects:
+        if (s.get("tier") == "confirmed"
+                and s.get("confirm_via") in (
+                    "review_llm", "hard_evidence_override", "comment_identity")):
+            confirmed_by_target.setdefault(_suspect_review_target_key(s), s)
+
+    def _code_eq(a: str, b: str) -> bool:
+        return "".join(str(a or "").split()) == "".join(str(b or "").split())
+
+    promoted = 0
+    for s in suspects:
+        if s.get("tier") not in ("review", "weak"):
+            continue
+        if s.get("model_review_selection") not in (
+                "deferred_secondary", "supplemental_source"):
+            continue
+        if s.get("review_verdict", "未复核") != "未复核":
+            continue
+        representative = confirmed_by_target.get(_suspect_review_target_key(s))
+        if representative is None:
+            continue
+        ref_code = ((s.get("candidate_func") or {}).get("raw_code") or "")
+        rep_code = ((representative.get("candidate_func") or {}).get("raw_code") or "")
+        ref_eq = _code_eq(ref_code, rep_code)
+        if not ref_eq:
+            # 无逐行等价时，该候选自身必须达到硬证据门槛才沿用（用代表的责任一致结论门控）。
+            resp = str(representative.get("review_responsibility") or "")
+            if resp not in ("一致", "部分一致"):
+                resp = "一致"
+            if not _hard_evidence_overrides_model_negative(s, resp):
+                continue
+        rep_repo = str((representative.get("candidate_func") or {}).get("repo_id") or "")
+        basis_note = "与已复核代表代码一致" if ref_eq else "自身逐行/短侧覆盖达硬证据门槛"
+        s["tier"] = "confirmed"
+        s["confirm_via"] = representative.get("confirm_via", "review_llm")
+        s["model_supported"] = bool(representative.get("model_supported"))
+        s["review_verdict"] = "借鉴"
+        s["review_reason"] = (
+            f"同目标函数已在 {rep_repo} 来源复核判「借鉴」；本条候选{basis_note}，"
+            "结论沿用，升入高置信同源。"
+        )
+        s.pop("model_review_note", None)
+        promoted += 1
+    return promoted
 
 
 def _cache_key(*parts: str) -> str:
@@ -3610,6 +3683,14 @@ def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, ac
             + ('<span class="ml-1 px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 '
                'whitespace-nowrap" title="相似度中等、经 AI 模型复核认定为借鉴（非逐行铁证）">'
                '模型复核认定</span>' if g.get("via_review") else "")
+            + ('<span class="ml-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 '
+               'whitespace-nowrap" title="模型判非借鉴，但逐行相似度与短侧覆盖达硬证据门槛，'
+               '规则覆盖模型结论升入高置信同源">硬证据覆盖</span>'
+               if g.get("via_hard_evidence") else "")
+            + ('<span class="ml-1 px-1.5 py-0.5 rounded bg-teal-50 text-teal-700 '
+               'whitespace-nowrap" title="两侧函数体存在逐字相同的非平凡注释，自由文本完全'
+               '相同只能来自抄写，规则判定同源升入高置信同源">注释逐字一致</span>'
+               if g.get("via_comment_identity") else "")
             + (f'<span class="ml-1 px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 '
                f'whitespace-nowrap" title="多仓共享只作背景，不证明传播方向或直接来源">'
                f'跨 {int(g.get("widespread_match_repos") or 0)} 仓出现</span>'
@@ -3714,7 +3795,7 @@ def _chapter_heading(index: str, title: str, description: str) -> str:
 
 
 _FEATURE_LABELS = {
-    "ext4": "Ext4 文件系统", "fat32": "FAT32 文件系统", "vfs": "虚拟文件系统",
+    "ext4": "Ext4 文件系统", "fat32": "FAT32 文件系统", "vfs": "文件系统",
     "inode": "Inode 与目录项", "page": "页与页缓存", "frame": "物理页帧",
     "path": "路径解析", "statfs": "文件系统统计", "signal": "信号机制",
     "ipc": "进程间通信", "pipe": "管道通信", "futex": "Futex 同步",
@@ -3797,6 +3878,7 @@ _FEATURE_CATEGORY = {
     "fstat": "文件元数据", "stat": "文件元数据",
     "truncate": "文件截断", "ftruncate": "文件截断",
     "pread": "文件读写", "pwrite": "文件读写", "read": "文件读写", "write": "文件读写",
+    "fs": "文件系统", "vfs": "文件系统",
 }
 _MODULE_PRIORITY = {
     "sched": 1.0, "mm": 1.0, "fs": 1.0, "trap": .95, "syscall": .95,
@@ -5097,7 +5179,7 @@ def _upstream_baseline_section(ub_funcs: list[dict], linker, query_repo_id: str)
     return _toc_link(sid, "上游基线 / ABI 受限代码", str(len(ub_funcs)), "excluded"), section
 
 
-_REVIEW_PROMPT_VERSION = "v8-json-mode-no-ellipsis"  # 改 prompt 即 bump，使旧缓存自动失效
+_REVIEW_PROMPT_VERSION = "v10-comment-identity"  # 改 prompt 即 bump，使旧缓存自动失效
 
 _REVIEW_ROLE_SYSTEM = """你是代码函数职责分析助手。只判断给定两个函数的职责是否一致，不判断代码借鉴。
 职责必须综合输入、输出、主要副作用、核心操作对象和调用契约，不能只看函数名、类型名或局部语句。
@@ -5119,8 +5201,14 @@ _REVIEW_SIM_SYSTEM = """你是跨语言代码同源复核助手。职责分析�
 - “职责相同”只是必要条件，不是借鉴证据。只有共享了具有选择空间的实现细节，才能判“借鉴”或“疑似”。
 - 正向证据至少覆盖以下两类：非平凡控制流/步骤顺序、数据变换或状态迁移、异常与边界处理、
   不寻常的常量/字符串/命名组合、稳定的一一改名关系。仅签名、括号、字段初始化外壳或常见 API 调用不算。
-- 语言惯例、接口实现、协议/文件格式/ABI 固定字段、标准算法骨架、生成代码、第三方库胶水和框架模板，
-  即使逐行相近，也不能单独证明借鉴。
+- 语言惯例、接口实现、协议/文件格式/ABI 固定字段、标准算法骨架、生成代码、第三方库胶水和框架模板
+  只能在你指出双方实现存在具体分歧（控制流、数据结构、并发/异步模型、错误处理或副作用顺序不同）时
+  作为“非借鉴”理由；不得仅凭“这属于惯用法”放逐行相同的代码。
+- 若双方近乎逐行一致且共享非平凡的步骤顺序、命名组合与分支结构，上述理由只能解释“接口为何长这样”，
+  不能解释“为何细节都一致”；此时应判“借鉴”或“疑似”，除非你能指出实质差异。
+- 若两侧函数体存在逐字相同的非平凡注释（TODO/FIXME/NOTE 备忘、源码引用 URL、英文说明句等自由文本），
+  这是非常强的抄写信号——注释不受语言惯例、API 或协议约束，独立实现几乎不可能逐字写出相同的长注释。
+  此时即使代码有细节差异，也应判“借鉴”（或至少“疑似”），并在 reason 中引用该相同注释原文。
 - 若双方在核心数据结构、算法、并发/异步模型、错误处理或副作用顺序上有实质差异，应判“非借鉴”。
 - 只匹配到函数的一小段时，以实质代码覆盖为准，不把公共前后缀外推成整个函数同源。
 - 证据能支持共同机制但不足以排除公共约束时判“疑似”；没有共同实质机制时判“非借鉴”。
@@ -5194,12 +5282,20 @@ def _validate_evidence_anchors(
     if not isinstance(raw_anchors, list) or not min_count <= len(raw_anchors) <= 4:
         raise ValueError(f"证据锚点必须为 {min_count}～4 项数组")
 
+    def _normalize_ws(text: str) -> str:
+        return re.sub(r"\s+", " ", text).strip()
+
     def _contains(code: str, anchor: str) -> bool:
         # 标识符锚点必须按完整 token 命中，不能把 ``allocate`` 在
         # ``deallocate_page`` 中的子串巧合当作共同证据；表达式仍按原文定位。
         if re.fullmatch(r"[A-Za-z_]\w*", anchor):
             return re.search(rf"(?<!\w){re.escape(anchor)}(?!\w)", code) is not None
-        return anchor in code
+        if anchor in code:
+            return True
+        # 模型从紧凑化代码抄锚点时可能把多行表达式折成一行、带入行回绕空白；折叠空白
+        # 后仍能定位即视为有效，避免一次空白差异直接落成「复核失败」。
+        folded = _normalize_ws(anchor)
+        return len(folded) >= 2 and folded in _normalize_ws(code)
 
     clean_anchors: list[str] = []
     for raw in raw_anchors:
@@ -5357,14 +5453,27 @@ def _request_review_json(
                     "只输出一个 JSON 对象，不要解释、不要 Markdown。"
                 )},
             ])
-        response = client.chat.completions.create(
-            model=model,
-            messages=current_messages,
-            response_format={"type": "json_object"},
-            temperature=0.0,
-            max_tokens=max_tokens,
-            timeout=timeout,
-        )
+        # 网络/限流/5xx 等瞬时异常先带短退避重试一次，避免单次抖动直接落成「复核失败」；
+        # 持久故障仍会进入下方格式自纠与 run_review_judgment 的独立重试轮次。
+        response = None
+        last_api_error: Exception | None = None
+        for api_attempt in range(2):
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=current_messages,
+                    response_format={"type": "json_object"},
+                    temperature=0.0,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                )
+                break
+            except Exception as exc:  # noqa: BLE001 — 调用侧统一转成复核失败原因
+                last_api_error = exc
+                if api_attempt == 0:
+                    time.sleep(1.5)
+        if response is None:
+            raise last_api_error or RuntimeError("模型调用未返回")
         previous = (response.choices[0].message.content or "").strip()
         try:
             return parser(previous)
@@ -5415,6 +5524,13 @@ def _review_one(client, model: str, g: dict, timeout: int) -> dict:
                 json.dumps(result, ensure_ascii=False), query_code, ref_code)
 
         stage = "代码同源复核"
+        comment_overlap = _verbatim_comment_overlap(query_code, ref_code)
+        comment_note = (
+            (f"两侧函数体存在逐字相同的非平凡注释："
+             f"{'；'.join(comment_overlap[:3])}。"
+             f"注释是自由文本，不受语言/API 约束，逐字相同只能来自抄写。")
+            if comment_overlap else "两侧函数体无逐字相同的非平凡注释。"
+        )
         verdict = _request_review_json(
             client, model,
             [{"role": "system", "content": _REVIEW_SIM_SYSTEM},
@@ -5423,8 +5539,11 @@ def _review_one(client, model: str, g: dict, timeout: int) -> dict:
                  + f"\n\n职责阶段结论：{role['responsibility']}；"
                           + role["responsibility_reason"]
                           + f"\n原始逐行相似度 {cand.get('line_similarity','')}；"
+                          + f"短侧覆盖率 {cand.get('match_coverage','')}；"
+                          + f"匹配行数 {cand.get('matched_lines','')}；"
                           + f"候选身份关系 {cand.get('function_identity_relation','未判定')}；"
                           + f"匹配证据：{_clone_summary(g)}。"
+                          + f"\n{comment_note}"
                  + "\n请进行代码同源复核。") }],
             timeout, 4096,
             lambda text: _parse_verdict_payload(text, query_code, ref_code),
@@ -5627,6 +5746,195 @@ def run_review_judgment(review_pairs: list[dict], work_dir: Path,
     return resolved
 
 
+_COMMENT_PREFIX_RE = re.compile(
+    r"^(?:(?:TODO|FIXME|NOTE|XXX|BUG|HACK|TEMP|WIP|Reference|Source|See|Link)"
+    r"\s*:\s*)?",
+    re.I,
+)
+
+
+def _extract_rust_comments(code: str) -> list[str]:
+    """粗略抽取 Rust 代码中的注释文本（跳过字符串/字符/原始字符串字面量）。
+
+    支持 `//`、`///`、`//!` 行注释与 `/* ... */`（含嵌套）块注释。命中字符串里的
+    `//`/`/*` 属于解析瑕疵，但归一化后几乎总会被非平凡过滤挡掉；真正的精确过滤由
+    `_verbatim_comment_overlap` 的长度与样板剔除负责。
+    """
+    out: list[str] = []
+    i, n = 0, len(code)
+    while i < n:
+        c = code[i]
+        if c == "/" and i + 1 < n and code[i + 1] == "/":
+            j = code.find("\n", i)
+            if j == -1:
+                j = n
+            out.append(code[i:j])
+            i = j
+        elif c == "/" and i + 1 < n and code[i + 1] == "*":
+            depth = 1
+            j = i + 2
+            while j < n and depth:
+                if code[j:j + 2] == "/*":
+                    depth += 1
+                    j += 2
+                elif code[j:j + 2] == "*/":
+                    depth -= 1
+                    j += 2
+                else:
+                    j += 1
+            out.append(code[i:j])
+            i = j
+        elif c == '"':
+            # 原始字符串 r"…" / r#"…"# / br"…"：引号前是 r 或 br 前缀（且非标识符结尾）
+            k = i - 1
+            hashes = 0
+            while k >= 0 and code[k] == "#":
+                hashes += 1
+                k -= 1
+            is_raw = k >= 0 and code[k] == "r"
+            if is_raw and k - 1 >= 0 and code[k - 1] == "b":
+                k -= 1
+            if is_raw and k > 0 and (code[k - 1].isalnum() or code[k - 1] == "_"):
+                is_raw = False
+            if is_raw:
+                j = i + 1
+                while j < n:
+                    if code[j] == '"':
+                        e = j + 1
+                        ok = True
+                        for _ in range(hashes):
+                            if e < n and code[e] == "#":
+                                e += 1
+                            else:
+                                ok = False
+                                break
+                        if ok:
+                            break
+                    j += 1
+                i = (j + 1) if j < n else n
+            else:
+                j = i + 1
+                while j < n:
+                    if code[j] == "\\":
+                        j += 2
+                        continue
+                    if code[j] == '"':
+                        break
+                    j += 1
+                i = (j + 1) if j < n else n
+        elif c == "'":
+            # 字符字面量（'x' / '\x'）或生命周期（'a）
+            if (i + 2 < n and code[i + 1] != "\\" and code[i + 2] == "'"):
+                i += 3
+            elif (i + 3 < n and code[i + 1] == "\\" and code[i + 3] == "'"):
+                i += 4
+            elif i + 1 < n and code[i + 1].isalpha():
+                j = i + 2
+                while j < n and (code[j].isalnum() or code[j] == "_"):
+                    j += 1
+                i = j
+            else:
+                i += 1
+        else:
+            i += 1
+    return out
+
+
+def _normalize_comment_text(raw: str) -> str:
+    """归一化注释：去注释标记、行首 `*` 装饰、行尾 `*/` 与空白折叠。"""
+    lines = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if line.startswith("///"):
+            line = line[3:].strip()
+        elif line.startswith("//!"):
+            line = line[3:].strip()
+        elif line.startswith("//"):
+            line = line[2:].strip()
+        elif line.startswith("/*"):
+            line = line[2:].strip()
+        if line.endswith("*/"):
+            line = line[:-2].strip()
+        if line.startswith("*"):
+            line = line.lstrip("*").strip()
+        if line:
+            lines.append(line)
+    return " ".join(lines)
+
+
+def _comment_is_meaningful(text: str) -> bool:
+    """非平凡注释：去掉 TODO:/Reference: 等通用前缀后仍足够长，且非版权样板。"""
+    t = _COMMENT_PREFIX_RE.sub("", text, count=1).strip()
+    if len(t) < 20:
+        return False
+    if re.match(r"(?i)^(?:SPDX-|Copyright\b|Licensed\b|License\b|All rights reserved)", t):
+        return False
+    return True
+
+
+def _verbatim_comment_overlap(qcode: str, ccode: str) -> list[str]:
+    """两侧代码逐字相同的非平凡注释（归一化后比较），按长度排序。"""
+    def meaningful_comments(code: str) -> set[str]:
+        seen: set[str] = set()
+        for raw in _extract_rust_comments(code or ""):
+            t = _normalize_comment_text(raw)
+            if _comment_is_meaningful(t):
+                seen.add(t)
+        return seen
+
+    qs = meaningful_comments(qcode)
+    cs = meaningful_comments(ccode)
+    return sorted(qs & cs, key=len, reverse=True)
+
+
+def _comment_identity_overrides_model(suspect: dict) -> bool:
+    """两侧函数体存在逐字相同的非平凡注释时，规则判定同源。
+
+    注释是自由文本，不受语言惯例、API 签名、协议/ABI 字段或 POSIX 语义约束；不同实现者
+    独立书写时，逐字相同的长句（TODO/FIXME 备忘、源码引用、英文说明）几乎只能来自直接抄写。
+    该信号独立于逐行相似度与模型判断，命中即覆盖模型结论升入高置信同源。
+    """
+    if suspect.get("tier") not in ("review", "weak"):
+        return False
+    qcode = ((suspect.get("query_func") or {}).get("raw_code") or "")
+    ccode = ((suspect.get("candidate_func") or {}).get("raw_code") or "")
+    if not (qcode or "").strip() or not (ccode or "").strip():
+        return False
+    return bool(_verbatim_comment_overlap(qcode, ccode))
+
+
+def _hard_evidence_overrides_model_negative(suspect: dict, responsibility: str) -> bool:
+    """模型阴性不足以覆盖近同代码铁证时，直接升入高置信同源。
+
+    门槛比 `_model_negative_requires_human_review` 更硬：不仅要求具体函数身份对应、
+    职责不冲突，还要求逐行相似度与短侧覆盖同时达到近同水平。命中说明模型大概率拿
+    「语言惯例 / 标准算法骨架」一类理由放过了事实上近乎逐行一致的代码，此时不让
+    概率性意见清除确定性证据，升档供评委直接核查。归一化指纹单独命中不足以上升
+    （样板代码的指纹也会相似），必须配足量逐行证据。规则不依赖仓库、路径、年份或
+    具体函数名。
+    """
+    if suspect.get("tier") not in ("review", "weak"):
+        return False
+    if responsibility not in ("一致", "部分一致"):
+        return False
+    ev = suspect.get("evidence") or {}
+    relation = str(ev.get("function_identity_relation") or "")
+    if relation not in ("exact_counterpart", "same_name_code_clone"):
+        return False
+    matched = int(ev.get("exact_match_lines") or 0) + int(
+        ev.get("renamed_match_lines") or 0
+    )
+    qcode = ((suspect.get("query_func") or {}).get("raw_code") or "")
+    ccode = ((suspect.get("candidate_func") or {}).get("raw_code") or "")
+    shorter_lines = min(_nonblank_line_count(qcode), _nonblank_line_count(ccode))
+    shorter_coverage = min(1.0, matched / max(1, shorter_lines))
+    line_similarity = _raw_line_sim(suspect)
+    return bool(
+        (line_similarity >= 0.85 and shorter_coverage >= 0.75 and matched >= 8)
+        or (line_similarity >= 0.70 and shorter_coverage >= 0.85 and matched >= 10)
+    )
+
+
 def _model_negative_requires_human_review(suspect: dict, responsibility: str) -> bool:
     """模型阴性是否不足以覆盖强直接代码证据。
 
@@ -5658,11 +5966,18 @@ def _apply_review_verdicts(suspects: list[dict], groups: list[dict]) -> tuple[in
     """据 LLM 复核结论标注档位。
       - review/weak：模型判「借鉴」→ 升入 confirmed（标记 confirm_via=review_llm，
         清单中带「模型复核认定」标记，进入「高置信同源功能簇」参与语义分析）；
-        「疑似」→ 保留原证据档位；非借鉴通常 → dismissed
-      - 若模型认为职责一致，且函数身份与强逐行/指纹证据均成立，
-        模型阴性不得把它改写为“未命中”，改为规则保留人工复核
+        「疑似」→ 达硬证据门槛则升档，否则保留原证据档位；非借鉴通常 → dismissed
+      - 两侧函数体存在逐字相同的非平凡注释（`_comment_identity_overrides_model`）→
+        自由文本不受语言/API 约束，完全相同只能来自抄写，规则覆盖「非借鉴/疑似」结论，
+        升入 confirmed（confirm_via=comment_identity，清单带「注释逐字一致」标记）
+      - 模型判「非借鉴/疑似」但逐行相似度与短侧覆盖达硬证据门槛（`_hard_evidence_
+        overrides_model_negative`）→ 规则覆盖模型结论，升入 confirmed（confirm_via=
+        hard_evidence_override，清单带「硬证据覆盖」标记；review_raw_verdict 保留模型
+        原结论，供评委区分覆盖口径）
+      - 其余模型阴性：若职责一致、具体函数身份与强逐行/指纹证据同时成立，
+        保留为规则保留人工复核；否则 dismissed
       - 复核失败 / 未复核 → 保持原档不动，并单独记录状态，绝不折算为“疑似”
-    返回 (模型认定借鉴升入高置信同源数, 明确排除数)。
+    返回 (模型认定借鉴 + 硬证据覆盖升入高置信同源数, 明确排除数)。
     """
     result_map = {_review_group_pair_key(g): g for g in groups}
     # 相同目标代码 + 相同候选函数内容在镜像仓库、分支或年份快照中只调用一次模型，
@@ -5702,24 +6017,55 @@ def _apply_review_verdicts(suspects: list[dict], groups: list[dict]) -> tuple[in
                 s["confirm_via"] = "review_llm"
                 s["model_supported"] = True
                 up += 1
-        elif v == "非借鉴":
-            responsibility = str(s.get("review_responsibility") or "")
-            if _model_negative_requires_human_review(s, responsibility):
-                s["review_raw_verdict"] = "非借鉴"
-                s["review_verdict"] = "规则保留"
+        elif v in ("非借鉴", "疑似"):
+            if _comment_identity_overrides_model(s):
+                # 两侧函数体存在逐字相同的非平凡注释：自由文本不受语言/API 约束，
+                # 完全相同只能来自抄写，确定性证据优先于模型概率性意见，升入高置信同源。
+                overlap = _verbatim_comment_overlap(
+                    ((s.get("query_func") or {}).get("raw_code") or ""),
+                    ((s.get("candidate_func") or {}).get("raw_code") or ""))
+                s["tier"] = "confirmed"
+                s["confirm_via"] = "comment_identity"
+                s["review_raw_verdict"] = v
+                s["comment_identity_override"] = True
                 s["review_reason"] = (
-                    "模型倾向非借鉴：" + str(s.get("review_reason") or "")
-                    + "；但双方职责不冲突，且具体函数身份与强直接代码证据同时成立，"
-                      "保留供评委人工复核。"
+                    "模型结论为「" + v + "」，但两侧函数体存在逐字相同的非平凡注释："
+                    + "；".join(overlap[:3])
+                    + "。注释不受语言或 API 约束，逐字相同只能来自抄写，规则覆盖模型结论，"
+                      "按借鉴升入高置信同源。"
                 )
-                s["model_negative_overridden_by_evidence"] = True
+                up += 1
             else:
-                s["tier"] = "dismissed"
-                s["dismiss_reason"] = "review_非借鉴"
-                dn += 1
-        elif v == "疑似":
-            # 不确定不是阴性证据：所有档位原样保留，交给人工复核。
-            pass
+                responsibility = str(s.get("review_responsibility") or "")
+                if _hard_evidence_overrides_model_negative(s, responsibility):
+                    # 逐行/短侧覆盖达硬证据门槛：模型阴性或存疑被确定性证据覆盖，升入
+                    # 高置信同源。confirm_via 与「模型复核认定」区分开，清单带「硬证据
+                    # 覆盖」标记；review_raw_verdict 保留模型原结论，说明覆盖口径。
+                    s["tier"] = "confirmed"
+                    s["confirm_via"] = "hard_evidence_override"
+                    s["review_raw_verdict"] = v
+                    s["model_negative_overridden_by_evidence"] = True
+                    s["review_reason"] = (
+                        "模型结论为「" + v + "」：" + str(s.get("review_reason") or "")
+                        + "；但逐行相似度、短侧覆盖与匹配行数达硬证据门槛，"
+                          "规则覆盖模型结论，按借鉴升入高置信同源。"
+                    )
+                    up += 1
+                elif v == "非借鉴":
+                    if _model_negative_requires_human_review(s, responsibility):
+                        s["review_raw_verdict"] = "非借鉴"
+                        s["review_verdict"] = "规则保留"
+                        s["review_reason"] = (
+                            "模型倾向非借鉴：" + str(s.get("review_reason") or "")
+                            + "；但双方职责不冲突，且具体函数身份与强直接代码证据同时成立，"
+                              "保留供评委人工复核。"
+                        )
+                        s["model_negative_overridden_by_evidence"] = True
+                    else:
+                        s["tier"] = "dismissed"
+                        s["dismiss_reason"] = "review_非借鉴"
+                        dn += 1
+                # 疑似但未达硬证据门槛：不确定不是阴性证据，原档保留，交给人工复核（pass）。
     return up, dn
 
 
@@ -5796,15 +6142,26 @@ def _review_section(review_pairs: list[dict], linker, query_repo_id: str,
     uncertain = [g for g in rows if g.get("review_verdict") == "疑似"]
     retained = [g for g in rows if g.get("review_verdict") == "规则保留"]
     failed = [g for g in rows if g.get("review_verdict") == "复核失败"]
-    pending = [g for g in rows if g.get("review_verdict") not in (
-        "借鉴", "疑似", "规则保留", "复核失败")]
+    # supplemental_source 是同一目标函数在已复核来源结论下的补充候选，并非独立未复核
+    # 项；C1 升档回填会把代码等价 / 硬证据成立的收进功能簇，其余内容确实不同的补充
+    # 候选不再冒充「未复核」，单列计数说明。
+    supplemental = [
+        g for g in rows
+        if g.get("model_review_selection") == "supplemental_source"
+        and g.get("review_verdict") not in ("借鉴", "疑似", "规则保留", "复核失败")
+    ]
+    pending = [
+        g for g in rows
+        if g.get("review_verdict") not in ("借鉴", "疑似", "规则保留", "复核失败")
+        and g.get("model_review_selection") != "supplemental_source"
+    ]
     active_keys = {
         (g.get("query_file", ""), int(g.get("query_start") or 0),
          g.get("query_func", "")) for g in rows
     }
-    n_funcs, n_uncertain, n_retained, n_failed, n_pending = (
+    n_funcs, n_uncertain, n_retained, n_failed, n_pending, n_supplemental = (
         len(active_keys), len(uncertain), len(retained),
-        len(failed), len(pending),
+        len(failed), len(pending), len(supplemental),
     )
 
     intro = ('<p class="text-sm text-slate-600 mb-3">'
@@ -5819,6 +6176,9 @@ def _review_section(review_pairs: list[dict], linker, query_repo_id: str,
              '不在本节重复列出。'
              + (f'另有 <b>{n_cleared}</b> 个准入函数已被模型明确排除，'
                 '不进入风险统计，也不展开其无关代码。' if n_cleared else '')
+             + (f'另有 <b>{n_supplemental}</b> 个同一目标函数的补充来源候选'
+                '已随该函数在已复核来源的结论处理（代码等价或硬证据成立的已升入功能簇），'
+                '不再单列为未复核。' if n_supplemental else '')
              + '本节按综合相似度、有效代码规模、子系统重要度与克隆类型排序。</p>')
 
     chips = []
@@ -6657,6 +7017,15 @@ def run_semantic_compare(
                 "{} 对在首选已排除且无独立强证据后移出报告",
                 secondary_resolution["supplemental"],
                 secondary_resolution["dismissed"],
+            )
+        # 同目标函数已在其他来源复核判「借鉴」时，报告侧（最相似仓库）代码等价或硬证据
+        # 成立的补充候选沿用结论升档，避免在复核节残留成「复核未完成」误导评委。
+        carried_over = _promote_strong_report_pairs_from_target_verdict(suspects)
+        if carried_over:
+            logger.info(
+                "[review] 同目标已有复核结论的报告侧候选升入高置信同源 {} 对"
+                "（代码等价 / 硬证据成立，结论沿用）",
+                carried_over,
             )
         _assert_model_review_complete(suspects)
 

@@ -1297,7 +1297,7 @@ def test_every_function_cluster_renders_its_own_semantic_explanation():
     assert section.count("功能簇语义说明") == 2
     assert all(cluster["analysis_id"] in section for cluster in clusters)
     assert "Inode 与目录项采用独立的功能簇分析正文" in section
-    assert "虚拟文件系统采用独立的功能簇分析正文" in section
+    assert "文件系统采用独立的功能簇分析正文" in section
 
 
 def test_review_priority_is_explainable_and_favors_core_large_match():
@@ -2036,3 +2036,448 @@ def test_verified_library_adapter_is_excluded_from_original_and_module_totals():
     assert stats["fs"]["original"] == 1
     assert stats["fs"]["total"] == 1
     assert excluded["library"] == 1
+
+
+# ---------- 硬证据覆盖模型阴性（change A）与复核覆盖对齐（change C） ----------
+
+def test_hard_evidence_overrides_model_negative_thresholds():
+    def make(line_sim, exact, lines, relation="exact_counterpart"):
+        s = _sc_suspect("a.rs", "f", "2025/team", "b.rs", "f", "review", line_sim,
+                        exact=exact)
+        s["query_func"]["raw_code"] = "\n".join(f"q{i}();" for i in range(lines))
+        s["candidate_func"]["raw_code"] = "\n".join(f"c{i}();" for i in range(lines))
+        s["evidence"].update({
+            "line_similarity": line_sim,
+            "function_identity_relation": relation,
+            "function_identity_score": .9,
+        })
+        return s
+
+    # set_itimer 式：0.78 逐行 / 14 行匹配 / 15 行短侧（覆盖 0.933）→ 命中 0.70/0.85/10
+    assert SC._hard_evidence_overrides_model_negative(make(.78, 14, 15), "一致") is True
+    # sys_setsid 式：0.917 / 11 / 13（覆盖 0.846）→ 命中 0.85/0.75/8
+    assert SC._hard_evidence_overrides_model_negative(make(.917, 11, 13), "部分一致") is True
+    # 未达门槛：0.80 / 12 / 15（覆盖 0.80），两档都不中
+    assert SC._hard_evidence_overrides_model_negative(make(.80, 12, 15), "一致") is False
+    # 职责不一致或身份关系不符 → 不升
+    assert SC._hard_evidence_overrides_model_negative(make(.95, 12, 15), "不一致") is False
+    assert SC._hard_evidence_overrides_model_negative(
+        make(.95, 12, 15, relation="family_neighbor"), "一致") is False
+    # 指纹单独命中不足以升档（避免样板代码误升）
+    fingerprint = make(.40, 6, 15)
+    fingerprint["evidence"]["normalized_fingerprint_match"] = True
+    assert SC._hard_evidence_overrides_model_negative(fingerprint, "一致") is False
+
+
+def test_model_negative_with_hard_evidence_promotes_to_confirmed():
+    s = _sc_suspect("a.rs", "set_itimer", "2025/Starry_Mix", "b.rs", "set_itimer",
+                    "review", .78, exact=14)
+    s["query_func"]["raw_code"] = "\n".join(f"q{i}();" for i in range(15))
+    s["candidate_func"]["raw_code"] = "\n".join(f"c{i}();" for i in range(15))
+    s["evidence"].update({
+        "line_similarity": .78,
+        "function_identity_relation": "exact_counterpart",
+        "function_identity_score": .9,
+    })
+    group = SC.collect_review_pairs([s], keep_tiers=("review", "weak"))[0]
+    group.update({
+        "review_verdict": "非借鉴",
+        "review_reason": "Rust 惯用法逐行相近",
+        "review_responsibility": "一致",
+        "review_responsibility_reason": "都是定时器设置职责",
+        "review_evidence_anchors": ["fn"],
+    })
+
+    up, dn = SC._apply_review_verdicts([s], [group])
+
+    assert up == 1 and dn == 0
+    assert s["tier"] == "confirmed"
+    assert s["confirm_via"] == "hard_evidence_override"
+    assert s["review_raw_verdict"] == "非借鉴"
+    assert s["model_negative_overridden_by_evidence"] is True
+    assert "硬证据门槛" in s["review_reason"]
+    # 清单带「硬证据覆盖」标记（via_hard_evidence），而非「模型复核认定」
+    confirmed_group = SC.collect_file_pairs([s])[0]
+    assert confirmed_group["via_review"] is False
+    assert confirmed_group["via_hard_evidence"] is True
+
+
+def test_model_suspected_with_hard_evidence_promotes_to_confirmed():
+    # metadata 式：模型判「疑似」（存疑而非阴性），但逐行/覆盖达硬证据门槛 →
+    # 确定性证据覆盖存疑结论，同样升入高置信同源，review_raw_verdict 保留「疑似」。
+    s = _sc_suspect("a.rs", "metadata", "2025/Starry_Mix", "b.rs", "metadata",
+                    "review", .917, exact=11)
+    s["query_func"]["raw_code"] = "\n".join(f"q{i}();" for i in range(12))
+    s["candidate_func"]["raw_code"] = "\n".join(f"c{i}();" for i in range(12))
+    s["evidence"].update({
+        "line_similarity": .917,
+        "function_identity_relation": "exact_counterpart",
+        "function_identity_score": .9,
+    })
+    group = SC.collect_review_pairs([s], keep_tiers=("review", "weak"))[0]
+    group.update({
+        "review_verdict": "疑似",
+        "review_reason": "共享非平凡元数据序列化步骤，仍有选择空间",
+        "review_responsibility": "一致",
+        "review_responsibility_reason": "都构造文件元数据",
+        "review_evidence_anchors": ["metadata"],
+    })
+
+    up, dn = SC._apply_review_verdicts([s], [group])
+
+    assert up == 1 and dn == 0
+    assert s["tier"] == "confirmed"
+    assert s["confirm_via"] == "hard_evidence_override"
+    assert s["review_raw_verdict"] == "疑似"
+    assert s["model_negative_overridden_by_evidence"] is True
+    assert "硬证据门槛" in s["review_reason"]
+    # 清单带「硬证据覆盖」标记
+    confirmed_group = SC.collect_file_pairs([s])[0]
+    assert confirmed_group["via_review"] is False
+    assert confirmed_group["via_hard_evidence"] is True
+    assert confirmed_group["via_comment_identity"] is False
+
+
+def test_promote_strong_report_pairs_from_target_verdict_carries_verdict():
+    def target(file="os/mm.rs", start=10, func="map_trampoline"):
+        return {"repo_id": "2024/new", "file_path": file, "start_line": start,
+                "end_line": start + 9, "func_name": func, "module_tag": "mm"}
+
+    rep_code = "\n".join(f"rep_step_{i}();" for i in range(3))
+    reviewed = _sc_suspect("os/mm.rs", "map_trampoline", "2025/other", "mm.rs",
+                           "map_trampoline", "review", .90, exact=10)
+    reviewed["query_func"] = target()
+    reviewed["candidate_func"].update({"repo_id": "2025/other", "raw_code": rep_code})
+    reviewed.update({
+        "tier": "confirmed", "confirm_via": "review_llm", "model_supported": True,
+        "review_verdict": "借鉴", "review_responsibility": "一致",
+    })
+    # 报告侧补充候选：与已复核代表代码空白等价 → 结论沿用升档
+    equivalent = _sc_suspect("os/mm.rs", "map_trampoline", "2025/Starry_Mix", "mm.rs",
+                             "map_trampoline", "review", .90, exact=10)
+    equivalent["query_func"] = target()
+    equivalent["candidate_func"].update({
+        "repo_id": "2025/Starry_Mix",
+        "raw_code": "rep_step_0(); rep_step_1();\n  rep_step_2();",
+    })
+    equivalent["model_review_selection"] = "supplemental_source"
+    equivalent["review_verdict"] = "未复核"
+    # 代码不同但自身硬证据成立 → 也沿用
+    hard = _sc_suspect("os/mm.rs", "map_trampoline", "2025/Starry_Mix", "mm.rs",
+                       "map_trampoline", "review", .78, exact=14)
+    hard["query_func"] = target()
+    hard["query_func"]["raw_code"] = "\n".join(f"q{i}();" for i in range(15))
+    hard["candidate_func"].update({
+        "repo_id": "2025/Starry_Mix",
+        "raw_code": "\n".join(f"alt_{i}();" for i in range(15)),
+    })
+    hard["evidence"].update({
+        "line_similarity": .78, "function_identity_relation": "exact_counterpart",
+        "function_identity_score": .9,
+    })
+    hard["model_review_selection"] = "deferred_secondary"
+    hard["review_verdict"] = "未复核"
+    # 代码不同且证据不足 → 不沿用
+    weak = _sc_suspect("os/mm.rs", "map_trampoline", "2025/Starry_Mix", "mm.rs",
+                       "map_trampoline", "review", .61, exact=8)
+    weak["query_func"] = target()
+    weak["query_func"]["raw_code"] = "\n".join(f"q{i}();" for i in range(20))
+    weak["candidate_func"].update({
+        "repo_id": "2025/Starry_Mix",
+        "raw_code": "\n".join(f"w{i}();" for i in range(20)),
+    })
+    weak["evidence"].update({
+        "line_similarity": .61, "function_identity_relation": "exact_counterpart",
+        "function_identity_score": .7,
+    })
+    weak["model_review_selection"] = "supplemental_source"
+    weak["review_verdict"] = "未复核"
+
+    promoted = SC._promote_strong_report_pairs_from_target_verdict(
+        [reviewed, equivalent, hard, weak])
+
+    assert promoted == 2
+    assert equivalent["tier"] == "confirmed"
+    assert equivalent["confirm_via"] == "review_llm"
+    assert equivalent["review_verdict"] == "借鉴"
+    assert "结论沿用" in equivalent["review_reason"]
+    assert "代码一致" in equivalent["review_reason"]
+    assert hard["tier"] == "confirmed"
+    assert hard["confirm_via"] == "review_llm"
+    assert weak["tier"] == "review"
+    assert weak["review_verdict"] == "未复核"
+
+
+def test_review_section_excludes_supplemental_source_from_pending():
+    pending = _sc_suspect("a.rs", "genuinely_unreviewed", "2025/Starry_Mix", "b.rs",
+                          "genuinely_unreviewed", "review", .72, exact=8)
+    pending["query_func"]["raw_code"] = "\n".join(f"q{i}();" for i in range(10))
+    pending["candidate_func"]["raw_code"] = "\n".join(f"c{i}();" for i in range(10))
+    pending["evidence"]["line_similarity"] = .72
+    pending["model_review_selection"] = "selected"
+    pending["review_verdict"] = "未复核"
+    supplemental = _sc_suspect("a.rs", "carried_function", "2025/Starry_Mix", "b.rs",
+                               "carried_function", "review", .90, exact=12)
+    supplemental["query_func"]["raw_code"] = "\n".join(f"s{i}();" for i in range(12))
+    supplemental["candidate_func"]["raw_code"] = "\n".join(f"d{i}();" for i in range(12))
+    supplemental["evidence"]["line_similarity"] = .90
+    supplemental["model_review_selection"] = "supplemental_source"
+    supplemental["review_verdict"] = "未复核"
+
+    groups = SC.collect_file_pairs([pending, supplemental],
+                                   keep_tiers=("review", "weak"))
+    _toc, section = SC._review_section(groups, None, "2024/new")
+
+    assert "genuinely_unreviewed" in section
+    assert "carried_function" not in section
+    assert "补充来源候选" in section
+
+
+# ---------- 复核失败兜底（change D） ----------
+
+def test_evidence_anchor_whitespace_folding_accepts_wrapped_anchor():
+    code = "let value = compute(a, b);\napply(&mut buf);"
+    wrapped = "compute(a,\nb); apply(&mut buf)"
+    clean = SC._validate_evidence_anchors([wrapped], code, code, min_count=1)
+    assert clean == [wrapped]
+
+
+def test_request_review_json_retries_transient_api_error(monkeypatch):
+    monkeypatch.setattr(SC.time, "sleep", lambda _s: None)
+    payload = ('{"responsibility":"一致","responsibility_reason":"双方都管理同一类定时器，'
+               '职责一致。","verdict":"疑似","reason":"共享了非平凡的装载步骤与常量，'
+               '语言惯例无法完全解释，保留人工复核。",'
+               '"evidence_anchors":["shared_anchor","bound_list"]}')
+
+    class _FakeClient:
+        def __init__(self):
+            self.calls = 0
+
+        @property
+        def chat(self):
+            return self
+
+        @property
+        def completions(self):
+            return self
+
+        def create(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise ConnectionError("boom")
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content=payload))])
+
+    code = "fn shared_anchor(){};\nlet bound_list = alloc();"
+    client = _FakeClient()
+    result = SC._request_review_json(
+        client, "model", [{"role": "system", "content": "x"}], 5, 100,
+        lambda text: SC._parse_review_payload(text, code, code))
+
+    assert client.calls == 2
+    assert result["verdict"] == "疑似"
+
+
+# ---------- 注释逐字一致 → 硬证据升档（用户指出存疑函数注释相同） ----------
+
+def test_verbatim_comment_overlap_matches_only_identical_nontrivial_comments():
+    q = (
+        "// TODO: implement PROT_GROWSUP & PROT_GROWSDOWN\n"
+        "fn mprotect(addr: usize) {\n"
+        "    // TODO\n"
+        "    // 我方独有说明\n"
+        "    let s = \"// not a comment\";\n"
+        "    align_up(addr, 4k)\n"
+        "}\n"
+    )
+    c = (
+        "// TODO: implement PROT_GROWSUP & PROT_GROWSDOWN\n"
+        "fn mprotect(addr: usize) {\n"
+        "    // TODO\n"
+        "    // 历史方独有说明\n"
+        "    let s = \"// not a comment\";\n"
+        "    align_up(addr, 4k)\n"
+        "}\n"
+    )
+    # 只返回逐字相同且非平凡的长注释；TODO 短注、独有说明、字符串里的 // 都不算
+    assert SC._verbatim_comment_overlap(q, c) == [
+        "TODO: implement PROT_GROWSUP & PROT_GROWSDOWN"]
+
+
+def test_verbatim_comment_overlap_filters_trivial_and_boilerplate():
+    q = (
+        "// TODO: handle error\n"
+        "// SPDX-License-Identifier: MIT\n"
+        "// Copyright 2024 Kernel Team\n"
+        "/// Reference: https://elixir.bootlin.com/linux/v6.13.6/source/kernel/futex/core.c#L777\n"
+        "fn f() {}\n"
+    )
+    c = (
+        "// TODO: handle error\n"
+        "// SPDX-License-Identifier: MIT\n"
+        "// Copyright 2024 Kernel Team\n"
+        "/// Reference: https://elixir.bootlin.com/linux/v6.13.6/source/kernel/futex/core.c#L777\n"
+        "fn f() {}\n"
+    )
+    # 版权样板被剔除；「TODO: handle error」太短被剔除；URL 引用注释保留（前缀不剥离）
+    assert SC._verbatim_comment_overlap(q, c) == [
+        "Reference: https://elixir.bootlin.com/linux/v6.13.6/source/kernel/futex/core.c#L777"]
+
+
+def test_comment_identity_overrides_model_gates():
+    s = _sc_suspect("a.rs", "f", "2025/Starry_Mix", "b.rs", "f", "review", .60, exact=8)
+    s["query_func"]["raw_code"] = "// TODO: implement PROT_GROWSUP & PROT_GROWSDOWN\nfn f(){}"
+    s["candidate_func"]["raw_code"] = "// TODO: implement PROT_GROWSUP & PROT_GROWSDOWN\nfn f(){}"
+    assert SC._comment_identity_overrides_model(s) is True
+    # 无相同注释 → False
+    s["candidate_func"]["raw_code"] = "// 历史方独有说明\nfn f(){}"
+    assert SC._comment_identity_overrides_model(s) is False
+    # confirmed 档不触发（已升档，无需再判）
+    s["tier"] = "confirmed"
+    s["candidate_func"]["raw_code"] = "// TODO: implement PROT_GROWSUP & PROT_GROWSDOWN\nfn f(){}"
+    assert SC._comment_identity_overrides_model(s) is False
+
+
+def test_apply_review_verdicts_promotes_suspected_with_comment_identity():
+    s = _sc_suspect("a.rs", "sys_mprotect", "2025/Starry_Mix", "b.rs", "sys_mprotect",
+                    "review", .93, exact=14)
+    qcode = ("// TODO: implement PROT_GROWSUP & PROT_GROWSDOWN\n"
+             "fn sys_mprotect(addr: usize, prot: u64) -> AxResult<()> {\n"
+             "    let flags = MmapProt::from_bits(prot)?;\n"
+             "    let base = align_up_4k(addr);\n"
+             "    let len = align_up_4k(length);\n"
+             "    aspace.protect(base, len, flags)\n"
+             "}\n")
+    s["query_func"]["raw_code"] = qcode
+    s["candidate_func"]["raw_code"] = qcode
+    s["evidence"]["line_similarity"] = .93
+    group = SC.collect_review_pairs([s], keep_tiers=("review", "weak"))[0]
+    group.update({
+        "review_verdict": "疑似",
+        "review_reason": "共享非平凡控制流，但仍有选择空间",
+        "review_responsibility": "一致",
+        "review_responsibility_reason": "都修改内存保护",
+        "review_evidence_anchors": ["sys_mprotect"],
+    })
+
+    up, dn = SC._apply_review_verdicts([s], [group])
+
+    assert up == 1 and dn == 0
+    assert s["tier"] == "confirmed"
+    assert s["confirm_via"] == "comment_identity"
+    assert s["review_raw_verdict"] == "疑似"
+    assert s["comment_identity_override"] is True
+    assert "注释不受语言或 API 约束" in s["review_reason"]
+    # 清单带「注释逐字一致」标记
+    confirmed_group = SC.collect_file_pairs([s])[0]
+    assert confirmed_group["via_review"] is False
+    assert confirmed_group["via_hard_evidence"] is False
+    assert confirmed_group["via_comment_identity"] is True
+
+
+def test_apply_review_verdicts_promotes_model_negative_with_comment_identity():
+    s = _sc_suspect("a.rs", "load_user_app", "2025/Starry_Mix", "b.rs", "load_user_app",
+                    "review", .20, exact=8)
+    qcode = ("// FIXME: impl `/proc/self/exe` to let busybox retry running\n"
+             "fn load_user_app(path: &str) -> AxResult<(usize, usize)> {\n"
+             "    let data = read_file(path)?;\n"
+             "    if data.starts_with(b\"#!\") {\n"
+             "        return handle_shebang(path, &data);\n"
+             "    }\n"
+             "    ELF_LOADER.load(data)\n"
+             "}\n")
+    s["query_func"]["raw_code"] = qcode
+    s["candidate_func"]["raw_code"] = qcode
+    s["evidence"]["line_similarity"] = .65
+    s["evidence"]["function_identity_score"] = .9
+    group = SC.collect_review_pairs([s], keep_tiers=("review", "weak"))[0]
+    group.update({
+        "review_verdict": "非借鉴",
+        "review_reason": "ELF 加载方式有实质差异",
+        "review_responsibility": "一致",
+        "review_responsibility_reason": "都加载用户程序",
+        "review_evidence_anchors": ["load_user_app"],
+    })
+
+    up, dn = SC._apply_review_verdicts([s], [group])
+
+    assert up == 1 and dn == 0
+    assert s["tier"] == "confirmed"
+    assert s["confirm_via"] == "comment_identity"
+    assert s["review_raw_verdict"] == "非借鉴"
+    assert "`/proc/self/exe`" in s["review_reason"]
+
+
+def test_apply_review_verdicts_keeps_suspected_without_comment_identity():
+    s = _sc_suspect("a.rs", "sys_setitimer", "2025/Starry_Mix", "b.rs", "sys_setitimer",
+                    "review", .67, exact=16)
+    qcode = ("// FIXME: AnyBitPattern\n"
+             "fn sys_setitimer(which: u32, new_value: UserPtr<ITimerVal>) -> AxResult<()> {\n"
+             "    let t = ITimerType::from_repr(which)?;\n"
+             "    let v = new_value.get_as_ref()?;\n"
+             "    let interval = v.interval.as_nanos();\n"
+             "    set_itimer(t, interval, v.remained)\n"
+             "}\n")
+    ccode = ("fn sys_setitimer(which: u32, new_value: UserPtr<ITimerVal>) -> AxResult<()> {\n"
+             "    let t = ITimerType::from_repr(which)?;\n"
+             "    let v = new_value.get_as_ref()?;\n"
+             "    let interval = v.interval.as_nanos();\n"
+             "    set_itimer(t, interval, v.remained)\n"
+             "}\n")
+    s["query_func"]["raw_code"] = qcode
+    s["candidate_func"]["raw_code"] = ccode
+    s["evidence"]["line_similarity"] = .67
+    s["evidence"]["function_identity_score"] = .9
+    group = SC.collect_review_pairs([s], keep_tiers=("review", "weak"))[0]
+    group.update({
+        "review_verdict": "疑似",
+        "review_reason": "构成疑似借鉴",
+        "review_responsibility": "一致",
+        "review_responsibility_reason": "都设置定时器",
+        "review_evidence_anchors": ["sys_setitimer"],
+    })
+
+    up, dn = SC._apply_review_verdicts([s], [group])
+
+    assert up == 0 and dn == 0
+    assert s["tier"] == "review"
+    assert s["review_verdict"] == "疑似"
+
+
+def test_target_has_active_review_result_accepts_comment_identity():
+    s = _sc_suspect("a.rs", "f", "2025/Starry_Mix", "b.rs", "f", "confirmed", .90, exact=10)
+    s["confirm_via"] = "comment_identity"
+    assert SC._target_has_active_review_result(s) is True
+
+
+def test_promote_strong_report_pairs_from_target_verdict_carries_comment_identity():
+    target = {"repo_id": "2024/new", "file_path": "os/mm.rs", "start_line": 10,
+              "end_line": 19, "func_name": "sys_mmap", "module_tag": "mm"}
+    rep_code = "// TODO: check illegal flags for mmap\nfn sys_mmap() {}\n"
+    reviewed = _sc_suspect("os/mm.rs", "sys_mmap", "2025/other", "mm.rs", "sys_mmap",
+                           "review", .90, exact=10)
+    reviewed["query_func"] = target
+    reviewed["candidate_func"].update({"repo_id": "2025/other", "raw_code": rep_code})
+    reviewed.update({
+        "tier": "confirmed", "confirm_via": "comment_identity", "model_supported": True,
+        "review_verdict": "借鉴", "review_responsibility": "一致",
+    })
+    # 同目标补充候选：与已复核代表代码空白等价 → 沿用 comment_identity 结论升档
+    equivalent = _sc_suspect("os/mm.rs", "sys_mmap", "2025/Starry_Mix", "mm.rs",
+                             "sys_mmap", "review", .90, exact=10)
+    equivalent["query_func"] = target
+    equivalent["candidate_func"].update({
+        "repo_id": "2025/Starry_Mix",
+        "raw_code": "//TODO: check illegal flags for mmap\n fn sys_mmap(){}",
+    })
+    equivalent["model_review_selection"] = "supplemental_source"
+    equivalent["review_verdict"] = "未复核"
+
+    promoted = SC._promote_strong_report_pairs_from_target_verdict(
+        [reviewed, equivalent])
+
+    assert promoted == 1
+    assert equivalent["tier"] == "confirmed"
+    assert equivalent["confirm_via"] == "comment_identity"
+    assert equivalent["review_verdict"] == "借鉴"
+    assert "结论沿用" in equivalent["review_reason"]
