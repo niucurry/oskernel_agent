@@ -1908,11 +1908,6 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
         result["meta"]["title_language_guard"] = {"enabled": True, "complete": False,
                                                           "remaining": None, "error": str(e)}
 
-    result["meta"]["language_incomplete"] = not (
-        result["meta"].get("language_guard", {}).get("complete", False)
-        and result["meta"].get("title_language_guard", {}).get("complete", False)
-    )
-
     # E. quote 护栏：把亮点/槽点里粘贴的源码摘录改写成中文一句话点评
     try:
         from .lang_guard import normalize_tree_quotes
@@ -1920,5 +1915,16 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
         normalize_tree_quotes(result)
     except Exception as e:
         print(f"[警告] quote 护栏失败：{e}（继续）", file=sys.stderr)
+
+    # 交付门禁：正文/标题护栏各自记录的是运行时快照统计，quote 护栏可能在之后把残留
+    # 英文 quote 改写为中文；因此按最终树重算，避免陈旧 complete=False 误拒交付。
+    try:
+        from .lang_guard import remaining_english_count
+        result["meta"]["language_incomplete"] = remaining_english_count(result) > 0
+    except Exception:
+        result["meta"]["language_incomplete"] = not (
+            result["meta"].get("language_guard", {}).get("complete", False)
+            and result["meta"].get("title_language_guard", {}).get("complete", False)
+        )
 
     return result

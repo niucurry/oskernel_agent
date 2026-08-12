@@ -235,6 +235,36 @@ def test_development_allows_explicit_runtime_evidence_limitation():
     assert "不能证明" in validated["conclusion"]
 
 
+def test_development_allows_conditional_prerequisite_limitation():
+    """“需逐项修补才能通过测试”是先决/限制口吻，不是“当前版本已通过”的断言。"""
+    commits = _history()
+    evidence = build_development_evidence(commits)
+    result = _ai_result(commits, evidence)
+    result["stages"][0]["conclusion"] = (
+        "提交历史呈现初始种子导入后的功能修复；主要限制是初始代码在多个子系统上"
+        "存在功能缺陷，需逐项修补才能通过测试。"
+    )
+
+    validated = validate_ai_development_result(result, evidence, commits)
+
+    assert "需逐项修补" in validated["stages"][0]["conclusion"]
+
+
+def test_development_allows_pass_rate_metric_phrasing():
+    """“测试通过率”是比率指标（整句在说限制），不是“当前版本已通过”的断言。"""
+    commits = _history()
+    evidence = build_development_evidence(commits)
+    result = _ai_result(commits, evidence)
+    result["stages"][0]["conclusion"] = (
+        "提交历史呈现竞赛冲刺阶段；主要限制是多次提交仅修改测试白名单，"
+        "反映测试通过率依赖白名单排除而非全部修复。"
+    )
+
+    validated = validate_ai_development_result(result, evidence, commits)
+
+    assert "通过率" in validated["stages"][0]["conclusion"]
+
+
 def test_development_rejects_ellipsis_in_ai_text():
     commits = _history()
     evidence = build_development_evidence(commits)

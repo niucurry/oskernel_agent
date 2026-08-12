@@ -251,6 +251,32 @@ def test_summary_rejects_code_identifier_not_in_referenced_finding(tmp_path):
         _validate_ai_summary_result(payload, digests)
 
 
+def test_summary_allows_identifier_from_related_finding_in_same_report(tmp_path):
+    """同一根因拆成多条 finding（一条给错误输出、一条给根因）时，跨 finding
+    引用真实标识符的合并是合法表达，不应判为幻觉。"""
+    digests = load_digests(_digests(tmp_path))
+    digests["description"].findings = [
+        Finding(title="比赛镜像双架构编译未全部通过",
+                detail="kernel-rv：失败（error: no such command: axplat）。",
+                severity="high", confidence=.95, source="description"),
+        Finding(title="源码实现问题：Makefile",
+                detail="依赖 cargo-axplat 工具链未安装导致编译失败。",
+                severity="high", confidence=.95, source="description"),
+    ]
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][0].update({
+        "source_finding": 1,
+        "severity": "high",
+        "confidence": 95,
+        "title": "双架构编译失败",
+        "judgment": "kernel-rv 与 kernel-la 因缺 cargo-axplat 工具链无法构建。",
+    })
+
+    summary = _validate_ai_summary_result(payload, digests)
+
+    assert summary.issues[0].title == "双架构编译失败"
+
+
 def test_summary_rejects_suspected_hardcode_rewritten_as_confirmed(tmp_path):
     digests = load_digests(_digests(tmp_path))
     digests["description"].findings = [Finding(
@@ -387,6 +413,19 @@ def test_summary_allows_warning_about_tests_passing_unexpectedly(tmp_path):
     summary = _validate_ai_summary_result(payload, digests)
 
     assert "非预期通过" in summary.issues[0].judgment
+
+
+def test_summary_allows_pass_rate_metric_without_runtime_log(tmp_path):
+    """“测试通过率依赖白名单排除”是比率/限制陈述，不是“测试已通过”的断言。"""
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    payload["sections"][1]["conclusion"] = (
+        "冲刺阶段测试通过率依赖白名单排除而非全部修复。"
+    )
+
+    summary = _validate_ai_summary_result(payload, digests)
+
+    assert "通过率" in summary.sections[1].conclusion
 
 
 def test_summary_explains_term_before_length_validation(tmp_path):

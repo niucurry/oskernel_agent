@@ -478,6 +478,37 @@ def rewrite_code_quote(quote: str, path: str, kind: str, model: str) -> str:
     return quote
 
 
+def remaining_english_count(tree: dict) -> int:
+    """最终交付复核：统计仍需要中文化的正文字段与模块标题数。
+
+    正文/标题护栏各自返回运行时快照统计；quote 护栏可能在之后把残留英文 quote
+    改写为中文，因此交付门禁必须按最终树重算，避免陈旧 complete=False 误拒交付。
+    """
+    count = 0
+
+    def walk(obj, module_record: bool = False):
+        nonlocal count
+        if isinstance(obj, dict):
+            if (module_record or obj.get("type") == "module") and title_needs_translation(
+                obj.get("name", "")
+            ):
+                count += 1
+            for key, value in obj.items():
+                if key == "modules" and isinstance(value, list):
+                    for item in value:
+                        walk(item, module_record=True)
+                elif isinstance(value, str) and key in PROSE_KEYS and needs_translation(value):
+                    count += 1
+                else:
+                    walk(value)
+        elif isinstance(obj, list):
+            for x in obj:
+                walk(x, module_record=module_record)
+
+    walk(tree)
+    return count
+
+
 def normalize_tree_quotes(tree: dict) -> dict:
     """遍历 tree 的 highlights/issues，把「代码摘录型」quote 改写成中文点评。就地修改。"""
     if os.environ.get("AGENT_QUOTE_GUARD", "").strip().lower() in ("0", "false", "no", "off"):
