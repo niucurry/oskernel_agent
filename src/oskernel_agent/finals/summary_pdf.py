@@ -566,6 +566,8 @@ def run_ai_summary_analysis(
         "每个 issue title 不超过 80 字、judgment 不超过 240 字；issue 中的函数名、路径名和代码标识符必须来自其引用的 source_finding，禁止改写或补造相近名称。\n"
         "不要在 issue 文字中裸写与代码标识符写法相同的专有缩写或术语（如 POSIX、ABI、MMIO、ELF）；"
         "表达标准或接口语义时用自然语言描述，必要时只使用来源 finding 明文中确实出现的写法。\n"
+        "输出 JSON 必须严格符合 expected_schema 的字段，禁止任何额外字段（尤其不得回传 "
+        "repo_id 或输入文件路径）；多出的字段会导致交付失败。\n"
         f"repo_id: {repo_id}\n"
         f"input_file: {input_path.resolve()}\n"
         f"expected_schema: {schema_hint}\n"
