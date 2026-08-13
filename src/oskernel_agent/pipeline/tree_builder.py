@@ -743,6 +743,29 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
     )
 
 
+def _drop_unresolvable_evidence(parsed: dict, repo_path: Path) -> None:
+    """确定性丢弃无法定位到真实仓库文件的亮点/问题条目，并把路径归一化为 path:line。
+
+    这些条目即使保留也无法渲染证据链接（项目要求证据必须可回溯），与其让
+    整份总评重试，不如在交付门禁放行后确定性清理；最终校验仍会复核其余结构。
+    """
+    for key in ("highlights", "issues"):
+        kept: list[dict] = []
+        for item in parsed.get(key) or []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                canonical_path, canonical_line = _validate_repo_location(
+                    repo_path, str(item.get("path") or ""), label=f"顶层{key}",
+                )
+                item["path"] = f"{canonical_path}:{canonical_line}"
+                kept.append(item)
+            except RuntimeError as exc:
+                print(f"[verdict] 证据定位失败，丢弃该 {key} 项：{exc}",
+                      file=sys.stderr, flush=True)
+        parsed[key] = kept
+
+
 def _verdict_fallback() -> dict:
     return {
         "score_total": 0,
@@ -865,8 +888,19 @@ def _validate_verdict_result(
     facts: dict | None = None,
     *,
     enforce_one_line_length: bool = True,
+    defer_one_line_repair: bool = False,
+    defer_evidence_paths: bool = False,
 ) -> None:
-    """总评必须包含真实正文、六维评分和理由，不允许用固定分数补位。"""
+    """总评必须包含真实正文、六维评分和理由，不允许用固定分数补位。
+
+    defer_one_line_repair=True 时跳过一句话完整性检查：一句话结论由下游
+    repair_verdict_one_line 用小任务专门修复，不必为它触发整份总评的昂贵重试；
+    最终校验（build_tree 末尾）仍以完整严格模式兜底。
+
+    defer_evidence_paths=True 时跳过亮点/问题的路径定位检查：定位失败的条目
+    由 _drop_unresolvable_evidence 确定性丢弃（无法渲染证据链接的条目不留），
+    同样不必为此触发整份总评重试；最终校验仍严格。
+    """
     parsed["highlights"] = [
         item for item in (parsed.get("highlights") or [])
         if isinstance(item, dict)
@@ -883,7 +917,8 @@ def _validate_verdict_result(
         raise RuntimeError("顶层评判缺少一句话结论")
     if enforce_one_line_length and len(str(parsed.get("one_line") or "")) > 80:
         raise RuntimeError("顶层评判一句话结论超过 80 字")
-    _validate_verdict_integrity_conclusion(parsed, facts)
+    if not defer_one_line_repair:
+        _validate_verdict_integrity_conclusion(parsed, facts)
     dimensions = parsed.get("dimensions") or []
     if not isinstance(dimensions, list):
         raise RuntimeError("顶层评判 dimensions 格式无效")
@@ -903,13 +938,14 @@ def _validate_verdict_result(
         if not str(item.get("reason") or "").strip():
             raise RuntimeError(f"顶层评判 {name} 缺少评分理由")
     if repo_path is not None:
-        _validate_structured_evidence(
-            parsed.get("highlights") or [], repo_path, label="顶层亮点",
-        )
-        _validate_structured_evidence(
-            parsed.get("issues") or [], repo_path, label="顶层问题",
-            require_confidence=True,
-        )
+        if not defer_evidence_paths:
+            _validate_structured_evidence(
+                parsed.get("highlights") or [], repo_path, label="顶层亮点",
+            )
+            _validate_structured_evidence(
+                parsed.get("issues") or [], repo_path, label="顶层问题",
+                require_confidence=True,
+            )
         similarity = parsed.get("similarity") or {}
         if isinstance(similarity, dict):
             _normalize_similarity_evidence(similarity)
@@ -1666,13 +1702,18 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
 
     def _delivery_complete(parsed: dict) -> bool:
         if not language_output_complete(parsed):
+            print("[verdict] 交付校验失败：语言中文化检查未通过（残留英文）",
+                  file=sys.stderr, flush=True)
             return False
         try:
             _validate_verdict_result(
                 parsed, repo_path or Path("."), facts,
                 enforce_one_line_length=False,
+                defer_one_line_repair=True,
+                defer_evidence_paths=True,
             )
-        except RuntimeError:
+        except RuntimeError as exc:
+            print(f"[verdict] 交付校验失败：{exc}", file=sys.stderr, flush=True)
             return False
         return True
 
@@ -1700,6 +1741,7 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                     '"one_line":str}',
         timeout=600,
     )
+    _drop_unresolvable_evidence(parsed, repo_path or Path("."))
     if _hardcode_reviews_needing_repair(parsed, facts, repo_path or Path(".")):
         repair_verdict_hardcode_reviews(
             parsed, facts, work_dir, repo_path or Path("."),

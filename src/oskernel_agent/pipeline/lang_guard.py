@@ -48,6 +48,15 @@ _IDENT = re.compile(
 _WORD = re.compile(r"[A-Za-z]{2,}")
 # 代码味标点（出现多处 → 判为源码片段，不译）
 _CODE_PUNCT = re.compile(r"->|::|[{};]|\)\s*\{|\)\s*->|==|!=|&&|\|\||#include|\basm\b")
+# 代码行：行首出现 Rust/C 语句关键词或注释/宏标记。报告 quote 字段常粘贴
+# 源码摘录（如 `if let Some(..) = ..`、`let .. = if cfg!(..)`），模型按
+# 提示词正确保留原文，检测器必须同样识别为代码而非英文散文。
+_CODE_LINE = re.compile(
+    r"(?m)^\s*(?:#\s*\[|//|/\*|\*\s)?\s*(?:"
+    r"(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(?:fn|let|use|static|const|mod|struct|enum|impl|trait|match|loop|while|for)\b"
+    r"|if\s+let\b|macro_rules!|cfg!\(|extern\s+(?:fn|crate)\b"
+    r")"
+)
 # 标题 / 表头：即便正文已是中文，英文标题也要单独抓出来
 _HEADING = re.compile(r"<(?:h[1-6]|th|strong)\b[^>]*>(.*?)</(?:h[1-6]|th|strong)>", re.I | re.S)
 # HTML 正文块逐块检查，防止一大段中文掩盖其中某一个全英文章节。
@@ -72,7 +81,9 @@ def _strip_noise(s: str) -> str:
 
 
 def _looks_like_code(prose: str) -> bool:
-    """去掉标识符后仍有多处代码标点 → 认为是粘贴的源码片段。"""
+    """去掉标识符后仍有多处代码标点，或含代码行起始关键词 → 认为是粘贴的源码片段。"""
+    if _CODE_LINE.search(prose):
+        return True
     return len(_CODE_PUNCT.findall(prose)) >= 3
 
 
@@ -160,6 +171,32 @@ def _get_client():
 
 _FENCE = re.compile(r"^```[a-zA-Z]*\s*|\s*```$")
 
+# 单次翻译请求可安全处理的最大字符数；超过则按 HTML 文本块拆分。
+_TRANSLATE_CHUNK_LIMIT = 4000
+
+
+def _translate_large(s: str, model: str) -> str:
+    """大字段（如整份 verdict 正文）按 HTML 文本块拆分翻译后原位回填。
+
+    整段直译会被 max_tokens 截断、校验失败；文本块单块很小，翻译可靠。
+    """
+    if _TEXT_BLOCK.search(s) is None:
+        return s
+    out: list[str] = []
+    last = 0
+    for match in _TEXT_BLOCK.finditer(s):
+        block = match.group(0)
+        inner = match.group(1)
+        out.append(s[last:match.start()])
+        if (_plain_needs_translation(inner) or _english_heading(block)) \
+                and len(block) <= _TRANSLATE_CHUNK_LIMIT:
+            out.append(_translate(block, model))
+        else:
+            out.append(block)
+        last = match.end()
+    out.append(s[last:])
+    return "".join(out)
+
 
 def _translate(s: str, model: str, retries: int = 3) -> str:
     import time
@@ -169,6 +206,14 @@ def _translate(s: str, model: str, retries: int = 3) -> str:
     cli = _get_client()
     if cli is None:
         return s
+    if len(s) > _TRANSLATE_CHUNK_LIMIT:
+        chunked = _translate_large(s, model)
+        if not needs_translation(chunked):
+            _cache[h] = chunked
+            return chunked
+        # 分块后仍残留英文：不再对整段做必然被截断的大请求，保留最佳结果。
+        print(f"[lang_guard] 分块翻译后仍残留英文（{len(s)} 字符字段）", file=sys.stderr)
+        return chunked
     last_err = None
     for i in range(1, retries + 1):
         try:
@@ -190,6 +235,8 @@ def _translate(s: str, model: str, retries: int = 3) -> str:
             last_err = e
             time.sleep(min(3 * i, 15))
     print(f"[lang_guard] 翻译失败（{retries} 次后保留原文）：{last_err}", file=sys.stderr)
+    if len(s) > 40:
+        print(f"[lang_guard] 失败字段样例：{s[:200]!r}", file=sys.stderr)
     return s
 
 
@@ -205,7 +252,14 @@ def normalize_tree_language(tree: dict) -> dict:
     """就地遍历 tree，把英文正文字段翻成中文（并发翻译，去重）。返回统计。"""
     if os.environ.get("AGENT_LANG_GUARD", "").strip().lower() in ("0", "false", "no", "off"):
         return {"enabled": False, "complete": True, "remaining": 0}
-    model = os.getenv("LLM_MODEL", "deepseek-v4-flash")
+    # 翻译是机械改写任务；模型跟随主链路 LLM_MODEL（生产为 deepseek-v4-pro），
+    # 可另用 AGENT_LANG_GUARD_MODEL 覆盖。大字段由 _translate 分块，
+    # 避免推理模型在整段输入上耗尽输出预算导致 content 为空。
+    model = (
+        os.getenv("AGENT_LANG_GUARD_MODEL", "").strip()
+        or os.getenv("LLM_MODEL", "").strip()
+        or "deepseek-v4-flash"
+    )
     stats = {"enabled": True, "checked": 0, "translated": 0,
              "remaining": 0, "complete": True}
 

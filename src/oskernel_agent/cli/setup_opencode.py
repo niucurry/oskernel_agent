@@ -108,14 +108,10 @@ def setup() -> None:
     max_steps = config.engine.get("max_steps", 200)
 
     # provider 固定标识为 deepseek；模型名可由环境变量覆盖。
-    # 当前项目使用 DashScope OpenAI-compatible 入口时，deepseek-chat 会返回
-    # model not found，因此默认跟主报告链路保持一致使用 deepseek-v4-flash。
+    # 默认与主报告链路保持一致使用 deepseek-v4-flash；旧行为在非 DashScope
+    # 入口会回落 deepseek-chat，导致 opencode 任务与主链路模型不一致。
     PROVIDER_ID = "deepseek"
-    default_model = (
-        "deepseek-v4-flash"
-        if "dashscope.aliyuncs.com" in base_url.lower()
-        else "deepseek-chat"
-    )
+    default_model = "deepseek-v4-flash"
     model_id = (
         _os.getenv("LLM_MODEL")
         or _os.getenv("AGENT_LLM_MODEL")
