@@ -62,6 +62,19 @@ def test_localized_term_is_not_expanded_inside_itself():
     assert "写时复制（写时复制" not in text
 
 
+def test_localized_label_without_glossary_spacing_is_not_double_expanded():
+    # 术语表 label 是“Linux 测试项目”，AI 输出常见不带空格的“Linux测试项目（LTP）”，
+    # 防嵌套判断须容忍标签内部空白，否则 LTP 会被再次展开成嵌套重复。
+    text = explain_terms_on_first_use("针对特定Linux测试项目（LTP）用例。")
+    assert text == "针对特定Linux测试项目（LTP）用例。"
+    assert "测试项目（Linux 测试项目（LTP））" not in text
+    assert not readability_errors(text)
+
+
+def test_readability_accepts_localized_label_without_glossary_spacing():
+    assert not readability_errors("针对特定Linux测试项目（LTP）用例。")
+
+
 def test_redundant_virtio_suffix_is_removed():
     text = explain_terms_on_first_use("基于虚拟输入输出设备规范（VirtIO）规范实现驱动。")
     assert text == "基于虚拟输入输出设备规范（VirtIO）实现驱动。"
