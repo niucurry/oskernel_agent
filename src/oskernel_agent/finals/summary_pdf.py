@@ -54,7 +54,8 @@ _INTERNAL_HARDCODE_METRICS = {
 }
 _UNVERIFIED_TEST_SUCCESS_RE = re.compile(
     r"(?:LTP|\u6d4b\u8bd5\u5957\u4ef6|\u6d4b\u8bd5|\u7528\u4f8b).{0,18}(?:\u5168\u91cf|\u5168\u90e8)?.{0,6}(?:\u901a\u8fc7|\u8dd1\u901a|\u6210\u529f)(?!\u7387)"
-    r"|(?:\u901a\u8fc7|\u8dd1\u901a)(?!\u7387).{0,18}(?:LTP|\u6d4b\u8bd5\u5957\u4ef6|\u6d4b\u8bd5|\u7528\u4f8b)",
+    r"|(?:\u901a\u8fc7(?!\u7387)(?!\s*(?:\u811a\u672c|\u4fee\u6539|\u767d\u540d\u5355|\u8bbe\u7f6e|\u914d\u7f6e|\u6ce8\u5165|\u52ab\u6301|\u62e6\u622a|\u65c1\u8def|\u7ed5\u8fc7|\u5ffd\u7565|\u786c\u7f16\u7801|\u6ce8\u91ca|\u63a5\u53e3|\u7cfb\u7edf\u8c03\u7528|syscall))"
+    r"|\u8dd1\u901a(?!\u7387)).{0,18}(?:LTP|\u6d4b\u8bd5\u5957\u4ef6|\u6d4b\u8bd5|\u7528\u4f8b)",
     re.I,
 )
 _UNVERIFIED_KERNEL_COMPLETENESS_RE = re.compile(
