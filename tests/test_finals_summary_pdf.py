@@ -10,11 +10,13 @@ from oskernel_agent.finals.models import Finding, ModuleDigest, ReportDigest
 from oskernel_agent.finals import summary_pdf
 from oskernel_agent.finals.summary_pdf import (
     AISummary,
+    AISummaryIssue,
     BODY_FONT_SIZE,
     SummaryPdfError,
     _build_pdf_bytes,
     _combined_findings,
     _has_distinct_detail,
+    _unattributed_issue_identifiers,
     generate_summary_pdf,
     load_digests,
     run_ai_summary_analysis,
@@ -25,6 +27,30 @@ from oskernel_agent.finals.summary_pdf import (
 def test_summary_omits_a_detail_that_only_repeats_the_title():
     assert not _has_distinct_detail("多核支持尚未启用", "多核支持尚未启用。")
     assert _has_distinct_detail("存在同源代码", "高置信同源函数比例为 13.3%。")
+
+
+def test_identifier_with_conventional_syscall_prefix_is_attributed_to_corpus():
+    corpus = "api/src/syscall/task/execve.rs execve 在多线程场景下返回错误。"
+    issue = AISummaryIssue(
+        source="description", source_finding=1,
+        title="多线程执行新程序缺陷",
+        judgment="sys_execve 在多线程场景直接返回错误。",
+        severity="high", confidence=90,
+    )
+
+    assert _unattributed_issue_identifiers(issue, corpus) == []
+
+
+def test_identifier_absent_from_corpus_is_still_flagged():
+    corpus = "api/src/syscall/task/execve.rs execve 在多线程场景下返回错误。"
+    issue = AISummaryIssue(
+        source="description", source_finding=1,
+        title="多线程执行新程序缺陷",
+        judgment="fork 相关路径也返回错误。",
+        severity="high", confidence=90,
+    )
+
+    assert _unattributed_issue_identifiers(issue, corpus) == ["fork"]
 
 
 def _write(tmp_path, digest: ReportDigest):
