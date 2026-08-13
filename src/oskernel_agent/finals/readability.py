@@ -143,7 +143,9 @@ def _term_replacement(text: str, match: re.Match, expansion: str) -> str:
     if "（" not in expansion or not expansion.endswith("）"):
         return expansion
     label, inner = expansion[:-1].split("（", 1)
-    if text[:match.start()].rstrip().endswith(label + "（"):
+    before = re.sub(r"\s+", "", text[: match.start()])
+    label_norm = re.sub(r"\s+", "", label)
+    if before.endswith(label_norm + "（"):
         return inner
     return expansion
 
@@ -341,8 +343,10 @@ def readability_errors(value: str, *, max_chars: int | None = None) -> list[str]
         match = re.search(
             rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])", text,
         )
-        if match and expansion not in text[: match.start() + len(expansion) + 8]:
-            errors.append(f"术语 {term} 首次出现时未解释")
+        if match:
+            window = re.sub(r"\s+", "", text[: match.start() + len(expansion) + 8])
+            if re.sub(r"\s+", "", expansion) not in window:
+                errors.append(f"术语 {term} 首次出现时未解释")
     if re.search(r"[。！？][。！？]+", text):
         errors.append("存在重复句末标点")
     if re.search(r"…|(?<!\.)\.{3}(?!\.)", text):
