@@ -93,7 +93,7 @@ def _tree() -> dict:
                 "confidence": 91,
                 "excerpt": "if (strstr(name, test))",
             }],
-            "one_line": "编译失败，并存在测试名分支。",
+            "one_line": "确认存在测试名分支硬编码；主要问题：页表回收路径不完整。",
             "content": "<p>这里是详细分析。</p>",
         },
         "tree": {
@@ -345,6 +345,7 @@ def test_make_targets_declared_through_simple_variables_are_detected(tmp_path):
     (tmp_path / "Makefile").write_text(
         "KERNEL_RV := kernel-rv\n"
         "KERNEL_LA := kernel-la\n"
+        "all: $(KERNEL_RV) $(KERNEL_LA)\n"
         "$(KERNEL_RV):\n\t@echo rv\n"
         "$(KERNEL_LA):\n\t@echo la\n",
         encoding="utf-8",
@@ -353,8 +354,8 @@ def test_make_targets_declared_through_simple_variables_are_detected(tmp_path):
     result = scan_build_interface(tmp_path)
 
     assert result["status"] == "complete"
-    assert result["required_targets"]["kernel-rv"]["line"] == 3
-    assert result["required_targets"]["kernel-la"]["line"] == 5
+    assert result["required_targets"]["kernel-rv"]["line"] == 4
+    assert result["required_targets"]["kernel-la"]["line"] == 6
 
 
 def test_literal_included_makefile_targets_are_detected_without_running_make(tmp_path):
@@ -365,12 +366,53 @@ def test_literal_included_makefile_targets_are_detected_without_running_make(tmp
         "kernel-la:\n\t@echo la\n",
         encoding="utf-8",
     )
-    (tmp_path / "Makefile").write_text("include mk/targets.mk\n", encoding="utf-8")
+    (tmp_path / "Makefile").write_text(
+        "include mk/targets.mk\nall: kernel-rv kernel-la\n", encoding="utf-8",
+    )
 
     result = scan_build_interface(tmp_path)
 
     assert result["status"] == "complete"
     assert result["required_targets"]["kernel-rv"]["path"] == "mk/targets.mk"
+
+
+def test_artifacts_copied_in_all_chain_recipes_count_as_declared(tmp_path):
+    """官方只要求 make all 产出两个文件：目标名无需叫 kernel-rv/kernel-la。"""
+    (tmp_path / "Makefile").write_text(
+        "KERNEL_RV := kernel-rv\n"
+        "KERNEL_LA := kernel-la\n"
+        "all: env_bootstrap\n"
+        "\t$(MAKE) build_riscv\n"
+        "\t$(MAKE) build_loongarch\n"
+        "env_bootstrap:\n\t@echo ready\n"
+        "build_riscv:\n\t@cp arceos/*_riscv64-qemu-virt.bin $(KERNEL_RV)\n"
+        "build_loongarch:\n\t@cp arceos/*_loongarch64-qemu-virt.bin $(KERNEL_LA)\n",
+        encoding="utf-8",
+    )
+
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "complete"
+    assert result["missing_targets"] == []
+    assert result["required_targets"]["kernel-rv"]["declared"] is True
+    assert result["required_targets"]["kernel-rv"]["via"] == "recipe"
+    assert result["required_targets"]["kernel-la"]["via"] == "recipe"
+    assert result["aggregate_targets"] == ["all"]
+
+
+def test_artifact_rules_without_all_entry_are_still_incomplete(tmp_path):
+    (tmp_path / "Makefile").write_text(
+        "kernel-rv:\n\t@echo rv\n"
+        "kernel-la:\n\t@echo la\n",
+        encoding="utf-8",
+    )
+
+    result = scan_build_interface(tmp_path)
+
+    assert result["status"] == "partial"
+    assert result["missing_targets"] == []
+    assert "未识别到 all" in result["summary"]
+    assert "双架构比赛构建入口不完整" in result["summary"]
 
 
 def test_missing_one_architecture_is_reported_as_partial_interface(tmp_path):
@@ -399,6 +441,7 @@ def test_phony_names_without_real_rules_do_not_count_as_kernel_targets(tmp_path)
 
 def test_root_docker_build_mismatch_is_only_an_auxiliary_warning(tmp_path):
     (tmp_path / "Makefile").write_text(
+        "all: kernel-rv kernel-la\n"
         "kernel-rv:\n\t@echo rv\n"
         "kernel-la:\n\t@echo la\n"
         "build_docker:\n\tdocker build -t demo .\n",
@@ -414,7 +457,7 @@ def test_root_docker_build_mismatch_is_only_an_auxiliary_warning(tmp_path):
     assert result["container"]["status"] == "inconsistent"
     assert "根目录没有 Dockerfile" in result["container"]["summary"]
     assert {(item["path"], item["line"]) for item in result["container"]["evidence"]} == {
-        ("Makefile", 6), ("ci/Dockerfile", 1),
+        ("Makefile", 7), ("ci/Dockerfile", 1),
     }
 
 
@@ -466,17 +509,18 @@ def test_tree_sitter_uses_byte_offsets_after_chinese_comments(tmp_path):
     assert engine._func_index["real_name"]["body"] == "fn real_name() {}"
 
 
-def test_description_digest_puts_runtime_and_hardcode_first():
+def test_description_digest_puts_hardcode_and_source_issues_first():
     digest = description_digest_from_tree(_tree())
     assert digest.kind == "description"
-    assert digest.findings[0].title == "编译失败"
+    titles = [item.title for item in digest.findings]
+    assert not any(("编译" in t) or ("构建" in t) or ("运行" in t) for t in titles)
     hardcode = next(finding for finding in digest.findings if "硬编码" in finding.title)
     assert "ELF" in hardcode.title and hardcode.severity == "high"
     assert "根据被加载的测试" in hardcode.detail
     assert len(digest.modules[0].summary) <= 300
 
 
-def test_description_digest_flags_missing_arch_target_without_treating_no_docker_as_risk():
+def test_description_digest_ignores_build_facts_entirely():
     tree = _tree()
     tree["facts"]["integrity"]["build_log"] = {"status": "not_provided"}
     tree["facts"]["integrity"]["build_interface"] = {
@@ -493,34 +537,30 @@ def test_description_digest_flags_missing_arch_target_without_treating_no_docker
 
     digest = description_digest_from_tree(tree)
 
-    interface = next(item for item in digest.findings if "构建入口" in item.title)
-    assert interface.title == "双架构 Make 构建入口不完整"
-    assert interface.severity == "medium"
-    assert not any("Dockerfile" in item.title for item in digest.findings)
-    compile_fact = next(item for item in digest.findings if item.title == "编译未实测")
-    assert compile_fact.severity == "info"
+    assert not any(
+        ("构建" in item.title) or ("编译" in item.title) for item in digest.findings
+    )
+    assert not any(
+        key.startswith(("build_", "run_", "kernel_", "container_", "reproducibility_"))
+        for key in digest.metrics
+    )
 
 
 def test_description_html_is_problem_first_and_module_text_is_bounded():
     rendered = render_tree_html(_tree())
     assert rendered.index('<section id="verdict"') < rendered.index('<section id="modules"')
     assert "最多 5" not in rendered and "不设数量上限" in rendered
-    assert rendered.index("真实可用性") < rendered.index("模块概览")
+    assert rendered.index('<section id="hardcode"') < rendered.index('<section id="modules"')
+    assert "真实可用性" not in rendered
+    assert "构建接口</strong>" not in rendered
     assert "根据被加载的测试" in rendered
     assert "模块详细证据" not in rendered and "子系统详细证据" not in rendered
     assert rendered.count('data-subsystem="') == 1
     assert all(int(value) <= 300 for value in re.findall(r'data-analysis-chars="(\d+)"', rendered))
-    assert "构建接口</strong>" in rendered and "双架构入口完整" in rendered
-    assert "提交编译日志</strong>" in rendered and "失败" in rendered
-    assert "QEMU）启动 / 运行" not in rendered
-    assert "运行日志</strong>" not in rendered
-    assert "非必需 / 未提供" in rendered
-    assert "缺少该文件不作为风险或扣分依据" not in rendered
-    assert "不据此判定风险" in rendered
     assert "修改测试脚本旁路失败" in rendered
     assert "src/main.c:7" in rendered and "确认问题" in rendered
     assert "参赛队伍不得修改" not in rendered
-    assert "分析依据：源码结构分析与编译运行日志" in rendered
+    assert "分析依据：源码结构分析与硬编码线索复核" in rendered
     assert '<section id="evaluation"' not in rendered
     assert "tree-node" not in rendered
 
@@ -557,13 +597,14 @@ def test_contest_build_verification_uses_temporary_copy_and_records_artifacts(
                 '{"Id":"sha256:image","RepoDigests":["contest@sha256:digest"],"Size":123}\n',
             )
         assert command[1] == "run"
+        assert command[-1] == "make all"
         mount = command[command.index("--mount") + 1]
         source = mount.removeprefix("type=bind,source=").removesuffix(",target=/work")
-        target = command[-1].split()[-1]
-        (Path(source) / target).write_bytes(f"artifact-{target}".encode())
+        (Path(source) / "kernel-rv").write_bytes(b"artifact-rv")
+        (Path(source) / "kernel-la").write_bytes(b"artifact-la")
         return subprocess.CompletedProcess(
             command, 0,
-            f"IOCTL_HEX2STR_ERROR configuration enabled\nFinished {target}\n",
+            "IOCTL_HEX2STR_ERROR configuration enabled\nFinished make all\n",
         )
 
     monkeypatch.setattr(integrity_module, "_docker_result", fake_docker)
@@ -574,6 +615,7 @@ def test_contest_build_verification_uses_temporary_copy_and_records_artifacts(
     assert result["image_digest"] == "contest@sha256:digest"
     assert result["limits"] == {"cpus": "8", "memory": "12g", "pids": 2048}
     assert set(result["targets"]) == {"kernel-rv", "kernel-la"}
+    assert all(item["command"] == "make all" for item in result["targets"].values())
     assert all(item["artifact"]["sha256"] for item in result["targets"].values())
     assert all(not item["errors"] for item in result["targets"].values())
     assert not (repo / "kernel-rv").exists() and not (repo / "kernel-la").exists()
@@ -621,9 +663,9 @@ def test_git_build_snapshot_uses_committed_lf_bytes_on_windows(tmp_path, monkeyp
         mount = command[command.index("--mount") + 1]
         source = mount.removeprefix("type=bind,source=").removesuffix(",target=/work")
         observed_scripts.append((Path(source) / "build.sh").read_bytes())
-        target = command[-1].split()[-1]
-        (Path(source) / target).write_bytes(target.encode())
-        return subprocess.CompletedProcess(command, 0, f"Finished {target}\n")
+        (Path(source) / "kernel-rv").write_bytes(b"rv")
+        (Path(source) / "kernel-la").write_bytes(b"la")
+        return subprocess.CompletedProcess(command, 0, "Finished make all\n")
 
     monkeypatch.setattr(integrity_module, "_docker_result", fake_docker)
     result = verify_contest_build(repo, image="contest:test", timeout_seconds=60)
@@ -634,7 +676,7 @@ def test_git_build_snapshot_uses_committed_lf_bytes_on_windows(tmp_path, monkeyp
         "commit": commit,
         "working_tree_dirty": True,
     }
-    assert observed_scripts == [b"#!/bin/sh\nexit 0\n"] * 2
+    assert observed_scripts == [b"#!/bin/sh\nexit 0\n"] * 1
 
 
 def test_contest_build_verification_separates_compile_failure_from_environment_error(
@@ -652,21 +694,15 @@ def test_contest_build_verification_separates_compile_failure_from_environment_e
             return subprocess.CompletedProcess(
                 command, 0, '{"Id":"id","RepoDigests":[],"Size":1}\n',
             )
-        target = command[-1].split()[-1]
-        if target == "kernel-rv":
-            mount = command[command.index("--mount") + 1]
-            source = mount.removeprefix("type=bind,source=").removesuffix(",target=/work")
-            (Path(source) / target).write_bytes(b"rv")
-            return subprocess.CompletedProcess(command, 0, "Finished kernel-rv\n")
         return subprocess.CompletedProcess(command, 2, "error: linker failed\n")
 
     monkeypatch.setattr(integrity_module, "_docker_result", fake_docker)
     result = verify_contest_build(repo, image="contest:test", timeout_seconds=60)
 
-    assert result["status"] == "partial"
-    assert result["targets"]["kernel-rv"]["status"] == "passed"
+    assert result["status"] == "failed"
+    assert result["targets"]["kernel-rv"]["status"] == "failed"
     assert result["targets"]["kernel-la"]["status"] == "failed"
-    assert "linker failed" in result["targets"]["kernel-la"]["errors"][0]
+    assert "linker failed" in result["targets"]["kernel-rv"]["errors"][0]
 
 
 def test_contest_build_verification_treats_offline_toolchain_download_as_environment_error(
@@ -712,10 +748,11 @@ def test_contest_build_verification_reports_missing_docker_as_environment_error(
     assert "Docker CLI" in result["summary"]
 
 
-def test_each_make_target_must_create_its_own_fresh_artifact(tmp_path, monkeypatch):
+def test_make_all_must_produce_both_root_artifacts_fresh(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "Makefile").write_text("all:\n\t@true\n", encoding="utf-8")
+    (repo / "kernel-la").write_bytes(b"stale-la")  # 构建前残留产物不应被当成结果
     monkeypatch.setattr(integrity_module.shutil, "which", lambda _name: "docker")
 
     def fake_docker(command, *, timeout):
@@ -727,11 +764,8 @@ def test_each_make_target_must_create_its_own_fresh_artifact(tmp_path, monkeypat
             )
         mount = command[command.index("--mount") + 1]
         source = mount.removeprefix("type=bind,source=").removesuffix(",target=/work")
-        target = command[-1].split()[-1]
-        if target == "kernel-rv":
-            (Path(source) / "kernel-rv").write_bytes(b"rv")
-            (Path(source) / "kernel-la").write_bytes(b"stale-la")
-        return subprocess.CompletedProcess(command, 0, f"Finished {target}\n")
+        (Path(source) / "kernel-rv").write_bytes(b"rv")
+        return subprocess.CompletedProcess(command, 0, "Finished make all\n")
 
     monkeypatch.setattr(integrity_module, "_docker_result", fake_docker)
     result = verify_contest_build(repo, image="contest:test", timeout_seconds=60)
@@ -742,7 +776,7 @@ def test_each_make_target_must_create_its_own_fresh_artifact(tmp_path, monkeypat
     assert "未生成非空 kernel-la" in result["targets"]["kernel-la"]["errors"][0]
 
 
-def test_description_prefers_real_build_verification_and_omits_unprovided_run():
+def test_description_renders_no_usability_section_even_with_build_facts():
     tree = _tree()
     verification = {
         "requested": True,
@@ -752,11 +786,11 @@ def test_description_prefers_real_build_verification_and_omits_unprovided_run():
         "image_digest": "contest@sha256:digest",
         "targets": {
             "kernel-rv": {
-                "status": "passed", "command": "make kernel-rv", "duration_seconds": 12,
+                "status": "passed", "command": "make all", "duration_seconds": 12,
                 "artifact": {"path": "kernel-rv", "size_bytes": 1048576, "sha256": "a" * 64},
             },
             "kernel-la": {
-                "status": "passed", "command": "make kernel-la", "duration_seconds": 14,
+                "status": "passed", "command": "make all", "duration_seconds": 14,
                 "artifact": {"path": "kernel-la", "size_bytes": 2097152, "sha256": "b" * 64},
             },
         },
@@ -767,70 +801,11 @@ def test_description_prefers_real_build_verification_and_omits_unprovided_run():
     rendered = render_tree_html(tree)
     digest = description_digest_from_tree(tree)
 
-    assert "RISC-V 编译</strong>" in rendered and "LoongArch 编译</strong>" in rendered
-    assert "比赛编译环境</strong>" in rendered and "已验证通过" in rendered
-    assert "contest@sha256:digest" in rendered
-    assert "1.0 MiB" in rendered and "2.0 MiB" in rendered
-    assert "运行日志</strong>" not in rendered
-    assert digest.metrics["build_log_status"] == "passed"
-    assert digest.metrics["kernel_rv_build_status"] == "passed"
-    assert not any(item.title == "编译失败" for item in digest.findings)
-
-
-def test_description_build_failure_digest_keeps_both_architectures():
-    tree = _tree()
-    rustup_error = (
-        "error: could not download file from "
-        "'https://static.rust-lang.org/dist/2024-05-01/channel-rust-nightly.toml.sha256' "
-        "to '/root/.rustup/tmp/random_file': error downloading file"
-    )
-    verification = {
-        "requested": True,
-        "status": "failed",
-        "summary": "比赛统一镜像中 kernel-rv 与 kernel-la 均未编译成功。",
-        "targets": {
-            "kernel-rv": {"status": "failed", "errors": [rustup_error]},
-            "kernel-la": {"status": "failed", "errors": [rustup_error]},
-        },
-    }
-    tree["facts"]["integrity"]["build_verification"] = verification
-    tree["facts"]["integrity"]["build_interface"]["verification"] = verification
-
-    digest = description_digest_from_tree(tree)
-
-    finding = next(item for item in digest.findings if item.title == "比赛镜像双架构编译未全部通过")
-    assert "kernel-rv：失败" in finding.detail
-    assert "kernel-la：失败" in finding.detail
-    assert finding.detail.count("nightly-2024-05-01") == 2
-    assert "random_file" not in finding.detail
-    assert digest.metrics["build_target_summary"] == finding.detail
-
-
-def test_description_labels_build_environment_error_without_blame():
-    tree = _tree()
-    verification = {
-        "requested": True,
-        "status": "environment_error",
-        "summary": "本机没有可用的比赛镜像，未执行编译。",
-        "image": "contest:test",
-        "limits": {"cpus": "8", "memory": "12g", "pids": 2048},
-        "targets": {
-            "kernel-rv": {"status": "environment_error", "errors": ["failed to fetch toolchain"]},
-            "kernel-la": {"status": "environment_error", "errors": ["failed to fetch toolchain"]},
-        },
-    }
-    tree["facts"]["integrity"]["build_verification"] = verification
-    tree["facts"]["integrity"]["build_interface"]["verification"] = verification
-
-    rendered = render_tree_html(tree)
-    digest = description_digest_from_tree(tree)
-
-    assert "环境异常" in rendered
-    assert "本机没有可用的比赛镜像" in rendered
-    finding = next(item for item in digest.findings if item.title == "比赛镜像编译未形成结论")
-    assert finding.severity == "info"
-    assert "kernel-rv：环境异常" in finding.detail
-    assert "kernel-la：环境异常" in finding.detail
+    assert "真实可用性" not in rendered
+    assert "比赛编译环境" not in rendered
+    assert "RISC-V 编译" not in rendered
+    assert "kernel_rv_build_status" not in digest.metrics
+    assert "build_verification_requested" not in digest.metrics
 
 
 def test_description_has_no_problem_count_cap_and_keeps_every_serious_issue():
@@ -1128,48 +1103,34 @@ def test_ai_discovered_hardcode_requires_a_real_in_range_source_line(tmp_path):
         _validate_hardcode_reviews(parsed, facts, tmp_path)
 
 
-def test_one_line_conclusion_must_match_each_integrity_status():
-    facts = {"integrity": {
-        "build_log": {"status": "failed"},
-        "run_log": {"status": "passed"},
-    }}
+def test_one_line_rejects_any_compile_claim():
+    facts = {"integrity": {}}
     parsed = {
-        "one_line": "编译失败，运行通过；未发现硬编码，页表回收不完整。",
+        "one_line": "编译失败；未发现硬编码，页表回收不完整。",
         "hardcode_reviews": [],
     }
-    _validate_verdict_integrity_conclusion(parsed, facts)
-    parsed["one_line"] = "编译通过，运行失败；未发现硬编码，页表回收不完整。"
-    with pytest.raises(RuntimeError, match="事实不一致"):
+    with pytest.raises(RuntimeError, match="不得出现编译或构建"):
         _validate_verdict_integrity_conclusion(parsed, facts)
 
 
 def test_one_line_accepts_equivalent_no_cheating_conclusion():
     parsed = {
-        "one_line": "编译日志未提供；硬编码线索均已复核，无作弊。",
+        "one_line": "硬编码线索均已复核，无作弊。",
         "hardcode_reviews": [{"status": "cleared"}],
     }
-    facts = {
-        "integrity": {
-            "build_log": {"status": "not_provided"},
-            "run_log": {"status": "not_provided"},
-        }
-    }
+    facts = {"integrity": {}}
     _validate_verdict_integrity_conclusion(parsed, facts)
 
 
-def test_one_line_prefers_real_build_and_omits_unprovided_run():
+def test_one_line_must_match_hardcode_review_conclusion():
+    facts = {"integrity": {}}
     parsed = {
-        "one_line": "双架构编译成功；未发现硬编码。",
-        "hardcode_reviews": [{"status": "cleared"}],
+        "one_line": "确认发现1项硬编码，页表回收不完整。",
+        "hardcode_reviews": [{"status": "confirmed"}],
     }
-    facts = {"integrity": {
-        "build_log": {"status": "failed"},
-        "build_verification": {"requested": True, "status": "passed"},
-        "run_log": {"status": "not_provided"},
-    }}
     _validate_verdict_integrity_conclusion(parsed, facts)
-    parsed["one_line"] = "双架构编译成功，运行未实测；未发现硬编码。"
-    with pytest.raises(RuntimeError, match="不应展示运行环境缺口"):
+    parsed["one_line"] = "未发现硬编码，页表回收不完整。"
+    with pytest.raises(RuntimeError, match="与硬编码复核结果不一致"):
         _validate_verdict_integrity_conclusion(parsed, facts)
 
 
@@ -1189,24 +1150,20 @@ def test_deterministic_one_line_fallback_keeps_verified_statuses_under_limit():
     one_line = _deterministic_verdict_one_line(parsed, facts)
     parsed["one_line"] = one_line
     assert len(one_line) <= 80
-    assert "编译失败" in one_line
+    assert "编译" not in one_line and "构建" not in one_line
     assert "发现2项疑似硬编码" in one_line
     assert "主要问题" in one_line
-    assert "运行" not in one_line
     _validate_verdict_integrity_conclusion(parsed, facts)
 
 
-def test_short_one_line_with_inconsistent_run_status_still_requires_repair():
-    facts = {"integrity": {
-        "build_verification": {"requested": True, "status": "failed"},
-        "run_log": {"status": "not_provided"},
-    }}
+def test_short_one_line_with_compile_claim_requires_repair():
+    facts = {"integrity": {}}
     parsed = {
-        "one_line": "\u7f16\u8bd1\u5931\u8d25\uff1b\u8fd0\u884c\u672a\u5b9e\u6d4b\uff1b\u672a\u53d1\u73b0\u786c\u7f16\u7801\u3002",
+        "one_line": "\u7f16\u8bd1\u5931\u8d25\uff1b\u672a\u53d1\u73b0\u786c\u7f16\u7801\u3002",
         "hardcode_reviews": [{"status": "cleared"}],
     }
     assert _verdict_one_line_requires_repair(parsed, facts) is True
-    parsed["one_line"] = "\u7f16\u8bd1\u5931\u8d25\uff1b\u672a\u53d1\u73b0\u786c\u7f16\u7801\u3002"
+    parsed["one_line"] = "\u672a\u53d1\u73b0\u786c\u7f16\u7801\u3002"
     assert _verdict_one_line_requires_repair(parsed, facts) is False
 
 

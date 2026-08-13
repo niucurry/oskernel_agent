@@ -56,9 +56,9 @@ class TocLocateAccuracy(unittest.TestCase):
         self.assertEqual(find_toc_locate_problems(self.html), [])
 
     def test_expected_anchors_present(self):
-        """速读版四个决策区块都进入目录。"""
+        """速读版三个决策区块都进入目录（已移除真实可用性章节）。"""
         hrefs = set(_HREF_RE.findall(self.html))
-        self.assertEqual(hrefs, {"verdict", "usability", "hardcode", "modules"})
+        self.assertEqual(hrefs, {"verdict", "hardcode", "modules"})
 
     def test_child_modules_are_not_toc_or_tree_nodes(self):
         self.assertNotIn("subsys-", self.html)

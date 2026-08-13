@@ -154,8 +154,7 @@ def test_run_description_only(monkeypatch) -> None:
     assert result.kinds["description"].status == "ok"
     assert result.kinds["description"].html_path == "description.html"
     assert (output_dir / "description.html").exists()
-    assert received["verify_build"] is True
-    assert received["pull_build_image"] is True
+    assert "verify_build" not in received and "pull_build_image" not in received
 
 
 def test_run_checkpoint_resume(monkeypatch) -> None:

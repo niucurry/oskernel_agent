@@ -471,7 +471,6 @@ def do_description(team_id: str, url: str, work_dir: Path, logfile: Path) -> tup
     cmd = [
         PY, "-m", "oskernel_agent.cli.agent", *src_arg, "-o", str(dst),
         "--team-id", team_id, "--repository-url", url,
-        "--verify-build", "--pull-build-image",
         "--keep-intermediates",
     ]
     ok, body = run_step("描述报告", cmd, logfile, timeout=7200)

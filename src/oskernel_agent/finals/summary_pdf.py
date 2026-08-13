@@ -57,13 +57,12 @@ _UNVERIFIED_TEST_SUCCESS_RE = re.compile(
     r"|(?:\u901a\u8fc7|\u8dd1\u901a)(?!\u7387).{0,18}(?:LTP|\u6d4b\u8bd5\u5957\u4ef6|\u6d4b\u8bd5|\u7528\u4f8b)",
     re.I,
 )
-_ENVIRONMENT_BUILD_FAILURE_RE = re.compile(
-    r"(?:双架构|kernel-rv|kernel-la|RISC-V|LoongArch).{0,30}"
-    r"(?:未通过编译|编译(?:未通过|失败))|编译(?:未通过|失败)",
-    re.I,
-)
 _UNVERIFIED_KERNEL_COMPLETENESS_RE = re.compile(
     r"(?:完整|完备|完善).{0,24}(?:双架构|操作系统|内核|内核框架)",
+    re.I,
+)
+_COMPILE_TOPIC_RE = re.compile(
+    r"编译|构建|make|kernel-rv|kernel-la",
     re.I,
 )
 _SOURCE_LABELS = {
@@ -477,37 +476,13 @@ def _validate_ai_summary_result(
         if critical and not any((source, index) in refs for index in critical):
             raise SummaryPdfError(f"摘要智能体遗漏了 {source} 的严重问题")
 
-    description_metrics = digests["description"].metrics
-    target_statuses = {
-        "kernel-rv": str(description_metrics.get("kernel_rv_build_status") or "not_run"),
-        "kernel-la": str(description_metrics.get("kernel_la_build_status") or "not_run"),
-    }
     rendered_text = _render_order_text(summary)
-    aliases = {
-        "kernel-rv": r"(?:kernel-rv|RISC-V)",
-        "kernel-la": r"(?:kernel-la|LoongArch)",
-    }
-    for target, status in target_statuses.items():
-        if status in {"", "not_run", "unknown"}:
-            continue
-        if re.search(
-            rf"{aliases[target]}.{{0,24}}(?:未单独说明|未说明|没有说明|结果不明)",
-            rendered_text,
-            re.I,
-        ):
-            raise SummaryPdfError(f"摘要忽略了已记录的 {target} 编译状态")
 
-    if (
-        any(status in {"environment_error", "timeout"} for status in target_statuses.values())
-        and _ENVIRONMENT_BUILD_FAILURE_RE.search(rendered_text)
-    ):
-        raise SummaryPdfError("摘要把环境中断改写成了作品编译失败或未通过")
+    if _COMPILE_TOPIC_RE.search(rendered_text):
+        raise SummaryPdfError("摘要不得包含编译或构建分析内容")
 
-    if (
-        set(target_statuses.values()) != {"passed"}
-        and _UNVERIFIED_KERNEL_COMPLETENESS_RE.search(summary.overall_judgment)
-    ):
-        raise SummaryPdfError("摘要把未经双架构编译验证的源码框架写成了完整内核")
+    if _UNVERIFIED_KERNEL_COMPLETENESS_RE.search(summary.overall_judgment):
+        raise SummaryPdfError("摘要把未经编译验证的源码框架写成了完整内核")
 
     test_claim_text = re.sub(
         r"(?:非预期|错误地|异常地|不应|本应失败却)通过",
@@ -519,10 +494,7 @@ def _validate_ai_summary_result(
         "",
         test_claim_text,
     )
-    if (
-        str(description_metrics.get("run_log_status") or "not_provided") != "passed"
-        and _UNVERIFIED_TEST_SUCCESS_RE.search(test_claim_text)
-    ):
+    if _UNVERIFIED_TEST_SUCCESS_RE.search(test_claim_text):
         raise SummaryPdfError(
             "摘要把开发提交信息改写成了未经正式运行日志证明的测试通过结论"
         )
@@ -570,11 +542,9 @@ def run_ai_summary_analysis(
         "证据不足时降低置信度并使用审慎表述。文字要简洁、自然、无模板腔。\n"
         "硬编码部分只使用 AI 复核后的 hardcode_confirmed 与 hardcode_suspected；确认项与疑似项必须分开表述，不得把疑似证据并入确认结论；"
         "不得在摘要中引用原始扫描候选数、扫描命中数、排除数或扫描文件数。\n"
-        "开发过程报告只证明提交历史；除非作品描述报告的正式运行日志明确通过，否则不得写 LTP 或其他测试已通过、跑通或成功。\n"
-        "若 metrics 已给出 kernel_rv_build_status 或 kernel_la_build_status，必须采用该状态；"
-        "不得把已记录的架构写成未说明、结果不明或未执行；environment_error 或 timeout 只能写编译未形成结论，不得写编译失败或未通过。\n"
-        "若 kernel-rv 与 kernel-la 未全部 passed，只能说源码框架覆盖了哪些模块；"
-        "不得称其为完整、完备、可运行或已经验证的双架构操作系统内核。\n"
+        "开发过程报告只证明提交历史；不得写 LTP 或其他测试已通过、跑通或成功。\n"
+        "本摘要不分析编译与构建：不得写编译通过、编译失败、构建入口、双架构编译或镜像编译等表述；"
+        "不得称作品为完整、完备、可运行或已经验证的操作系统内核。\n"
         "所有文字必须使用完整句子，禁止使用‘…’或‘...’省略内容；不得提交被截断的词组。"
         "overall_judgment 不超过 280 字，每个 section conclusion 不超过 180 字，"
         "每个 issue title 不超过 80 字、judgment 不超过 240 字；issue 中的函数名、路径名和代码标识符必须来自其引用的 source_finding，禁止改写或补造相近名称。\n"

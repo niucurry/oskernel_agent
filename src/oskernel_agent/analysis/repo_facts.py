@@ -205,13 +205,6 @@ def build_repo_facts(
     repo_path: Path,
     repo_name: str,
     ts: str,
-    *,
-    build_log: str | Path | None = None,
-    run_log: str | Path | None = None,
-    verify_build: bool = False,
-    build_image: str | None = None,
-    build_timeout: int = 1800,
-    pull_build_image: bool = False,
 ) -> dict:
     """采集项目级共享事实档案，5 个分会话共用同一口径。"""
     repo_path = Path(repo_path).resolve()
@@ -223,10 +216,7 @@ def build_repo_facts(
     standard_count, std_list = _probe_standard_syscalls(repo_path)
     dispatch_count, dispatch_evidence = _probe_syscall_dispatch(repo_path)
 
-    from oskernel_agent.finals.integrity import (
-        DEFAULT_CONTEST_BUILD_IMAGE,
-        collect_integrity_facts,
-    )
+    from oskernel_agent.finals.integrity import collect_integrity_facts
 
     return {
         "meta": {
@@ -251,15 +241,7 @@ def build_repo_facts(
         "key_files":   _probe_key_files(repo_path),
         "smp":         _probe_smp(repo_path),
         "commits":     summarize_commits(str(repo_path)),
-        "integrity":   collect_integrity_facts(
-            repo_path,
-            build_log=build_log,
-            run_log=run_log,
-            verify_build=verify_build,
-            build_image=build_image or DEFAULT_CONTEST_BUILD_IMAGE,
-            build_timeout=build_timeout,
-            pull_build_image=pull_build_image,
-        ),
+        "integrity":   collect_integrity_facts(repo_path),
         "profile_lite": {
             "primary_lang":  profile.get("primary_lang"),
             "kernel_type":   profile.get("kernel_type"),

@@ -243,8 +243,6 @@ def _run_description(clone_path: Path, output_dir: Path) -> KindResult:
             repo_name,
             str(html_path),
             cli_depth=3,
-            verify_build=True,
-            pull_build_image=True,
         )
         if out is None:
             result.error = "description report generation returned None"

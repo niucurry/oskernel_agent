@@ -218,74 +218,32 @@ def _description_priority_key(item: Finding) -> tuple[int, int, float]:
     """先按严重级别，再在同级内按评委决策价值排序。"""
     rank = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}
     text = f"{item.title} {item.detail}"
-    if item.title in {
-        "编译失败", "运行失败", "编译日志缺失", "运行日志缺失",
-        "根目录 Make 构建入口缺失", "双架构 Make 构建入口不完整",
-    }:
+    if "硬编码" in item.title:
         group = 0
-    elif "硬编码" in item.title:
-        group = 1
-    elif "容器" in item.title or "Dockerfile" in text:
-        group = 2
     elif any(token in text for token in (
         "仅返回成功", "占位实现", "行为不明确", "溢出丢弃", "旁路",
         "伪造", "错误结果",
     )):
-        group = 3
+        group = 1
     elif any(token in text for token in ("路由", "竞态", "死锁", "越界", "权限")):
-        group = 4
+        group = 2
     elif item.severity in {"critical", "high"}:
-        group = 5
+        group = 3
     elif any(token in text for token in ("性能", "浪费", "热点", "锁竞争")):
-        group = 8
-    elif item.severity == "medium":
         group = 6
+    elif item.severity == "medium":
+        group = 4
     else:
-        group = 7
+        group = 5
     return -rank[item.severity], group, -item.confidence
 
 
 def description_priority_findings(
     digest: ReportDigest, limit: int | None = None,
 ) -> list[Finding]:
-    """描述报告专用顺序：比赛构建接口、诚信、正确性、性能。"""
+    """描述报告专用顺序：诚信、正确性、性能。"""
     ordered = sorted(digest.findings, key=_description_priority_key)
     return ordered if limit is None else ordered[: max(0, limit)]
-
-
-def build_verification_target_detail(build_verification: dict) -> str:
-    """Keep both contest build targets visible without copying enormous tool logs."""
-    target_results = build_verification.get("targets") or {}
-    details: list[str] = []
-    status_labels = {
-        "failed": "失败",
-        "timeout": "超时",
-        "environment_error": "环境异常",
-        "not_run": "未执行",
-        "unknown": "状态未知",
-    }
-    for target in ("kernel-rv", "kernel-la"):
-        item = target_results.get(target) or {}
-        status = str(item.get("status") or "unknown")
-        if status == "passed":
-            details.append(f"{target}：编译成功")
-            continue
-
-        raw_error = " ".join(
-            " ".join(str(value).split()) for value in (item.get("errors") or [])[:1]
-        )
-        if re.search(r"static\.rust-lang\.org|channel-rust-nightly|rustup", raw_error, re.I):
-            version = re.search(r"/dist/(\d{4}-\d{2}-\d{2})/", raw_error)
-            toolchain = f"nightly-{version.group(1)} " if version else ""
-            reason = f"rustup 同步 {toolchain}工具链失败（比赛编译容器禁用网络）"
-        elif raw_error:
-            reason = re.sub(r"https?://\S+", "远程地址", raw_error)
-            reason = re.sub(r"/root/\.rustup/tmp/\S+", "rustup 临时文件", reason)
-            reason = clip_at_sentence(reason, 105)
-        else:
-            reason = "未生成可用内核产物" if status == "failed" else "未提供进一步错误"
-        details.append(f"{target}：{status_labels.get(status, status)}（{reason}）")
-    return concise_module_summary("；".join(details))
 
 
 def description_digest_from_tree(tree: dict) -> ReportDigest:
@@ -294,130 +252,6 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
     facts = tree.get("facts") or {}
     integrity = facts.get("integrity") or {}
     findings: list[Finding] = []
-
-    # 新报告优先使用比赛镜像真实编译；旧报告仍可只提供外部 build_log。
-    build_interface = integrity.get("build_interface") or {}
-    if not build_interface:
-        legacy = integrity.get("reproducibility") or {}
-        if legacy.get("required_targets"):
-            build_interface = legacy
-    build_verification = (
-        integrity.get("build_verification")
-        or build_interface.get("verification")
-        or {}
-    )
-    verification_requested = bool(build_verification.get("requested"))
-    verification_status = str(build_verification.get("status") or "unknown")
-    if verification_requested:
-        if verification_status in {"failed", "partial"}:
-            findings.append(Finding(
-                title="比赛镜像双架构编译未全部通过",
-                detail=build_verification_target_detail(build_verification),
-                severity="high",
-                confidence=1.0,
-                source="description",
-            ))
-        elif verification_status in {"environment_error", "timeout"}:
-            findings.append(Finding(
-                title="比赛镜像编译未形成结论",
-                detail=concise_module_summary(
-                    f"{build_verification.get('summary') or 'Docker 或宿主环境未能完成编译验证；不能据此判断作品失败。'}"
-                    f" {build_verification_target_detail(build_verification)}"
-                ),
-                severity="info",
-                confidence=1.0,
-                source="description",
-            ))
-
-    for log_key, label in (("build_log", "编译"), ("run_log", "运行")):
-        log = integrity.get(log_key) or {}
-        if log_key == "build_log" and verification_requested:
-            continue
-        if log_key == "run_log" and log.get("status") == "not_provided":
-            # 没有动态运行材料时不在描述报告中额外展开无法验证的环境。
-            continue
-        if log.get("status") == "failed":
-            details = "；".join(log.get("errors") or []) or f"{label}日志出现失败标记。"
-            findings.append(Finding(
-                title=f"{label}失败",
-                detail=concise_module_summary(details),
-                severity="high",
-                confidence=0.95,
-                source="description",
-                evidence=[EvidenceRef(path=str(log.get("path") or ""))],
-            ))
-        elif log.get("status") == "missing":
-            findings.append(Finding(
-                title=f"{label}日志缺失",
-                detail=f"指定的{label}日志不存在，无法核验该项结论。",
-                severity="medium",
-                confidence=1.0,
-                source="description",
-            ))
-        elif log.get("status") == "not_provided":
-            findings.append(Finding(
-                title=f"{label}未实测",
-                detail=(
-                    f"本地描述报告未执行正式{label}；该状态仅表示没有动态证据，"
-                    "不等于作品失败，也不应单独作为扣分依据。"
-                ),
-                severity="info",
-                confidence=1.0,
-                source="description",
-            ))
-        elif log.get("status") == "unknown":
-            findings.append(Finding(
-                title=f"{label}结果未能确认",
-                detail=f"{label}日志没有可识别的成功或失败标记，不能据此判断结果。",
-                severity="medium",
-                confidence=1.0,
-                source="description",
-                evidence=[EvidenceRef(path=str(log.get("path") or ""))],
-            ))
-
-    interface_status = str(build_interface.get("status") or "unknown")
-    if interface_status in {"partial", "missing"}:
-        findings.append(Finding(
-            title=(
-                "根目录 Make 构建入口缺失"
-                if interface_status == "missing"
-                else "双架构 Make 构建入口不完整"
-            ),
-            detail=concise_module_summary(str(
-                build_interface.get("summary") or "未能确认比赛规定的双架构 Make 构建入口。"
-            )),
-            severity="high" if interface_status == "missing" else "medium",
-            confidence=1.0,
-            source="description",
-            evidence=[
-                EvidenceRef(
-                    path=str(item.get("path") or ""),
-                    line=item.get("line"),
-                    excerpt=str(item.get("excerpt") or "")[:500],
-                )
-                for item in (build_interface.get("evidence") or [])[:3]
-                if isinstance(item, dict) and item.get("path")
-            ],
-        ))
-
-    container = build_interface.get("container") or {}
-    if container.get("status") == "inconsistent":
-        findings.append(Finding(
-            title="仓库自带容器辅助入口不一致",
-            detail=concise_module_summary(str(container.get("summary") or "容器辅助入口不一致。")),
-            severity="low",
-            confidence=1.0,
-            source="description",
-            evidence=[
-                EvidenceRef(
-                    path=str(item.get("path") or ""),
-                    line=item.get("line"),
-                    excerpt=str(item.get("excerpt") or "")[:500],
-                )
-                for item in (container.get("evidence") or [])[:2]
-                if isinstance(item, dict) and item.get("path")
-            ],
-        ))
 
     hardcode_findings = _reviewed_hardcode_findings(verdict, integrity)
     findings.extend(hardcode_findings)
@@ -528,42 +362,6 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             "hardcode_cleared": sum(
                 1 for item in reviews if isinstance(item, dict) and item.get("status") == "cleared"
             ),
-            "build_log_status": (
-                build_verification.get("status", "unknown")
-                if verification_requested else
-                (integrity.get("build_log") or {}).get("status", "not_provided")
-            ),
-            "run_log_status": (integrity.get("run_log") or {}).get("status", "not_provided"),
-            "build_log_note": str(
-                build_verification.get("summary")
-                if verification_requested else
-                (integrity.get("build_log") or {}).get("note") or ""
-            ),
-            "run_log_note": str((integrity.get("run_log") or {}).get("note") or ""),
-            "build_verification_requested": verification_requested,
-            "build_verification_image": str(build_verification.get("image") or ""),
-            "build_verification_digest": str(build_verification.get("image_digest") or ""),
-            "kernel_rv_build_status": str(
-                ((build_verification.get("targets") or {}).get("kernel-rv") or {}).get("status")
-                or "not_run"
-            ),
-            "kernel_la_build_status": str(
-                ((build_verification.get("targets") or {}).get("kernel-la") or {}).get("status")
-                or "not_run"
-            ),
-            "build_target_summary": (
-                build_verification_target_detail(build_verification)
-                if verification_requested and verification_status != "passed" else ""
-            ),
-            "build_interface_status": build_interface.get("status", "unknown"),
-            "build_interface_summary": str(build_interface.get("summary") or ""),
-            "build_interface_missing_targets": "、".join(
-                str(value) for value in (build_interface.get("missing_targets") or [])
-            ),
-            "container_entry_status": container.get("status", "not_provided"),
-            # 兼容仍读取旧指标名的摘要产物；含义已变为比赛 Make 构建接口。
-            "reproducibility_status": build_interface.get("status", "unknown"),
-            "reproducibility_summary": str(build_interface.get("summary") or ""),
         },
     )
 
