@@ -1671,7 +1671,7 @@ def collect_file_pairs(
     return result
 
 
-_SEMANTIC_PROMPT_CHAR_BUDGET = 90_000
+_SEMANTIC_PROMPT_CHAR_BUDGET = 25_000
 _SEMANTIC_CODE_CHAR_LIMIT = 3_000
 
 
