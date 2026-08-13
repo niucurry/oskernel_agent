@@ -13,6 +13,16 @@ from oskernel_agent.finals.development import (
 )
 
 
+def test_esc_renders_numeric_zero_not_empty():
+    """0 变更的关键提交必须渲染为「0 LOC」，而不是空串（str(0 or '') 曾吞掉 0）。"""
+    from oskernel_agent.finals.development import _esc
+
+    assert _esc(0) == "0"
+    assert _esc(3) == "3"
+    assert _esc(None) == ""
+    assert _esc("0 LOC") == "0 LOC"
+
+
 def test_development_cli_default_keeps_only_html(tmp_path, monkeypatch):
     import oskernel_agent.finals.__main__ as cli
     import oskernel_agent.finals.development as development

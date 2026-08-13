@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from loguru import logger
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from oskernel_agent.finals.digests import is_placeholder_team_name
 
 
 class RepoEntry(BaseModel):
@@ -90,6 +93,12 @@ def load_repos(path: str | Path) -> list[RepoEntry]:
     if isinstance(data, dict):
         data = data.get("repos", [])
     entries = [RepoEntry.model_validate(item) for item in data]
+    for entry in entries:
+        if is_placeholder_team_name(entry.team_name):
+            logger.warning(
+                "repos.yaml 中 {} 的队名为占位符 {!r}；报告展示将回退为「未知队伍」，"
+                "请补充真实队名。", entry.repo_id, entry.team_name,
+            )
     seen: dict[str, str] = {}
     for entry in entries:
         url = entry.repo_url.strip().rstrip("/").lower().removesuffix(".git")

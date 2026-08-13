@@ -624,7 +624,8 @@ def analyze_history(
 
 
 def _esc(value: object) -> str:
-    return html.escape(str(value or ""), quote=True)
+    # 仅把 None 归一为空串；数值 0 必须原样渲染（str(0 or "") 会吞掉 0）。
+    return html.escape("" if value is None else str(value), quote=True)
 
 
 def render_development_html(analysis: dict) -> str:
