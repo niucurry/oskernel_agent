@@ -503,7 +503,7 @@ def do_summary(team_id: str, work_dir: Path, logfile: Path) -> tuple[bool, str]:
         "--comparison-digest", str(work_dir / "comparison.digest.json"),
         "--repo-id", team_id, "--output", str(dst),
     ]
-    ok, body = run_step("一页摘要", cmd, logfile, timeout=180)
+    ok, body = run_step("一页摘要", cmd, logfile, timeout=600)
     return ok and dst.exists(), body
 
 

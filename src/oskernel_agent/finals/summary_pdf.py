@@ -392,18 +392,26 @@ def _source_report_corpus(source: str, digests: dict[str, ReportDigest]) -> str:
 
 
 def _unattributed_issue_identifiers(issue: AISummaryIssue, corpus: str) -> list[str]:
-    """发现摘要问题中没有出现在来源报告语料的代码标识符。"""
+    """发现摘要问题中没有出现在来源报告语料的代码标识符。
+
+    同一标识符带约定命名前缀（sys_execve / syscall_xxx / do_xxx 等）视为来源
+    标识符的规范写法，不算改写或补造；只有整份来源报告都查不到的标识符才拦截。
+    """
     generated = f"{issue.title} {issue.judgment}"
     source = corpus.casefold()
     identifiers = set(re.findall(
         r"(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]{3,}(?![A-Za-z0-9_])",
         generated,
     ))
-    return sorted(
-        token for token in identifiers
-        if token.casefold() not in _SUMMARY_IDENTIFIER_ALLOWLIST
-        and token.casefold() not in source
-    )
+
+    def attributed(token: str) -> bool:
+        folded = token.casefold()
+        if folded in _SUMMARY_IDENTIFIER_ALLOWLIST or folded in source:
+            return True
+        stripped = re.sub(r"^(?:sys|syscall|__sys|__do|do|ax|k)_", "", folded)
+        return len(stripped) >= 4 and stripped in source
+
+    return sorted(token for token in identifiers if not attributed(token))
 
 
 def _validate_ai_summary_result(
@@ -547,9 +555,12 @@ def run_ai_summary_analysis(
         "不得称作品为完整、完备、可运行或已经验证的操作系统内核。\n"
         "所有文字必须使用完整句子，禁止使用‘…’或‘...’省略内容；不得提交被截断的词组。"
         "overall_judgment 不超过 280 字，每个 section conclusion 不超过 180 字，"
-        "每个 issue title 不超过 80 字、judgment 不超过 240 字；issue 中的函数名、路径名和代码标识符必须来自其引用的 source_finding，禁止改写或补造相近名称。\n"
-        "不要在 issue 文字中裸写与代码标识符写法相同的专有缩写或术语（如 POSIX、ABI、MMIO、ELF）；"
-        "表达标准或接口语义时用自然语言描述，必要时只使用来源 finding 明文中确实出现的写法。\n"
+        "每个 issue title 不超过 80 字、judgment 不超过 240 字；issue 中的函数名、路径名和代码标识符必须来自其引用的 source_finding，"
+        "禁止改写或补造相近名称（例如不得把 finding 中的 execve 改写成 sys_execve，"
+        "也不得引入 finding 中不存在的其他函数名如 fork），否则会导致交付失败。\n"
+        "不要在 issue 文字中裸写与代码标识符写法相同的专有缩写或术语（如 POSIX、ABI、MMIO、ELF、syscall）；"
+        "表达标准或接口语义时用自然语言描述，必要时只使用来源 finding 明文中确实出现的写法。"
+        "全篇任何英文术语（如 syscall）首次出现时必须给出中文解释（如 系统调用（syscall）），否则无法通过可读性校验。\n"
         "输出 JSON 必须严格符合 expected_schema 的字段，禁止任何额外字段（尤其不得回传 "
         "repo_id 或输入文件路径）；多出的字段会导致交付失败。\n"
         f"repo_id: {repo_id}\n"
@@ -759,7 +770,7 @@ def _story(
         HRFlowable(width="100%", thickness=.6, color=colors.HexColor("#d0d5dd")),
         Spacer(1, 3),
         Paragraph(
-            "使用说明：内容仅用于安排评委核查顺序，不替代源码、正式编译运行日志、比赛章程与现场说明。",
+            "使用说明：内容仅用于安排评委核查顺序，不替代源码与正式日志、比赛章程与现场说明。",
             style["small"],
         ),
     ])
