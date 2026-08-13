@@ -447,6 +447,19 @@ def test_summary_allows_pass_rate_metric_without_runtime_log(tmp_path):
     assert "通过率" in summary.sections[1].conclusion
 
 
+def test_summary_allows_via_phrasing_before_test_word(tmp_path):
+    """“通过脚本忽略测试退出码”的“通过”是方式介词，不是测试通过断言。"""
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][0]["judgment"] = (
+        "可疑实现通过脚本忽略测试退出码来绕过失败。"
+    )
+
+    summary = _validate_ai_summary_result(payload, digests)
+
+    assert "通过脚本" in summary.issues[0].judgment
+
+
 def test_summary_explains_term_before_length_validation(tmp_path):
     digests = load_digests(_digests(tmp_path))
     payload = _ai_summary().model_dump(mode="json")
