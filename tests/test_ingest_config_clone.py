@@ -86,6 +86,31 @@ def test_repo_key_allows_internal_space(tmp_path):
     assert entries[0].repo_id == "2023/key with space"
 
 
+def test_load_repos_warns_on_placeholder_team_names(tmp_path):
+    """undefined / undefinedType 这类占位队名必须在加载时就显形。"""
+    import loguru
+
+    from oskernel_agent.finals.digests import team_display_label
+
+    path = tmp_path / "repos.yaml"
+    path.write_text(
+        'repos:\n'
+        '- {repo_url: "https://g.example/x", year: 2023, team_name: "undefined"}\n'
+        '- {repo_url: "https://g.example/y", year: 2023, team_name: "undefinedType"}\n',
+        encoding="utf-8",
+    )
+    records: list[str] = []
+    sink = loguru.logger.add(records.append, level="WARNING")
+    try:
+        entries = load_repos(path)
+    finally:
+        loguru.logger.remove(sink)
+    assert len(entries) == 2
+    assert any("占位符" in message for message in records)
+    assert team_display_label("undefined") == "未知队伍"
+    assert team_display_label("undefinedType") == "未知队伍"
+
+
 def test_invalid_repo_key_character_raises(tmp_path):
     path = tmp_path / "repos.yaml"
     path.write_text(

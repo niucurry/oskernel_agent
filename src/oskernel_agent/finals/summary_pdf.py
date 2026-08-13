@@ -236,7 +236,8 @@ def load_digests(paths: list[str | Path]) -> dict[str, ReportDigest]:
 
 
 def _safe(value: object) -> str:
-    return html.escape(str(value or ""), quote=False)
+    # 与 development._esc 同一约定：仅 None 归一为空串，数值 0 原样渲染。
+    return html.escape("" if value is None else str(value), quote=False)
 
 
 def _summary_input_digest(digest: ReportDigest) -> dict:
