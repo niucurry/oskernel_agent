@@ -35,11 +35,12 @@ def _write(tmp_path, digest: ReportDigest):
 
 def _digests(tmp_path):
     description = ReportDigest(
-        repo_id="T2026-demo", kind="description", conclusion="编译失败，需先修复链接错误。",
-        findings=[Finding(title="编译失败", detail="链接器找不到入口符号。", severity="high",
-                          confidence=.95, source="description")],
-        metrics={"build_log_status": "failed", "run_log_status": "not_provided",
-                 "hardcode_signals": 1},
+        repo_id="T2026-demo", kind="description",
+        conclusion="存在需要核查的硬编码线索，且发现页表回收实现缺陷。",
+        findings=[Finding(title="页表回收路径不完整",
+                          detail="页表释放路径遗漏了中间页目录，可能造成内存泄漏。",
+                          severity="high", confidence=.95, source="description")],
+        metrics={"hardcode_signals": 1},
     )
     development = ReportDigest(
         repo_id="T2026-demo", kind="development", conclusion="可见历史包含 8 次提交。",
@@ -61,12 +62,12 @@ def _digests(tmp_path):
 
 def _ai_summary():
     return AISummary.model_validate({
-        "overall_judgment": "作品当前最影响评审的是编译链路失败；开发历史存在集中提交，对比结果显示部分实现与历史作品接近，三项均需按证据顺序复核。",
+        "overall_judgment": "作品当前最影响评审的是页表回收实现缺陷；开发历史存在集中提交，对比结果显示部分实现与历史作品接近，三项均需按证据顺序复核。",
         "confidence": 80,
         "sections": [
             {
                 "source": "description",
-                "conclusion": "现有日志显示链接阶段失败，且缺少可确认的运行结果，功能完成度暂不能按通过评价。",
+                "conclusion": "描述报告显示页表回收路径存在遗漏，且硬编码线索需要核查，功能完成度需要结合源码继续确认。",
                 "confidence": 80,
             },
             {
@@ -84,8 +85,8 @@ def _ai_summary():
             {
                 "source": "description",
                 "source_finding": 1,
-                "title": "编译链路失败",
-                "judgment": "链接器找不到入口符号，当前产物无法完成正式构建，直接影响功能验证。",
+                "title": "页表回收缺陷",
+                "judgment": "页表释放路径遗漏中间页目录，可能造成内存泄漏，直接影响内存管理正确性。",
                 "severity": "high",
                 "confidence": 95,
             },
@@ -203,29 +204,21 @@ def test_summary_rejects_ai_confidence_above_source(tmp_path, monkeypatch):
         run_ai_summary_analysis(digests, "T2026-demo", tmp_path / "summary.pdf")
 
 
-def test_summary_rejects_claim_that_recorded_build_target_is_unexplained(tmp_path):
+def test_summary_rejects_any_compile_claim_in_issue_judgment(tmp_path):
     digests = load_digests(_digests(tmp_path))
-    digests["description"].metrics.update({
-        "kernel_rv_build_status": "failed",
-        "kernel_la_build_status": "failed",
-    })
     payload = _ai_summary().model_dump(mode="json")
-    payload["issues"][0]["judgment"] = "kernel-la 结果未单独说明。"
+    payload["issues"][0]["judgment"] = "内核产物未完成正式构建，结果未单独说明。"
 
-    with pytest.raises(SummaryPdfError, match="kernel-la 编译状态"):
+    with pytest.raises(SummaryPdfError, match="不得包含编译或构建"):
         _validate_ai_summary_result(payload, digests)
 
 
-def test_summary_rejects_environment_interruption_as_build_failure(tmp_path):
+def test_summary_rejects_environment_interruption_claim_wording(tmp_path):
     digests = load_digests(_digests(tmp_path))
-    digests["description"].metrics.update({
-        "kernel_rv_build_status": "environment_error",
-        "kernel_la_build_status": "environment_error",
-    })
     payload = _ai_summary().model_dump(mode="json")
     payload["sections"][0]["conclusion"] = "双架构因环境限制未通过编译。"
 
-    with pytest.raises(SummaryPdfError, match="环境中断"):
+    with pytest.raises(SummaryPdfError, match="不得包含编译或构建"):
         _validate_ai_summary_result(payload, digests)
 
 
@@ -256,11 +249,11 @@ def test_summary_allows_identifier_from_related_finding_in_same_report(tmp_path)
     引用真实标识符的合并是合法表达，不应判为幻觉。"""
     digests = load_digests(_digests(tmp_path))
     digests["description"].findings = [
-        Finding(title="比赛镜像双架构编译未全部通过",
-                detail="kernel-rv：失败（error: no such command: axplat）。",
+        Finding(title="源码实现问题：页表释放",
+                detail="sys_free_pages 对 /musl/ 路径返回成功。",
                 severity="high", confidence=.95, source="description"),
-        Finding(title="源码实现问题：Makefile",
-                detail="依赖 cargo-axplat 工具链未安装导致编译失败。",
+        Finding(title="源码实现问题：页表遍历",
+                detail="free_pagetable 递归深度未设上限。",
                 severity="high", confidence=.95, source="description"),
     ]
     payload = _ai_summary().model_dump(mode="json")
@@ -268,13 +261,13 @@ def test_summary_allows_identifier_from_related_finding_in_same_report(tmp_path)
         "source_finding": 1,
         "severity": "high",
         "confidence": 95,
-        "title": "双架构编译失败",
-        "judgment": "kernel-rv 与 kernel-la 因缺 cargo-axplat 工具链无法构建。",
+        "title": "页表释放缺陷",
+        "judgment": "sys_free_pages 与 free_pagetable 均改写错误返回。",
     })
 
     summary = _validate_ai_summary_result(payload, digests)
 
-    assert summary.issues[0].title == "双架构编译失败"
+    assert summary.issues[0].title == "页表释放缺陷"
 
 
 def test_summary_rejects_suspected_hardcode_rewritten_as_confirmed(tmp_path):
@@ -303,7 +296,7 @@ def test_summary_rejects_complete_kernel_claim_without_dual_arch_build(tmp_path)
     payload = _ai_summary().model_dump(mode="json")
     payload["overall_judgment"] = "作品具有完整的 RISC-V 与 LoongArch 双架构操作系统内核框架。"
 
-    with pytest.raises(SummaryPdfError, match="未经双架构编译验证"):
+    with pytest.raises(SummaryPdfError, match="未经编译验证"):
         _validate_ai_summary_result(payload, digests)
 
 
@@ -395,7 +388,7 @@ def test_summary_allows_explicit_runtime_evidence_limitation(tmp_path):
     digests = load_digests(_digests(tmp_path))
     payload = _ai_summary().model_dump(mode="json")
     payload["sections"][1]["conclusion"] = (
-        "提交历史不能证明当前版本可编译、可启动或测试通过。"
+        "提交历史不能证明当前版本的功能测例全部通过。"
     )
 
     summary = _validate_ai_summary_result(payload, digests)

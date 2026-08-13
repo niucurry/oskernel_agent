@@ -393,29 +393,10 @@ def _render_priority_summary(tree_json: dict, resolver) -> str:
         )
 
     metrics = digest.metrics
-    status_text = {
-        "passed": "通过", "failed": "失败", "unknown": "未能确认",
-        "not_provided": "未实测", "missing": "文件缺失", "skipped": "未执行",
-        "partial": "仅一个架构通过", "timeout": "验证超时",
-        "environment_error": "环境异常",
-    }
-    build_verified = bool(metrics.get("build_verification_requested"))
-    interface_text = {
-        "complete": "双架构入口完整" if build_verified else "双架构入口完整（静态）",
-        "partial": "双架构入口不完整",
-        "missing": "根目录 Make 入口缺失",
-        "unknown": "未采集",
-    }.get(str(metrics.get("build_interface_status") or "unknown"), "未采集")
-    build_status = status_text.get(str(metrics.get("build_log_status")), "未能确认")
-    run_status = status_text.get(str(metrics.get("run_log_status")), "未能确认")
-    coverage_parts = [f"构建接口：{interface_text}", f"比赛镜像编译：{build_status}"]
-    if str(metrics.get("run_log_status") or "not_provided") != "not_provided":
-        coverage_parts.append(f"运行日志：{run_status}")
-    coverage_parts.append(
+    coverage = (
         f'AI 确认 {_esc(metrics.get("hardcode_confirmed", 0))} 条、'
-        f'疑似 {_esc(metrics.get("hardcode_suspected", 0))} 条'
+        f'疑似 {_esc(metrics.get("hardcode_suspected", 0))} 条。'
     )
-    coverage = "；".join(coverage_parts) + "。"
     hardcode_scope = (
         "硬编码专项检查范围：仓库第一方源码与测试/评测脚本中的按测试名或被加载的 ELF 文件名分支、"
         "针对测试的不合理缓存替换策略、直接打印预期输出、修改测试脚本绕过失败用例；"
@@ -549,45 +530,6 @@ def _render_verdict(verdict: dict, resolver) -> str:
   </details>
 </section>
 """
-
-
-def _status_label(status: str) -> tuple[str, str]:
-    labels = {
-        "passed": ("已验证通过", "status-ok"),
-        "failed": ("失败", "status-bad"),
-        "timeout": ("验证超时", "status-warn"),
-        "environment_error": ("环境异常", "status-warn"),
-        "skipped": ("未执行", "status-info"),
-        "not_run": ("未实测", "status-info"),
-        "not_provided": ("未实测", "status-info"),
-        "missing": ("文件缺失", "status-bad"),
-        "unknown": ("结果不明确", "status-warn"),
-        "configured": ("配置存在，未实测", "status-warn"),
-        "warning": ("配置不一致", "status-bad"),
-        "partial": ("仅部分配置", "status-warn"),
-        "complete": ("双架构入口完整", "status-info"),
-        "provided": ("已提供补充材料", "status-info"),
-        "nested": ("子目录补充材料", "status-info"),
-        "inconsistent": ("辅助入口不一致", "status-warn"),
-    }
-    return labels.get(str(status or "unknown"), ("未核验", "status-warn"))
-
-
-def _first_evidence_link(evidence_items: list, resolver) -> str:
-    for item in evidence_items or []:
-        if isinstance(item, dict):
-            path = str(item.get("path") or "")
-            line = item.get("line")
-        else:
-            path = str(getattr(item, "path", "") or "")
-            line = getattr(item, "line", None)
-        if not path:
-            continue
-        if line:
-            return _resolve_path_anchor(f"{path}:{line}", resolver)
-        if re.search(r"(?::|#L)\d+(?:-L?\d+)?$", path):
-            return _resolve_path_anchor(path, resolver)
-    return ""
 
 
 _SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
@@ -745,172 +687,6 @@ def _render_judge_conclusion(tree_json: dict, resolver) -> str:
 """
 
 
-def _render_usability(tree_json: dict, resolver) -> str:
-    integrity = ((tree_json.get("facts") or {}).get("integrity") or {})
-    rows: list[str] = []
-
-    build_interface = integrity.get("build_interface") or {}
-    if not build_interface:
-        legacy = integrity.get("reproducibility") or {}
-        if legacy.get("required_targets"):
-            build_interface = legacy
-    interface_status = str(build_interface.get("status") or "unknown")
-    interface_text, interface_cls = _status_label(interface_status)
-    if interface_status == "missing":
-        interface_text = "根目录 Make 入口缺失"
-    elif interface_status == "partial":
-        interface_text = "双架构入口不完整"
-    interface_summary = str(
-        build_interface.get("summary")
-        or "旧报告未采集根目录 Makefile 与 kernel-rv/kernel-la 静态入口事实。"
-    )
-    interface_evidence = _first_evidence_link(build_interface.get("evidence") or [], resolver)
-    rows.append(
-        '<div class="grid grid-cols-1 md:grid-cols-[7rem_8rem_1fr] gap-2 py-2 border-b '
-        'border-slate-200 dark:border-slate-700">'
-        '<strong class="text-sm">构建接口</strong>'
-        f'<span><span class="status-pill {interface_cls}">{interface_text}</span></span>'
-        f'<p class="text-sm text-slate-600 dark:text-slate-300">'
-        f'{_esc(interface_summary)}'
-        f'{(" · 证据：" + interface_evidence) if interface_evidence else ""}</p></div>'
-    )
-
-    build_verification = (
-        integrity.get("build_verification")
-        or build_interface.get("verification")
-        or {}
-    )
-    verification_requested = bool(build_verification.get("requested"))
-    if verification_requested:
-        overall_status = str(build_verification.get("status") or "unknown")
-        overall_text, overall_cls = _status_label(overall_status)
-        image = str(build_verification.get("image") or "未记录")
-        digest = str(build_verification.get("image_digest") or "")
-        image_note = f"{image}"
-        if digest:
-            image_note += f"；digest {digest}"
-        limits = build_verification.get("limits") or {}
-        if limits:
-            image_note += (
-                f"；网络关闭；{limits.get('cpus') or '?'} CPU / "
-                f"{limits.get('memory') or '?'} 内存 / {limits.get('pids') or '?'} 进程上限"
-            )
-        source = build_verification.get("source") or {}
-        if source.get("commit"):
-            image_note += f"；构建输入 HEAD {source.get('commit')}"
-            if source.get("working_tree_dirty"):
-                image_note += "（工作区有未提交变化，本次仍按 HEAD 原始内容编译）"
-        summary = str(build_verification.get("summary") or "").strip()
-        if summary:
-            image_note += f"；{summary}"
-        elif build_verification.get("errors"):
-            image_note += "；" + "；".join(
-                str(value) for value in build_verification.get("errors")[:2]
-            )
-        rows.append(
-            '<div class="grid grid-cols-1 md:grid-cols-[7rem_8rem_1fr] gap-2 py-2 border-b '
-            'border-slate-200 dark:border-slate-700">'
-            '<strong class="text-sm">比赛编译环境</strong>'
-            f'<span><span class="status-pill {overall_cls}">{overall_text}</span></span>'
-            f'<p class="text-sm text-slate-600 dark:text-slate-300">{_esc(image_note)}</p></div>'
-        )
-        target_labels = {"kernel-rv": "RISC-V 编译", "kernel-la": "LoongArch 编译"}
-        for target in ("kernel-rv", "kernel-la"):
-            fact = (build_verification.get("targets") or {}).get(target) or {}
-            status = str(fact.get("status") or "not_run")
-            status_text, status_cls = _status_label(status)
-            artifact = fact.get("artifact") or {}
-            parts = [str(fact.get("command") or f"make {target}")]
-            if fact.get("duration_seconds") is not None:
-                parts.append(f"耗时 {fact.get('duration_seconds')} 秒")
-            if artifact:
-                size_mb = int(artifact.get("size_bytes") or 0) / (1024 * 1024)
-                parts.append(f"产物 {artifact.get('path') or target}（{size_mb:.1f} MiB）")
-                sha256 = str(artifact.get("sha256") or "")
-                if sha256:
-                    parts.append(f"SHA-256 {sha256}")
-            elif fact.get("errors"):
-                parts.extend(str(value) for value in fact.get("errors")[:2])
-            rows.append(
-                '<div class="grid grid-cols-1 md:grid-cols-[7rem_8rem_1fr] gap-2 py-2 border-b '
-                'border-slate-200 dark:border-slate-700">'
-                f'<strong class="text-sm">{target_labels[target]}</strong>'
-                f'<span><span class="status-pill {status_cls}">{status_text}</span></span>'
-                f'<p class="text-sm text-slate-600 dark:text-slate-300">'
-                f'{_esc("；".join(parts))}</p></div>'
-            )
-    elif str((integrity.get("build_log") or {}).get("status") or "not_provided") != "not_provided":
-        fact = integrity.get("build_log") or {}
-        status = str(fact.get("status") or "not_provided")
-        status_text, status_cls = _status_label(status)
-        note = str(fact.get("note") or "").strip()
-        if not note:
-            if fact.get("errors"):
-                note = "；".join(str(value) for value in fact.get("errors")[:2])
-            elif status == "not_provided":
-                note = "本地描述报告未执行该步骤；未实测不等于作品失败。"
-            else:
-                note = "当前材料不足以核验。"
-        evidence = ""
-        if fact.get("path"):
-            evidence = _resolve_path_anchor(str(fact.get("path")), resolver)
-        rows.append(
-            '<div class="grid grid-cols-1 md:grid-cols-[7rem_8rem_1fr] gap-2 py-2 border-b '
-            'border-slate-200 dark:border-slate-700">'
-            '<strong class="text-sm">提交编译日志</strong>'
-            f'<span><span class="status-pill {status_cls}">{status_text}</span></span>'
-            f'<p class="text-sm text-slate-600 dark:text-slate-300">{_esc(note)}'
-            f'{(" · 日志：" + evidence) if evidence else ""}</p></div>'
-        )
-
-    run_fact = integrity.get("run_log") or {}
-    run_status = str(run_fact.get("status") or "not_provided")
-    if run_status != "not_provided":
-        status_text, status_cls = _status_label(run_status)
-        note = str(run_fact.get("note") or "").strip()
-        if not note:
-            note = (
-                "；".join(str(value) for value in run_fact.get("errors")[:2])
-                if run_fact.get("errors") else "当前材料不足以核验。"
-            )
-        evidence = (
-            _resolve_path_anchor(str(run_fact.get("path")), resolver)
-            if run_fact.get("path") else ""
-        )
-        rows.append(
-            '<div class="grid grid-cols-1 md:grid-cols-[7rem_8rem_1fr] gap-2 py-2 border-b '
-            'border-slate-200 dark:border-slate-700">'
-            '<strong class="text-sm">运行日志</strong>'
-            f'<span><span class="status-pill {status_cls}">{status_text}</span></span>'
-            f'<p class="text-sm text-slate-600 dark:text-slate-300">{_esc(note)}'
-            f'{(" · 日志：" + evidence) if evidence else ""}</p></div>'
-        )
-
-    container = build_interface.get("container") or {}
-    container_status = str(container.get("status") or "not_provided")
-    container_text, container_cls = _status_label(container_status)
-    if container_status == "not_provided":
-        container_text = "非必需 / 未提供"
-    container_summary = str(
-        container.get("summary")
-        or "Dockerfile 不是比赛规定的构建入口；缺少该文件不作为风险或扣分依据。"
-    )
-    container_evidence = _first_evidence_link(container.get("evidence") or [], resolver)
-    rows.append(
-        '<div class="grid grid-cols-1 md:grid-cols-[7rem_8rem_1fr] gap-2 py-2">'
-        '<strong class="text-sm">容器材料</strong>'
-        f'<span><span class="status-pill {container_cls}">{container_text}</span></span>'
-        f'<p class="text-sm text-slate-600 dark:text-slate-300">'
-        f'{_esc(container_summary)}'
-        f'{(" · 证据：" + container_evidence) if container_evidence else ""}</p></div>'
-    )
-    return f"""
-<section id="usability" data-section-id="usability" class="brief-card p-5 mb-5">
-  <h2 class="text-xl font-bold mb-3">真实可用性</h2>
-  <div>{"".join(rows)}</div>
-  <p class="text-xs text-slate-500 mt-3">分析边界：构建接口来自 Makefile 静态检查；比赛镜像编译只证明规定命令能否生成双架构内核，不等于功能测例或性能通过。未实测和宿主环境异常均不等于作品失败。</p>
-</section>
-"""
 
 
 def _render_hardcode_brief(tree_json: dict, resolver) -> str:
@@ -1323,7 +1099,6 @@ def _render_all_subsystems(tree_json: dict, resolver) -> str:
 def _render_brief_toc() -> str:
     items = (
         ("verdict", "结论与关键问题"),
-        ("usability", "真实可用性"),
         ("hardcode", "硬编码复核"),
         ("modules", "全部模块概览"),
     )
@@ -1345,7 +1120,6 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
     assert_report_complete("", structured=tree_json)
     meta = tree_json.get("meta", {})
     conclusion_html = _render_judge_conclusion(tree_json, resolver)
-    usability_html = _render_usability(tree_json, resolver)
     hardcode_html = _render_hardcode_brief(tree_json, resolver)
     modules_html = _render_all_subsystems(tree_json, resolver)
     toc_html = _render_brief_toc()
@@ -1374,10 +1148,9 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
         <span class="status-pill status-ok">准确性优先 · 精简呈现</span>
       </div>
       <div class="text-sm text-slate-500 mt-2">队伍：{_esc(meta.get('team_id','未记录'))} · 分析时间：{_esc(meta.get('ts',''))} · 索引源文件：{_esc(meta.get('indexed_files',0))} 个</div>
-      <div class="text-xs text-slate-500 mt-1 ai-disclaimer">分析依据：源码结构分析与编译运行日志。相关判断仅供评委参考，不构成违规认定。</div>
+      <div class="text-xs text-slate-500 mt-1 ai-disclaimer">分析依据：源码结构分析与硬编码线索复核。相关判断仅供评委参考，不构成违规认定。</div>
     </header>
     {conclusion_html}
-    {usability_html}
     {hardcode_html}
     {modules_html}
     <footer class="text-xs text-slate-500 pb-8">结论所需证据均已收录在本报告的源码链接中。</footer>

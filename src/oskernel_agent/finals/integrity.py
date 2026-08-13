@@ -1,5 +1,7 @@
-"""编译/运行日志与硬编码线索的轻量事实采集。
+"""硬编码线索的轻量事实采集。
 
+描述报告不再分析编译、构建与运行可用性；本模块只保留硬编码扫描，
+以及编译/运行日志解析、Make 构建接口与比赛镜像验证的独立库函数（报告管线未使用）。
 扫描结果只表示“值得复核的线索”，不会把关键词命中直接写成作弊结论。
 """
 
@@ -26,7 +28,10 @@ _SOURCE_SUFFIXES = {
 _SCRIPT_SUFFIXES = {".py", ".sh", ".bash", ".ps1", ".bat", ".cmd", ".cmake"}
 _SCRIPT_NAMES = {"makefile", "gnumakefile", "kbuild", "kconfig"}
 _ROOT_MAKEFILE_NAMES = ("GNUmakefile", "makefile", "Makefile")
+# 官方评测入口为 ``make all``，要求 all 目标在仓库根目录生成这两个 ELF 产物文件；
+# 名称是产物文件名，不是 Make 目标名——仓库无需声明同名目标。
 _REQUIRED_KERNEL_TARGETS = ("kernel-rv", "kernel-la")
+_AGGREGATE_ENTRY_TARGETS = ("all", "submit")
 _MAX_FILE_BYTES = 2 * 1024 * 1024
 DEFAULT_CONTEST_BUILD_IMAGE = "zhouzhouyi/os-contest:20260510"
 DEFAULT_HARDCODE_SIGNAL_LIMIT = 100
@@ -351,11 +356,17 @@ def _safe_make_include(root: Path, current: Path, token: str) -> Path | None:
 
 
 def _scan_make_targets(root: Path, entry: Path) -> tuple[dict[str, dict], list[str]]:
-    """静态读取根 Makefile 及可安全解析的 include，不调用 make。"""
+    """静态读取根 Makefile 及可安全解析的 include，不调用 make。
+
+    比赛只要求 ``make all`` 能在根目录生成 kernel-rv / kernel-la 两个产物文件，并不要求
+    存在同名目标。产物规则有两种可静态识别的形态：同名目标（含 ``$(KERNEL_RV):`` 这类
+    变量写法），或任意目标的配方引用产物（如 ``cp ... kernel-rv``）。两条线索都只表示
+    声明存在，不代表编译通过。
+    """
     variables: dict[str, str] = {}
     visited: set[Path] = set()
     queue = [entry.resolve()]
-    records: list[tuple[Path, int, str]] = []
+    rules: list[tuple[Path, int, list[str], list[tuple[int, str]]]] = []
 
     while queue and len(visited) < 64:
         path = queue.pop(0)
@@ -367,7 +378,7 @@ def _scan_make_targets(root: Path, entry: Path) -> tuple[dict[str, dict], list[s
         except OSError:
             continue
 
-        # 先收集简单变量，使 ``$(KERNEL_RV):`` 这类比赛常见写法可静态识别。
+        # 先收集简单变量，使 ``$(KERNEL_RV):`` 与配方里的 ``cp ... $(KERNEL_RV)`` 可静态识别。
         for _, raw in logical_lines:
             line = raw.split("#", 1)[0]
             match = _MAKE_ASSIGNMENT_RE.match(line)
@@ -376,9 +387,15 @@ def _scan_make_targets(root: Path, entry: Path) -> tuple[dict[str, dict], list[s
                     match.group(2).strip(), variables
                 )
 
+        current: tuple[Path, int, list[str], list[tuple[int, str]]] | None = None
         for line_no, raw in logical_lines:
             line = raw.split("#", 1)[0].rstrip()
-            if not line or line.startswith("\t"):
+            if not line:
+                continue
+            if line.startswith("\t") and current is not None:
+                current[3].append(
+                    (line_no, _expand_simple_make_vars(line.strip(), variables))
+                )
                 continue
             include_match = _MAKE_INCLUDE_RE.match(line)
             if include_match:
@@ -387,29 +404,49 @@ def _scan_make_targets(root: Path, entry: Path) -> tuple[dict[str, dict], list[s
                     included = _safe_make_include(root, path, token)
                     if included is not None and included not in visited:
                         queue.append(included)
+                current = None
                 continue
-            records.append((path, line_no, line))
+            # ``:=`` 等变量赋值不是规则；规则配方在上方按 Tab 单独收集。
+            match = re.match(r"^\s*([^:=]+?)\s*:(?!=)(.*)$", line)
+            if match:
+                lhs = _expand_simple_make_vars(match.group(1), variables)
+                current = (path, line_no, [token.rstrip("&") for token in lhs.split()], [])
+                rules.append(current)
+            else:
+                current = None
 
     found: dict[str, dict] = {}
     aggregate_targets: set[str] = set()
-    for path, line_no, line in records:
-        # ``:=`` 等变量赋值不是规则；规则配方已在上面按 Tab 排除。
-        match = re.match(r"^\s*([^:=]+?)\s*:(?!=)(.*)$", line)
-        if not match:
-            continue
-        lhs = _expand_simple_make_vars(match.group(1), variables)
-        names = {token.rstrip("&") for token in lhs.split()}
-        aggregate_targets.update(names & {"all", "submit"})
+    for path, line_no, names, recipes in rules:
+        aggregate_targets.update(set(names) & set(_AGGREGATE_ENTRY_TARGETS))
         for target in _REQUIRED_KERNEL_TARGETS:
-            if target not in names or target in found:
-                continue
-            found[target] = {
-                "declared": True,
-                "path": _relative(path, root),
-                "line": line_no,
-                "excerpt": " ".join(line.split())[:280],
-                "expected_output": target,
-            }
+            if target in names and target not in found:
+                found[target] = {
+                    "declared": True,
+                    "via": "target",
+                    "path": _relative(path, root),
+                    "line": line_no,
+                    "excerpt": (" ".join(names) + ":")[:280],
+                    "expected_output": target,
+                }
+    # 同名目标未声明时，允许由其他目标（如 all 链上的 build_riscv）的配方生成产物。
+    for path, line_no, names, recipes in rules:
+        for recipe_line_no, recipe in recipes:
+            for target in _REQUIRED_KERNEL_TARGETS:
+                if target in found:
+                    continue
+                if re.search(
+                    rf"\b(?:cp|mv|install|objcopy|ln)\b[^\n]{{0,80}}\b{re.escape(target)}\b",
+                    recipe,
+                ):
+                    found[target] = {
+                        "declared": True,
+                        "via": "recipe",
+                        "path": _relative(path, root),
+                        "line": recipe_line_no,
+                        "excerpt": recipe[:280],
+                        "expected_output": target,
+                    }
 
     return found, sorted(aggregate_targets)
 
@@ -602,7 +639,11 @@ def verify_contest_build(
     timeout_seconds: int = 1800,
     pull_image: bool = False,
 ) -> dict:
-    """在比赛统一镜像的临时副本中依次执行双架构 Make 目标。
+    """在比赛统一镜像的临时副本中执行官方评测入口 ``make all``。
+
+    官方评测指南要求评测时在仓库根目录执行 make all，all 目标应编译并生成 ELF 格式的
+    kernel-rv 与 kernel-la 两个产物文件；这里按同一入口执行，并在结束后分别核验两个
+    根目录产物。
 
     参赛仓库按不可信输入处理：构建发生在一次性目录和一次性容器中，不挂载原仓库、
     Docker socket 或其他主机目录，且关闭容器网络。这里只验证编译和根目录产物，不启动
@@ -715,41 +756,48 @@ def verify_contest_build(
             workspace = Path(temp_dir) / "repo"
             base["source"] = _prepare_build_workspace(root, workspace, Path(temp_dir))
             for target in _REQUIRED_KERNEL_TARGETS:
-                target_started = time.monotonic()
                 artifact_path = workspace / target
                 if artifact_path.is_symlink() or artifact_path.is_file():
                     artifact_path.unlink()
                 elif artifact_path.is_dir():
                     shutil.rmtree(artifact_path)
-                command = [
-                    docker,
-                    "run",
-                    "--rm",
-                    "--network", "none",
-                    "--security-opt", "no-new-privileges",
-                    "--cap-drop", "ALL",
-                    "--cpus", base["limits"]["cpus"],
-                    "--memory", base["limits"]["memory"],
-                    "--pids-limit", "2048",
-                    "--mount", f"type=bind,source={workspace},target=/work",
-                    "-w", "/work",
-                    runtime_image,
-                    "/bin/bash", "-lc", f"make {target}",
-                ]
-                try:
-                    process = _docker_result(command, timeout=timeout_seconds)
-                    output = process.stdout or ""
-                    exit_code = process.returncode
-                    status = "passed" if exit_code == 0 else "failed"
-                except subprocess.TimeoutExpired as exc:
-                    raw_output = exc.stdout or ""
-                    output = (
-                        raw_output.decode("utf-8", errors="replace")
-                        if isinstance(raw_output, bytes) else str(raw_output)
-                    )
-                    exit_code = None
-                    status = "timeout"
-                errors, tail = _build_log_details(output)
+            run_started = time.monotonic()
+            command = [
+                docker,
+                "run",
+                "--rm",
+                "--network", "none",
+                "--security-opt", "no-new-privileges",
+                "--cap-drop", "ALL",
+                "--cpus", base["limits"]["cpus"],
+                "--memory", base["limits"]["memory"],
+                "--pids-limit", "2048",
+                "--mount", f"type=bind,source={workspace},target=/work",
+                "-w", "/work",
+                runtime_image,
+                "/bin/bash", "-lc", "make all",
+            ]
+            try:
+                process = _docker_result(command, timeout=timeout_seconds)
+                output = process.stdout or ""
+                exit_code = process.returncode
+                run_status = "passed" if exit_code == 0 else "failed"
+            except subprocess.TimeoutExpired as exc:
+                raw_output = exc.stdout or ""
+                output = (
+                    raw_output.decode("utf-8", errors="replace")
+                    if isinstance(raw_output, bytes) else str(raw_output)
+                )
+                exit_code = None
+                run_status = "timeout"
+            errors, tail = _build_log_details(output)
+            if run_status == "failed" and (
+                exit_code == 125 or _BUILD_ENV_ERROR_RE.search(output)
+            ):
+                run_status = "environment_error"
+            duration = round(time.monotonic() - run_started, 2)
+            for target in _REQUIRED_KERNEL_TARGETS:
+                artifact_path = workspace / target
                 artifact = None
                 if artifact_path.is_file() and artifact_path.stat().st_size > 0:
                     artifact = {
@@ -757,24 +805,22 @@ def verify_contest_build(
                         "size_bytes": artifact_path.stat().st_size,
                         "sha256": _sha256_file(artifact_path),
                     }
-                if status == "passed" and artifact is None:
-                    status = "failed"
-                    errors.insert(0, f"命令退出码为 0，但仓库根目录未生成非空 {target}")
-                elif status == "passed":
+                target_status = run_status
+                target_errors = list(errors[:6])
+                if run_status == "passed" and artifact is None:
+                    target_status = "failed"
+                    target_errors = [f"make all 退出码为 0，但仓库根目录未生成非空 {target}"]
+                elif run_status == "passed":
                     # 配置项名称可能含 ERROR（如 IOCTL_HEX2STR_ERROR），但成功退出且
                     # 生成目标产物时不能在结构化结果中同时保留“错误”列表。
-                    errors = []
-                if status == "failed" and (
-                    exit_code == 125 or _BUILD_ENV_ERROR_RE.search(output)
-                ):
-                    status = "environment_error"
+                    target_errors = []
                 base["targets"][target] = {
-                    "status": status,
-                    "command": f"make {target}",
+                    "status": target_status,
+                    "command": "make all",
                     "exit_code": exit_code,
-                    "duration_seconds": round(time.monotonic() - target_started, 2),
+                    "duration_seconds": duration,
                     "artifact": artifact,
-                    "errors": errors[:6],
+                    "errors": target_errors,
                     "log_tail": tail,
                 }
     except (OSError, shutil.Error) as exc:
@@ -792,10 +838,10 @@ def verify_contest_build(
     ]
     if statuses and all(status == "passed" for status in statuses):
         status = "passed"
-        summary = "比赛统一镜像中 kernel-rv 与 kernel-la 均编译成功，并生成非空根目录产物。"
+        summary = "比赛统一镜像中 make all 编译成功，并生成非空 kernel-rv 与 kernel-la 根目录产物。"
     elif "passed" in statuses:
         status = "partial"
-        summary = "比赛统一镜像中仅有一个架构完成编译，双架构编译未全部通过。"
+        summary = "比赛统一镜像中 make all 退出码为 0，但未生成全部双架构产物。"
     elif any(item == "environment_error" for item in statuses):
         status = "environment_error"
         summary = "比赛镜像编译受到环境或构建前置依赖影响，未进入可归因于源码的编译阶段；不能据此判断作品失败。"
@@ -804,7 +850,7 @@ def verify_contest_build(
         summary = "比赛镜像编译超时，未形成双架构编译结论。"
     else:
         status = "failed"
-        summary = "比赛统一镜像中 kernel-rv 与 kernel-la 均未编译成功。"
+        summary = "比赛统一镜像中 make all 编译失败，未生成双架构内核产物。"
     return {
         **base,
         "status": status,
@@ -815,9 +861,11 @@ def verify_contest_build(
 
 
 def scan_build_interface(repo_path: str | Path) -> dict:
-    """静态检查比赛约定的双架构 Make 入口，本函数本身不执行编译。
+    """静态检查比赛约定的 Make 构建入口，本函数本身不执行编译。
 
-    该事实用于帮助评委确认作品是否声明了规定入口。即使两个目标都存在，也只能写
+    官方评测指南：评测在仓库根目录执行 ``make all``，all 目标应编译并生成 ELF 格式的
+    kernel-rv 与 kernel-la 两个产物文件。本函数只静态确认根目录 Makefile 声明了 all
+    入口，且能识别到两个产物规则（同名目标或任意目标的配方引用）；即使齐全也只能写
     “入口完整、未实测”，不能外推为编译、启动或测试通过。
     """
     root = Path(repo_path).resolve()
@@ -836,7 +884,7 @@ def scan_build_interface(repo_path: str | Path) -> dict:
             "status": "missing",
             "summary": (
                 "仓库根目录未发现 Makefile、makefile 或 GNUmakefile，无法确认比赛规定的 "
-                "kernel-rv 与 kernel-la 构建入口。"
+                "make all 构建入口。"
             ),
             "makefile": None,
             "required_targets": {
@@ -881,20 +929,32 @@ def scan_build_interface(repo_path: str | Path) -> dict:
         found[target] for target in _REQUIRED_KERNEL_TARGETS if target in found
     )
 
-    if not missing_targets:
+    all_declared = "all" in aggregate_targets
+    if all_declared and not missing_targets:
         status = "complete"
         summary = (
-            f"根目录 {makefile_rel} 静态识别到 kernel-rv 与 kernel-la 双架构入口，"
-            "约定产物分别为仓库根目录同名文件；静态目标存在不能据此判定编译通过。"
+            f"根目录 {makefile_rel} 静态识别到比赛规定的 all 构建入口，并可识别 kernel-rv 与 "
+            "kernel-la 两个产物规则；静态目标存在不能据此判定编译通过。"
+        )
+    elif all_declared:
+        status = "partial"
+        missing_text = "、".join(missing_targets)
+        summary = (
+            f"根目录 {makefile_rel} 识别到 all 构建入口，但未识别到 {missing_text} 产物规则，"
+            "双架构比赛构建入口不完整。"
+        )
+    elif not missing_targets:
+        status = "partial"
+        summary = (
+            f"根目录 {makefile_rel} 识别到 kernel-rv 与 kernel-la 产物规则，但未识别到 all "
+            "构建入口；评测执行的 make all 将失败，双架构比赛构建入口不完整。"
         )
     else:
         status = "partial"
-        present = [target for target in _REQUIRED_KERNEL_TARGETS if target in found]
-        present_text = "、".join(present) if present else "两个规定目标均未识别到"
         missing_text = "、".join(missing_targets)
         summary = (
-            f"根目录 {makefile_rel} 存在，但静态检查仅确认 {present_text}；"
-            f"未识别到 {missing_text}，双架构比赛构建入口不完整。"
+            f"根目录 {makefile_rel} 存在，但未识别到 all 构建入口，且未识别到 {missing_text} "
+            "产物规则，双架构比赛构建入口不完整。"
         )
 
     return {
@@ -918,41 +978,17 @@ def scan_reproducibility(repo_path: str | Path) -> dict:
     return scan_build_interface(repo_path)
 
 
-def collect_integrity_facts(
-    repo_path: str | Path,
-    *,
-    build_log: str | Path | None = None,
-    run_log: str | Path | None = None,
-    verify_build: bool = False,
-    build_image: str = DEFAULT_CONTEST_BUILD_IMAGE,
-    build_timeout: int = 1800,
-    pull_build_image: bool = False,
-) -> dict:
+def collect_integrity_facts(repo_path: str | Path) -> dict:
+    """描述报告只做硬编码线索采集，不再分析编译、构建与运行可用性。"""
     try:
         signal_limit = max(4, int(os.environ.get("AGENT_HARDCODE_SIGNAL_LIMIT", str(DEFAULT_HARDCODE_SIGNAL_LIMIT))))
     except ValueError:
         signal_limit = DEFAULT_HARDCODE_SIGNAL_LIMIT
-    build_interface = scan_build_interface(repo_path)
-    build_verification = (
-        verify_contest_build(
-            repo_path,
-            image=build_image,
-            timeout_seconds=build_timeout,
-            pull_image=pull_build_image,
-        )
-        if verify_build else build_interface["verification"]
-    )
-    build_interface["verification"] = build_verification
     return {
-        "build_log": analyze_log(build_log, kind="build"),
-        "run_log": analyze_log(run_log, kind="run"),
         "hardcode": scan_hardcode_signals(repo_path, limit=signal_limit),
-        "build_interface": build_interface,
-        "build_verification": build_verification,
         "interpretation": (
-            "构建接口来自 Makefile 静态检查；若请求比赛镜像验证，则双架构编译在一次性副本中执行。"
-            "目标存在不等于编译通过，宿主或 Docker 环境错误也不等于作品失败。"
-            "硬编码扫描仅提供待复核线索；只有结合完整源码、正式日志和评测环境后，"
-            "才能判断是否构成针对测试的作弊实现。未实测项不等于作品失败。"
+            "本报告不分析编译、构建与运行可用性，不执行比赛镜像编译验证。"
+            "硬编码扫描仅提供待复核线索；只有结合完整源码上下文后，"
+            "才能判断是否构成针对测试的作弊实现。"
         ),
     }

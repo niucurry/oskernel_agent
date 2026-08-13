@@ -127,12 +127,7 @@ def _cleanup_tree_intermediates(output_file: str) -> None:
 # 树状报告主入口
 
 def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
-                   cli_depth: int = 3, *, build_log: str | None = None,
-                   run_log: str | None = None,
-                   verify_build: bool = False,
-                   build_image: str | None = None,
-                   build_timeout: int = 1800,
-                   pull_build_image: bool = False,
+                   cli_depth: int = 3, *,
                    team_id: str | None = None,
                    repository_url: str | None = None,
                    repository_ref: str | None = None) -> Path | None:
@@ -146,22 +141,12 @@ def _run_tree_mode(repo_path: Path, repo_name: str, output_file: str,
     try:
         from ..analysis.repo_facts import build_repo_facts
         print("\n[预处理] 采集项目级共享事实档案 ...")
-        facts = build_repo_facts(
-            repo_path,
-            repo_name,
-            ts,
-            build_log=build_log,
-            run_log=run_log,
-            verify_build=verify_build,
-            build_image=build_image,
-            build_timeout=build_timeout,
-            pull_build_image=pull_build_image,
-        )
+        facts = build_repo_facts(repo_path, repo_name, ts)
     except Exception as e:
         print(f"[错误] 事实档案构建失败：{e}", file=sys.stderr)
         return None
     if not isinstance(facts.get("integrity"), dict):
-        print("[错误] 事实档案缺少编译、运行与硬编码检查结果", file=sys.stderr)
+        print("[错误] 事实档案缺少硬编码检查结果", file=sys.stderr)
         return None
 
     # 2. 自底向上构建 tree
@@ -241,25 +226,6 @@ def main() -> None:
     parser.add_argument("--output", "-o")
     parser.add_argument("--depth", type=int, default=3,
                         help="终端树打印的最大下钻层数（默认 3）")
-    parser.add_argument("--build-log", help="可选：正式编译日志，用于问题前置与证据提取")
-    parser.add_argument("--run-log", help="可选：正式运行日志，用于问题前置与证据提取")
-    parser.add_argument(
-        "--verify-build", action="store_true",
-        help="在比赛统一 Docker 镜像的一次性副本中执行 make kernel-rv 和 make kernel-la",
-    )
-    parser.add_argument(
-        "--build-image",
-        default=os.environ.get("OSKERNEL_BUILD_IMAGE", "zhouzhouyi/os-contest:20260510"),
-        help="真实编译使用的比赛镜像（可用 OSKERNEL_BUILD_IMAGE 覆盖）",
-    )
-    parser.add_argument(
-        "--build-timeout", type=int, default=1800,
-        help="每个架构的编译超时秒数（默认 1800）",
-    )
-    parser.add_argument(
-        "--pull-build-image", action="store_true",
-        help="本地缺少比赛镜像时允许拉取；同时启用 --verify-build",
-    )
     parser.add_argument("--team-id", help="队伍编号，写入报告元数据")
     parser.add_argument("--repository-url", help="目标仓库网页地址；证据链接只使用该地址")
     parser.add_argument("--repository-ref", help="证据链接使用的不可变提交或分支")
@@ -280,12 +246,7 @@ def main() -> None:
     print(f"[agent] 报告将写入：{output_file}")
     try:
         result = _run_tree_mode(repo_path_a, repo_name_a, output_file,
-                                cli_depth=args.depth, build_log=args.build_log,
-                                run_log=args.run_log,
-                                verify_build=args.verify_build or args.pull_build_image,
-                                build_image=args.build_image,
-                                build_timeout=args.build_timeout,
-                                pull_build_image=args.pull_build_image,
+                                cli_depth=args.depth,
                                 team_id=args.team_id,
                                 repository_url=args.repository_url or args.url,
                                 repository_ref=args.repository_ref)
