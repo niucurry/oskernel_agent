@@ -291,6 +291,20 @@ def test_summary_rejects_any_compile_claim_in_issue_judgment(tmp_path):
         _validate_ai_summary_result(payload, digests)
 
 
+def test_summary_allows_factual_compile_word_mentions(tmp_path, monkeypatch):
+    """重编译测例/编译期/构建场景等事实性表述不是构建状态分析，不应被拒。"""
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][0]["judgment"] = (
+        "发现重编译测例并覆盖官方二进制，属硬编码疑似项；"
+        "开发主线围绕构建场景题 2 展开。"
+    )
+    monkeypatch.setattr(summary_pdf, "run_batch_task", lambda *args, **kwargs: payload)
+
+    summary = run_ai_summary_analysis(digests, "T2026-demo", tmp_path / "summary.pdf")
+    assert "重编译测例" in summary.issues[0].judgment
+
+
 def test_summary_rejects_environment_interruption_claim_wording(tmp_path):
     digests = load_digests(_digests(tmp_path))
     payload = _ai_summary().model_dump(mode="json")
