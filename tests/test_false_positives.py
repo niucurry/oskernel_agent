@@ -232,6 +232,11 @@ def test_semantic_sanitizer_wraps_code_ellipses_only():
     )
     assert '<span title="a...b">' in tag_intact
 
+    shell_run = SC._sanitize_code_ellipses(
+        ']; then echo "SKIP LTP CASE"... —— 以跳过代替修复 证据： user/src/ltp'
+    )
+    assert '<code>]; then echo &quot;SKIP LTP CASE&quot;...</code>' in shell_run
+
     prose = SC._sanitize_code_ellipses("普通省略号……这里没有代码形态，不应被包。")
     assert prose.count("<code>") == 0
 

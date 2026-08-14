@@ -37,6 +37,15 @@ _CODE_ELLIPSIS_RE = re.compile(
     r"[^>]{0,120}?(?:\.\.\.|…)[^<]{0,120}?[\)\]}>]"
 )
 
+# 无括号包裹的代码缩写（如 echo "SKIP LTP CASE"...、]; then rm -f x...）：
+# 以代码类字符（引号/分号/括号等）开头的连续 ASCII run 以 ... 结尾时，
+# 整体包成 <code>。首字符必须是代码类字符而非空白/中文，避免误吞正文。
+_CODE_RUN_ELLIPSIS_RE = re.compile(
+    r"[A-Za-z0-9_\"';=/$\[\]{}<>().,:+~\-]"
+    r"[A-Za-z0-9_\"';=/$\[\]{}<>().,:+~\- ]{2,118}(?:\.\.\.|…)"
+    r"(?=\s|$|[^A-Za-z0-9_])"
+)
+
 
 def sanitize_code_ellipses(html_text: str) -> str:
     """把正文里含省略号的代码式片段包进 <code>，已有 <code> 段落先占位保护。"""
@@ -53,7 +62,10 @@ def sanitize_code_ellipses(html_text: str) -> str:
         token = match.group(0).strip("`")
         return f"<code>{html.escape(token)}</code>"
 
-    wrapped = _CODE_ELLIPSIS_RE.sub(_wrap, protected)
+    # 单趟左优先匹配：括号形态优先，无括号代码 run 兜底；生成物不再二次处理
+    combined = re.compile(
+        r"(?:" + _CODE_ELLIPSIS_RE.pattern + r"|" + _CODE_RUN_ELLIPSIS_RE.pattern + r")")
+    wrapped = combined.sub(_wrap, protected)
     for key, span in placeholders.items():
         wrapped = wrapped.replace(key, span)
     return wrapped
