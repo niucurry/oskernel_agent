@@ -297,7 +297,7 @@ def test_summary_allows_factual_compile_word_mentions(tmp_path, monkeypatch):
     payload = _ai_summary().model_dump(mode="json")
     payload["issues"][0]["judgment"] = (
         "发现重编译测例并覆盖官方二进制，属硬编码疑似项；"
-        "开发主线围绕构建场景题 2 展开。"
+        "开发主线围绕构建类评测题 2 展开。"
     )
     monkeypatch.setattr(summary_pdf, "run_batch_task", lambda *args, **kwargs: payload)
 
