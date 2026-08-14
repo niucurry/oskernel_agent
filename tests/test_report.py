@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import re
 import pytest
 import sqlite3
 from types import SimpleNamespace
@@ -1298,6 +1299,38 @@ def test_every_function_cluster_renders_its_own_semantic_explanation():
     assert all(cluster["analysis_id"] in section for cluster in clusters)
     assert "Inode 与目录项采用独立的功能簇分析正文" in section
     assert "文件系统采用独立的功能簇分析正文" in section
+
+
+def test_cluster_section_groups_cards_by_module_and_keeps_global_numbering():
+    suspects = [
+        _sc_suspect("os/src/task/scheduler.rs", "schedule_next", "2023/sched", "scheduler.rs",
+                    "schedule_next", "confirmed", .97, module="sched", exact=20),
+        _sc_suspect("os/src/ipc/channel.rs", "send_msg", "2023/ipc", "channel.rs",
+                    "send_msg", "confirmed", .95, module="ipc", exact=18),
+        _sc_suspect("os/src/time/clock.rs", "get_time", "2023/time", "clock.rs",
+                    "get_time", "confirmed", .93, module="time", exact=16),
+        _sc_suspect("os/src/entry/startup.rs", "entry_init", "2023/arch", "startup.rs",
+                    "entry_init", "confirmed", .91, module="arch", exact=14),
+    ]
+    groups = SC.collect_file_pairs(suspects)
+    clusters = SC.build_similarity_clusters(groups)
+    assert len(clusters) == 4
+
+    _toc, section = SC._cluster_section(groups, "", None, "2026/new")
+
+    # ① 分组头按 _MODULE_PRIORITY 降序：sched(1.0) < ipc(.9) < time(.8) < arch(.75)
+    positions = [section.index(f'id="module-evidence-{mod}"') for mod in
+                 ("sched", "ipc", "time", "arch")]
+    assert positions == sorted(positions)
+    # ② 锚点只在分组头 div 上且每个恰好一次；卡片不再带 id
+    for mod in ("sched", "ipc", "time", "arch"):
+        assert section.count(f'id="module-evidence-{mod}"') == 1
+        assert f'<div id="module-evidence-{mod}"' in section
+    assert "<article id=" not in section
+    # ③ 卡片总数 == 簇总数
+    assert section.count('class="cluster-card"') == len(clusters)
+    # ④ 全局编号连续，跨组不重置
+    assert re.findall(r'cluster-index">C(\d\d)<', section) == ["01", "02", "03", "04"]
 
 
 def test_review_priority_is_explainable_and_favors_core_large_match():

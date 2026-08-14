@@ -376,6 +376,24 @@ _MODULE_NAMES = {
 }
 
 
+PLACEHOLDER_TEAM_NAMES = frozenset({
+    "", "undefined", "undefinedtype", "null", "none", "nan", "tbd",
+    "unknown", "n/a", "na", "not provided", "not provided yet",
+})
+
+
+def is_placeholder_team_name(team: str) -> bool:
+    """判断队名是否为抓取/配置产生的占位符（undefined、undefinedType、null 等）。"""
+    return team.strip().casefold() in PLACEHOLDER_TEAM_NAMES
+
+
+def team_display_label(team: str) -> str:
+    """队名展示：占位符/缺失回退为「未知队伍」，避免报告出现 literal 占位符。"""
+    if is_placeholder_team_name(team):
+        return "未知队伍"
+    return team if team.endswith("队") else f"{team} 队"
+
+
 def comparison_digest(
     repo_id: str,
     closest_source: str,
@@ -396,10 +414,16 @@ def comparison_digest(
         if not module_total:
             continue
         pct = round(module_confirmed / module_total * 100, 1)
+        summary = (f"{module_confirmed}/{module_total} 个函数形成高置信同源证据；"
+                   f"另有 {module_review} 个函数需要人工复核。")
+        # 分母除同源与存疑外还含复核未完成/暂未检出等类别，必须交代缺口，
+        # 否则读者对账 N + K != total。
+        remaining = module_total - module_confirmed - module_review
+        if remaining > 0:
+            summary += f"其余 {remaining} 个函数未形成高置信同源证据。"
         modules.append(ModuleDigest(
             name=_MODULE_NAMES.get(module, module),
-            summary=(f"{module_confirmed}/{module_total} 个函数形成高置信同源证据；"
-                     f"另有 {module_review} 个函数需要人工复核。"),
+            summary=summary,
             similarity_pct=pct,
             evidence_count=module_confirmed + module_review,
         ))
@@ -415,9 +439,7 @@ def comparison_digest(
         closest_year, closest_team = closest_source.split("/", 1)
     identity = source_text
     if closest_year and closest_team:
-        closest_team_label = (
-            closest_team if closest_team.endswith("队") else f"{closest_team} 队"
-        )
+        closest_team_label = team_display_label(closest_team)
         identity = (
             f"{closest_year} 年来自 {closest_institution} 的 {closest_team_label}作品"
             if closest_institution else

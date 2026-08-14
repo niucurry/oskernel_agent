@@ -271,6 +271,20 @@ _INDEX_SKIP_DIRS = frozenset({
 })
 
 
+def _segments_are_subsequence(want: list[str], rel: list[str]) -> bool:
+    """两个段列表是否互为保序子序列（长度不等）。
+
+    少写前缀：want=[axhal,src,cpu.rs] 是 rel=[arceos,modules,axhal,src,cpu.rs]
+    的子序列；多写中间段：rel=[os,vdso,loongarch64.S] 是
+    want=[os,src,vdso,loongarch64.S] 的子序列。
+    """
+    shorter, longer = (want, rel) if len(want) < len(rel) else (rel, want)
+    if len(shorter) == len(longer):
+        return False
+    it = iter(longer)
+    return all(segment in it for segment in shorter)
+
+
 def _build_repo_index(roots: list[Path]) -> dict[str, list[str]]:
     """遍历仓库根，建 basename → [posix 相对路径, ...] 索引，供后缀匹配兜底。
 
@@ -328,19 +342,25 @@ def make_file_link_resolver(
     line_count_cache: dict[Path, int] = {}
 
     def _suffix_unique_match(filepath: str) -> tuple[Path, int] | None:
-        """在仓库里找路径以 filepath 结尾（按段对齐）的文件；仅唯一命中时返回。
+        """在仓库里找与 filepath 段级保序子序列相等的文件；仅唯一命中时返回。
 
-        修复「agent 少写前缀」的常见情形，如 `axhal/src/cpu.rs` →
-        `arceos/modules/axhal/src/cpu.rs`。重名歧义（多命中）保持不解析。
+        覆盖 AI 路径漂移的两种常见方向：少写前缀（`axhal/src/cpu.rs` →
+        `arceos/modules/axhal/src/cpu.rs`，want 是 rel 的子序列）与多写/错写
+        中间段（`os/src/vdso/loongarch64.S` → `os/vdso/loongarch64.S`，rel 是
+        want 的子序列）。段不对齐（同位置不同段）不匹配；重名歧义
+        （多命中）保持不解析，避免链错文件。
         """
         base = Path(filepath).name
         if "index" not in index_cache:
             index_cache["index"] = _build_repo_index(roots)
-        want = Path(filepath).as_posix()
+        want_segments = Path(filepath).as_posix().split("/")
         matches: list[tuple[Path, int]] = []
         for tagged in index_cache["index"].get(base, []):
             ri_str, rel = tagged.split("\x00", 1)
-            if rel == want or rel.endswith("/" + want):
+            rel_segments = rel.split("/")
+            if len(rel_segments) != len(want_segments) and _segments_are_subsequence(
+                want_segments, rel_segments
+            ):
                 ri = int(ri_str)
                 matches.append((roots[ri] / rel, ri))
         return matches[0] if len(matches) == 1 else None

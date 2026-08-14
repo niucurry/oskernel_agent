@@ -26,7 +26,7 @@ import uuid
 import atexit
 from contextlib import contextmanager
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from oskernel_agent.paths import PROJECT_ROOT, SOURCE_ROOT
@@ -324,7 +324,9 @@ class BatchTask:
     enrich: Callable[[dict], dict] | None = None
     # 缓存准入校验。用于拒绝结构合法但不满足交付约束（如残留英文正文）的结果；
     # 同时会校验旧缓存，避免一次异常输出被长期复用。
-    cache_validator: Callable[[dict], bool] | None = None
+    # 返回值约定：True/None 通过；False 拒绝；str 拒绝且给出原因，
+    # 原因会追加进重试请求（知情重试，避免模型重复同样的错误）。
+    cache_validator: Callable[[dict], bool | str | None] | None = None
     # 大体积只读输入通过 OpenCode --file 附加，避免 Windows 命令行 32767 字符上限。
     input_files: tuple[Path, ...] = ()
 
@@ -336,6 +338,44 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 def _log(msg: str) -> None:
     with _print_lock:
         print(msg, file=sys.stderr, flush=True)
+
+
+def _delivery_verdict(task: BatchTask, value: dict) -> bool | str | None:
+    """取交付校验判定；validator 缺失视为通过。"""
+    if task.cache_validator is None:
+        return True
+    return task.cache_validator(value)
+
+
+def _delivery_valid(verdict: bool | str | None) -> bool:
+    """True/None 通过；False 或错误字符串拒绝。"""
+    return verdict is True or verdict is None
+
+
+def _delivery_reason(task: BatchTask, value: dict) -> str | None:
+    """取校验失败原因（validator 返回非空 str 时）；无原因返回 None（盲重试）。"""
+    verdict = _delivery_verdict(task, value)
+    return verdict if isinstance(verdict, str) and verdict else None
+
+
+def _retry_task(task: BatchTask, reason: str | None) -> BatchTask:
+    """知情重试：把上次交付校验的失败原因追加进重试请求。
+
+    盲重试（原 prompt 原样重跑）是「两次漂移一致」的根源——模型不知道上次
+    为何被拒，只会重复同样的错误；附带具体原因后，模型能针对约束修正。
+    无原因时原样返回，保持既有行为。
+    """
+    if not reason:
+        return task
+    return replace(
+        task,
+        user_request=(
+            task.user_request
+            + "\n\n【上次输出未通过交付校验】\n"
+            + reason
+            + "\n请针对以上原因修正后，重新生成完整结果并写到 output_path。"
+        ),
+    )
 
 
 def _tail_text(text: str, limit: int = 2000) -> str:
@@ -389,12 +429,13 @@ def _iter_json_objects(text: str):
             yield obj
 
 
-def _safe_tool_write(task: BatchTask, raw_path: str, content) -> bool:
+def _safe_tool_write(task: BatchTask, raw_path: str, content) -> Path | None:
+    """按 write_report 参数落盘；成功返回实际写入的绝对路径，失败返回 None。"""
     if content is None:
-        return False
+        return None
     raw_path = html.unescape(str(raw_path or "")).strip().strip('"')
     if not raw_path:
-        return False
+        return None
 
     target = Path(raw_path)
     if not target.is_absolute():
@@ -405,7 +446,7 @@ def _safe_tool_write(task: BatchTask, raw_path: str, content) -> bool:
         resolved_target.relative_to(allowed_root)
     except (OSError, ValueError):
         _log(f"[llm_batch] 忽略越界写入请求：{target}")
-        return False
+        return None
 
     if not isinstance(content, str):
         content = json.dumps(content, ensure_ascii=False, indent=2)
@@ -413,7 +454,7 @@ def _safe_tool_write(task: BatchTask, raw_path: str, content) -> bool:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
     _log(f"[llm_batch] 从 stdout 兜底写入：{target}（{len(content)} 字符）")
-    return True
+    return resolved_target
 
 
 def _tool_params_from_json(obj: dict) -> tuple[str, str] | None:
@@ -450,17 +491,23 @@ def _extract_tag_value(body: str, names: tuple[str, ...]) -> str | None:
     return None
 
 
-def _materialize_stdout_writes(task: BatchTask, stdout: str) -> bool:
+def _materialize_stdout_writes(task: BatchTask, stdout: str) -> list[Path]:
     """把模型输出中的伪工具调用/裸 JSON 兜底落盘。
 
     正常路径仍然依赖 MCP write_report。该函数只处理 OpenCode/模型偶发把
     tool call 当文本输出的情况，避免报告生成因为未落盘而退回 fallback。
+    返回本次实际落盘的文件路径列表，供调用方在 output_path 缺失时找回
+    模型写到别名路径的 JSON（如 .verdict.json）。
     """
     if not stdout:
-        return False
+        return []
 
-    wrote = False
+    wrote: list[Path] = []
     clean = _ANSI_RE.sub("", stdout or "")
+
+    def _record(written: Path | None) -> None:
+        if written is not None:
+            wrote.append(written)
 
     # 优先：整段 stdout 就是一个顶层 JSON 对象（报告对象）。只有这个"顶层对象"
     # 才允许写回 task.output_path；嵌套 dict 绝不写回报告路径，避免污染已落盘报告。
@@ -472,15 +519,15 @@ def _materialize_stdout_writes(task: BatchTask, stdout: str) -> bool:
         params = _tool_params_from_json(top)
         if params is not None:
             path, content = params
-            wrote = _safe_tool_write(task, path, content) or wrote
+            _record(_safe_tool_write(task, path, content))
         elif any(k in top for k in (
             "modules", "dimensions", "score_total", "summary", "stages"
         )):
-            wrote = _safe_tool_write(
+            _record(_safe_tool_write(
                 task,
                 str(task.output_path),
                 json.dumps(top, ensure_ascii=False, indent=2),
-            ) or wrote
+            ))
 
     # 扫描嵌套 JSON：只认带显式 output_path 的工具调用，不再把嵌套 magic-key 对象写盘。
     for obj in _iter_json_objects(stdout):
@@ -489,24 +536,24 @@ def _materialize_stdout_writes(task: BatchTask, stdout: str) -> bool:
         params = _tool_params_from_json(obj)
         if params is not None:
             path, content = params
-            wrote = _safe_tool_write(task, path, content) or wrote
+            _record(_safe_tool_write(task, path, content))
 
     for m in re.finditer(
         r"<(?P<tag>write_report|write_to_file|WriteToFile)\b[^>]*>"
         r"(?P<body>.*?)</(?P=tag)>",
-        stdout,
+        clean,
         flags=re.IGNORECASE | re.DOTALL,
     ):
         body = m.group("body")
         content = _extract_tag_value(body, ("content",))
         path = _extract_tag_value(body, ("output_path", "path", "file_path"))
         if path and content is not None:
-            wrote = _safe_tool_write(task, path, content) or wrote
+            _record(_safe_tool_write(task, path, content))
 
     for m in re.finditer(
         r"<[^>]*invoke\b[^>]*name=[\"'](?P<tool>write_report|write_to_file)[\"'][^>]*>"
         r"(?P<body>.*?)</[^>]*invoke>",
-        stdout,
+        clean,
         flags=re.IGNORECASE | re.DOTALL,
     ):
         params: dict[str, str] = {}
@@ -520,13 +567,17 @@ def _materialize_stdout_writes(task: BatchTask, stdout: str) -> bool:
         content = params.get("content")
         path = params.get("output_path") or params.get("path") or params.get("file_path")
         if path and content is not None:
-            wrote = _safe_tool_write(task, path, content) or wrote
+            _record(_safe_tool_write(task, path, content))
 
     return wrote
 
 
-def _run_opencode_once(task: BatchTask, timeout: int) -> tuple[bool, str]:
-    """跑一次 OpenCode 子进程。返回 (是否产生了 output_path 文件, stdout)。"""
+def _run_opencode_once(task: BatchTask, timeout: int) -> tuple[bool, str, list[Path]]:
+    """跑一次 OpenCode 子进程。
+
+    返回 (是否产生了 output_path 文件, stdout, 本次实际落盘的文件路径)。
+    第三项用于 output_path 缺失时找回模型写到别名路径的 JSON。
+    """
     cmd = _opencode_command(task)
     try:
         with _opencode_run_guard():
@@ -544,9 +595,9 @@ def _run_opencode_once(task: BatchTask, timeout: int) -> tuple[bool, str]:
             )
     except subprocess.TimeoutExpired:
         _log(f"[llm_batch] {task.batch_id} 超时 {timeout}s")
-        return False, ""
+        return False, "", []
     stdout = proc.stdout or ""
-    _materialize_stdout_writes(task, stdout)
+    written = _materialize_stdout_writes(task, stdout)
     ok = task.output_path.exists()
     if proc.returncode not in (0, 1) or not ok:
         _log(
@@ -559,7 +610,7 @@ def _run_opencode_once(task: BatchTask, timeout: int) -> tuple[bool, str]:
             _log(f"[llm_batch] {task.batch_id} stdout_tail:\n{stdout_tail}")
         if stderr_tail:
             _log(f"[llm_batch] {task.batch_id} stderr_tail:\n{stderr_tail}")
-    return ok, stdout
+    return ok, stdout, written
 
 
 def _parse_json_file(path: Path) -> dict | None:
@@ -573,15 +624,25 @@ def _parse_json_file(path: Path) -> dict | None:
 
 
 def _try_repair_json(task: BatchTask, raw_text: str,
-                     schema_hint: str, timeout: int) -> dict | None:
-    """调用 json_repair agent 修复损坏文本。"""
+                     schema_hint: str, timeout: int,
+                     repair_validator=None) -> dict | None:
+    """调用 json_repair agent 修复损坏文本。
+
+    repair_validator 可选：repair 输出的轻量结构校验（非 None 且抛异常时
+    弃用 repair 结果，让上层重试原始任务）。
+    """
     repair_path = task.output_path.with_suffix(".repair.json")
     repair_request = (
         f"raw:\n{raw_text}\n\n"
         f"expected_schema:\n{schema_hint}\n\n"
         f"output_path:\n{repair_path}\n\n"
+        "修复前先检查 output_path 所在目录是否存在本次任务生成的 JSON 文件"
+        "（如 .verdict.json、report.json）：若存在，必须先用 read 工具读取其"
+        "完整内容，以它为准修复语法并严格按 expected_schema 补全/规整字段，"
+        "禁止凭空重建结构、改名或自创字段。仅当找不到任何该文件时才以 raw 为"
+        "唯一依据。\n"
         "请只调用 write_report：content 参数为修复后的合法 JSON 字符串，"
-        "output_path 参数必须使用上面的绝对路径。不要读取仓库，不要输出解释。"
+        "output_path 参数必须使用上面的绝对路径。不要输出解释。"
     )
     repair_task = BatchTask(
         batch_id=f"{task.batch_id}-repair",
@@ -592,18 +653,89 @@ def _try_repair_json(task: BatchTask, raw_text: str,
         cache_key="",
         repo_path=task.repo_path,
     )
-    ok, _ = _run_opencode_once(repair_task, timeout)
-    if not ok:
-        return None
-    return _parse_json_file(repair_path)
+    ok, _, written = _run_opencode_once(repair_task, timeout)
+    # 修复产物同样回收别名落盘（修复 agent 偶发写到 report.json 等别名）。
+    # repair_task 的 output_path 是 *.repair.json，_locate_parsed_json 会先
+    # 解析它本身，再尝试其余落盘文件，二者任一可用即采用。
+    parsed = _locate_parsed_json(repair_task, ok, written)
+    if parsed is not None and repair_validator is not None:
+        try:
+            repair_validator(parsed)
+        except Exception as exc:  # noqa: BLE001 — 结构不合法即弃用
+            _log(f"[llm_batch] {task.batch_id} json_repair 输出未通过结构校验，弃用：{exc}")
+            return None
+    return parsed
+
+
+def _locate_parsed_json(task: BatchTask, ok: bool,
+                        written: list[Path]) -> dict | None:
+    """优先 output_path 解析；缺失时找回模型写到别名路径的 JSON。
+
+    模型偶发把 JSON 写到 .verdict.json / report.json 等别名路径（output_path
+    未命中），修复 agent 仅凭 stdout 摘要重建会丢字段结构。这里直接采用
+    实际落盘文件（定向取用，不重新生成），并把内容回写到 canonical 路径，
+    .repair.json 后缀是修复产物，不参与回收。
+    """
+    parsed = _parse_json_file(task.output_path) if ok else None
+    if parsed is not None:
+        return parsed
+    for wp in written or []:
+        if wp == task.output_path:
+            continue
+        if wp.name.endswith(".repair.json"):
+            continue
+        candidate = _parse_json_file(wp)
+        if candidate is not None:
+            _log(f"[llm_batch] {task.batch_id} 采用模型实际落盘 JSON：{wp.name}")
+            try:
+                task.output_path.write_text(
+                    wp.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+                _log(f"[llm_batch] {task.batch_id} 回收内容已回写 {task.output_path.name}")
+            except OSError:
+                pass  # 无法回写 canonical 路径时仍采用回收内容
+            return candidate
+    return None
+
+
+def _best_written_content(task: BatchTask, written: list[Path]) -> str:
+    """取模型实际落盘内容里最完整的一份，供 json_repair 作为修复输入。
+
+    模型把 JSON 写到别名路径时，stdout 里往往只有摘要；以 stdout 为输入
+    会让修复 agent 从摘要重建结构（推倒重来）。以落盘内容为输入则只需修
+    语法/规整字段，内容不丢失。优先 .json 后缀文件，其次取体积最大者。
+    """
+    candidates = [
+        wp for wp in (written or [])
+        if not wp.name.endswith(".repair.json")
+    ]
+
+    def _size(wp: Path) -> int:
+        try:
+            return wp.stat().st_size if wp.exists() else 0
+        except OSError:
+            return 0
+
+    json_like = [wp for wp in candidates if wp.suffix.casefold() in {".json", ".jsonl"}]
+    best = max(json_like or candidates, key=_size, default=None)
+    if best is None:
+        return ""
+    try:
+        return best.read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 def run_batch_task(task: BatchTask, schema_hint: str = "",
-                   timeout: int = 300) -> dict:
-    """单 batch 完整执行：缓存查 → 跑 LLM → 解析 → 失败修复 → 兜底 fallback。"""
+                   timeout: int = 300,
+                   repair_validator=None) -> dict:
+    """单 batch 完整执行：缓存查 → 跑 LLM → 解析 → 失败修复 → 兜底 fallback。
+
+    repair_validator 可选：json_repair 输出的轻量结构校验（见 _try_repair_json）。
+    """
     cached = cache_read(task.cache_dir, task.cache_key) if task.cache_enabled else None
     if cached is not None:
-        if task.cache_validator is None or task.cache_validator(cached):
+        if _delivery_valid(_delivery_verdict(task, cached)):
             _log(f"[llm_batch] {task.batch_id} 缓存命中")
             return cached
         _log(f"[llm_batch] {task.batch_id} 缓存未通过交付校验，重新生成")
@@ -615,13 +747,14 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
         except OSError:
             pass
 
-    ok, stdout = _run_opencode_once(task, timeout)
-    parsed = _parse_json_file(task.output_path) if ok else None
+    ok, stdout, written = _run_opencode_once(task, timeout)
+    parsed = _locate_parsed_json(task, ok, written)
 
     if parsed is None:
-        # 尝试 json 修复
-        raw = ""
-        if task.output_path.exists():
+        # 尝试 json 修复：输入优先取模型实际落盘的内容（定向修，不重建），
+        # 找不到落盘内容才退到 stdout 摘要。
+        raw = _best_written_content(task, written)
+        if not raw and task.output_path.exists():
             try:
                 raw = task.output_path.read_text(encoding="utf-8")
             except OSError:
@@ -630,13 +763,19 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
             raw = stdout
         if raw and schema_hint:
             _log(f"[llm_batch] {task.batch_id} 触发 json_repair")
-            parsed = _try_repair_json(task, raw, schema_hint, timeout)
+            parsed = _try_repair_json(task, raw, schema_hint, timeout,
+                                      repair_validator)
 
     if parsed is None:
-        # 最终重试 1 次
+        # 最终重试 1 次（知情重试：附上上次输出片段，让模型对照修正格式）
         _log(f"[llm_batch] {task.batch_id} 重试 1 次")
-        ok2, _ = _run_opencode_once(task, timeout)
-        parsed = _parse_json_file(task.output_path) if ok2 else None
+        reason = (
+            "上次输出不是合法 JSON，或没有写到指定的 output_path。\n"
+            "上次输出片段：\n" + _tail_text(raw or stdout, 1500)
+        )
+        retry_task = _retry_task(task, reason)
+        ok2, _, written2 = _run_opencode_once(retry_task, timeout)
+        parsed = _locate_parsed_json(retry_task, ok2, written2)
 
     if parsed is None:
         _log(f"[llm_batch] {task.batch_id} 最终失败，使用 fallback")
@@ -654,7 +793,7 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
 
     # 增补正文后再做交付校验：保证缺正文、残留英文等语义不完整结果也会自动重试。
     parsed = enrich_result(parsed)
-    delivery_valid = task.cache_validator is None or task.cache_validator(parsed)
+    delivery_valid = _delivery_valid(_delivery_verdict(task, parsed))
     if not parsed.get("_error") and not delivery_valid:
         _log(f"[llm_batch] {task.batch_id} 未通过交付校验，重试 1 次")
         if task.output_path.exists():
@@ -662,14 +801,15 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
                 task.output_path.unlink()
             except OSError:
                 pass
-        ok2, _ = _run_opencode_once(task, timeout)
-        retried = _parse_json_file(task.output_path) if ok2 else None
+        retry_task = _retry_task(task, _delivery_reason(task, parsed))
+        ok2, _, written2 = _run_opencode_once(retry_task, timeout)
+        retried = _locate_parsed_json(retry_task, ok2, written2)
         if retried is not None:
             parsed = enrich_result(retried)
 
     # 只缓存成功结果：带 _error 的兜底**不写缓存**，否则一次瞬时失败（超时/限流/
     # 子进程异常）会被永久冻住，后续每次跑都命中空结果而不再重试。不缓存则下次自愈。
-    cache_valid = task.cache_validator is None or task.cache_validator(parsed)
+    cache_valid = _delivery_valid(_delivery_verdict(task, parsed))
     if parsed.get("_error"):
         _log(f"[llm_batch] {task.batch_id} 失败结果不入缓存，下次将重试")
     elif not cache_valid:

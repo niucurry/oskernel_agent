@@ -1145,7 +1145,6 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
     <header class="mb-6">
       <div class="flex flex-wrap items-baseline gap-3">
         <h1 class="text-2xl font-bold">{_esc(meta.get('repo','?'))} 作品描述报告</h1>
-        <span class="status-pill status-ok">准确性优先 · 精简呈现</span>
       </div>
       <div class="text-sm text-slate-500 mt-2">队伍：{_esc(meta.get('team_id','未记录'))} · 分析时间：{_esc(meta.get('ts',''))} · 索引源文件：{_esc(meta.get('indexed_files',0))} 个</div>
       <div class="text-xs text-slate-500 mt-1 ai-disclaimer">分析依据：源码结构分析与硬编码线索复核。相关判断仅供评委参考，不构成违规认定。</div>
