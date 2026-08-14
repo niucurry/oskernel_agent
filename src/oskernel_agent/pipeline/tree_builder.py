@@ -474,7 +474,7 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
                     '"highlights":[...],"issues":[...],'
                     '"modules":[{slot:int,name:str,summary:str,'
                     'file_paths:[...]}]}',
-        timeout=600,
+        timeout=900,
     )
     _validate_subsys_result(parsed, subsys_node["name"], repo_path)
 
@@ -1410,6 +1410,13 @@ def _normalize_hardcode_repair_items(
     return normalized_items if seen == set(sources) else []
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int((os.environ.get(name) or "").strip())
+    except ValueError:
+        return default
+
+
 def repair_verdict_hardcode_reviews(
     parsed: dict,
     facts: dict | None,
@@ -1462,18 +1469,6 @@ def repair_verdict_hardcode_reviews(
         )
         return merged
 
-    def _complete(candidate: dict) -> bool:
-        merged_reviews = _merged_reviews(candidate)
-        if not merged_reviews:
-            return False
-        merged = dict(parsed)
-        merged["hardcode_reviews"] = merged_reviews
-        try:
-            _validate_hardcode_reviews(merged, facts, repo_path)
-        except RuntimeError:
-            return False
-        return True
-
     payload = {
         "复核规则": (
             "先判断代码是否会针对固定程序/路径改变正常失败或执行语义，再区分 confirmed、"
@@ -1483,37 +1478,109 @@ def repair_verdict_hardcode_reviews(
         "待复核线索": targets,
         "输出路径": str(out_path),
     }
-    task = BatchTask(
-        batch_id="verdict-hardcode-repair",
-        agent_name="os-kernel-verdict",
-        user_request=(
-            "你是操作系统内核赛评委，只重审输入中的硬编码线索，不修改报告其他内容。"
-            "逐项阅读 source_context，说明触发方法、实际输出/返回值变化及其对正常内核语义的"
-            "影响。必须原样返回每个 signal_id/category/path/line；status 只能是 confirmed、"
-            "suspected、cleared，semantic_risk 非空时不得 cleared。不得把普通第三方库实现当作"
-            "作品问题。调用 write_report，把仅含 hardcode_reviews 的 JSON 写到指定路径。\n\n"
-            + json.dumps(payload, ensure_ascii=False, indent=2)
-        ),
-        output_path=out_path,
-        cache_dir=work_dir,
-        cache_key="",
-        cache_enabled=False,
-        fallback={"hardcode_reviews": []},
-        repo_path=repo_path,
-        cache_validator=_complete,
+    schema_hint = (
+        '{"hardcode_reviews":[{"signal_id":str,"category":str,"path":str,'
+        '"line":int,"status":"confirmed|suspected|cleared","method":str,'
+        '"reason":str,"confidence":int,"excerpt":str}]}'
     )
-    candidate = run_batch_task(
-        task,
-        schema_hint=(
-            '{"hardcode_reviews":[{"signal_id":str,"category":str,"path":str,'
-            '"line":int,"status":"confirmed|suspected|cleared","method":str,'
-            '"reason":str,"confidence":int,"excerpt":str}]}'
-        ),
-        timeout=300,
-    )
-    if not _complete(candidate):
+    # 单次会话复核能力有限：候选数超过阈值时分块复核再合并，
+    # 保证全部候选都经过 AI 复核（每块独立校验覆盖与 risk/cleared 规则）。
+    chunk_size = max(1, _env_int("AGENT_HARDCODE_REPAIR_CHUNK", 100))
+    repair_timeout = max(60, _env_int("AGENT_HARDCODE_REPAIR_TIMEOUT", 600))
+    gap_cap = max(1, _env_int("AGENT_HARDCODE_REPAIR_GAP_CAP", 25))
+    chunks = [targets[i:i + chunk_size] for i in range(0, len(targets), chunk_size)]
+    reviews_by_id: dict[str, dict] = {}
+
+    def _run_repair_task(chunk: list[dict], batch_id: str, chunk_out: Path) -> dict:
+        chunk_payload = {
+            "复核规则": payload["复核规则"],
+            "待复核线索": chunk,
+            "输出路径": str(chunk_out),
+        }
+
+        def _chunk_complete(candidate: dict) -> bool:
+            items = _normalize_hardcode_repair_items(candidate, chunk)
+            if not items:
+                return False
+            return not any(
+                str(item.get("signal_id") or "") in risk_ids
+                and item.get("status") == "cleared"
+                for item in items
+            )
+
+        task = BatchTask(
+            batch_id=batch_id,
+            agent_name="os-kernel-verdict",
+            user_request=(
+                "你是操作系统内核赛评委，只重审输入中的硬编码线索，不修改报告其他内容。"
+                "逐项阅读 source_context，说明触发方法、实际输出/返回值变化及其对正常内核语义的"
+                "影响。必须原样返回每个 signal_id/category/path/line；status 只能是 confirmed、"
+                "suspected、cleared，semantic_risk 非空时不得 cleared。不得把普通第三方库实现当作"
+                "作品问题。调用 write_report，把仅含 hardcode_reviews 的 JSON 写到指定路径。\n\n"
+                + json.dumps(chunk_payload, ensure_ascii=False, indent=2)
+            ),
+            output_path=chunk_out,
+            cache_dir=work_dir,
+            cache_key="",
+            cache_enabled=False,
+            fallback={"hardcode_reviews": []},
+            repo_path=repo_path,
+            cache_validator=_chunk_complete,
+        )
+        return run_batch_task(task, schema_hint=schema_hint, timeout=repair_timeout)
+
+    for index, chunk in enumerate(chunks):
+        chunk_out = (out_path if len(chunks) == 1
+                     else work_dir / f"verdict-hardcode.repair-{index:02d}.json")
+        batch_id = ("verdict-hardcode-repair" if len(chunks) == 1
+                    else f"verdict-hardcode-repair-{index + 1}of{len(chunks)}")
+        candidate = _run_repair_task(chunk, batch_id, chunk_out)
+        items = _normalize_hardcode_repair_items(candidate, chunk)
+        if not items:
+            # 模型偶发漏掉个别线索：对缺失项单独补一次小任务，再与已复核项合并。
+            returned = candidate.get("hardcode_reviews") or []
+            have = {
+                str(item.get("signal_id") or "")
+                for item in returned if isinstance(item, dict)
+            }
+            missing = [
+                target for target in chunk
+                if str(target.get("signal_id") or "") not in have
+            ]
+            if not missing or len(missing) > gap_cap:
+                raise RuntimeError(
+                    "AI 未能完成系统级高风险硬编码线索的定向复核"
+                    f"（第 {index + 1}/{len(chunks)} 块）"
+                )
+            gap_out = work_dir / f"verdict-hardcode.repair-{index:02d}-gap.json"
+            gap = _run_repair_task(missing, f"{batch_id}-gap", gap_out)
+            gap_items = _normalize_hardcode_repair_items(gap, missing)
+            if not gap_items:
+                raise RuntimeError(
+                    "AI 未能完成系统级高风险硬编码线索的定向复核"
+                    f"（第 {index + 1}/{len(chunks)} 块补缺）"
+                )
+            items = _normalize_hardcode_repair_items(
+                {
+                    "hardcode_reviews": [
+                        item for item in returned if isinstance(item, dict)
+                        and str(item.get("signal_id") or "") in have
+                    ] + gap_items,
+                },
+                chunk,
+            )
+            if not items:
+                raise RuntimeError(
+                    "AI 未能完成系统级高风险硬编码线索的定向复核"
+                    f"（第 {index + 1}/{len(chunks)} 块合并）"
+                )
+        for item in items:
+            reviews_by_id[str(item.get("signal_id") or "")] = item
+
+    merged = _merged_reviews({"hardcode_reviews": list(reviews_by_id.values())})
+    if not merged:
         raise RuntimeError("AI 未能完成系统级高风险硬编码线索的定向复核")
-    parsed["hardcode_reviews"] = _merged_reviews(candidate)
+    parsed["hardcode_reviews"] = merged
     return parsed
 
 
@@ -1739,7 +1806,7 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                     '"similarity":{reference_os:str,overlap_pct:int,level:str,'
                     'summary:str,borrowed:[...],original:[...]},'
                     '"one_line":str}',
-        timeout=600,
+        timeout=900,
     )
     _drop_unresolvable_evidence(parsed, repo_path or Path("."))
     if _hardcode_reviews_needing_repair(parsed, facts, repo_path or Path(".")):

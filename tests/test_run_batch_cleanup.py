@@ -287,6 +287,45 @@ def test_do_comparison_archives_pair_created_by_current_run(tmp_path, monkeypatc
     assert "fresh comparison" in (final_dir / "comparison.html").read_text(encoding="utf-8")
 
 
+def test_do_comparison_skips_ai_detect_when_batch_flag_off(tmp_path, monkeypatch):
+    """BATCH_ENABLE_AI_DETECT 关闭时命令必须显式带 --skip-ai-detect（流水线默认开启）。"""
+    monkeypatch.delenv("BATCH_ENABLE_AI_DETECT", raising=False)
+    monkeypatch.setattr(run_batch, "OUT", tmp_path / "output")
+    repo_name = run_batch.fork_to_repo_name("https://gitlab.example.test/group/repo")
+    final_dir = tmp_path / "final"
+    final_dir.mkdir()
+    captured = {}
+
+    def successful_step(_name, command, _logfile, **_kwargs):
+        captured["command"] = command
+        source = run_batch.OUT / repo_name
+        source.mkdir(parents=True, exist_ok=True)
+        (source / f"{repo_name}_comparison.html").write_text(
+            "<html>fresh</html>", encoding="utf-8"
+        )
+        (source / f"{repo_name}_comparison.digest.json").write_text(
+            json.dumps({"repo_id": repo_name}), encoding="utf-8"
+        )
+        return True, "ok"
+
+    monkeypatch.setattr(run_batch, "run_step", successful_step)
+
+    ok, _body = run_batch.do_comparison(
+        "team-1", "https://gitlab.example.test/group/repo", final_dir, tmp_path / "cmp.log"
+    )
+    assert ok
+    assert "--skip-ai-detect" in captured["command"]
+    assert "--ai-detect" not in captured["command"]
+
+    monkeypatch.setenv("BATCH_ENABLE_AI_DETECT", "1")
+    ok, _body = run_batch.do_comparison(
+        "team-1", "https://gitlab.example.test/group/repo", final_dir, tmp_path / "cmp.log"
+    )
+    assert ok
+    assert "--ai-detect" in captured["command"]
+    assert "--skip-ai-detect" not in captured["command"]
+
+
 def test_batch_description_runs_without_build_verification(tmp_path, monkeypatch):
     url = "https://gitlab.example.test/group/repo"
     repo_name = run_batch.fork_to_repo_name(url)

@@ -106,7 +106,7 @@ def _complete_sentence(value: str) -> str:
 
 
 def _complete_sentences_within(value: str, limit: int) -> str:
-    """只在完整句边界压缩；绝不截断词组，也不添加省略号。"""
+    """在完整句边界压缩到额度内；没有完整句可保留时按额度硬切，守住交付上限。"""
     text = _complete_sentence(value)
     if len(text) <= limit:
         return text
@@ -121,7 +121,11 @@ def _complete_sentences_within(value: str, limit: int) -> str:
             break
         kept.append(sentence)
         used += len(sentence)
-    return "".join(kept) if kept else text
+    if kept:
+        return "".join(kept)
+    # 首句本身超额度或全文无句界：按额度硬切并补句号，保证通过交付校验
+    hard = text[: limit - 1].rstrip("，,、；;：: ")
+    return hard + "。" if hard else text[:limit]
 
 
 class AISummaryIssue(BaseModel):
@@ -470,12 +474,25 @@ def _validate_ai_summary_result(
                 "摘要问题引入了来源 finding 中不存在的代码标识符："
                 + "、".join(unattributed)
             )
-        if (
-            issue.source == "description"
-            and "硬编码线索" in source_finding.title
-            and re.search(r"(?:已|人工智能（AI）复核)?确认|构成(?:作弊|硬编码)", issue.judgment)
-        ):
-            raise SummaryPdfError("摘要把疑似硬编码线索改写成了确认结论")
+        if issue.source == "description" and "硬编码线索" in source_finding.title:
+            confirm = re.search(
+                r"(?:已|人工智能（AI）复核)?确认|构成(?:作弊|硬编码)",
+                issue.judgment,
+            )
+            if confirm:
+                # 只看上一个标点之后的上下文：否定/待定修饰（尚未确认、无法确认、
+                # 无确认项、待确认、疑似构成等）与「与/有确认项区分」这类类别引用
+                # 都属于审慎表述，不算把疑似线索改写为确认结论；裸「确认」、
+                # 「已确认」「构成硬编码」等断言仍拒绝。
+                tail = re.split(r"[，。；！？、]", issue.judgment[: confirm.start()])[-1]
+                negated = re.search(
+                    r"(尚未|还未|未能|无法|不能|不足以|有待|待|未|没有|无|与|和|把|将|有|共)$",
+                    tail,
+                )
+                hedged = confirm.group(0).startswith("构成") and re.search(
+                    r"(疑似|推测|可能|或可)$", tail)
+                if not (negated or hedged):
+                    raise SummaryPdfError("摘要把疑似硬编码线索改写成了确认结论")
 
     for source in _SUMMARY_SOURCES:
         critical = [
@@ -590,7 +607,7 @@ def run_ai_summary_analysis(
         input_files=(input_path,),
         cache_validator=_delivery_complete,
     )
-    result = run_batch_task(task, schema_hint=schema_hint, timeout=300)
+    result = run_batch_task(task, schema_hint=schema_hint, timeout=480)
     return _validate_ai_summary_result(result, digests)
 
 

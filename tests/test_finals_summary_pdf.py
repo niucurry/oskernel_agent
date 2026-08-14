@@ -207,7 +207,7 @@ def test_summary_runs_dedicated_ai_agent_and_validates_references(tmp_path, monk
     assert captured["agent_name"] == "os-kernel-summary"
     assert captured["input_files"] == (tmp_path / "summary.input.json",)
     assert "source_finding" in captured["schema_hint"]
-    assert captured["timeout"] == 300
+    assert captured["timeout"] == 480
     description_metrics = captured["input"]["reports"]["description"]["metrics"]
     assert description_metrics["hardcode_confirmed"] == 0
     assert description_metrics["hardcode_suspected"] == 7
@@ -311,6 +311,56 @@ def test_summary_rejects_suspected_hardcode_rewritten_as_confirmed(tmp_path):
         "severity": "medium",
         "confidence": 80,
         "judgment": "人工智能（AI）复核确认该实现构成硬编码行为。",
+    })
+
+    with pytest.raises(SummaryPdfError, match="疑似硬编码"):
+        _validate_ai_summary_result(payload, digests)
+
+
+@pytest.mark.parametrize("judgment", [
+    "共 5 处疑似项，硬编码复核无确认项，须与确认项区分并人工核查。",
+    "该实现为疑似获益项、尚未确认，建议人工复核。",
+    "当前证据不足以确认，仍需运行验证影响范围。",
+    "疑似构成硬编码，需结合完整源码上下文判断。",
+    "可能构成针对测试的硬编码行为，置信度较低。",
+])
+def test_summary_allows_hedged_hardcode_judgments(tmp_path, judgment):
+    """否定与待定表述是审慎表达，不应被当作把疑似线索改写为确认结论。"""
+    digests = load_digests(_digests(tmp_path))
+    digests["description"].findings = [Finding(
+        title="人工智能（AI）复核硬编码线索：按测试名分支",
+        detail="缺失路径可能回退为固定程序。",
+        severity="medium",
+        confidence=.8,
+        source="description",
+    )]
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][0].update({
+        "source_finding": 1,
+        "severity": "medium",
+        "confidence": 80,
+        "judgment": judgment,
+    })
+
+    summary = _validate_ai_summary_result(payload, digests)
+    assert summary.issues[0].judgment == judgment
+
+
+def test_summary_rejects_bare_confirmed_hardcode_judgment(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    digests["description"].findings = [Finding(
+        title="人工智能（AI）复核硬编码线索：按测试名分支",
+        detail="缺失路径可能回退为固定程序。",
+        severity="medium",
+        confidence=.8,
+        source="description",
+    )]
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][0].update({
+        "source_finding": 1,
+        "severity": "medium",
+        "confidence": 80,
+        "judgment": "该实现构成硬编码作弊，可直接认定。",
     })
 
     with pytest.raises(SummaryPdfError, match="疑似硬编码"):
