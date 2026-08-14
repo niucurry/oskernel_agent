@@ -137,6 +137,15 @@ def _humanize_ai_text(value: object, limit: int) -> str:
     return text
 
 
+def _clean_commit_subject(value: object) -> str:
+    """提交主题是参赛队的原始 git 数据，只去掉结尾省略号再渲染。
+
+    省略号截断门禁只针对 AI 生成文字；真实提交消息带「…」（如「具体测试
+    能不能成功还不知道...」）属于作者原话，不应让整份报告交付失败。
+    """
+    return re.sub(r"[….]+$", "", " ".join(str(value or "").split())).strip()
+
+
 def _remove_repeated_stage_facts(value: str) -> str:
     """删除 AI 结论开头会由程序紧接着复算展示的日期和提交次数。"""
     return re.sub(
@@ -555,7 +564,7 @@ def analyze_history(
                 "key_commits": [
                     {
                         "sha": commit["sha"],
-                        "subject": commit.get("subject", ""),
+                        "subject": _clean_commit_subject(commit.get("subject", "")),
                         "date": str(commit["date"])[:10],
                         "loc": _changes(commit),
                         "url": (
