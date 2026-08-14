@@ -41,3 +41,14 @@ repos:
     year: 0
     team_name: baseline_virtio_drivers
     award_level: baseline
+  # ext4_rs 系：Rust 侧最常被 vendored 的 ext4 实现（yuoo655 原创 + async-smp fork 谱系）。
+  # 2025/武大前锋 vendored 1.3.1、T202610006999602-3220 vendored async-smp（UPSTREAM.md
+  # 记录 commit ab082178）；两队互比时该库函数成簇，但本质是公共 MIT 库同源而非互抄。
+  - repo_url: https://github.com/yuoo655/ext4_rs
+    year: 0
+    team_name: baseline_ext4_rs
+    award_level: baseline
+  - repo_url: https://github.com/YuXuaann/ext4_rs-async-smp
+    year: 0
+    team_name: baseline_ext4_rs_async_smp
+    award_level: baseline

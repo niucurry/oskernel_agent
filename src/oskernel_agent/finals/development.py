@@ -615,7 +615,9 @@ def analyze_history(
         "repo_id": repo_id,
         "commits": commits,
         "stages": stages,
-        "authors": authors.most_common(8),
+        # 完整列出全部作者：digest.author_count 是全体作者数，HTML 截断会造成
+        # 「名单数 ≠ author_count」的口径不一致（审计 E3 曾拦截 8 vs 10 实例）。
+        "authors": authors.most_common(),
         "reviews": validated["issues"],
         "evidence": evidence,
         "digest": digest,
@@ -744,7 +746,7 @@ a{{color:#075985;text-decoration:none}}a:hover{{text-decoration:underline}}
 <div class="metric"><b>{_esc(metrics.get('large_commit_threshold', 0))}</b><span>大规模提交阈值（LOC）</span></div>
 </div><div class="panel" style="margin-top:10px"><p><strong>判定口径：</strong>{_esc(minimum_note)}</p>
 <p><strong>大规模提交口径：</strong>{_esc(_THRESHOLD_DEFINITION)}</p>
-<p><strong>主要贡献者：</strong>{authors}</p></div></section>
+<p><strong>贡献者：</strong>{authors}</p></div></section>
 <section><h2>提交历史与开发阶段</h2><div class="stages">{"".join(stage_html)}</div></section>
 </main></body></html>"""
     return explain_terms_in_html(rendered)
@@ -793,13 +795,13 @@ def run_ai_development_analysis(
         "只调用 write_report；content 为合法 JSON 字符串，output_path 必须使用上面的绝对路径。"
     )
 
-    def _delivery_complete(value: dict) -> bool:
+    def _delivery_complete(value: dict) -> bool | str:
         if commits is None:
             return True
         try:
             validate_ai_development_result(value, evidence, commits)
-        except RuntimeError:
-            return False
+        except RuntimeError as exc:
+            return str(exc)
         return True
 
     task = BatchTask(

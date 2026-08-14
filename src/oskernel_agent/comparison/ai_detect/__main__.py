@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from loguru import logger
 
@@ -32,6 +33,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--engine", default=None, choices=["transformers", "vllm"])
     p.add_argument("--max-functions", type=int, default=None, help=">0 时只检测前 N 个函数")
     p.add_argument("--no-progress", action="store_true")
+    p.add_argument(
+        "--exclude-file", default=None,
+        help="排除清单 JSON 文件：{\"files\": [...posix 相对路径], \"funcs\": [[posix 路径, 函数名], ...]}。"
+             "命中文件/函数全部跳过检测（借鉴代码与第三方复用不入 AI 检测口径）",
+    )
     return p
 
 
@@ -54,12 +60,36 @@ def main(argv: list[str] | None = None) -> int:
     if overrides:
         st = st.model_copy(update=overrides)
 
+    exclude_files: set[str] | None = None
+    exclude_funcs: set[tuple[str, str]] | None = None
+    if args.exclude_file:
+        try:
+            exclusions = json.loads(Path(args.exclude_file).read_text(encoding="utf-8"))
+            if not isinstance(exclusions, dict):
+                raise ValueError("排除清单必须是 JSON 对象")
+            raw_files = exclusions.get("files") or []
+            raw_funcs = exclusions.get("funcs") or []
+            if (not isinstance(raw_files, list)
+                    or not isinstance(raw_funcs, list)
+                    or not all(isinstance(x, str) for x in raw_files)
+                    or not all(isinstance(x, list) and len(x) == 2
+                               and all(isinstance(y, str) for y in x)
+                               for x in raw_funcs)):
+                raise ValueError("排除清单字段格式无效")
+            exclude_files = set(raw_files)
+            exclude_funcs = {(str(p), str(n)) for p, n in raw_funcs}
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.error("[ai_detect] 排除清单不可用，拒绝降低检测口径：{}", exc)
+            return 2
+
     res = run_ai_detect(
         args.repo,
         output_dir=args.output_dir,
         repo_name=args.name,
         settings=st,
         show_progress=not args.no_progress,
+        exclude_files=exclude_files,
+        exclude_funcs=exclude_funcs,
     )
 
     summary = {k: res.get(k) for k in ("status", "reason", "repo_id", "output_path")}

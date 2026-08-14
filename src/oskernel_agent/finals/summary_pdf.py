@@ -457,11 +457,13 @@ def _validate_ai_summary_result(
         if issue.severity != source_finding.severity:
             raise SummaryPdfError(
                 f"摘要智能体改变了来源严重度：{issue.source}#{issue.source_finding}"
+                f"（来源为 {source_finding.severity}）"
             )
         source_confidence = round(source_finding.confidence * 100)
         if issue.confidence > source_confidence:
             raise SummaryPdfError(
                 f"摘要智能体置信度高于来源：{issue.source}#{issue.source_finding}"
+                f"（来源上限 {source_confidence}）"
             )
         if not _has_distinct_detail(issue.title, issue.judgment):
             raise SummaryPdfError("摘要问题的标题与判断重复")
@@ -689,11 +691,11 @@ def run_ai_summary_analysis(
         "只调用 write_report；content 为合法 JSON 字符串，output_path 必须使用上面的绝对路径。"
     )
 
-    def _delivery_complete(value: dict) -> bool:
+    def _delivery_complete(value: dict) -> bool | str:
         try:
             _validate_ai_summary_result(value, digests)
-        except SummaryPdfError:
-            return False
+        except SummaryPdfError as exc:
+            return str(exc)
         return True
 
     task = BatchTask(

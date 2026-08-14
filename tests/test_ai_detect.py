@@ -222,5 +222,90 @@ def test_pipeline_runs_ai_model_by_default_and_allows_explicit_skip():
         ["--repo", "demo", "--skip-ai-detect"]).ai_detect is False
 
 
+# ---------- ai_detect 子进程隔离（原生崩溃包含） ----------
+
+import json as _json
+
+import oskernel_agent.comparison.ai_detect.__main__ as ai_detect_cli
+from oskernel_agent.comparison.pipeline import __main__ as pipeline_main
+
+
+def test_ai_detect_cli_accepts_exclude_file():
+    args = ai_detect_cli.build_parser().parse_args(
+        ["--repo", "demo", "--exclude-file", "excl.json"])
+    assert args.exclude_file == "excl.json"
+
+
+class _Proc:
+    def __init__(self, returncode):
+        self.returncode = returncode
+
+
+def test_ai_detect_subprocess_crash_is_contained(tmp_path, monkeypatch):
+    """原生崩溃（exit 非 0，无 traceback）不再杀死主流水线：返回 crashed 诊断。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _Proc(3221225477)  # 0xC0000005 访问违例
+
+    monkeypatch.setattr(pipeline_main.subprocess, "run", fake_run)
+    res = pipeline_main._run_ai_detect_subprocess(
+        repo, tmp_path, "team-x", {"a.rs"}, {("b.rs", "f")})
+
+    assert res["status"] == "crashed"
+    assert "3221225477" in res["reason"]
+    assert "--exclude-file" in captured["cmd"]
+    exclude = _json.loads((tmp_path / "team-x_ai_exclude.json").read_text(encoding="utf-8"))
+    assert exclude == {"files": ["a.rs"], "funcs": [["b.rs", "f"]]}
+
+
+def test_ai_detect_subprocess_ok_artifact_is_returned(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(
+        pipeline_main.subprocess, "run",
+        lambda cmd, **kwargs: _Proc(0),
+    )
+    (tmp_path / "team-x_ai_detect.json").write_text(
+        _json.dumps({"status": "ok", "aggregated": {"overall": {}}}), encoding="utf-8")
+
+    res = pipeline_main._run_ai_detect_subprocess(repo, tmp_path, "team-x", set(), set())
+
+    assert res["status"] == "ok"
+
+
+def test_ai_detect_subprocess_timeout_is_contained(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def fake_run(cmd, **kwargs):
+        raise pipeline_main.subprocess.TimeoutExpired(cmd, 5400)
+
+    monkeypatch.setattr(pipeline_main.subprocess, "run", fake_run)
+    res = pipeline_main._run_ai_detect_subprocess(repo, tmp_path, "team-x", set(), set())
+
+    assert res["status"] == "crashed"
+    assert "超时" in res["reason"]
+
+
+def test_ai_detect_usable_gate():
+    assert pipeline_main._ai_detect_usable({"status": "ok"}) is True
+    assert pipeline_main._ai_detect_usable({
+        "status": "skipped",
+        "scope": {"eligible_functions": 0, "analyzed_functions": 0},
+    }) is True
+    # 有可归属函数却未完成检测：模型失败，不得渲染成检测通过
+    assert pipeline_main._ai_detect_usable({
+        "status": "skipped",
+        "scope": {"eligible_functions": 5, "analyzed_functions": 0},
+    }) is False
+    assert pipeline_main._ai_detect_usable({"status": "crashed"}) is False
+    assert pipeline_main._ai_detect_usable(None) is False
+    assert pipeline_main._ai_detect_usable({"status": "skipped", "scope": {}}) is False
+
+
 # 说明：旧 Markdown 报告（oskernel_agent.comparison.report.generate）的「章六」拼装已随旧流程一并移除；
 # AI 检测章节现由 semantic_compare 直接渲染进对比报告 HTML，测试见 test_report.py。

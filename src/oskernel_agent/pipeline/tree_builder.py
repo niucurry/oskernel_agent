@@ -510,13 +510,13 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
 
     from .lang_guard import language_output_complete
 
-    def _delivery_complete(parsed: dict) -> bool:
+    def _delivery_complete(parsed: dict) -> bool | str:
         if not language_output_complete(parsed):
-            return False
+            return "正文缺失或不完整"
         try:
             _validate_subsys_result(parsed, subsys_node["name"], repo_path)
-        except RuntimeError:
-            return False
+        except RuntimeError as exc:
+            return str(exc)
         return True
 
     task = BatchTask(
@@ -1513,16 +1513,16 @@ def repair_verdict_hardcode_reviews(
         )
         return merged
 
-    def _complete(candidate: dict) -> bool:
+    def _complete(candidate: dict) -> bool | str:
         merged_reviews = _merged_reviews(candidate)
         if not merged_reviews:
-            return False
+            return "hardcode_reviews 为空或结构无效"
         merged = dict(parsed)
         merged["hardcode_reviews"] = merged_reviews
         try:
             _validate_hardcode_reviews(merged, facts, repo_path)
-        except RuntimeError:
-            return False
+        except RuntimeError as exc:
+            return str(exc)
         return True
 
     payload = {
@@ -1593,16 +1593,16 @@ def repair_verdict_one_line(
         "输出路径": str(out_path),
     }
 
-    def _complete(candidate: dict) -> bool:
+    def _complete(candidate: dict) -> bool | str:
         one_line = str(candidate.get("one_line") or "").strip()
         if not one_line or len(one_line) > 80:
-            return False
+            return f"one_line 缺失或超长（{len(one_line)} 字，上限 80）"
         merged = dict(parsed)
         merged["one_line"] = one_line
         try:
             _validate_verdict_integrity_conclusion(merged, facts)
-        except RuntimeError:
-            return False
+        except RuntimeError as exc:
+            return str(exc)
         return True
 
     task = BatchTask(
@@ -1679,10 +1679,10 @@ def repair_verdict_similarity(
         "output_path": str(out_path),
     }
 
-    def _complete(candidate: dict) -> bool:
+    def _complete(candidate: dict) -> bool | str:
         similarity = candidate.get("similarity")
         if not isinstance(similarity, dict):
-            return False
+            return "similarity 缺失或不是对象"
         _normalize_similarity_evidence(similarity)
         merged = dict(parsed)
         merged["similarity"] = similarity
@@ -1694,8 +1694,8 @@ def repair_verdict_similarity(
             _validate_structured_evidence(
                 similarity.get("original") or [], repo_path, label="候选创新证据",
             )
-        except RuntimeError:
-            return False
+        except RuntimeError as exc:
+            return str(exc)
         return True
 
     task = BatchTask(
@@ -1757,16 +1757,16 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
 
     from .lang_guard import language_output_complete
 
-    def _delivery_complete(parsed: dict) -> bool:
+    def _delivery_complete(parsed: dict) -> bool | str:
         if not language_output_complete(parsed):
-            return False
+            return "正文缺失或不完整"
         try:
             _validate_verdict_result(
                 parsed, repo_path or Path("."), facts,
                 enforce_one_line_length=False,
             )
-        except RuntimeError:
-            return False
+        except RuntimeError as exc:
+            return str(exc)
         return True
 
     task = BatchTask(

@@ -103,7 +103,7 @@ def test_finals_comparison_html_shows_dynamic_overview_and_closest_evidence():
         }, query_repo_path=None,
         linker=None, file_matches=[], file_similar=[], retrieval_contract=None, recall=None,
     )
-    assert "经人工智能（AI）分析，与 2025/A 最接近" in rendered
+    assert "经分析，与 2025/A 最接近" in rendered
     assert "2025 年 · A 队 · 学校信息未提供" in rendered
     assert "参赛队不得修改" not in rendered
     assert "完全由 AI 工具生成" not in rendered

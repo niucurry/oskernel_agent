@@ -26,7 +26,7 @@ import uuid
 import atexit
 from contextlib import contextmanager
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from oskernel_agent.paths import SOURCE_ROOT
@@ -307,7 +307,9 @@ class BatchTask:
     enrich: Callable[[dict], dict] | None = None
     # 缓存准入校验。用于拒绝结构合法但不满足交付约束（如残留英文正文）的结果；
     # 同时会校验旧缓存，避免一次异常输出被长期复用。
-    cache_validator: Callable[[dict], bool] | None = None
+    # 返回值约定：True/None 通过；False 拒绝；str 拒绝且给出原因，
+    # 原因会追加进重试请求（知情重试，避免模型重复同样的错误）。
+    cache_validator: Callable[[dict], bool | str | None] | None = None
     # 大体积只读输入通过 OpenCode --file 附加，避免 Windows 命令行 32767 字符上限。
     input_files: tuple[Path, ...] = ()
 
@@ -319,6 +321,44 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 def _log(msg: str) -> None:
     with _print_lock:
         print(msg, file=sys.stderr, flush=True)
+
+
+def _delivery_verdict(task: BatchTask, value: dict) -> bool | str | None:
+    """取交付校验判定；validator 缺失视为通过。"""
+    if task.cache_validator is None:
+        return True
+    return task.cache_validator(value)
+
+
+def _delivery_valid(verdict: bool | str | None) -> bool:
+    """True/None 通过；False 或错误字符串拒绝。"""
+    return verdict is True or verdict is None
+
+
+def _delivery_reason(task: BatchTask, value: dict) -> str | None:
+    """取校验失败原因（validator 返回非空 str 时）；无原因返回 None（盲重试）。"""
+    verdict = _delivery_verdict(task, value)
+    return verdict if isinstance(verdict, str) and verdict else None
+
+
+def _retry_task(task: BatchTask, reason: str | None) -> BatchTask:
+    """知情重试：把上次交付校验的失败原因追加进重试请求。
+
+    盲重试（原 prompt 原样重跑）是「两次漂移一致」的根源——模型不知道上次
+    为何被拒，只会重复同样的错误；附带具体原因后，模型能针对约束修正。
+    无原因时原样返回，保持既有行为。
+    """
+    if not reason:
+        return task
+    return replace(
+        task,
+        user_request=(
+            task.user_request
+            + "\n\n【上次输出未通过交付校验】\n"
+            + reason
+            + "\n请针对以上原因修正后，重新生成完整结果并写到 output_path。"
+        ),
+    )
 
 
 def _tail_text(text: str, limit: int = 2000) -> str:
@@ -596,10 +636,11 @@ def _try_repair_json(task: BatchTask, raw_text: str,
         cache_key="",
         repo_path=task.repo_path,
     )
-    ok, _, _ = _run_opencode_once(repair_task, timeout)
-    if not ok:
-        return None
-    parsed = _parse_json_file(repair_path)
+    ok, _, written = _run_opencode_once(repair_task, timeout)
+    # 修复产物同样回收别名落盘（修复 agent 偶发写到 report.json 等别名）。
+    # repair_task 的 output_path 是 *.repair.json，_locate_parsed_json 会先
+    # 解析它本身，再尝试其余落盘文件，二者任一可用即采用。
+    parsed = _locate_parsed_json(repair_task, ok, written)
     if parsed is not None and repair_validator is not None:
         try:
             repair_validator(parsed)
@@ -615,7 +656,8 @@ def _locate_parsed_json(task: BatchTask, ok: bool,
 
     模型偶发把 JSON 写到 .verdict.json / report.json 等别名路径（output_path
     未命中），修复 agent 仅凭 stdout 摘要重建会丢字段结构。这里直接采用
-    实际落盘文件，.repair.json 后缀是修复产物，不参与回收。
+    实际落盘文件（定向取用，不重新生成），并把内容回写到 canonical 路径，
+    .repair.json 后缀是修复产物，不参与回收。
     """
     parsed = _parse_json_file(task.output_path) if ok else None
     if parsed is not None:
@@ -628,8 +670,43 @@ def _locate_parsed_json(task: BatchTask, ok: bool,
         candidate = _parse_json_file(wp)
         if candidate is not None:
             _log(f"[llm_batch] {task.batch_id} 采用模型实际落盘 JSON：{wp.name}")
+            try:
+                task.output_path.write_text(
+                    wp.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+                _log(f"[llm_batch] {task.batch_id} 回收内容已回写 {task.output_path.name}")
+            except OSError:
+                pass  # 无法回写 canonical 路径时仍采用回收内容
             return candidate
     return None
+
+
+def _best_written_content(task: BatchTask, written: list[Path]) -> str:
+    """取模型实际落盘内容里最完整的一份，供 json_repair 作为修复输入。
+
+    模型把 JSON 写到别名路径时，stdout 里往往只有摘要；以 stdout 为输入
+    会让修复 agent 从摘要重建结构（推倒重来）。以落盘内容为输入则只需修
+    语法/规整字段，内容不丢失。优先 .json 后缀文件，其次取体积最大者。
+    """
+    candidates = [
+        wp for wp in (written or [])
+        if not wp.name.endswith(".repair.json")
+    ]
+
+    def _size(wp: Path) -> int:
+        try:
+            return wp.stat().st_size if wp.exists() else 0
+        except OSError:
+            return 0
+
+    json_like = [wp for wp in candidates if wp.suffix.casefold() in {".json", ".jsonl"}]
+    best = max(json_like or candidates, key=_size, default=None)
+    if best is None:
+        return ""
+    try:
+        return best.read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 def run_batch_task(task: BatchTask, schema_hint: str = "",
@@ -641,7 +718,7 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
     """
     cached = cache_read(task.cache_dir, task.cache_key) if task.cache_enabled else None
     if cached is not None:
-        if task.cache_validator is None or task.cache_validator(cached):
+        if _delivery_valid(_delivery_verdict(task, cached)):
             _log(f"[llm_batch] {task.batch_id} 缓存命中")
             return cached
         _log(f"[llm_batch] {task.batch_id} 缓存未通过交付校验，重新生成")
@@ -657,9 +734,10 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
     parsed = _locate_parsed_json(task, ok, written)
 
     if parsed is None:
-        # 尝试 json 修复
-        raw = ""
-        if task.output_path.exists():
+        # 尝试 json 修复：输入优先取模型实际落盘的内容（定向修，不重建），
+        # 找不到落盘内容才退到 stdout 摘要。
+        raw = _best_written_content(task, written)
+        if not raw and task.output_path.exists():
             try:
                 raw = task.output_path.read_text(encoding="utf-8")
             except OSError:
@@ -672,10 +750,15 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
                                       repair_validator)
 
     if parsed is None:
-        # 最终重试 1 次
+        # 最终重试 1 次（知情重试：附上上次输出片段，让模型对照修正格式）
         _log(f"[llm_batch] {task.batch_id} 重试 1 次")
-        ok2, _, written2 = _run_opencode_once(task, timeout)
-        parsed = _locate_parsed_json(task, ok2, written2)
+        reason = (
+            "上次输出不是合法 JSON，或没有写到指定的 output_path。\n"
+            "上次输出片段：\n" + _tail_text(raw or stdout, 1500)
+        )
+        retry_task = _retry_task(task, reason)
+        ok2, _, written2 = _run_opencode_once(retry_task, timeout)
+        parsed = _locate_parsed_json(retry_task, ok2, written2)
 
     if parsed is None:
         _log(f"[llm_batch] {task.batch_id} 最终失败，使用 fallback")
@@ -693,7 +776,7 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
 
     # 增补正文后再做交付校验：保证缺正文、残留英文等语义不完整结果也会自动重试。
     parsed = enrich_result(parsed)
-    delivery_valid = task.cache_validator is None or task.cache_validator(parsed)
+    delivery_valid = _delivery_valid(_delivery_verdict(task, parsed))
     if not parsed.get("_error") and not delivery_valid:
         _log(f"[llm_batch] {task.batch_id} 未通过交付校验，重试 1 次")
         if task.output_path.exists():
@@ -701,14 +784,15 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
                 task.output_path.unlink()
             except OSError:
                 pass
-        ok2, _, written2 = _run_opencode_once(task, timeout)
-        retried = _locate_parsed_json(task, ok2, written2)
+        retry_task = _retry_task(task, _delivery_reason(task, parsed))
+        ok2, _, written2 = _run_opencode_once(retry_task, timeout)
+        retried = _locate_parsed_json(retry_task, ok2, written2)
         if retried is not None:
             parsed = enrich_result(retried)
 
     # 只缓存成功结果：带 _error 的兜底**不写缓存**，否则一次瞬时失败（超时/限流/
     # 子进程异常）会被永久冻住，后续每次跑都命中空结果而不再重试。不缓存则下次自愈。
-    cache_valid = task.cache_validator is None or task.cache_validator(parsed)
+    cache_valid = _delivery_valid(_delivery_verdict(task, parsed))
     if parsed.get("_error"):
         _log(f"[llm_batch] {task.batch_id} 失败结果不入缓存，下次将重试")
     elif not cache_valid:

@@ -6564,7 +6564,7 @@ def _finals_comparison_summary(
     return f"""
 <section id="summary" data-section-id="summary" class="summary-card">
   <div class="summary-kicker">先看结论</div>
-  <h2>经 AI 分析，与 {_ref_repo_anchor(linker, closest)} 最接近</h2>
+  <h2>经分析，与 {_ref_repo_anchor(linker, closest)} 最接近</h2>
   {f'<p class="closest-identity">{identity}</p>' if identity else ''}
   <p class="summary-lead">{html.escape(digest.conclusion)}</p>
   <p class="section-intro"><b>整体比例口径：</b>高置信同源目标函数 ÷ 可比目标函数。
