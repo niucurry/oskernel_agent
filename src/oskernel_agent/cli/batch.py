@@ -497,7 +497,8 @@ def do_development(team_id: str, url: str, work_dir: Path, logfile: Path) -> tup
     minimum_commits = os.environ.get("FINALS_MIN_COMMITS", "").strip()
     if minimum_commits:
         cmd.extend(["--min-commits", minimum_commits])
-    ok, body = run_step("开发过程报告", cmd, logfile, timeout=600)
+    # 浅克隆补全完整历史可能触发长 fetch；放宽到 30 分钟，超时才算失败。
+    ok, body = run_step("开发过程报告", cmd, logfile, timeout=1800)
     return ok and dst.exists() and dst.with_suffix(".digest.json").exists(), body
 
 
