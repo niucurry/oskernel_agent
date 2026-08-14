@@ -336,6 +336,7 @@ def test_summary_rejects_suspected_hardcode_rewritten_as_confirmed(tmp_path):
     "当前证据不足以确认，仍需运行验证影响范围。",
     "疑似构成硬编码，需结合完整源码上下文判断。",
     "可能构成针对测试的硬编码行为，置信度较低。",
+    "人工智能复核将其列为疑似而非确认的硬编码线索，需人工核查。",
 ])
 def test_summary_allows_hedged_hardcode_judgments(tmp_path, judgment):
     """否定与待定表述是审慎表达，不应被当作把疑似线索改写为确认结论。"""
