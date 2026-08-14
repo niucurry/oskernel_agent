@@ -491,7 +491,7 @@ def _validate_ai_summary_result(
                 # 「已确认」「构成硬编码」等断言仍拒绝。
                 tail = re.split(r"[，。；！？、]", issue.judgment[: confirm.start()])[-1]
                 negated = re.search(
-                    r"(尚未|还未|未能|无法|不能|不足以|有待|待|未|没有|无|与|和|把|将|有|共)$",
+                    r"(尚未|还未|未能|无法|不能|不足以|有待|待|未|没有|无|与|和|把|将|有|共|而非|非)$",
                     tail,
                 )
                 hedged = confirm.group(0).startswith("构成") and re.search(
