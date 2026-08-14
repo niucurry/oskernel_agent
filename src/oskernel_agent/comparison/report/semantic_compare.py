@@ -2341,6 +2341,23 @@ def run_semantic_analysis(
                 missing.append(cluster_id)
         return missing
 
+    def _dedupe_cluster_sections(content: str) -> str:
+        """模型偶发对同一功能簇输出多个 section：保留首个，去掉后续重复段。"""
+        seen: set[str] = set()
+        kept: list[str] = []
+        for piece in re.split(
+            r"(<section\b.*?</section>)", content, re.IGNORECASE | re.DOTALL
+        ):
+            match = re.search(
+                r'data-cluster=["\']([^"\']+)["\']', piece, re.IGNORECASE)
+            if match:
+                cluster_id = match.group(1)
+                if cluster_id in seen:
+                    continue
+                seen.add(cluster_id)
+            kept.append(piece)
+        return "".join(kept)
+
     def _append_gap_sections(content: str, gap_html: str) -> str:
         """把补缺响应中的 section 并入正文；已有空 section 则原位替换，避免重复 ID。
 
@@ -2397,10 +2414,10 @@ def run_semantic_analysis(
             continue
 
         # 提取各批 HTML 片段（模型可能在 markdown 代码块里），按原功能簇顺序合并。
-        merged = _sanitize_code_ellipses("\n".join(
+        merged = _dedupe_cluster_sections(_sanitize_code_ellipses("\n".join(
             _extract_html_from_text(response_text) or response_text
             for response_text in responses
-        ))
+        )))
 
         # 首轮直接生成中文；只有确实检测到英文正文时才保留一次翻译兜底。
         merged, lang_stats = normalize_html_language(merged)
