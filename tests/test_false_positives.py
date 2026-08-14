@@ -225,7 +225,7 @@ def test_semantic_sanitizer_wraps_code_ellipses_only():
     generics = SC._sanitize_code_ellipses(
         "文件描述符表采用 Vec<Option<...>> 保存句柄。"
     )
-    assert "<code>Vec<Option<...></code>" in generics
+    assert "<code>Vec&lt;Option&lt;...</code>" in generics
 
     tag_intact = SC._sanitize_code_ellipses(
         '见 <span title="a...b">正文</span> 标签完整。'
