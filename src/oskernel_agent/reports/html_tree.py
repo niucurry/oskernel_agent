@@ -27,7 +27,7 @@ from oskernel_agent.finals.readability import (
     remove_ai_filler,
 )
 
-from ..report_quality import IncompleteReportError, assert_report_complete
+from ..report_quality import IncompleteReportError, assert_report_complete, sanitize_code_ellipses
 from .html import (
     _BROKEN_PREFIX,
     _CDN_HEAD,
@@ -1159,6 +1159,9 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
 </html>
 """
     doc = explain_terms_in_html(doc)
+    # 正文里含省略号的代码式片段包成 <code>（代码引述不是正文截断），
+    # 避免模型描述代码差异时的 ... 缩写触发省略号门禁。
+    doc = sanitize_code_ellipses(doc)
     assert_toc_resolves(doc)
     assert_report_complete(doc, structured=tree_json)
     return doc

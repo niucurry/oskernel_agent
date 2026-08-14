@@ -25,6 +25,37 @@ SYSTEM_PLACEHOLDER_MARKERS = (
 )
 
 _ELLIPSIS_RE = re.compile(r"…|(?<!\.)\.{3}(?!\.)")
+
+# 正文里含省略号的代码式片段（函数调用 / 结构体字面量等），如 bail!(EPERM, ...)、
+# Self { this: this.clone(), ... }。模型描述代码差异时习惯用 ... 缩写参数列表，
+# 这是代码引述而非正文截断；省略号门禁只看正文（剥离 <code> 内容），
+# 因此确定性包成 <code> 即可通过门禁，且不改变可见内容。
+_CODE_ELLIPSIS_RE = re.compile(
+    r"`?[A-Za-z_][A-Za-z0-9_:]*!?\s*[\(\[{]"
+    r"[^<>]{0,120}?(?:\.\.\.|…)[^<>]{0,120}?[\)\]}]"
+)
+
+
+def sanitize_code_ellipses(html_text: str) -> str:
+    """把正文里含省略号的代码式片段包进 <code>，已有 <code> 段落先占位保护。"""
+    code_spans = re.findall(
+        r"<code\b[^>]*>.*?</code>", html_text or "", re.IGNORECASE | re.DOTALL)
+    protected = html_text or ""
+    placeholders: dict[str, str] = {}
+    for index, span in enumerate(code_spans):
+        key = f"\x00CODE{index}\x00"
+        placeholders[key] = span
+        protected = protected.replace(span, key, 1)
+
+    def _wrap(match: re.Match) -> str:
+        token = match.group(0).strip("`")
+        return f"<code>{html.escape(token)}</code>"
+
+    wrapped = _CODE_ELLIPSIS_RE.sub(_wrap, protected)
+    for key, span in placeholders.items():
+        wrapped = wrapped.replace(key, span)
+    return wrapped
+
 _VISUAL_TRUNCATION_PATTERNS = (
     (re.compile(r"text-overflow\s*:\s*ellipsis", re.I), "CSS text-overflow: ellipsis"),
     (re.compile(r"-webkit-line-clamp\s*:", re.I), "CSS line-clamp"),
