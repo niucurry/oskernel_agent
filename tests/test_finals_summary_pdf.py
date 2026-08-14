@@ -243,6 +243,25 @@ def test_summary_clamps_overall_and_section_confidence_to_source_caps(tmp_path, 
     assert summary.sections[0].confidence == 80
 
 
+def test_summary_compacts_long_judgments_to_fit_layout_cap(tmp_path, monkeypatch):
+    """正文超出一页版式上限时按完整句边界逐级压缩 issue 判断，而不是交付失败。"""
+    digests = load_digests(_digests(tmp_path))
+    long_issue = _ai_summary().model_dump(mode="json")
+    long_judgment = (
+        "整体同源比例约四分之一，覆盖页表、进程与调度等核心路径的数十个函数，"
+        "结构上与历史作品高度接近，代码行级别的细节特征多处重合，"
+        "需要结合开发时间线、提交顺序与注释风格进一步判断是否存在直接借用，"
+        "并安排人工逐函数复核，比例数字本身不能单独作为违规结论依据。"
+    )
+    for issue in long_issue["issues"]:
+        issue["judgment"] = long_judgment
+    monkeypatch.setattr(summary_pdf, "run_batch_task", lambda *args, **kwargs: long_issue)
+
+    summary = run_ai_summary_analysis(digests, "T2026-demo", tmp_path / "summary.pdf")
+    from oskernel_agent.finals.readability import html_to_text
+    assert len(html_to_text(summary_pdf._render_order_text(summary))) <= 1450
+
+
 def test_summary_rejects_any_compile_claim_in_issue_judgment(tmp_path):
     digests = load_digests(_digests(tmp_path))
     payload = _ai_summary().model_dump(mode="json")

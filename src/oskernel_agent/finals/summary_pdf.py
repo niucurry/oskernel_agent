@@ -40,7 +40,7 @@ from reportlab.platypus import (
 from oskernel_agent.engines.llm_batch import BatchTask, run_batch_task
 
 from .models import Finding, ReportDigest, Severity
-from .readability import explain_terms_on_first_use, readability_errors
+from .readability import explain_terms_on_first_use, html_to_text, readability_errors
 
 BODY_FONT_SIZE = 10.5
 _PAGE_MARGIN = 14 * mm
@@ -508,6 +508,16 @@ def _validate_ai_summary_result(
             raise SummaryPdfError(f"摘要智能体遗漏了 {source} 的严重问题")
 
     rendered_text = _render_order_text(summary)
+    # 正文超出一页版式上限时，按完整句边界逐级压缩 issue 判断再校验；
+    # 上限是版式约束而非内容结论，压缩不影响证据引用与置信度。
+    _SUMMARY_MAX_CHARS = 1450
+    if len(html_to_text(rendered_text)) > _SUMMARY_MAX_CHARS:
+        for tier in (220, 180, 140, 100, 60):
+            for issue in summary.issues:
+                issue.judgment = _complete_sentences_within(issue.judgment, tier)
+            rendered_text = _render_order_text(summary)
+            if len(html_to_text(rendered_text)) <= _SUMMARY_MAX_CHARS:
+                break
 
     if _COMPILE_TOPIC_RE.search(rendered_text):
         raise SummaryPdfError("摘要不得包含编译或构建分析内容")
