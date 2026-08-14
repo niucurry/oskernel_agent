@@ -230,6 +230,19 @@ def test_summary_rejects_ai_confidence_above_source(tmp_path, monkeypatch):
         run_ai_summary_analysis(digests, "T2026-demo", tmp_path / "summary.pdf")
 
 
+def test_summary_clamps_overall_and_section_confidence_to_source_caps(tmp_path, monkeypatch):
+    """总体/章节置信度超过来源上限时确定性钳制，而不是整份摘要交付失败。"""
+    digests = load_digests(_digests(tmp_path))
+    invalid = _ai_summary().model_dump(mode="json")
+    invalid["confidence"] = 99  # 三份来源共同上限 80
+    invalid["sections"][0]["confidence"] = 99  # description 上限同为 80
+    monkeypatch.setattr(summary_pdf, "run_batch_task", lambda *args, **kwargs: invalid)
+
+    summary = run_ai_summary_analysis(digests, "T2026-demo", tmp_path / "summary.pdf")
+    assert summary.confidence == 80
+    assert summary.sections[0].confidence == 80
+
+
 def test_summary_rejects_any_compile_claim_in_issue_judgment(tmp_path):
     digests = load_digests(_digests(tmp_path))
     payload = _ai_summary().model_dump(mode="json")

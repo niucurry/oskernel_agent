@@ -440,11 +440,13 @@ def _validate_ai_summary_result(
 
     overall_cap = min(round(digests[source].confidence * 100) for source in _SUMMARY_SOURCES)
     if summary.confidence > overall_cap:
-        raise SummaryPdfError("摘要智能体总体置信度高于三份来源报告的共同上限")
+        # 总体置信度不得高于三份来源报告的共同上限：确定性钳制到上限，
+        # 而不是让模型对长输入的偶发超限把整份摘要拖入交付失败。
+        summary.confidence = overall_cap
     for section in summary.sections:
         source_cap = round(digests[section.source].confidence * 100)
         if section.confidence > source_cap:
-            raise SummaryPdfError(f"摘要智能体的 {section.source} 结论置信度高于来源报告")
+            section.confidence = source_cap
 
     refs = {(issue.source, issue.source_finding) for issue in summary.issues}
     source_corpora = {
