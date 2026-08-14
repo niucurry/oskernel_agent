@@ -2187,6 +2187,7 @@ def _build_analysis_message(
         "## 任务",
         "对上面每个功能簇分别输出一段语义分析 HTML；必须覆盖全部 data-cluster ID。",
         "报告必须一次性完整使用简体中文；仅代码标识符和技术专名保留英文，不要生成英文版等待翻译。",
+        "正文与代码引用中禁止使用“...”或“…”省略任何内容；无法完整引用时删去该示例，不得缩写代码路径。",
         "直接输出 HTML，不要输出 Markdown，不要有任何额外说明文字。",
     ]
     return "\n".join(lines)
@@ -2328,7 +2329,42 @@ def run_semantic_analysis(
     # 模型偶发漏回个别功能簇、返回残缺片段或瞬时调用失败；每轮都是全新请求，
     # 整轮重试最多 3 次，仍不完整则维持 RuntimeError 拒绝交付（与复核门禁一致）。
     from oskernel_agent.pipeline.lang_guard import normalize_html_language
+
+    def _missing_cluster_ids(content: str) -> list[str]:
+        """返回 section 缺失或内容为空的簇 ID（重复/未知 ID 不属于补缺范围）。"""
+        missing = []
+        for cluster in expected_clusters:
+            cluster_id = cluster["analysis_id"]
+            if not _extract_cluster_analysis(content, cluster_id).strip():
+                missing.append(cluster_id)
+        return missing
+
+    def _append_gap_sections(content: str, gap_html: str) -> str:
+        """把补缺响应中的 section 并入正文；已有空 section 则原位替换，避免重复 ID。"""
+        merged = content
+        for piece in re.findall(
+            r"<section\b.*?</section>", gap_html, re.IGNORECASE | re.DOTALL
+        ):
+            match = re.search(
+                r'data-cluster=["\']([^"\']+)["\']', piece, re.IGNORECASE)
+            if not match:
+                continue
+            cluster_id = match.group(1)
+            if _extract_cluster_analysis(merged, cluster_id).strip():
+                continue
+            existing = re.compile(
+                r"<section\b[^>]*data-cluster=[\"\']" + re.escape(cluster_id)
+                + r"[\"\'][^>]*>.*?</section>",
+                re.IGNORECASE | re.DOTALL,
+            ).search(merged)
+            if existing:
+                merged = merged[: existing.start()] + piece + merged[existing.end():]
+            else:
+                merged = merged.rstrip() + "\n" + piece
+        return merged
+
     html_content = ""
+    merged = ""
     last_error: RuntimeError | None = None
     for attempt in range(1, 4):
         try:
@@ -2364,10 +2400,64 @@ def run_semantic_analysis(
         except RuntimeError as exc:
             last_error = exc
             logger.warning("[semantic] 第 {}/3 轮完整性校验未过：{}", attempt, exc)
-            continue
-        html_content = merged
-        break
+            # 模型偶发漏回个别功能簇：只针对缺失簇单独补缺请求，最多 3 轮；
+            # 重复/未知 ID 等结构性错误仍走整轮重试。
+            for gap_round in range(1, 4):
+                missing = _missing_cluster_ids(merged)
+                if not missing:
+                    break
+                logger.info(
+                    "[semantic] 第 {}/3 轮补缺：{} 个功能簇", gap_round, len(missing))
+                by_id = {
+                    cluster["analysis_id"]: cluster for cluster in expected_clusters
+                }
+                missing_clusters = [by_id[cid] for cid in missing if cid in by_id]
+                try:
+                    gap_msg = _build_analysis_message(
+                        query_repo_id, missing_clusters, submodule_stats,
+                        members_per_cluster)
+                    gap_resp = client.chat.completions.create(
+                        model=semantic_model,
+                        messages=[
+                            {"role": "system", "content": _ANALYSIS_SYSTEM},
+                            {"role": "user", "content": gap_msg},
+                        ],
+                        temperature=0.2,
+                        max_tokens=8000,
+                    )
+                except Exception as gap_exc:
+                    last_error = RuntimeError(
+                        f"语义级分析补缺调用失败：{type(gap_exc).__name__}: {gap_exc}")
+                    logger.warning(
+                        "[semantic] 第 {}/3 轮补缺调用失败：{}", attempt, last_error)
+                    break
+                gap_html = _extract_html_from_text(
+                    gap_resp.choices[0].message.content or "") or ""
+                if not gap_html.strip():
+                    logger.warning("[semantic] 第 {}/3 轮补缺返回空内容", gap_round)
+                    break
+                merged = _append_gap_sections(merged, gap_html)
+            merged, lang_stats = normalize_html_language(merged)
+            if not lang_stats["complete"]:
+                last_error = RuntimeError(
+                    f"语义级分析未通过中文交付校验：仍有 {lang_stats['remaining']} 处")
+                logger.warning("[semantic] 第 {}/3 轮补缺后中文校验未过", attempt)
+                continue
+            try:
+                validate_complete(merged)
+            except RuntimeError as exc2:
+                last_error = exc2
+                logger.warning("[semantic] 第 {}/3 轮补缺后仍不完整：{}", attempt, exc2)
+                continue
+            html_content = merged
+            break
     if not html_content:
+        # 失败取证：保留合并结果，便于核对缺失/重复/未知簇的诊断
+        try:
+            (work_dir.resolve() / "semantic_analysis.failure.html").write_text(
+                merged, encoding="utf-8")
+        except OSError:
+            pass
         raise last_error
 
     output_path.write_text(html_content, encoding="utf-8")

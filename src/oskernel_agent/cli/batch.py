@@ -357,16 +357,19 @@ def _clone_has_source(dest: Path) -> bool:
     return False
 
 
-def ensure_clone(url: str, repo_name: str, retries: int = 4) -> bool:
+def ensure_clone(url: str, repo_name: str, retries: int = 4, branch: str | None = None) -> bool:
     """带重试地把仓库克隆到 data/output/_repos/<repo_name>，并校验拉全。
-    gitlab.eduxiji.net 偶发 exit 128（网络抖动）+ 大仓库偶发截断，两者重试可救回。"""
+    gitlab.eduxiji.net 偶发 exit 128（网络抖动）+ 大仓库偶发截断，两者重试可救回。
+    branch 非空时克隆该分支（默认分支无源码的作品需指定真正含代码的分支）。"""
     dest = REPOS / repo_name
     if (dest / ".git").exists() and _clone_has_source(dest):
         return True
     REPOS.mkdir(parents=True, exist_ok=True)
     for i in range(1, retries + 1):
         try:
-            clone_repo(url + ".git", dest, depth=200)
+            # 重试循环内的克隆必须真正重拉：force 会移除上一轮的完整但无源码检出，
+            # 否则 clone_repo 会因 is_cloned() 直接 skipped，循环空转。
+            clone_repo(url + ".git", dest, depth=200, branch=branch, force=True)
         except Exception as exc:  # noqa: BLE001 - 网络、Git 与文件系统错误均可重试
             log(f"  克隆失败（第 {i}/{retries} 次）：{exc}")
             time.sleep(min(10 * i, 40))
@@ -401,9 +404,13 @@ def do_comparison(team_id: str, url: str, work_dir: Path, logfile: Path) -> tupl
     cmd = [PY, "-m", "oskernel_agent.comparison.pipeline", "--repo", url + ".git", "--baselines"]
     if os.environ.get("BATCH_ENABLE_AI_DETECT", "").strip().lower() in {"1", "true", "yes"}:
         cmd.append("--ai-detect")
+    else:
+        # 流水线默认开启 AI 生成代码检测；批处理默认关闭时必须显式跳过，
+        # 否则大仓库会因检测模型加载崩溃（原生崩溃无 traceback）白白失败一轮。
+        cmd.append("--skip-ai-detect")
     if _comparison_resume_ready(repo_name):
         cmd.extend(["--resume-from", "report"])
-        log(f"  对比报告前序产物齐备，续跑报告阶段（跳过模型加载）")
+        log("  对比报告前序产物齐备，续跑报告阶段（跳过模型加载）")
     cmp_timeout = int(os.environ.get("BATCH_CMP_TIMEOUT", "3600"))  # 巨型仓库可调大
     source_pairs = (
         (
@@ -505,5 +512,4 @@ def do_summary(team_id: str, work_dir: Path, logfile: Path) -> tuple[bool, str]:
     ]
     ok, body = run_step("一页摘要", cmd, logfile, timeout=600)
     return ok and dst.exists(), body
-
 
