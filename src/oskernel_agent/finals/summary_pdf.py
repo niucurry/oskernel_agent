@@ -63,7 +63,12 @@ _UNVERIFIED_KERNEL_COMPLETENESS_RE = re.compile(
     re.I,
 )
 _COMPILE_TOPIC_RE = re.compile(
-    r"编译|构建|make|kernel-rv|kernel-la",
+    # 门禁针对构建状态分析（编译通过/失败、构建入口、make 目标），
+    # 不误伤事实性表述：重编译测例（硬编码机制）、编译期/时（运行时概念）、
+    # 构建场景（赛题名）等正常内容。
+    r"(?<!重)(?<!内嵌)(?:编译|构建)(?!期)(?!时)(?!器)(?!场景)(?!阶段)"
+    r"|\b(?:make)\b"
+    r"|\b(?:kernel-rv|kernel-la)\b",
     re.I,
 )
 _SOURCE_LABELS = {
