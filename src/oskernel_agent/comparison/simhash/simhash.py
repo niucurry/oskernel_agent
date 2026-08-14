@@ -9,7 +9,9 @@ BITS = 64
 
 def token_hash(token: str) -> int:
     """token 的 64 位哈希。"""
-    return xxhash.xxh64_intdigest(token)
+    # xxhash 4.x no longer implicitly encodes str inputs. Keep the hash stable
+    # across supported xxhash versions by always passing UTF-8 bytes.
+    return xxhash.xxh64_intdigest(token.encode("utf-8"))
 
 
 def hamming(a: int, b: int) -> int:

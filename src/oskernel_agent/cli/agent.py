@@ -17,6 +17,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+
 from .. import config
 from ..engines.base import AnalysisEngine
 from ..parsers.code_parser import (
@@ -26,6 +27,21 @@ from ..parsers.code_parser import (
     find_doc_files,
     detect_anomalies,
 )
+
+
+def _configure_utf8_output() -> None:
+    """Use UTF-8 for redirected output while respecting the active console."""
+    for stream in (sys.stdout, sys.stderr):
+        if stream.isatty():
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            # Some redirected streams do not support reconfigure().
+            pass
+
+
+_configure_utf8_output()
 
 
 # 引擎选择：路径 A、B、C 依次降级（保留给 MCP server 的 initialize_analysis 用）

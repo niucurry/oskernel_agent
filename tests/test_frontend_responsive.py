@@ -14,14 +14,16 @@ def test_frontend_exposes_finals_reports_in_judge_order():
     app = (ROOT / "frontend/src/App.vue").read_text(encoding="utf-8")
     report_files = (ROOT / "frontend/server/reportFiles.js").read_text(encoding="utf-8")
     pipeline = (ROOT / "frontend/server/pipeline.js").read_text(encoding="utf-8")
-    runner = (ROOT / "src/oskernel_agent/report_jobs/_runner.py").read_text(encoding="utf-8")
 
     expected = '["summary", "description", "development", "comparison"]'
     assert expected in report_files
     assert 'activeReportKind = ref("summary")' in app
     assert '"oskernel_agent.report_jobs"' in pipeline
     assert '"--kinds"' in pipeline
-    assert "verify_build=True" in runner and "pull_build_image=True" in runner
+    # Description reports do not compile by default: Docker/image availability
+    # is an optional, explicit verification step.
+    assert "verify_build=True" not in pipeline
+    assert "pull_build_image=True" not in pipeline
 
 
 def test_frontend_always_cleans_intermediates_and_keeps_digests_internal():
@@ -40,6 +42,15 @@ def test_frontend_always_cleans_intermediates_and_keeps_digests_internal():
     assert "await cleanupReportDirectory(job.repo_id);" in pipeline
     assert "await cleanupReportDirectory(repo.id);" not in pipeline
     assert '"oskernel_agent.report_jobs"' in pipeline
+
+
+def test_frontend_server_allows_runtime_paths_outside_source_tree():
+    config = (ROOT / "frontend/server/config.js").read_text(encoding="utf-8")
+    server = (ROOT / "frontend/server/index.js").read_text(encoding="utf-8")
+
+    for variable in ("FRONTEND_DATA_DIR", "FRONTEND_REPORTS_DIR", "FRONTEND_DIST_DIR"):
+        assert variable in config
+    assert "DIST_DIR" in server
 
 
 def test_drain_protected_by_try_finally():

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
 import subprocess
 
 import pytest
@@ -138,3 +138,48 @@ def test_windows_reserved_path_detection():
     assert _is_windows_unsafe_path("os/src/task/aux.rs")
     assert _is_windows_unsafe_path("drivers/COM1.c")
     assert not _is_windows_unsafe_path("os/src/task/processor.rs")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="core.longpaths 仅 Windows 需要")
+def test_clone_sets_longpaths_on_windows(tmp_path):
+    """深路径仓库在 Windows 上 checkout 会触发 "Filename too long"，克隆须启用 longpaths。"""
+    source = tmp_path / "src"
+    subprocess.run(["git", "init", "-q", str(source)], check=True)
+    subprocess.run(["git", "-C", str(source), "config", "user.email", "t@example.com"], check=True)
+    subprocess.run(["git", "-C", str(source), "config", "user.name", "tester"], check=True)
+    (source / "f.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "-C", str(source), "add", "f.txt"], check=True)
+    subprocess.run(["git", "-C", str(source), "commit", "-q", "-m", "init"], check=True)
+
+    dest = tmp_path / "dest"
+    assert clone_repo(str(source), dest) == "cloned"
+    value = subprocess.run(
+        ["git", "-C", str(dest), "config", "core.longpaths"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    assert value == "true"
+
+
+def test_clone_with_branch_checks_out_requested_branch(tmp_path):
+    """默认分支无源码的作品可指定真正含代码的分支克隆。"""
+    source = tmp_path / "src"
+    subprocess.run(["git", "init", "-q", str(source)], check=True)
+    subprocess.run(["git", "-C", str(source), "config", "user.email", "t@example.com"], check=True)
+    subprocess.run(["git", "-C", str(source), "config", "user.name", "tester"], check=True)
+    (source / "README.md").write_text("docs only", encoding="utf-8")
+    subprocess.run(["git", "-C", str(source), "add", "README.md"], check=True)
+    subprocess.run(["git", "-C", str(source), "commit", "-q", "-m", "docs"], check=True)
+    subprocess.run(["git", "-C", str(source), "checkout", "-q", "-b", "os2026-2"], check=True)
+    (source / "Makefile").write_text("all:", encoding="utf-8")
+    (source / "kernel.rs").write_text("fn main() {}", encoding="utf-8")
+    subprocess.run(["git", "-C", str(source), "add", "Makefile", "kernel.rs"], check=True)
+    subprocess.run(["git", "-C", str(source), "commit", "-q", "-m", "code"], check=True)
+
+    dest = tmp_path / "dest"
+    assert clone_repo(str(source), dest, branch="os2026-2") == "cloned"
+    head = subprocess.run(
+        ["git", "-C", str(dest), "rev-parse", "--abbrev-ref", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    assert head == "os2026-2"
+    assert (dest / "kernel.rs").is_file()

@@ -15,6 +15,35 @@ def test_find_opencode_ignores_inaccessible_candidates(monkeypatch):
     assert llm_batch._find_opencode() == "opencode"
 
 
+def test_opencode_session_uses_project_private_config(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    source_data = project_root / "data" / "opencode" / "data" / "opencode"
+    source_config = project_root / "data" / "opencode" / "config" / "opencode"
+    source_data.mkdir(parents=True)
+    source_config.mkdir(parents=True)
+    (source_data / "auth.json").write_text('{"deepseek": {}}', encoding="utf-8")
+    (source_config / "opencode.json").write_text(
+        '{"model": "deepseek/test"}', encoding="utf-8"
+    )
+
+    monkeypatch.setattr(llm_batch, "PROJECT_ROOT", project_root)
+    monkeypatch.setattr(llm_batch, "_OPENCODE_DATA_ROOT", tmp_path / "sessions")
+    task = llm_batch.BatchTask(
+        batch_id="private-config",
+        agent_name="test",
+        user_request="test",
+        output_path=tmp_path / "result.json",
+        cache_dir=tmp_path / "cache",
+        cache_key="",
+    )
+
+    env = llm_batch._opencode_env(task)
+    config_home = Path(env["XDG_CONFIG_HOME"])
+    assert env["XDG_DATA_HOME"] == str(config_home.parent / "data")
+    assert (config_home / "opencode" / "opencode.json").is_file()
+    assert (config_home.parent / "data" / "opencode" / "auth.json").is_file()
+
+
 def test_cache_disabled_task_always_regenerates_and_does_not_write_cache(
     tmp_path, monkeypatch
 ):

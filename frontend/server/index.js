@@ -4,7 +4,7 @@ import express from "express";
 import cors from "cors";
 import multer from "multer";
 import { db } from "./db.js";
-import { PORT, REPORTS_DIR, FRONTEND_ROOT } from "./config.js";
+import { DIST_DIR, PORT, REPORTS_DIR } from "./config.js";
 import { importRepositories } from "./importer.js";
 import { PipelineQueue } from "./pipeline.js";
 import { normalizeReportKinds, syncExistingReports } from "./reportFiles.js";
@@ -183,10 +183,9 @@ app.post("/api/jobs/clear", asyncRoute(async (req, res) => {
   res.json(result);
 }));
 
-const distDir = path.join(FRONTEND_ROOT, "dist");
-if (fs.existsSync(distDir)) {
-  app.use(express.static(distDir));
-  app.get("*", (req, res) => res.sendFile(path.join(distDir, "index.html")));
+if (fs.existsSync(DIST_DIR)) {
+  app.use(express.static(DIST_DIR));
+  app.get("*", (req, res) => res.sendFile(path.join(DIST_DIR, "index.html")));
 }
 
 app.use((error, req, res, next) => {
