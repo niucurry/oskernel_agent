@@ -34,7 +34,7 @@ _REQUIRED_KERNEL_TARGETS = ("kernel-rv", "kernel-la")
 _AGGREGATE_ENTRY_TARGETS = ("all", "submit")
 _MAX_FILE_BYTES = 2 * 1024 * 1024
 DEFAULT_CONTEST_BUILD_IMAGE = "zhouzhouyi/os-contest:20260510"
-DEFAULT_HARDCODE_SIGNAL_LIMIT = 100
+DEFAULT_HARDCODE_SIGNAL_LIMIT = 150
 _BUILD_COPY_SKIP_DIRS = {
     ".git", ".venv", "node_modules", "target", "build", "dist", "__pycache__",
 }

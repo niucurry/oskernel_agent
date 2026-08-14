@@ -26,10 +26,15 @@ from oskernel_agent.pipeline.tree_builder import (
     _normalize_adjacent_module_paths,
     _normalize_similarity_evidence,
     _validate_subsys_result,
+    _check_hardcode_capacity,
     _validate_hardcode_reviews,
     _hardcode_reviews_needing_repair,
     _normalize_hardcode_repair_items,
     _validate_verdict_integrity_conclusion,
+    _normalize_verdict,
+    _validate_verdict_result,
+    _verdict_repair_shape_ok,
+    _read_latest_matching,
 )
 from oskernel_agent.report_quality import IncompleteReportError
 from oskernel_agent.reports.html_tree import (
@@ -257,6 +262,56 @@ def test_hardcode_repair_normalizes_ai_field_drift():
     assert item["path"] == "src/fs.rs" and item["line"] == 9
 
 
+def test_hardcode_repair_normalizes_trigger_method_and_reason_drift():
+    """模型把 method 写成 trigger_method、理由拆到多个长字段时，归一化必须兜底，
+    否则整批复核因缺 method/reason 被交付校验拒绝（T202610006999602-3220 实测）。"""
+    target = {
+        "signal_id": "Makefile:108:按测试名或 ELF 名称分支",
+        "category": "按测试名或 ELF 名称分支",
+        "path": "Makefile",
+        "line": 108,
+        "excerpt": "ifneq ($(wildcard $(CONFIG_FILE)),)",
+        "confidence": 90,
+    }
+    candidate = {"hardcode_reviews": [{
+        "signal_id": target["signal_id"],
+        "status": "confirmed",
+        "trigger_method": "构建前置条件检查",
+        "actual_output_or_return_value_change": "镜像缺失时 exit 1",
+        "impact_on_kernel_semantics": "不影响内核执行路径",
+        "semantic_risk": "",
+    }]}
+
+    item = _normalize_hardcode_repair_items(candidate, [target])[0]
+
+    assert item["method"] == "构建前置条件检查"
+    assert item["reason"] == "不影响内核执行路径；镜像缺失时 exit 1"
+    assert item["path"] == "Makefile" and item["line"] == 108
+    assert item["status"] == "confirmed"
+
+
+def test_hardcode_repair_normalizes_explanation_drift():
+    """模型只写 explanation 一个自由字段时，reason 取 explanation 兜底。"""
+    target = {
+        "signal_id": "src/fs.rs:9:按测试名或 ELF 名称分支",
+        "category": "按测试名或 ELF 名称分支",
+        "path": "src/fs.rs",
+        "line": 9,
+        "excerpt": "return 0;",
+        "confidence": 90,
+    }
+    candidate = {"hardcode_reviews": [{
+        "signal_id": target["signal_id"],
+        "status": "suspected",
+        "method": "失败后返回成功",
+        "explanation": "仅当镜像缺失时触发，属构建期行为。",
+    }]}
+
+    item = _normalize_hardcode_repair_items(candidate, [target])[0]
+
+    assert item["reason"] == "仅当镜像缺失时触发，属构建期行为。"
+
+
 def test_all_four_required_hardcode_methods_are_scanned(tmp_path):
     (tmp_path / "loader.c").write_text(
         'if (strstr(name, "case.elf")) return 0;\n', encoding="utf-8"
@@ -302,7 +357,22 @@ def test_hardcode_limit_does_not_let_first_category_hide_other_methods(tmp_path)
     assert all(item["scanned"] for item in result["category_coverage"].values())
 
 def test_default_hardcode_review_capacity_handles_large_kernel():
-    assert integrity_module.DEFAULT_HARDCODE_SIGNAL_LIMIT >= 100
+    assert integrity_module.DEFAULT_HARDCODE_SIGNAL_LIMIT >= 150
+
+
+def test_hardcode_capacity_check_fails_before_llm_work():
+    """候选超限必须即刻拒绝（T202610006999602-3220 实测 119 条候选撞 100 上限，
+    此前要等 verdict+repair 跑完约 16 分钟才在末次校验报错）。"""
+    facts = {"integrity": {"hardcode": {
+        "truncated": True, "candidate_count": 119, "findings": list(range(100)),
+    }}}
+    with pytest.raises(RuntimeError, match="超过复核上限"):
+        _check_hardcode_capacity(facts)
+
+    ok_facts = {"integrity": {"hardcode": {
+        "truncated": False, "candidate_count": 100, "findings": list(range(100)),
+    }}}
+    _check_hardcode_capacity(ok_facts)  # 不抛
 
 
 
@@ -1174,6 +1244,109 @@ def test_verdict_content_uses_full_path_from_structured_evidence():
     }
     _normalize_verdict_content_paths(parsed)
     assert "os/src/arch/loongarch64/paging.rs:8" in parsed["content"]
+
+
+def _verdict_with_dimension_names(names: list[str]) -> dict:
+    return {
+        "score_total": 82,
+        "dimensions": [
+            {"name": name, "score": 80, "reason": "理由"} for name in names
+        ],
+        "highlights": [],
+        "issues": [],
+        "hardcode_reviews": [],
+        "similarity": {},
+        "one_line": "未发现硬编码。",
+        "content": "<p>详细正文</p>",
+    }
+
+
+def test_verdict_normalizes_abbreviated_dimension_names():
+    """LLM 省写维度后缀（架构/文档）时确定性纠偏到规范名，总分按规范权重重算。"""
+    parsed = _verdict_with_dimension_names(
+        ["原创性", "架构", "代码质量", "文档", "完整性", "功能性"])
+    out = _normalize_verdict(parsed)
+    assert [d["name"] for d in out["dimensions"]] == [
+        "原创性", "架构合理性", "代码质量", "文档质量", "完整性", "功能性",
+    ]
+    by = {d["name"]: d["score"] for d in out["dimensions"]}
+    assert by["架构合理性"] == 80 and by["文档质量"] == 80
+    assert out["score_total"] == 80
+
+
+def test_verdict_validation_accepts_abbreviated_dimension_names():
+    """校验入口同样接受别名维度名——交付校验与最终校验共用同一映射。"""
+    parsed = _verdict_with_dimension_names(
+        ["原创性", "架构", "代码质量", "文档", "完整性", "功能性"])
+    _validate_verdict_result(parsed, None)  # 不抛 RuntimeError
+
+
+def test_verdict_validation_rejects_truly_missing_dimension():
+    parsed = _verdict_with_dimension_names(
+        ["原创性", "架构", "代码质量", "文档", "完整性"])
+    with pytest.raises(RuntimeError, match="缺少评分维度：功能性"):
+        _validate_verdict_result(parsed, None)
+
+
+def _repair_shape_ok_dict(**overrides) -> dict:
+    base = {
+        "score_total": 82,
+        "dimensions": [
+            {"name": name, "score": 80, "reason": "理由"}
+            for name in ("原创性", "架构合理性", "代码质量", "文档质量",
+                         "完整性", "功能性")
+        ],
+        "highlights": [{"path": "os/src/mm.rs:8", "quote": "亮点"}],
+        "issues": [{"path": "os/src/mm.rs:8", "quote": "问题", "confidence": 90}],
+        "hardcode_reviews": [
+            {"signal_id": "os/src/a.rs:1:疑似写死测试结果", "status": "cleared",
+             "path": "os/src/a.rs", "line": 1, "excerpt": "e"}
+        ],
+        "similarity": {"reference_os": "rcore-tutorial-v3",
+                       "overlap_pct": 35, "summary": "摘要"},
+        "one_line": "未发现硬编码。",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_verdict_repair_shape_ok_accepts_proper_structure():
+    _verdict_repair_shape_ok(_repair_shape_ok_dict())  # 不抛
+
+
+def test_verdict_repair_shape_ok_rejects_string_highlights():
+    drifted = _repair_shape_ok_dict(highlights=["文本亮点"])
+    with pytest.raises(RuntimeError, match="亮点"):
+        _verdict_repair_shape_ok(drifted)
+
+
+def test_verdict_repair_shape_ok_rejects_issues_without_quote():
+    drifted = _repair_shape_ok_dict(issues=[{"path": "os/src/mm.rs:8"}])
+    with pytest.raises(RuntimeError, match="问题"):
+        _verdict_repair_shape_ok(drifted)
+
+
+def test_verdict_repair_shape_ok_accepts_abbreviated_names_but_rejects_unknown():
+    """别名维度名视为可识别（与 _validate_verdict_result 同一映射）。"""
+    dims = _repair_shape_ok_dict()["dimensions"]
+    dims[1]["name"] = "架构"
+    _verdict_repair_shape_ok(_repair_shape_ok_dict(dimensions=dims))  # 不抛
+    dims[1]["name"] = "魔法值"
+    with pytest.raises(RuntimeError, match="维度"):
+        _verdict_repair_shape_ok(_repair_shape_ok_dict(dimensions=dims))
+
+
+def test_read_latest_matching_prefers_newest_alias(tmp_path):
+    """正文写到别名路径（.verdict.html）时不得读回上一轮的陈旧正文。"""
+    work = tmp_path / "work"
+    work.mkdir()
+    stale = work / "verdict.html"
+    stale.write_text("旧正文", encoding="utf-8")
+    alias = work / ".verdict.html"
+    alias.write_text("新正文", encoding="utf-8")
+    assert _read_latest_matching(stale) == "新正文"
+    alias.unlink()
+    assert _read_latest_matching(stale) == "旧正文"
 
 
 def test_description_delivery_rejects_broken_source_links(tmp_path):
