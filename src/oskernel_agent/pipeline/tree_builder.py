@@ -1621,7 +1621,8 @@ def repair_verdict_hardcode_reviews(
         )
         return run_batch_task(task, schema_hint=schema_hint, timeout=repair_timeout)
 
-    for index, chunk in enumerate(chunks):
+    def _repair_one_chunk(index: int, chunk: list[dict]) -> list[dict]:
+        """单块复核 + 缺项补跑，返回归一化后的复核项；块之间相互独立可并行。"""
         chunk_out = (out_path if len(chunks) == 1
                      else work_dir / f"verdict-hardcode.repair-{index:02d}.json")
         batch_id = ("verdict-hardcode-repair" if len(chunks) == 1
@@ -1666,6 +1667,21 @@ def repair_verdict_hardcode_reviews(
                     "AI 未能完成系统级高风险硬编码线索的定向复核"
                     f"（第 {index + 1}/{len(chunks)} 块合并）"
                 )
+        return items
+
+    parallel = _env_int("AGENT_HARDCODE_REPAIR_PARALLEL", 3)
+    if len(chunks) > 1 and parallel > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(parallel, len(chunks))) as pool:
+            chunk_items = list(pool.map(
+                lambda pair: _repair_one_chunk(pair[0], pair[1]),
+                enumerate(chunks),
+            ))
+    else:
+        chunk_items = [_repair_one_chunk(index, chunk)
+                       for index, chunk in enumerate(chunks)]
+
+    for items in chunk_items:
         for item in items:
             reviews_by_id[str(item.get("signal_id") or "")] = item
 
