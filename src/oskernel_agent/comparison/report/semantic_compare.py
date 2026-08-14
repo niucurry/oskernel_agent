@@ -2371,7 +2371,12 @@ def run_semantic_analysis(
         return missing
 
     def _append_gap_sections(content: str, gap_html: str) -> str:
-        """把补缺响应中的 section 并入正文；已有空 section 则原位替换，避免重复 ID。"""
+        """把补缺响应中的 section 并入正文；已有空 section 则原位替换，避免重复 ID。
+
+        模型偶发把 cluster- 前缀写丢或编造未知 ID：前缀缺失且能唯一对应时补回，
+        无法对应的未知 ID 段直接丢弃（该簇仍缺失，由下一轮补缺继续）。
+        """
+        expected_ids = {cluster["analysis_id"] for cluster in expected_clusters}
         merged = content
         for raw_piece in re.findall(
             r"<section\b.*?</section>", gap_html, re.IGNORECASE | re.DOTALL
@@ -2381,7 +2386,16 @@ def run_semantic_analysis(
                 r'data-cluster=["\']([^"\']+)["\']', piece, re.IGNORECASE)
             if not match:
                 continue
-            cluster_id = match.group(1)
+            raw_id = match.group(1)
+            if raw_id in expected_ids:
+                canonical = raw_id
+            elif f"cluster-{raw_id}" in expected_ids:
+                canonical = f"cluster-{raw_id}"
+                piece = (piece[: match.start(1)] + canonical
+                         + piece[match.end(1):])
+            else:
+                continue  # 未知 ID，丢弃
+            cluster_id = canonical
             if _extract_cluster_analysis(merged, cluster_id).strip():
                 continue
             existing = re.compile(
