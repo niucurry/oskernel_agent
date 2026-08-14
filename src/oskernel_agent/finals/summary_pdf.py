@@ -514,6 +514,123 @@ def _validate_ai_summary_result(
     return summary
 
 
+def _collect_ai_summary_issue_errors(
+    summary: AISummary,
+    digests: dict[str, ReportDigest],
+) -> list[str]:
+    """收集全部 issue 级交付错误，供定向修复任务使用。
+
+    覆盖校验器逐 issue 检查的超集：引用、严重度、置信度、标题判断重复、标识符归属、
+    硬编码确认化。结构性错误（遗漏全部问题、总体/分节置信度上限）不在此列，
+    由调用方直接抛出。
+    """
+    errors: list[str] = []
+    source_corpora = {
+        source: _source_report_corpus(source, digests)
+        for source in _SUMMARY_SOURCES
+    }
+    for issue in summary.issues:
+        findings = digests[issue.source].findings
+        if issue.source_finding > len(findings):
+            errors.append(
+                f"{issue.source}#{issue.source_finding}：引用了不存在的问题"
+            )
+            continue
+        source_finding = findings[issue.source_finding - 1]
+        if issue.severity != source_finding.severity:
+            errors.append(
+                f"{issue.source}#{issue.source_finding}：severity 应为 "
+                f"{source_finding.severity}（来源 finding「{source_finding.title}」），"
+                f"实际为 {issue.severity}；若该 issue 的内容实际来自其他 finding，"
+                "请改引用并同步修正严重度与置信度"
+            )
+        source_confidence = round(source_finding.confidence * 100)
+        if issue.confidence > source_confidence:
+            errors.append(
+                f"{issue.source}#{issue.source_finding}：confidence {issue.confidence} "
+                f"高于来源 {source_confidence}"
+            )
+        if not _has_distinct_detail(issue.title, issue.judgment):
+            errors.append(f"{issue.source}#{issue.source_finding}：标题与判断重复")
+        unattributed = _unattributed_issue_identifiers(
+            issue, source_corpora[issue.source]
+        )
+        if unattributed:
+            errors.append(
+                f"{issue.source}#{issue.source_finding}：引入来源不存在的代码标识符 "
+                + "、".join(unattributed)
+            )
+        if (
+            issue.source == "description"
+            and "硬编码线索" in source_finding.title
+            and re.search(
+                r"(?:已|人工智能（AI）复核)?确认|构成(?:作弊|硬编码)", issue.judgment
+            )
+        ):
+            errors.append(
+                f"{issue.source}#{issue.source_finding}：把疑似硬编码线索改写成了确认结论"
+            )
+    return errors
+
+
+def _repair_ai_summary_analysis(
+    summary: AISummary,
+    digests: dict[str, ReportDigest],
+    ai_path: Path,
+    input_path: Path,
+    repo_id: str,
+    schema_hint: str,
+    errors: list[str],
+) -> dict:
+    """定向修复 issue 级交付错误：只允许按来源 finding 修正引用、严重度、置信度与表述。
+
+    修复任务是只读式小范围修改（与 tree_builder 的 verdict 定向修复同构）：
+    未列入错误清单的 issue 与字段一律保持原样，随后由调用方整体重跑交付校验。
+    """
+    repair_path = ai_path.with_name(ai_path.stem + ".repair.json")
+    issues_dump = json.dumps(
+        [issue.model_dump() for issue in summary.issues],
+        ensure_ascii=False,
+        indent=2,
+    )
+    request = (
+        "上次生成的最终评审摘要未通过交付校验。请先读取随消息附加的 summary input JSON，"
+        "逐一核对每个 issue 与其 source_finding 的实际内容，只修复下面列出的错误：\n"
+        "错误清单：\n"
+        + "\n".join("- " + error for error in errors)
+        + "\n\n"
+        "当前 issues：\n"
+        + issues_dump
+        + "\n\n"
+        "修复规则：source_finding 必须指向真实存在的 finding（一基序号）；severity 必须"
+        "与来源 finding 完全一致；confidence 不得高于来源；issue 中的函数名、路径名和"
+        "代码标识符必须来自其引用的 finding，禁止改写或补造相近名称；不得把疑似硬编码"
+        "线索写成确认结论；标题与判断不得重复。未列入错误清单的 issue 和字段一律保持"
+        "原样，overall_judgment 与 sections 保持原样，禁止改动。\n"
+        f"repo_id: {repo_id}\n"
+        f"input_file: {input_path.resolve()}\n"
+        f"expected_schema: {schema_hint}\n"
+        f"output_path: {repair_path.resolve()}\n"
+        "只调用 write_report；content 为修复后的完整合法 JSON（overall_judgment、"
+        "sections 与全部 issues），output_path 必须使用上面的绝对路径。"
+    )
+    task = BatchTask(
+        batch_id=f"summary-repair-{re.sub(r'[^A-Za-z0-9_.-]+', '-', repo_id)[:80]}",
+        agent_name="os-kernel-summary-repair",
+        user_request=request,
+        output_path=repair_path,
+        cache_dir=ai_path.parent,
+        cache_key="",
+        cache_enabled=False,
+        fallback={},
+        input_files=(input_path,),
+    )
+    repaired = run_batch_task(task, schema_hint=schema_hint, timeout=300)
+    if not repaired or repaired.get("_error"):
+        raise SummaryPdfError("摘要修复智能体未返回可用结果：" + "；".join(errors))
+    return repaired
+
+
 def run_ai_summary_analysis(
     digests: dict[str, ReportDigest],
     repo_id: str,
@@ -592,7 +709,27 @@ def run_ai_summary_analysis(
         cache_validator=_delivery_complete,
     )
     result = run_batch_task(task, schema_hint=schema_hint, timeout=300)
-    return _validate_ai_summary_result(result, digests)
+    try:
+        return _validate_ai_summary_result(result, digests)
+    except SummaryPdfError:
+        if not isinstance(result, dict) or result.get("_error"):
+            raise
+        normalized = _normalize_zero_based_finding_refs(
+            _compact_ai_summary_fields(result), digests
+        )
+        try:
+            summary = AISummary.model_validate(normalized)
+        except ValidationError:
+            raise  # 结构无效（缺字段/错类型），无法定向修复
+        errors = _collect_ai_summary_issue_errors(summary, digests)
+        if not errors:
+            raise  # 结构性错误（遗漏全部问题、置信度上限等）不在修复范围
+        print(f"[summary] {repo_id} 存在 {len(errors)} 条 issue 级交付错误，触发定向修复")
+        repaired = _repair_ai_summary_analysis(
+            summary, digests, ai_path, input_path, repo_id,
+            schema_hint, errors,
+        )
+        return _validate_ai_summary_result(repaired, digests)
 
 
 def _styles(font: str, bold: str, *, compact: bool) -> dict[str, ParagraphStyle]:

@@ -72,6 +72,55 @@ VERDICT_WEIGHTS = {
     "功能性":     1.0,
 }
 
+# LLM 偶尔省写维度后缀（架构/文档 → 架构合理性/文档质量），导致校验拒绝。
+# 确定性纠偏到规范名，与 _normalize_hardcode_repair_items 同一策略。
+_VERDICT_DIMENSION_ALIASES = {
+    "架构":      "架构合理性",
+    "架构设计":  "架构合理性",
+    "体系架构":  "架构合理性",
+    "文档":      "文档质量",
+    "文档完善度": "文档质量",
+    "注释质量":  "文档质量",
+    "创新性":    "原创性",
+    "功能":      "功能性",
+    "功能正确性": "功能性",
+}
+
+
+def _canonical_verdict_dimension(name: str) -> str:
+    return _VERDICT_DIMENSION_ALIASES.get(name, name)
+
+
+def _verdict_repair_shape_ok(parsed: dict) -> None:
+    """json_repair 输出的轻量结构校验（交付校验需要正文，repair 阶段尚无正文）。
+
+    拒绝结构漂移的 repair 重建（如凭摘要自创 score/max/weight/comment 结构、
+    高亮点写成字符串），让上层重试原始任务而不是带垃圾继续跑 16 分钟。
+    """
+    dims = [d for d in (parsed.get("dimensions") or []) if isinstance(d, dict)]
+    canonical = {_canonical_verdict_dimension(str(d.get("name") or "").strip())
+                 for d in dims}
+    if set(VERDICT_DIMENSIONS) != canonical:
+        raise RuntimeError("repair 输出评分维度缺失或名称不可识别")
+    for item in parsed.get("highlights") or []:
+        if not isinstance(item, dict) or not str(item.get("path") or "").strip():
+            raise RuntimeError("repair 输出亮点不是带路径的对象")
+    for item in parsed.get("issues") or []:
+        if not (isinstance(item, dict)
+                and str(item.get("path") or "").strip()
+                and str(item.get("quote") or "").strip()):
+            raise RuntimeError("repair 输出问题缺少 path 或 AI 分析")
+    for item in parsed.get("hardcode_reviews") or []:
+        if not isinstance(item, dict) or not str(item.get("signal_id") or "").strip():
+            raise RuntimeError("repair 输出硬编码复核缺少 signal_id")
+    similarity = parsed.get("similarity")
+    if not isinstance(similarity, dict):
+        raise RuntimeError("repair 输出缺少相似度对象")
+    if not str(similarity.get("summary") or "").strip():
+        raise RuntimeError("repair 输出相似度缺少摘要")
+    if not str(parsed.get("one_line") or "").strip():
+        raise RuntimeError("repair 输出缺少一句话结论")
+
 _LANG_BY_EXT = {
     ".c": "c", ".h": "c", ".cc": "cpp", ".cpp": "cpp", ".hpp": "cpp",
     ".rs": "rust",
@@ -145,6 +194,22 @@ def _read_md_if_exists(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def _read_latest_matching(path: Path) -> str:
+    """读取与 path 同目录、按同名 stem 匹配的最新文件正文。
+
+    模型偶发把正文写到别名路径（.verdict.html 而非 verdict.html），直接读
+    精确路径会拿到上一轮运行的陈旧正文；取 f"*{stem}*{suffix}" 中 mtime
+    最新者。正常落盘时精确路径即最新，行为不变。
+    """
+    parent = path.parent
+    if not parent.exists():
+        return ""
+    candidates = list(parent.glob(f"*{path.stem}*{path.suffix}"))
+    if not candidates:
+        return _read_md_if_exists(path)
+    return _read_md_if_exists(max(candidates, key=lambda p: p.stat().st_mtime))
 
 
 # 并发度
@@ -740,6 +805,8 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         "写入前做最后一次语言自检：若任何标题、段落、表格单元格或 JSON 描述仍是英文，"
         "先改写成简体中文再调用写入工具；不要输出英文版后等待后续翻译。"
         "hardcode_reviews 必须覆盖每个原 signal_id；即使结论为 cleared 也不能省略。"
+        "dimensions 六个名称必须逐字使用「原创性/架构合理性/代码质量/文档质量/完整性/功能性」，"
+        "禁止缩写（如「架构」「文档」）或改写，名称与 JSON 校验严格逐字匹配。"
     )
 
 
@@ -799,9 +866,9 @@ def _normalize_verdict(parsed: dict) -> dict:
             continue
         score = max(0, min(100, int(round(raw * scale))))
         nd = dict(d)
-        nd["name"] = name
+        nd["name"] = _canonical_verdict_dimension(name)
         nd["score"] = score
-        by_name[name] = nd
+        by_name[nd["name"]] = nd
 
     ordered_dims: list[dict] = []
     for name in VERDICT_DIMENSIONS:
@@ -888,7 +955,7 @@ def _validate_verdict_result(
     if not isinstance(dimensions, list):
         raise RuntimeError("顶层评判 dimensions 格式无效")
     by_name = {
-        str(item.get("name") or "").strip(): item
+        _canonical_verdict_dimension(str(item.get("name") or "").strip()): item
         for item in dimensions if isinstance(item, dict)
     }
     missing = [name for name in VERDICT_DIMENSIONS if name not in by_name]
@@ -903,12 +970,14 @@ def _validate_verdict_result(
         if not str(item.get("reason") or "").strip():
             raise RuntimeError(f"顶层评判 {name} 缺少评分理由")
     if repo_path is not None:
+        # 亮点/问题是文件级论断，行锚点是加分项而非必需；文件存在性仍强制校验。
         _validate_structured_evidence(
             parsed.get("highlights") or [], repo_path, label="顶层亮点",
+            require_line=False,
         )
         _validate_structured_evidence(
             parsed.get("issues") or [], repo_path, label="顶层问题",
-            require_confidence=True,
+            require_confidence=True, require_line=False,
         )
         similarity = parsed.get("similarity") or {}
         if isinstance(similarity, dict):
@@ -1057,6 +1126,7 @@ def _validate_structured_evidence(
     *,
     label: str,
     require_confidence: bool = False,
+    require_line: bool = True,
 ) -> None:
     if not isinstance(items, list):
         raise RuntimeError(f"{label}格式无效")
@@ -1066,8 +1136,10 @@ def _validate_structured_evidence(
         canonical_path, canonical_line = _validate_repo_location(
             repo_path, str(item.get("path") or ""),
             label=f"{label}第 {index} 项",
+            require_line=require_line,
         )
-        item["path"] = f"{canonical_path}:{canonical_line}"
+        item["path"] = (f"{canonical_path}:{canonical_line}"
+                        if canonical_line is not None else canonical_path)
         if not str(item.get("quote") or "").strip():
             raise RuntimeError(f"{label}第 {index} 项缺少 AI 分析")
         if require_confidence:
@@ -1168,20 +1240,27 @@ def _hardcode_reviews_needing_repair(
     return targets
 
 
+def _check_hardcode_capacity(facts: dict | None) -> None:
+    """硬编码候选超过复核上限时立即失败，避免 LLM 阶段白跑 16 分钟。"""
+    hardcode = (((facts or {}).get("integrity") or {}).get("hardcode") or {})
+    if hardcode.get("truncated"):
+        raise RuntimeError(
+            "硬编码候选超过复核上限，拒绝生成不完整报告："
+            f"候选 {hardcode.get('candidate_count', '?')} 条，"
+            f"当前上限 {len(hardcode.get('findings') or [])} 条；"
+            "请提高 AGENT_HARDCODE_SIGNAL_LIMIT 后重跑"
+        )
+
+
 def _validate_hardcode_reviews(
     parsed: dict,
     facts: dict | None,
     repo_path: Path | None = None,
 ) -> None:
     """确保每条规则线索都经过 AI 复核，且结论能回到真实代码位置。"""
+    _check_hardcode_capacity(facts)
     hardcode = (((facts or {}).get("integrity") or {}).get("hardcode") or {})
     signals = hardcode.get("findings") or []
-    if hardcode.get("truncated"):
-        raise RuntimeError(
-            "硬编码候选超过复核上限，拒绝生成不完整报告："
-            f"候选 {hardcode.get('candidate_count', '?')} 条，"
-            f"当前上限 {len(signals)} 条；请提高 AGENT_HARDCODE_SIGNAL_LIMIT 后重跑"
-        )
     reviews = parsed.get("hardcode_reviews") or []
     if not isinstance(reviews, list):
         raise RuntimeError("顶层评判 hardcode_reviews 格式无效")
@@ -1358,10 +1437,18 @@ def _normalize_hardcode_repair_items(
             "line": source.get("line"),
             "excerpt": source.get("excerpt"),
         })
+        # 模型对「触发方法」和「判定理由」的字段命名会漂移（trigger_method、
+        # explanation、actual_output_or_return_value_change 等均出现过）；
+        # 不兜底会让整批复核因缺 method/reason 被交付校验拒绝。
+        if not str(normalized.get("method") or "").strip():
+            normalized["method"] = str(normalized.get("trigger_method") or "").strip()
         if not str(normalized.get("reason") or "").strip():
             normalized["reason"] = "；".join(
                 str(normalized.get(field) or "").strip()
-                for field in ("semantic_risk", "impact")
+                for field in (
+                    "semantic_risk", "impact", "impact_on_kernel_semantics",
+                    "actual_output_or_return_value_change", "explanation",
+                )
                 if str(normalized.get(field) or "").strip()
             )
         if normalized.get("confidence") is None:
@@ -1452,10 +1539,14 @@ def repair_verdict_hardcode_reviews(
         agent_name="os-kernel-verdict",
         user_request=(
             "你是操作系统内核赛评委，只重审输入中的硬编码线索，不修改报告其他内容。"
-            "逐项阅读 source_context，说明触发方法、实际输出/返回值变化及其对正常内核语义的"
-            "影响。必须原样返回每个 signal_id/category/path/line；status 只能是 confirmed、"
-            "suspected、cleared，semantic_risk 非空时不得 cleared。不得把普通第三方库实现当作"
-            "作品问题。调用 write_report，把仅含 hardcode_reviews 的 JSON 写到指定路径。\n\n"
+            "必须逐条判定并输出，条数与「待复核线索」完全一致；signal_id 必须逐条"
+            "原样复制自线索，禁止重新编号或改名。逐项阅读 source_context，说明触发方法、"
+            "实际输出/返回值变化及其对正常内核语义的影响；输出字段名为 signal_id、"
+            "category、path、line、status、method、reason、confidence、excerpt。"
+            "status 只能是 confirmed、suspected、cleared；semantic_risk 非空的线索"
+            "不得写 cleared，必须给出 confirmed 或 suspected 判定及其依据。"
+            "不得把普通第三方库实现当作作品问题。调用 write_report，把仅含 "
+            "hardcode_reviews 的 JSON 写到指定路径。\n\n"
             + json.dumps(payload, ensure_ascii=False, indent=2)
         ),
         output_path=out_path,
@@ -1645,6 +1736,8 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                        repo_path: Path | None = None) -> dict:
     # 指纹库故障必须在顶层模型开始评分前修复，避免模型看不到工具结果后自行估算原创性。
     _ensure_reference_database(facts)
+    # 硬编码候选超限先拒绝，不必等 verdict/repair 跑完 16 分钟才报错。
+    _check_hardcode_capacity(facts)
     outputs = {
         "json_path":    str(work_dir / "verdict.json"),
         "content_path": str(work_dir / "verdict.html"),
@@ -1654,7 +1747,7 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
     subsys_summaries = _collect_subsys_summaries(tree_root)
     def _enrich(parsed: dict) -> dict:
         """把 verdict 详细正文（HTML，含强制图表）读进 parsed，随 JSON 一起进缓存。"""
-        parsed["content"] = _read_md_if_exists(Path(outputs["content_path"]))
+        parsed["content"] = _read_latest_matching(Path(outputs["content_path"]))
         parsed["content"] = _VERDICT_DUPLICATE_SCORE_RE.sub("", parsed["content"])
         _normalize_verdict_content_paths(parsed)
         # 正常情况下提示词已直接生成中文；只有检测出英文正文时才调用翻译兜底。
@@ -1699,6 +1792,7 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                     'summary:str,borrowed:[...],original:[...]},'
                     '"one_line":str}',
         timeout=600,
+        repair_validator=_verdict_repair_shape_ok,
     )
     if _hardcode_reviews_needing_repair(parsed, facts, repo_path or Path(".")):
         repair_verdict_hardcode_reviews(

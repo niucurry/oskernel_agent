@@ -509,3 +509,88 @@ def test_five_long_ai_issues_still_fit_one_page(tmp_path):
     (tmp_path / "stress-summary.pdf").write_bytes(data)
 
     assert len(PdfReader(io.BytesIO(data)).pages) == 1
+
+
+def test_summary_repair_fixes_severity_mismatch(tmp_path, monkeypatch):
+    """摘要智能体拿错 finding 内容（severity 与来源不符）时，定向修复后交付。
+
+    生产失败原型：comparison#1 来源为 medium，AI 写成 high（内容实际来自其他
+    高严重度 finding）。修复任务收到逐条错误清单，只改被点名的 issue。
+    """
+    digests = load_digests(_digests(tmp_path))
+    first_attempt = _ai_summary().model_dump(mode="json")
+    first_attempt["issues"][2] = {
+        "source": "comparison",
+        "source_finding": 1,
+        "title": "发现同源代码",
+        "judgment": "整体比例为 25%，足以安排源码语义复核，但不能仅凭比例认定违规。",
+        "severity": "high",  # 来源 finding 为 medium
+        "confidence": 90,
+    }
+    calls = {"n": 0, "repair_request": ""}
+
+    def fake_run(task, *, schema_hint, timeout):
+        calls["n"] += 1
+        if task.agent_name == "os-kernel-summary":
+            return first_attempt
+        assert task.agent_name == "os-kernel-summary-repair"
+        assert task.output_path.name == "summary.ai.repair.json"
+        calls["repair_request"] = task.user_request
+        return _ai_summary().model_dump(mode="json")
+
+    monkeypatch.setattr(summary_pdf, "run_batch_task", fake_run)
+    result = run_ai_summary_analysis(digests, "T2026-demo", tmp_path / "summary.pdf")
+
+    assert calls["n"] == 2
+    assert "comparison#1" in calls["repair_request"]
+    assert "severity 应为 medium" in calls["repair_request"]
+    assert "保持原样" in calls["repair_request"]
+    assert result.overall_judgment.startswith("作品当前最影响评审")
+
+
+def test_summary_structural_error_does_not_trigger_repair(tmp_path, monkeypatch):
+    """遗漏全部问题属结构性错误：直接失败，不派修复任务。"""
+    digests = load_digests(_digests(tmp_path))
+    invalid = _ai_summary().model_dump(mode="json")
+    invalid["issues"] = []
+
+    def fake_run(task, *, schema_hint, timeout):
+        assert task.agent_name == "os-kernel-summary"
+        return invalid
+
+    monkeypatch.setattr(summary_pdf, "run_batch_task", fake_run)
+    with pytest.raises(SummaryPdfError, match="遗漏"):
+        run_ai_summary_analysis(digests, "T2026-demo", tmp_path / "summary.pdf")
+
+
+def test_summary_repair_output_still_invalid_raises(tmp_path, monkeypatch):
+    """修复输出仍不合格时，原始失败以明确错误传播，不静默放行。"""
+    digests = load_digests(_digests(tmp_path))
+    first_attempt = _ai_summary().model_dump(mode="json")
+    first_attempt["issues"][2]["severity"] = "high"
+    still_bad = _ai_summary().model_dump(mode="json")
+    still_bad["issues"][0]["source_finding"] = 99
+
+    def fake_run(task, *, schema_hint, timeout):
+        if task.agent_name == "os-kernel-summary":
+            return first_attempt
+        return still_bad
+
+    monkeypatch.setattr(summary_pdf, "run_batch_task", fake_run)
+    with pytest.raises(SummaryPdfError, match="不存在"):
+        run_ai_summary_analysis(digests, "T2026-demo", tmp_path / "summary.pdf")
+
+
+def test_validate_rejects_negative_or_zero_finding_ref(tmp_path):
+    """负序号被模型约束直接拒绝，越界序号由引用检查拒绝，不得回绕到列表尾部。"""
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][0]["source_finding"] = -2
+
+    with pytest.raises(SummaryPdfError, match="结构无效"):
+        _validate_ai_summary_result(payload, digests)
+
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][2]["source_finding"] = 5  # comparison 只有 1 条 finding
+    with pytest.raises(SummaryPdfError, match="不存在"):
+        _validate_ai_summary_result(payload, digests)
