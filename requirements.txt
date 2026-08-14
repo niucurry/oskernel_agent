@@ -15,6 +15,8 @@ python-gitlab>=4.4
 pyyaml>=6.0
 loguru>=0.7
 python-dotenv>=1.0
+# 作品仓库列表 xlsx 读取（oskernel_agent.works_list / run_works_xlsx.py）
+openpyxl>=3.1
 # 函数级 McCabe 圈复杂度、NLOC、token/参数计数（支持 Rust/C/C++ 等）
 lizard==1.23.0
 # Layer 2 向量召回（oskernel_agent.comparison.embed）

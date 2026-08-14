@@ -5,8 +5,15 @@ import { fileURLToPath } from "node:url";
 export const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const FRONTEND_ROOT = path.resolve(SERVER_DIR, "..");
 export const PROJECT_ROOT = path.resolve(FRONTEND_ROOT, "..");
-export const DATA_DIR = path.join(FRONTEND_ROOT, "data");
-export const REPORTS_DIR = path.join(PROJECT_ROOT, "data", "output");
+export const DATA_DIR = path.resolve(
+  process.env.FRONTEND_DATA_DIR || path.join(FRONTEND_ROOT, "data")
+);
+export const REPORTS_DIR = path.resolve(
+  process.env.FRONTEND_REPORTS_DIR || path.join(PROJECT_ROOT, "data", "output")
+);
+export const DIST_DIR = path.resolve(
+  process.env.FRONTEND_DIST_DIR || path.join(FRONTEND_ROOT, "dist")
+);
 export const DB_PATH = path.join(DATA_DIR, "app.sqlite");
 export const PORT = Number(process.env.FRONTEND_API_PORT || 3130);
 

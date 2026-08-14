@@ -33,17 +33,18 @@ python -m venv .venv
 source .venv/bin/activate              # Windows: .\.venv\Scripts\activate
 python -m pip install -e .
 npm install -g opencode-ai
-oskernel-setup
 ```
 
 复制本地配置模板，真实凭据不得提交：
 
 ```bash
 cp .env.example .env
-cp config.toml.example config.toml
+cp config.toml.example config.toml      # Windows: Copy-Item config.toml.example config.toml
 ```
 
-修改 `config.toml` 中的模型配置后重新执行 `oskernel-setup`。比赛最低提交次数只能通过 `FINALS_MIN_COMMITS` 配置为当届章程的真实值；未配置时系统不会自行认定“提交缺失”。
+填写 `config.toml` 的 API key 后执行 `oskernel-setup`。该命令将 OpenCode 的认证和项目配置写入
+`data/opencode/`，不会修改用户目录中的 OpenCode 配置。比赛最低提交次数只能通过
+`FINALS_MIN_COMMITS` 配置为当届章程的真实值；未配置时系统不会自行认定“提交缺失”。
 
 ## 快速使用
 
@@ -65,11 +66,15 @@ oskernel-agent --repo-path /path/to/repository --output description.html \
 
 ### 历史库与对比报告
 
-先在 `config/repos.yaml` 维护历史作品清单，然后建库：
+先在 `config/repos.yaml` 维护历史作品清单。推荐将大型历史仓库保存在项目外的
+`D:\@MyData\work\OS\historical_repos\by_year\<year>\<repo_key 或 team_name>\`，再建库：
 
 ```bash
-python -m oskernel_agent.comparison.buildlib
+python -m oskernel_agent.comparison.buildlib --repos-root D:\@MyData\work\OS\historical_repos\by_year
 ```
+
+目录名必须与 `config/repos.yaml` 的 `year` 和 `repo_key`（没有时为 `team_name`）一一对应；可让下载任务只负责
+按此结构克隆，建库命令负责归一化、索引和覆盖率校验。
 
 对比新作品：
 
@@ -93,16 +98,34 @@ Git 提交次数、日期、代码变更行数（LOC）和文件明细由程序�
 ### 一对一报告产出
 
 报告改为**逐个产出**，不再有事务式批处理（`oskernel-batch` 已移除）。对单个队伍，运行
-`run_incremental_1931.py`（改脚本头部的 `TEAM_ID` / `URL` 即可适配其他队伍）：
+`run_incremental.py`（改脚本头部的 `TEAM_ID` / `URL` 即可适配其他队伍）：
 
 ```bash
-python run_incremental_1931.py
+python run_incremental.py
 ```
 
 每份报告（对比 / 描述 / 开发过程 / 一页摘要）独立执行、独立发布：任一报告成功即发布到
 `data/output/<队伍编号>/`，失败只影响它自身，其余步骤照常进行。步骤复用
 `oskernel_agent.cli.batch` 的单步函数与交付门禁；也可以直接调用单个命令
 （`oskernel-compare` / `oskernel-agent` / `oskernel-finals`）逐一生成。
+
+### 从作品列表批量下载目标仓库
+
+批量分析前，可先从作品仓库列表（`内核赛作品仓库列表.xlsx`，单列 `fork地址`）读取被分析仓库
+的位置并一次性下载，落盘位置与批量分析各步骤读取的位置一致（`data/output/_repos/<存储键>/`）：
+
+```bash
+python run_works_xlsx.py --xlsx "D:\@MyData\work\OS\内核赛作品仓库列表.xlsx" --jobs 4
+```
+
+- 队号自动取 fork 地址最后一段（如 `T2026100069910651-2494`）；
+- 默认分支没有源码的作品，用 `--branch URL=BRANCH`（可重复）指定真正含代码的分支；
+- GitHub 的 `/tree/<分支>`、`/blob/<分支>/…` 网页地址自动转为「仓库地址 + 该分支」克隆，
+  无法映射的浏览页（如 `/commit/`、`/pull/`）跳过并告警；
+- 下载后逐队运行 `run_incremental.py` 会直接复用已下载的克隆，不再重复下载；
+- 追加 `--reports` 会在下载后逐队串行产出四份报告（并发批次会拖垮内存，故串行）；
+- 单个仓库失败不阻断其余；`--dry-run` 只列出队号、地址与目标路径；
+- 未指定 `--xlsx` 时依次查找项目根目录与上级工作区中的 `内核赛作品仓库列表.xlsx`。
 
 ## 前端控制台
 
@@ -116,6 +139,8 @@ npm run dev:all
 - API：`http://127.0.0.1:3130`
 
 前端可导入作品表格、选择报告类型、查看实时日志和打开正式报告。本地数据库位于 `frontend/data/`，不进入版本控制。
+如工作目录不允许写入源码树，可设置 `FRONTEND_DATA_DIR`、`FRONTEND_REPORTS_DIR` 和
+`FRONTEND_DIST_DIR`，将前端数据库、报告目录和生产静态文件分别放到外部路径。
 
 ## 项目结构
 
@@ -147,7 +172,8 @@ npm run dev:all
 以下内容均为本地状态，不提交到 Git：
 
 - `data/db/`：函数库、向量库和 SimHash 索引；
-- `data/historical_repos/`：目标或历史仓库克隆；
+- `data/historical_repos/`：通过 `oskernel-agent --url` 拉取的目标仓库缓存；
+- `D:\@MyData\work\OS\historical_repos\by_year/`：用于建库的历史仓库（推荐放在项目外）；
 - `data/output/`：正式报告；
 - `frontend/data/`：前端数据库；
 - `.env`、`config.toml`：本地凭据与运行配置；

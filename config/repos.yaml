@@ -1,5 +1,5 @@
 # 历史决赛作品清单（由 history_db/hisRepo_metadata.json 生成）
-# 字段：repo_url / year / team_name / award_level；克隆到 data/repos/{year}/{team_name}/
+# 字段：repo_url / year / team_name / award_level；克隆到 <repos-root>/{year}/{repo_key 或 team_name}/
 repos:
 - repo_url: https://gitlab.eduxiji.net/educg-group-36002-2710490/T202518123995667-1436
   year: 2025

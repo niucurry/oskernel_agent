@@ -191,8 +191,9 @@ def clone_repo(
     token: str | None = None,
     force: bool = False,
     depth: int | None = None,
+    branch: str | None = None,
 ) -> str:
-    """克隆仓库到 dest，支持断点续传。
+    """克隆仓库到 dest，支持断点续传与指定分支。
 
     返回状态："skipped"（已存在且未 --force）/ "recloned"（--force 重克隆）/ "cloned"。
     """
@@ -214,10 +215,20 @@ def clone_repo(
     cmd = ["git", "clone", "--no-checkout"]
     if depth:
         cmd += ["--depth", str(depth)]
+    if branch:
+        cmd += ["--branch", branch]
     cmd += [_auth_url(repo_url, token), str(dest)]
     # 不回显带 token 的 URL
     try:
         subprocess.run(cmd, check=True, capture_output=True)
+        if os.name == "nt":
+            # Windows 默认 260 字符路径上限：存储键加深层目录会把长路径仓库的
+            # checkout 卡成 "Filename too long"；Git for Windows 用 core.longpaths 解除。
+            # 写入仓库本地配置，后续 ls-tree / checkout / diff 一并生效。
+            subprocess.run(
+                ["git", "-C", str(dest), "config", "core.longpaths", "true"],
+                check=True, capture_output=True,
+            )
         _checkout_clone(dest)
     except Exception:
         # 失败目录绝不能留给下一次 is_cloned() 误判；克隆可安全重试。

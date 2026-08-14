@@ -1,6 +1,7 @@
-"""注册本项目的 agent 与 MCP 工具到 OpenCode 全局配置。"""
+"""Register this project's OpenCode configuration and MCP tools privately."""
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -14,14 +15,20 @@ _VENV_PY_CANDIDATES = [
 ]
 _VENV_PY = next((str(p) for p in _VENV_PY_CANDIDATES if p.exists()),
                 str(PROJECT_ROOT / ".venv" / "bin" / "python"))
-# opencode 全局配置路径：优先 opencode.jsonc（opencode npm 版本使用），
-# 降级到 opencode.json（Linux 版本），都在 ~/.config/opencode/ 下。
-_CFG_DIR = Path.home() / ".config" / "opencode"
-_GLOBAL_CFG = (
-    _CFG_DIR / "opencode.jsonc"
-    if (_CFG_DIR / "opencode.jsonc").exists()
-    else _CFG_DIR / "opencode.json"
-)
+def _source_config_dir() -> Path:
+    """Return the project-private OpenCode configuration directory."""
+    override = os.environ.get("AGENT_OPENCODE_SOURCE_CONFIG_DIR", "").strip()
+    if override:
+        return Path(override)
+    return PROJECT_ROOT / "data" / "opencode" / "config" / "opencode"
+
+
+def _source_data_dir() -> Path:
+    """Return the project-private OpenCode data directory."""
+    override = os.environ.get("AGENT_OPENCODE_SOURCE_DATA_DIR", "").strip()
+    if override:
+        return Path(override)
+    return PROJECT_ROOT / "data" / "opencode" / "data" / "opencode"
 
 
 # 共享：会话系统提示词构造（4 个产出会话 + 1 个修复兜底）
@@ -101,8 +108,6 @@ def setup() -> None:
 
     from .. import config
 
-    import os as _os
-
     api_key   = config.api.get("key", "")
     base_url  = config.api.get("base_url", "").strip()
     max_steps = config.engine.get("max_steps", 200)
@@ -113,8 +118,8 @@ def setup() -> None:
     PROVIDER_ID = "deepseek"
     default_model = "deepseek-v4-flash"
     model_id = (
-        _os.getenv("LLM_MODEL")
-        or _os.getenv("AGENT_LLM_MODEL")
+        os.getenv("LLM_MODEL")
+        or os.getenv("AGENT_LLM_MODEL")
         or default_model
     ).strip() or default_model
     MODEL = f"{PROVIDER_ID}/{model_id}"
@@ -124,16 +129,17 @@ def setup() -> None:
               file=sys.stderr)
         sys.exit(1)
 
-    # 将 API 密钥写入 OpenCode 认证文件
-    _AUTH_FILE = Path.home() / ".local" / "share" / "opencode" / "auth.json"
-    _AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+    # Keep credentials inside project data so a restricted user profile does
+    # not prevent setup and this project never mutates a user's global config.
+    auth_file = _source_data_dir() / "auth.json"
+    auth_file.parent.mkdir(parents=True, exist_ok=True)
     try:
-        auth = json.loads(_AUTH_FILE.read_text(encoding="utf-8")) if _AUTH_FILE.exists() else {}
+        auth = json.loads(auth_file.read_text(encoding="utf-8")) if auth_file.exists() else {}
     except json.JSONDecodeError:
         auth = {}
     auth[PROVIDER_ID] = {"type": "api", "key": api_key}
-    _AUTH_FILE.write_text(json.dumps(auth, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[配置] 已写入 API 密钥到 {_AUTH_FILE}（provider: {PROVIDER_ID}）")
+    auth_file.write_text(json.dumps(auth, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"[配置] 已写入 API 密钥到 {auth_file}（provider: {PROVIDER_ID}）")
 
     # MCP server 通过当前项目 src 直接启动，避免依赖外部 shell 的 PYTHONPATH
     # 或 editable install 状态；OpenCode 会把后续参数原样传给 python -c。
@@ -156,17 +162,20 @@ def setup() -> None:
         },
     }
 
-    # 读取或初始化全局配置
-    _GLOBAL_CFG.parent.mkdir(parents=True, exist_ok=True)
-    if _GLOBAL_CFG.exists():
+    # llm_batch copies this configuration into each isolated OpenCode session
+    # and sets XDG_CONFIG_HOME, so no user-global directory is touched.
+    config_dir = _source_config_dir()
+    config_file = config_dir / "opencode.json"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    if config_file.exists():
         try:
-            existing = json.loads(_GLOBAL_CFG.read_text(encoding="utf-8"))
+            existing = json.loads(config_file.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             existing = {}
-        print(f"[配置] 读取已有全局配置：{_GLOBAL_CFG}")
+        print(f"[配置] 读取已有项目配置：{config_file}")
     else:
         existing = {}
-        print(f"[配置] 创建全局配置：{_GLOBAL_CFG}")
+        print(f"[配置] 创建项目配置：{config_file}")
 
     # 更新我们的 agent 和 MCP 条目（model 始终更新，不覆盖其他用户配置）
     existing.setdefault("$schema", "https://opencode.ai/config.json")
@@ -254,11 +263,11 @@ def setup() -> None:
 
     existing.setdefault("mcp", {})["os-kernel-tools"] = mcp_entry
 
-    _GLOBAL_CFG.write_text(
+    config_file.write_text(
         json.dumps(existing, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    print(f"[完成] 全局配置已写入：{_GLOBAL_CFG}")
+    print(f"[完成] 项目配置已写入：{config_file}")
 
 
 if __name__ == "__main__":

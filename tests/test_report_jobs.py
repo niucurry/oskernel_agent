@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-import json
+import os
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -263,8 +265,6 @@ def test_run_all_four_kinds(monkeypatch) -> None:
 # ---- CLI ----
 
 def test_cli_help() -> None:
-    import subprocess, sys, os
-
     result = subprocess.run(
         [sys.executable, "-m", "oskernel_agent.report_jobs", "--help"],
         capture_output=True, encoding="utf-8", timeout=30,

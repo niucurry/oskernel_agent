@@ -29,16 +29,17 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from oskernel_agent.paths import SOURCE_ROOT
+from oskernel_agent.paths import PROJECT_ROOT, SOURCE_ROOT
+
+
+def _safe_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
 
 def _find_opencode() -> str:
     import shutil
-
-    def _safe_exists(path: Path) -> bool:
-        try:
-            return path.exists()
-        except OSError:
-            return False
 
     def _prefer_real_exe(path: Path) -> Path:
         # npm 全局 shim（opencode.cmd/.ps1/无扩展名）经 subprocess 调用时会走 cmd.exe，
@@ -99,10 +100,14 @@ def _opencode_source_data_dir() -> Path:
     raw = os.environ.get("AGENT_OPENCODE_SOURCE_DATA_DIR", "").strip()
     if raw:
         return Path(raw)
-    data_home = os.environ.get("XDG_DATA_HOME")
-    if data_home:
-        return Path(data_home) / "opencode"
-    return Path.home() / ".local" / "share" / "opencode"
+    return PROJECT_ROOT / "data" / "opencode" / "data" / "opencode"
+
+
+def _opencode_source_config_dir() -> Path:
+    raw = os.environ.get("AGENT_OPENCODE_SOURCE_CONFIG_DIR", "").strip()
+    if raw:
+        return Path(raw)
+    return PROJECT_ROOT / "data" / "opencode" / "config" / "opencode"
 
 
 def _cleanup_opencode_data_root(path: Path) -> None:
@@ -149,17 +154,28 @@ def _prepare_opencode_data_home(task: "BatchTask") -> Path:
     root = _opencode_isolated_root() / _safe_path_part(task.batch_id)
     data_home = root / "data"
     state_home = root / "state"
+    config_home = root / "config"
     opencode_data = data_home / "opencode"
+    opencode_config = config_home / "opencode"
     opencode_data.mkdir(parents=True, exist_ok=True)
     state_home.mkdir(parents=True, exist_ok=True)
+    opencode_config.mkdir(parents=True, exist_ok=True)
 
     source_auth = _opencode_source_data_dir() / "auth.json"
     target_auth = opencode_data / "auth.json"
-    if source_auth.exists() and not target_auth.exists():
+    if _safe_exists(source_auth) and not _safe_exists(target_auth):
         try:
             shutil.copy2(source_auth, target_auth)
         except OSError as e:
             _log(f"[llm_batch] 复制 OpenCode auth.json 失败：{e}")
+    for filename in ("opencode.json", "opencode.jsonc"):
+        source_config = _opencode_source_config_dir() / filename
+        target_config = opencode_config / filename
+        if _safe_exists(source_config) and not _safe_exists(target_config):
+            try:
+                shutil.copy2(source_config, target_config)
+            except OSError as e:
+                _log(f"[llm_batch] 复制 OpenCode {filename} 失败：{e}")
     return root
 
 
@@ -221,6 +237,7 @@ def _opencode_env(task: "BatchTask") -> dict:
         isolated_root = _prepare_opencode_data_home(task)
         env["XDG_DATA_HOME"] = str(isolated_root / "data")
         env["XDG_STATE_HOME"] = str(isolated_root / "state")
+        env["XDG_CONFIG_HOME"] = str(isolated_root / "config")
     local_bin = str(Path.home() / ".local" / "bin")
     if local_bin not in env.get("PATH", ""):
         env["PATH"] = local_bin + os.pathsep + env.get("PATH", "")
@@ -662,5 +679,4 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
     else:
         cache_write(task.cache_dir, task.cache_key, parsed)
     return parsed
-
 
