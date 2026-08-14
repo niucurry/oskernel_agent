@@ -354,6 +354,21 @@ def make_file_link_resolver(
         if "index" not in index_cache:
             index_cache["index"] = _build_repo_index(roots)
         want_segments = Path(filepath).as_posix().split("/")
+        # 段级后缀优先：少写前缀（ipc/msg.rs → os/src/syscall/ipc/msg.rs、
+        # mm/mod.rs → os/src/mm/mod.rs）时真实路径以 want 整段序列结尾，
+        # 比子序列更精确，可消解 mod.rs 一类重名基名的歧义。
+        suffix_matches: list[tuple[Path, int]] = []
+        for tagged in index_cache["index"].get(base, []):
+            ri_str, rel = tagged.split("\x00", 1)
+            rel_segments = rel.split("/")
+            if (
+                len(rel_segments) > len(want_segments)
+                and rel_segments[-len(want_segments):] == want_segments
+            ):
+                ri = int(ri_str)
+                suffix_matches.append((roots[ri] / rel, ri))
+        if len(suffix_matches) == 1:
+            return suffix_matches[0]
         matches: list[tuple[Path, int]] = []
         for tagged in index_cache["index"].get(base, []):
             ri_str, rel = tagged.split("\x00", 1)
