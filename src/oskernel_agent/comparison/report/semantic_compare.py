@@ -27,6 +27,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from oskernel_agent.paths import PROJECT_ROOT
+from oskernel_agent.report_quality import sanitize_code_ellipses as _sanitize_code_ellipses
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -1674,36 +1675,6 @@ def collect_file_pairs(
 
 _SEMANTIC_PROMPT_CHAR_BUDGET = 25_000
 _SEMANTIC_CODE_CHAR_LIMIT = 3_000
-
-# 正文里含省略号的代码式片段（函数调用 / 结构体字面量等），如 bail!(EPERM, ...)、
-# Self { this: this.clone(), ... }。模型在描述代码差异时习惯用 ... 缩写参数列表，
-# 这是代码引述而非正文截断；省略号门禁只看正文（剥离 <code> 内容），
-# 因此确定性包成 <code> 即可通过门禁，且不改变可见内容。
-_CODE_ELLIPSIS_RE = re.compile(
-    r"`?[A-Za-z_][A-Za-z0-9_:]*!?\s*[\(\[{]"
-    r"[^<>]{0,120}?(?:\.\.\.|…)[^<>]{0,120}?[\)\]}]"
-)
-
-
-def _sanitize_code_ellipses(html_text: str) -> str:
-    # 已有的 <code> 段落先占位保护，避免二次包裹产生嵌套代码标签。
-    code_spans = re.findall(
-        r"<code\b[^>]*>.*?</code>", html_text or "", re.IGNORECASE | re.DOTALL)
-    protected = html_text or ""
-    placeholders: dict[str, str] = {}
-    for index, span in enumerate(code_spans):
-        key = f"\x00CODE{index}\x00"
-        placeholders[key] = span
-        protected = protected.replace(span, key, 1)
-
-    def _wrap(match: re.Match) -> str:
-        token = match.group(0).strip("`")
-        return f"<code>{html.escape(token)}</code>"
-
-    wrapped = _CODE_ELLIPSIS_RE.sub(_wrap, protected)
-    for key, span in placeholders.items():
-        wrapped = wrapped.replace(key, span)
-    return wrapped
 
 
 def _semantic_group_cost(group: dict) -> int:
