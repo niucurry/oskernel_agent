@@ -188,3 +188,141 @@ def test_repair_validator_rejects_drifted_repair_output(tmp_path, monkeypatch):
         repair_validator=accept,
     )
     assert repaired is not None
+
+
+def test_informed_retry_carries_delivery_failure_reason(tmp_path, monkeypatch):
+    """校验器返回 str 失败原因时，重试请求携带原因，模型可针对性修正。"""
+    requests = []
+
+    def fake_run(task, timeout):
+        requests.append(task.user_request)
+        task.output_path.write_text(
+            json.dumps({"summary": "完整结果"}), encoding="utf-8"
+        )
+        return True, "", []
+
+    monkeypatch.setattr(llm_batch, "_run_opencode_once", fake_run)
+    task = _batch_task(tmp_path)
+    task.cache_enabled = False
+    task.cache_validator = lambda value: (
+        "severity 与来源不符：comparison#2" if len(requests) == 1 else True
+    )
+
+    result = llm_batch.run_batch_task(task)
+
+    assert len(requests) == 2
+    assert "【上次输出未通过交付校验】" in requests[1]
+    assert "severity 与来源不符：comparison#2" in requests[1]
+    assert result["summary"] == "完整结果"
+
+
+def test_str_validator_means_failure_not_success(tmp_path, monkeypatch):
+    """校验器返回错误字符串必须视为失败并重试，不能误当作通过。"""
+    calls = {"n": 0}
+
+    def fake_run(task, timeout):
+        calls["n"] += 1
+        task.output_path.write_text(
+            json.dumps({"summary": "完整" if calls["n"] == 2 else ""}),
+            encoding="utf-8",
+        )
+        return True, "", []
+
+    monkeypatch.setattr(llm_batch, "_run_opencode_once", fake_run)
+    task = _batch_task(tmp_path)
+    task.cache_enabled = False
+    task.cache_validator = lambda value: "每次都不行" if calls["n"] < 2 else True
+
+    result = llm_batch.run_batch_task(task)
+
+    assert calls["n"] == 2
+    assert result["summary"] == "完整"
+
+
+def test_parse_failure_retry_includes_previous_output_tail(tmp_path, monkeypatch):
+    """解析失败的重试同样知情：附带上次输出片段供模型对照修正格式。"""
+    requests = []
+
+    def fake_run(task, timeout):
+        requests.append(task.user_request)
+        if len(requests) == 1:
+            task.output_path.write_text("{broken json", encoding="utf-8")
+        else:
+            task.output_path.write_text(
+                json.dumps({"summary": "ok"}), encoding="utf-8"
+            )
+        return True, "", []
+
+    monkeypatch.setattr(llm_batch, "_run_opencode_once", fake_run)
+    task = _batch_task(tmp_path)
+    task.cache_enabled = False
+
+    result = llm_batch.run_batch_task(task)
+
+    assert len(requests) == 2
+    assert "【上次输出未通过交付校验】" in requests[1]
+    assert "上次输出片段" in requests[1]
+    assert "{broken json" in requests[1]
+    assert result["summary"] == "ok"
+
+
+def test_locate_parsed_json_materializes_recovered_content_to_output_path(tmp_path):
+    """别名 JSON 回收时内容回写 canonical 路径，下游直读 output_path 不落空。"""
+    alias = tmp_path / ".result.json"
+    content = '{"summary": "别名落盘"}'
+    alias.write_text(content, encoding="utf-8")
+    task = _batch_task(tmp_path)
+
+    parsed = llm_batch._locate_parsed_json(task, ok=False, written=[alias])
+
+    assert parsed == {"summary": "别名落盘"}
+    assert task.output_path.read_text(encoding="utf-8") == content
+
+
+def test_json_repair_input_prefers_written_file_over_stdout(tmp_path, monkeypatch):
+    """内容写在别名路径、JSON 损坏时，修复输入必须是落盘内容而非 stdout 摘要。
+
+    以 stdout 为输入会让修复 agent 从摘要重建结构（推倒重来）；落盘内容
+    只需修语法。这里断言 _try_repair_json 收到的 raw 就是别名文件内容。
+    """
+    alias = tmp_path / ".result.json"
+    alias.write_text('{"summary": "缺" 尾}', encoding="utf-8")
+    captured = {}
+
+    def fake_run(task, timeout):
+        return False, "stdout 摘要：模型声称已生成结果", [alias]
+
+    def fake_repair(task, raw_text, schema_hint, timeout, repair_validator=None):
+        captured["raw"] = raw_text
+        return {"summary": "修复后"}
+
+    monkeypatch.setattr(llm_batch, "_run_opencode_once", fake_run)
+    monkeypatch.setattr(llm_batch, "_try_repair_json", fake_repair)
+    task = _batch_task(tmp_path)
+    task.cache_enabled = False
+
+    result = llm_batch.run_batch_task(task, schema_hint='{"summary":str}')
+
+    assert captured["raw"] == '{"summary": "缺" 尾}'
+    assert result == {"summary": "修复后"}
+
+
+def test_try_repair_json_recovers_aliased_repair_output(tmp_path, monkeypatch):
+    """修复 agent 把产物写到别名路径时回收，而不是丢弃后重跑原始任务。"""
+    alias = tmp_path / "report.json"
+    alias.write_text(
+        json.dumps({"summary": "修复产物"}), encoding="utf-8"
+    )
+
+    def fake_run(task, timeout):
+        assert task.agent_name == "os-kernel-json-repair"
+        return False, "", [alias]
+
+    monkeypatch.setattr(llm_batch, "_run_opencode_once", fake_run)
+    task = _batch_task(tmp_path)
+
+    repaired = llm_batch._try_repair_json(
+        task, '{"summary": "原始损坏文本"}', '{"summary":str}', 60,
+    )
+
+    assert repaired == {"summary": "修复产物"}
