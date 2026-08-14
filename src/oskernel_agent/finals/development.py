@@ -56,6 +56,36 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout
 
 
+def _try_unshallow(repo: Path) -> bool:
+    """浅克隆先补齐完整历史：开发过程报告必须基于完整提交史。
+
+    驱动侧为省带宽/磁盘用 depth=200 浅克隆；gitlab.eduxiji.net 对多并线
+    合并史的 depth 语义会切断部分祖先链（如 T202610008999575-242 被切成
+    905 提交 + 2 条截断线）。在浅克隆上直接分析会误报「无法追溯完整历史」
+    并压低整体置信度。补齐失败时保持浅克隆状态（下游按 shallow 降级表述），
+    不阻塞报告生成。
+    """
+    try:
+        is_shallow = _git(
+            repo, "rev-parse", "--is-shallow-repository"
+        ).strip().lower() == "true"
+    except RuntimeError:
+        return False
+    if not is_shallow:
+        return True
+    result = subprocess.run(
+        ["git", "-C", str(repo), "fetch", "--unshallow", "--tags"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", errors="replace", check=False,
+        timeout=600,
+    )
+    if result.returncode == 0:
+        return True
+    print(f"[development] 浅克隆补齐失败（保持降级标记）："
+          f"{result.stderr.strip()[:200]}", flush=True)
+    return False
+
+
 def collect_commits(repo_path: str | Path) -> tuple[list[dict], bool]:
     """按时间正序读取全部可见提交及 numstat。"""
     repo = Path(repo_path).resolve()
@@ -839,6 +869,7 @@ def generate_development_report(
     repo = Path(repo_path).resolve()
     output = Path(output_path).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
+    _try_unshallow(repo)   # 浅克隆补齐完整历史后再分析；失败保持 shallow 降级标记
     commits, shallow = collect_commits(repo)
     repository_url = ""
     try:
