@@ -5918,18 +5918,19 @@ def run_review_judgment(review_pairs: list[dict], work_dir: Path,
                     _save_cache()
         _save_cache()
 
-        # 两阶段内部的格式纠正已处理“同一次对话”的偶发偏差；若最终仍失败，再发起
+        # 两阶段内部的格式纠正已处理”同一次对话”的偶发偏差；若最终仍失败，再发起
         # 独立对话，避免模型沿用上轮错误锚点。只重试失败项，不重复调用有效结果。
-        # 独立重试最多 3 轮：单轮常救不回模型输出抖动，而交付门禁要求全部入选候选
-        # 都有合格结论；每轮都是全新对话，仍失败则交由 completeness 门禁拒绝交付。
-        for retry_round in range(1, 4):
+        # 独立重试最多 6 轮：每轮只花失败项（通常几对，约 30 秒），多给几次
+        # 独立重掷即可收敛到 0，避免几对格式失败拖垮整条流水线重跑；
+        # 仍失败则交由 completeness 门禁拒绝交付。
+        for retry_round in range(1, 7):
             retry_failed = [
                 g for g in pending
                 if (cache.get(_key(g)) or {}).get("verdict") == "复核失败"
             ]
             if not retry_failed:
                 break
-            logger.info("[review] {} 对格式失败，启动第 {}/3 轮独立复核重试",
+            logger.info("[review] {} 对格式失败，启动第 {}/6 轮独立复核重试",
                         len(retry_failed), retry_round)
             with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
                 futures = [ex.submit(_work, g) for g in retry_failed]
