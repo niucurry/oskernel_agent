@@ -531,7 +531,7 @@ def _validate_ai_summary_result(
         rendered_text,
     )
     test_claim_text = re.sub(
-        r"(?:不能|无法|不足以|不代表|不得)[^。！？；]{0,80}",
+        r"(?:不能|无法|不足以|不代表|不得|未发现|没有发现|未见)[^。！？；]{0,80}",
         "",
         test_claim_text,
     )
