@@ -1364,7 +1364,10 @@ def _validate_hardcode_reviews(
         category = str(item.get("category") or "").strip()
         if original is not None:
             if category != str(original.get("category") or "").strip():
-                raise RuntimeError(f"硬编码复核 {signal_id} 的类别与扫描证据不一致")
+                # 类别是扫描证据的既定事实，配对已由 signal_id 确立；
+                # 按信号确定性回填规范类别，而不是让模型的措辞偏差
+                # 触发整份描述报告重试。
+                item["category"] = str(original.get("category") or "").strip()
         else:
             if not re.fullmatch(r"ai-new-\d+", signal_id):
                 raise RuntimeError(f"AI 主动发现的硬编码复核 ID 无效：{signal_id}")
