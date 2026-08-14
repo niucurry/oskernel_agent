@@ -1675,6 +1675,36 @@ def collect_file_pairs(
 _SEMANTIC_PROMPT_CHAR_BUDGET = 25_000
 _SEMANTIC_CODE_CHAR_LIMIT = 3_000
 
+# 正文里含省略号的代码式片段（函数调用 / 结构体字面量等），如 bail!(EPERM, ...)、
+# Self { this: this.clone(), ... }。模型在描述代码差异时习惯用 ... 缩写参数列表，
+# 这是代码引述而非正文截断；省略号门禁只看正文（剥离 <code> 内容），
+# 因此确定性包成 <code> 即可通过门禁，且不改变可见内容。
+_CODE_ELLIPSIS_RE = re.compile(
+    r"`?[A-Za-z_][A-Za-z0-9_:]*!?\s*[\(\[{]"
+    r"[^<>]{0,120}?(?:\.\.\.|…)[^<>]{0,120}?[\)\]}]"
+)
+
+
+def _sanitize_code_ellipses(html_text: str) -> str:
+    # 已有的 <code> 段落先占位保护，避免二次包裹产生嵌套代码标签。
+    code_spans = re.findall(
+        r"<code\b[^>]*>.*?</code>", html_text or "", re.IGNORECASE | re.DOTALL)
+    protected = html_text or ""
+    placeholders: dict[str, str] = {}
+    for index, span in enumerate(code_spans):
+        key = f"\x00CODE{index}\x00"
+        placeholders[key] = span
+        protected = protected.replace(span, key, 1)
+
+    def _wrap(match: re.Match) -> str:
+        token = match.group(0).strip("`")
+        return f"<code>{html.escape(token)}</code>"
+
+    wrapped = _CODE_ELLIPSIS_RE.sub(_wrap, protected)
+    for key, span in placeholders.items():
+        wrapped = wrapped.replace(key, span)
+    return wrapped
+
 
 def _semantic_group_cost(group: dict) -> int:
     best = group.get("candidates", [{}])[0] if group.get("candidates") else {}
@@ -2343,9 +2373,10 @@ def run_semantic_analysis(
     def _append_gap_sections(content: str, gap_html: str) -> str:
         """把补缺响应中的 section 并入正文；已有空 section 则原位替换，避免重复 ID。"""
         merged = content
-        for piece in re.findall(
+        for raw_piece in re.findall(
             r"<section\b.*?</section>", gap_html, re.IGNORECASE | re.DOTALL
         ):
+            piece = _sanitize_code_ellipses(raw_piece)
             match = re.search(
                 r'data-cluster=["\']([^"\']+)["\']', piece, re.IGNORECASE)
             if not match:
@@ -2381,10 +2412,10 @@ def run_semantic_analysis(
             continue
 
         # 提取各批 HTML 片段（模型可能在 markdown 代码块里），按原功能簇顺序合并。
-        merged = "\n".join(
+        merged = _sanitize_code_ellipses("\n".join(
             _extract_html_from_text(response_text) or response_text
             for response_text in responses
-        )
+        ))
 
         # 首轮直接生成中文；只有确实检测到英文正文时才保留一次翻译兜底。
         merged, lang_stats = normalize_html_language(merged)

@@ -206,3 +206,25 @@ def test_false_positive_stats_grouping():
     assert reasons["write_csr"] == "cross_arch"
     assert "__switch" not in reasons
     assert suspects[1]["boilerplate_asm_signal"] is True
+
+
+# ── 语义分析正文省略号清洗 ─────────────────────────────────────────────────────
+
+def test_semantic_sanitizer_wraps_code_ellipses_only():
+    sanitized = SC._sanitize_code_ellipses(
+        "错误处理从 bail!(EPERM, ...) 改为 ax_bail!(OperationNotPermitted, e)。"
+    )
+    assert "<code>bail!(EPERM, ...)</code>" in sanitized
+    assert "<code>ax_bail!(OperationNotPermitted, e)</code>" not in sanitized
+
+    struct_literal = SC._sanitize_code_ellipses(
+        "通过 Self { this: this.clone(), ... } 建立终端自引用对象。"
+    )
+    assert "<code>Self { this: this.clone(), ... }</code>" in struct_literal
+
+    prose = SC._sanitize_code_ellipses("普通省略号……这里没有代码形态，不应被包。")
+    assert prose.count("<code>") == 0
+
+    existing = SC._sanitize_code_ellipses("已有 <code>foo(...)</code> 标签不受影响。")
+    assert existing.count("<code>") == 1
+    assert existing.count("</code>") == 1
