@@ -222,6 +222,16 @@ def test_semantic_sanitizer_wraps_code_ellipses_only():
     )
     assert "<code>Self { this: this.clone(), ... }</code>" in struct_literal
 
+    generics = SC._sanitize_code_ellipses(
+        "文件描述符表采用 Vec<Option<...>> 保存句柄。"
+    )
+    assert "<code>Vec<Option<...></code>" in generics
+
+    tag_intact = SC._sanitize_code_ellipses(
+        '见 <span title="a...b">正文</span> 标签完整。'
+    )
+    assert '<span title="a...b">' in tag_intact
+
     prose = SC._sanitize_code_ellipses("普通省略号……这里没有代码形态，不应被包。")
     assert prose.count("<code>") == 0
 
