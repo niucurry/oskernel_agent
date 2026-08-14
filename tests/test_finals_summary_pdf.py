@@ -262,6 +262,26 @@ def test_summary_compacts_long_judgments_to_fit_layout_cap(tmp_path, monkeypatch
     assert len(html_to_text(summary_pdf._render_order_text(summary))) <= 1450
 
 
+def test_summary_allows_negated_test_claim_wording(tmp_path):
+    """「未发现伪造通过输出」是否定表述，不是把提交信息改写为测试通过结论。"""
+    digests = load_digests(_digests(tmp_path))
+    payload = _ai_summary().model_dump(mode="json")
+    payload["issues"][0].update({
+        "source": "description",
+        "source_finding": 1,
+        "severity": "high",
+        "confidence": 95,
+        "judgment": (
+            "按可执行与可链接格式（ELF）名称强杀一类测试辅助二进制。"
+            "影响：改变测试执行路径，疑似为规避其导致的挂起，未发现伪造通过输出的证据。"
+        ),
+    })
+    monkeypatch.setattr(summary_pdf, "run_batch_task", lambda *args, **kwargs: payload)
+
+    summary = run_ai_summary_analysis(digests, "T2026-demo", tmp_path / "summary.pdf")
+    assert "未发现伪造通过" in summary.issues[0].judgment
+
+
 def test_summary_rejects_any_compile_claim_in_issue_judgment(tmp_path):
     digests = load_digests(_digests(tmp_path))
     payload = _ai_summary().model_dump(mode="json")
