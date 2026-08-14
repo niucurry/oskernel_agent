@@ -1287,6 +1287,30 @@ def _check_hardcode_capacity(facts: dict | None) -> None:
         )
 
 
+def _hardcode_excerpt_from_repo(item: dict, repo_path: Path | None) -> str:
+    """按 path:line 从仓库确定性回填代码摘录；读不到时返回空串。"""
+    if not repo_path:
+        return ""
+    rel = str(item.get("path") or "").strip()
+    try:
+        line = int(item.get("line"))
+    except (TypeError, ValueError):
+        return ""
+    if not rel or line < 1:
+        return ""
+    try:
+        root = repo_path.resolve()
+        target = (root / rel).resolve()
+        if not str(target).startswith(str(root)):
+            return ""
+        lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+        if line <= len(lines):
+            return lines[line - 1].strip()
+    except OSError:
+        return ""
+    return ""
+
+
 def _validate_hardcode_reviews(
     parsed: dict,
     facts: dict | None,
@@ -1322,7 +1346,13 @@ def _validate_hardcode_reviews(
         if not str(item.get("method") or "").strip() or not str(item.get("reason") or "").strip():
             raise RuntimeError(f"硬编码复核 {signal_id} 缺少方法或分析")
         if not str(item.get("excerpt") or "").strip():
-            raise RuntimeError(f"硬编码复核 {signal_id} 缺少关键代码摘录")
+            # 模型偶发漏摘录：按 path:line 从仓库确定性回填，证据仍可回到真实代码；
+            # 回填失败才拒绝交付。
+            filled = _hardcode_excerpt_from_repo(item, repo_path)
+            if filled:
+                item["excerpt"] = filled
+            else:
+                raise RuntimeError(f"硬编码复核 {signal_id} 缺少关键代码摘录")
         try:
             confidence = float(item.get("confidence"))
         except (TypeError, ValueError) as exc:
