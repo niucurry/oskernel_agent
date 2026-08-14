@@ -539,7 +539,7 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
                     '"highlights":[...],"issues":[...],'
                     '"modules":[{slot:int,name:str,summary:str,'
                     'file_paths:[...]}]}',
-        timeout=900,
+        timeout=1800,
     )
     _validate_subsys_result(parsed, subsys_node["name"], repo_path)
 
