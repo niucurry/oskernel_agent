@@ -2352,9 +2352,9 @@ def run_semantic_analysis(
         return batch_index, (response.choices[0].message.content or "").strip()
 
     try:
-        configured_workers = int(os.getenv("SEMANTIC_WORKERS", "3"))
+        configured_workers = int(os.getenv("SEMANTIC_WORKERS", "8"))
     except ValueError:
-        configured_workers = 3
+        configured_workers = 8
     workers = max(1, min(configured_workers, len(messages)))
 
     # 模型偶发漏回个别功能簇、返回残缺片段或瞬时调用失败；每轮都是全新请求，
@@ -2433,7 +2433,28 @@ def run_semantic_analysis(
             last_error = exc
             logger.warning("[semantic] 第 {}/3 轮完整性校验未过：{}", attempt, exc)
             # 模型偶发漏回个别功能簇：只针对缺失簇单独补缺请求，最多 3 轮；
-            # 重复/未知 ID 等结构性错误仍走整轮重试。
+            # 缺失簇拆成小批并发请求（单次大请求漏检率高），重复/未知 ID 仍走整轮重试。
+            def _gap_request(chunk: list[dict]) -> str:
+                msg = _build_analysis_message(
+                    query_repo_id, chunk, submodule_stats, members_per_cluster)
+                resp = client.chat.completions.create(
+                    model=semantic_model,
+                    messages=[
+                        {"role": "system", "content": _ANALYSIS_SYSTEM},
+                        {"role": "user", "content": msg},
+                    ],
+                    temperature=0.2,
+                    max_tokens=8000,
+                )
+                return _extract_html_from_text(
+                    resp.choices[0].message.content or "") or ""
+
+            def _gap_batch_size() -> int:
+                try:
+                    return max(1, int((os.getenv("AGENT_SEMANTIC_GAP_BATCH") or "").strip()))
+                except ValueError:
+                    return 6
+
             for gap_round in range(1, 4):
                 missing = _missing_cluster_ids(merged)
                 if not missing:
@@ -2444,31 +2465,28 @@ def run_semantic_analysis(
                     cluster["analysis_id"]: cluster for cluster in expected_clusters
                 }
                 missing_clusters = [by_id[cid] for cid in missing if cid in by_id]
+                gap_chunks = [
+                    missing_clusters[i:i + _gap_batch_size()]
+                    for i in range(0, len(missing_clusters), _gap_batch_size())
+                ]
                 try:
-                    gap_msg = _build_analysis_message(
-                        query_repo_id, missing_clusters, submodule_stats,
-                        members_per_cluster)
-                    gap_resp = client.chat.completions.create(
-                        model=semantic_model,
-                        messages=[
-                            {"role": "system", "content": _ANALYSIS_SYSTEM},
-                            {"role": "user", "content": gap_msg},
-                        ],
-                        temperature=0.2,
-                        max_tokens=8000,
-                    )
+                    gap_parts: list[str] = []
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+                    with ThreadPoolExecutor(max_workers=min(3, len(gap_chunks))) as pool:
+                        futures = [pool.submit(_gap_request, chunk) for chunk in gap_chunks]
+                        for future in as_completed(futures):
+                            gap_parts.append(future.result())
                 except Exception as gap_exc:
                     last_error = RuntimeError(
                         f"语义级分析补缺调用失败：{type(gap_exc).__name__}: {gap_exc}")
                     logger.warning(
                         "[semantic] 第 {}/3 轮补缺调用失败：{}", attempt, last_error)
                     break
-                gap_html = _extract_html_from_text(
-                    gap_resp.choices[0].message.content or "") or ""
-                if not gap_html.strip():
+                if not any(part.strip() for part in gap_parts):
                     logger.warning("[semantic] 第 {}/3 轮补缺返回空内容", gap_round)
                     break
-                merged = _append_gap_sections(merged, gap_html)
+                for part in gap_parts:
+                    merged = _append_gap_sections(merged, part)
             merged, lang_stats = normalize_html_language(merged)
             if not lang_stats["complete"]:
                 last_error = RuntimeError(
@@ -5738,7 +5756,7 @@ def _review_one(client, model: str, g: dict, timeout: int) -> dict:
 
 def run_review_judgment(review_pairs: list[dict], work_dir: Path,
                         model: str | None = None, timeout: int = 30,
-                        workers: int = 8,
+                        workers: int = 12,
                         cache_lookup_pairs: list[dict] | None = None) -> list[dict]:
     """对候选逐对执行“职责门控→同源复核”，原地写入严格校验后的结果与证据。
 
