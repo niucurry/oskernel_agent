@@ -216,8 +216,11 @@ def test_cuda_memory_limits_reserve_inference_headroom(monkeypatch):
     }
 
 
-def test_pipeline_runs_ai_model_by_default_and_allows_explicit_skip():
-    assert build_parser().parse_args(["--repo", "demo"]).ai_detect is True
+def test_pipeline_skips_ai_model_by_default_and_allows_explicit_opt_in():
+    """AI 检测默认跳过（本机 3B 模型原生崩溃已知）；--ai-detect 显式启用。"""
+    assert build_parser().parse_args(["--repo", "demo"]).ai_detect is False
+    assert build_parser().parse_args(
+        ["--repo", "demo", "--ai-detect"]).ai_detect is True
     assert build_parser().parse_args(
         ["--repo", "demo", "--skip-ai-detect"]).ai_detect is False
 

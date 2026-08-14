@@ -4,8 +4,9 @@
                          [--resume-from <step>] [--baselines]
 
 按序执行 ingest → fastpath → recall(含 normalize) → exact → segment → metadata
-→ ai_detect → report，每步落盘中间结果，打印每步耗时与漏斗数字。`ai_detect` 默认运行；
-只有显式传入 `--skip-ai-detect` 才跳过，此时不会生成缺少该模块的交付报告。
+→ ai_detect → report，每步落盘中间结果，打印每步耗时与漏斗数字。`ai_detect` 默认跳过
+（本机 3B 检测模型原生崩溃已知）；显式传入 `--ai-detect` 才运行，检测阶段在独立
+子进程执行，原生崩溃被包含为 status="crashed" 诊断产物，报告省略该章并继续。
 （LLM 复核在报告阶段只处理规则难例。）
 """
 
@@ -43,12 +44,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--baselines", action="store_true", help="启用基线扣除（需 Qdrant 已有基线数据）")
     ai_group = p.add_mutually_exclusive_group()
     ai_group.add_argument(
-        "--ai-detect", dest="ai_detect", action="store_true", default=True,
-        help="运行 AI 生成代码模型检测（默认；保留该参数以兼容已有命令）",
+        "--ai-detect", dest="ai_detect", action="store_true", default=False,
+        help="显式启用 AI 生成代码模型检测（默认跳过；本机 3B 检测模型原生崩溃已知，"
+             "检测阶段运行在独立子进程，崩溃只影响该章、不影响其余报告）",
     )
     ai_group.add_argument(
         "--skip-ai-detect", dest="ai_detect", action="store_false",
-        help="仅诊断前序阶段；跳过后报告完整性门禁会拒绝生成交付报告",
+        help="跳过 AI 生成代码模型检测（默认行为，保留该参数以兼容已有命令）",
     )
     p.add_argument("--db", default=DEFAULT_DB)
     p.add_argument("--history-config", default="config/repos.yaml",
