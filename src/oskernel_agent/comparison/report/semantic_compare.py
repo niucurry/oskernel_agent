@@ -2469,12 +2469,14 @@ def run_semantic_analysis(
                 except ValueError:
                     return 6
 
-            for gap_round in range(1, 4):
+            for gap_round in range(1, 9):
+                # 补缺小批并发且便宜（每轮 30-90 秒）：给足收敛轮次，
+                # 避免漏簇触发整轮全量重跑；只有 API 层异常才放弃补缺。
                 missing = _missing_cluster_ids(merged)
                 if not missing:
                     break
                 logger.info(
-                    "[semantic] 第 {}/3 轮补缺：{} 个功能簇", gap_round, len(missing))
+                    "[semantic] 第 {}/8 轮补缺：{} 个功能簇", gap_round, len(missing))
                 by_id = {
                     cluster["analysis_id"]: cluster for cluster in expected_clusters
                 }
@@ -2497,8 +2499,9 @@ def run_semantic_analysis(
                         "[semantic] 第 {}/3 轮补缺调用失败：{}", attempt, last_error)
                     break
                 if not any(part.strip() for part in gap_parts):
-                    logger.warning("[semantic] 第 {}/3 轮补缺返回空内容", gap_round)
-                    break
+                    logger.warning(
+                        "[semantic] 第 {}/8 轮补缺返回空内容，下一轮继续", gap_round)
+                    continue
                 for part in gap_parts:
                     merged = _append_gap_sections(merged, part)
             merged, lang_stats = normalize_html_language(merged)
