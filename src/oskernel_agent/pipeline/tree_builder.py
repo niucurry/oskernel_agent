@@ -1943,7 +1943,7 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                     '"similarity":{reference_os:str,overlap_pct:int,level:str,'
                     'summary:str,borrowed:[...],original:[...]},'
                     '"one_line":str}',
-        timeout=900,
+        timeout=1800,
         repair_validator=_verdict_repair_shape_ok,
     )
     _drop_unresolvable_evidence(parsed, repo_path or Path("."))
