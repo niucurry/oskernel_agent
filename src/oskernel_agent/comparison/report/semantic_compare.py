@@ -45,6 +45,7 @@ from oskernel_agent.comparison.normalize.classify import load_classifier
 from oskernel_agent.comparison.normalize.discovery import is_test_or_benchmark_path
 from oskernel_agent.comparison.retrieval_contract import (CONTRACT_VERSION, contract_errors,
                                     require_complete_contract)
+from oskernel_agent.finals.digests import _MODULE_NAMES, team_display_label
 from oskernel_agent.finals.readability import explain_terms_in_html, sanitize_html_controls
 from oskernel_agent.report_quality import IncompleteReportError
 
@@ -3807,10 +3808,10 @@ def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, ac
         )
     verdict_th = ('<th class="text-left p-2 border-b">复核结论</th>' if show_verdict else "")
     priority_th = ('<th class="text-left p-2 border-b">复核优先级</th>' if show_priority else "")
-    # 计数按 query 函数 (文件,函数名) 去重，与导航栏 badge / 模块统计 compute_submodule_stats
-    # 同口径（后者也按 (file_path,func_name) 去重）；len(groups) 会把同名不同起始行的函数
-    # 算成多个，导致「badge 35 / 清单 37」之类前后矛盾。
-    n_funcs = len({(g.get("query_file", ""), g.get("query_func", "")) for g in groups})
+    # 每行已是按 (file_path,start_line,func_name) 去重后的评审单元（_review_section 的
+    # unique_review 或 _query_key 口径），表格标题直接按行计数；按 (文件,函数名) 去重会把
+    # 同文件同名但不同起始行的函数漏算，造成「标题 N 个 / 清单 N+1 行」的前后矛盾。
+    n_funcs = len(groups)
     return (
         f'<div class="mt-3"><div class="text-sm font-semibold {accent} mb-1">{html.escape(title)}'
         f'（{n_funcs} 个函数）</div>'
@@ -4041,8 +4042,12 @@ def build_similarity_clusters(file_pairs: list[dict]) -> list[dict]:
     clusters = []
     for c in grouped.values():
         c["groups"].sort(key=lambda g: -float(g.get("overall_sim") or 0.0))
-        c["function_count"] = len({(g.get("query_file", ""), g.get("query_func", ""))
-                                   for g in c["groups"]})
+        # 与 _query_key / compute_submodule_stats 同口径：同一文件中的同名函数若起始行
+        # 不同，是两个独立目标函数。(file,func) 去重会把它们合并，导致功能簇函数总数
+        # 少于「高置信同源目标函数」总计。
+        c["function_count"] = len({(g.get("query_file", ""),
+                                    int(g.get("query_start") or 0),
+                                    g.get("query_func", "")) for g in c["groups"]})
         c["file_count"] = len(c.pop("files"))
         mean_sim = sum(c.pop("similarities")) / max(1, len(c["groups"]))
         size_factor = min(1.0, c["effective_loc"] / 300)
@@ -4136,50 +4141,71 @@ def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
     if not clusters:
         body = '<p class="text-sm text-slate-500">没有形成高置信同源功能簇。</p>'
     else:
-        cards = []
-        anchored_modules: set[str] = set()
-        for index, c in enumerate(clusters, 1):
-            tone = "critical" if c["priority"] == "重点核查" else "normal"
-            table = _groups_table(
-                "簇内函数证据", c["groups"], linker, query_repo_id, "text-red-700")
-            frag = _extract_cluster_analysis(analysis_html, c["analysis_id"])
-            # 兼容低层调用传入的旧模块级片段；正式流程的 v4 完整性门禁只接受功能簇 ID。
-            if not frag:
-                frag = _extract_module_analysis(analysis_html, c["module"])
-            analysis = (
-                '<div class="cluster-analysis"><b>功能簇语义说明</b>'
-                + _strip_addr_refs(frag) + '</div>'
-                if frag else ""
+        # 展示层按模块分组：聚类数据与全局排序保持不变，仅重组渲染顺序，
+        # 让同一内核子系统的簇相邻，便于按子系统集中核查。
+        module_groups: dict[str, list[dict]] = {}
+        for c in clusters:
+            module_groups.setdefault(c["module"], []).append(c)
+        module_order = sorted(
+            module_groups,
+            key=lambda mod: (
+                -_MODULE_PRIORITY.get(mod, .55),
+                MODULES.index(mod) if mod in MODULES else len(MODULES),
+            ),
+        )
+        parts: list[str] = []
+        card_index = 0
+        for mod in module_order:
+            members = module_groups[mod]
+            parts.append(
+                '<div id="module-evidence-' + html.escape(mod) + '" class="cluster-group-head">'
+                '<span class="cluster-group-name">'
+                + html.escape(_MODULE_DISPLAY.get(mod, mod)) + '</span>'
+                '<code class="cluster-group-tag">' + html.escape(mod) + '</code>'
+                f'<span class="cluster-group-count">{len(members)} 簇</span></div>'
             )
-            module_anchor = ""
-            if c["module"] not in anchored_modules:
-                module_anchor = f' id="module-evidence-{html.escape(c["module"])}"'
-                anchored_modules.add(c["module"])
-            cards.append(
-                f'<article{module_anchor} class="cluster-card" data-priority="{tone}" '
-                'x-data="{open:false}">'
-                '<button type="button" class="cluster-head" @click="open=!open">'
-                f'<span class="cluster-index">C{index:02d}</span><span class="cluster-main">'
-                f'<b>{html.escape(c["feature"])}</b><small>{html.escape(_MODULE_DISPLAY.get(c["module"], c["module"]))}</small></span>'
-                f'<span class="cluster-metrics">{c["function_count"]} 函数 · {c["file_count"]} 文件 · '
-                f'{c["effective_loc"]} 有效相似行</span>'
-                + (f'<span class="text-xs text-violet-700">多仓出现 {c["widespread_repos"]}，来源不唯一</span>'
-                   if c.get("source_ambiguous") else "")
-                + f'<span class="cluster-priority">{c["priority"]} {c["priority_score"]}</span>'
-                '<span class="cluster-chevron" x-text="open?\'▾\':\'▸\'"></span></button>'
-                f'<div class="cluster-body" x-show="open" x-cloak>'
-                f'<div class="text-xs text-slate-500 mb-2">主要匹配仓库：'
-                f'{_ref_repo_anchor(linker, str(c["source"]))}</div>'
-                f'{_cluster_lineage_html(c)}{table}{analysis}</div></article>'
-            )
+            for c in members:  # 组内保持 build_similarity_clusters 的全局排序（priority 降序）
+                card_index += 1  # 编号全局连续，跨组不重置
+                tone = "critical" if c["priority"] == "重点核查" else "normal"
+                table = _groups_table(
+                    "簇内函数证据", c["groups"], linker, query_repo_id, "text-red-700")
+                frag = _extract_cluster_analysis(analysis_html, c["analysis_id"])
+                # 兼容低层调用传入的旧模块级片段；正式流程的 v4 完整性门禁只接受功能簇 ID。
+                if not frag:
+                    frag = _extract_module_analysis(analysis_html, c["module"])
+                analysis = (
+                    '<div class="cluster-analysis"><b>功能簇语义说明</b>'
+                    + _strip_addr_refs(frag) + '</div>'
+                    if frag else ""
+                )
+                parts.append(
+                    f'<article class="cluster-card" data-priority="{tone}" '
+                    'x-data="{open:false}">'
+                    '<button type="button" class="cluster-head" @click="open=!open">'
+                    f'<span class="cluster-index">C{card_index:02d}</span>'
+                    '<span class="cluster-main">'
+                    f'<b>{html.escape(c["feature"])}</b>'
+                    f'<small>{html.escape(_MODULE_DISPLAY.get(c["module"], c["module"]))}</small></span>'
+                    f'<span class="cluster-metrics">{c["function_count"]} 函数 · '
+                    f'{c["file_count"]} 文件 · {c["effective_loc"]} 有效相似行</span>'
+                    + (f'<span class="text-xs text-violet-700">多仓出现 {c["widespread_repos"]}，来源不唯一</span>'
+                       if c.get("source_ambiguous") else "")
+                    + f'<span class="cluster-priority">{c["priority"]} {c["priority_score"]}</span>'
+                    '<span class="cluster-chevron" x-text="open?\'▾\':\'▸\'"></span></button>'
+                    f'<div class="cluster-body" x-show="open" x-cloak>'
+                    f'<div class="text-xs text-slate-500 mb-2">主要匹配仓库：'
+                    f'{_ref_repo_anchor(linker, str(c["source"]))}</div>'
+                    f'{_cluster_lineage_html(c)}{table}{analysis}</div></article>'
+                )
         intro = (
             '<div class="section-intro">系统将同一匹配仓库、同一子系统且属于同一功能域的函数合并为一个'
             '“同源事件”。优先级综合代码相似度、有效相似行和内核子系统重要度，并对多仓高频出现的'
             '来源歧义降权；函数级链接与并排代码'
             '仍保留在簇内。每个簇额外标注<b>教学 OS 溯源</b>：本簇借用代码最接近的'
-            '教学/公共基线（rCore / uCore / xv6 / ArceOS 等），提示其公共代码来源。</div>'
+            '教学/公共基线（rCore / uCore / xv6 / ArceOS 等），提示其公共代码来源。'
+            '展示按内核子系统分组，组内按优先级排序，便于按子系统集中核查。</div>'
         )
-        body = intro + "".join(cards)
+        body = intro + "".join(parts)
     section = _collapsible_html(
         sid, "高置信同源功能簇", body, tone="evidence",
         subtitle="将零散函数聚合成可评审的功能级同源事件",
@@ -4188,10 +4214,16 @@ def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
 
 
 def _lineage_section(query_repo_id: str, suspects: list[dict], linker,
-                     recall: dict | None = None) -> tuple[str, str]:
-    """展示排除可归因公共来源后的主要历史匹配，不输出时间或版本方向判断。"""
+                     recall: dict | None = None,
+                     source_metrics: list[dict] | None = None) -> tuple[str, str]:
+    """展示排除可归因公共来源后的主要历史匹配，不输出时间或版本方向判断。
+
+    source_metrics 应传全历史库统一排名行（_historical_source_metrics 的产物，含
+    multi_repo_functions）。调用方只提供主对比作品（closest-repo）的 suspects 时，
+    “多仓同时命中”必须跨仓库统计，否则每个目标函数只见过一个仓库，恒为 0。
+    """
     sid = "sec-lineage"
-    metrics = _source_metrics(suspects)
+    metrics = list(source_metrics) if source_metrics else _source_metrics(suspects)
     rows = []
     for x in metrics[:12]:
         rows.append(
@@ -4685,6 +4717,7 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
 .cluster-head{display:grid;width:100%;grid-template-columns:2.4rem minmax(11rem,1fr) auto auto 1rem;align-items:center;gap:.7rem;padding:.72rem .8rem;border:0;background:#f8fafc;text-align:left;cursor:pointer}
 .cluster-card[data-priority="critical"] .cluster-head{background:#fff7f7}.cluster-index{font:.72rem ui-monospace,SFMono-Regular,Consolas;color:#64748b}.cluster-main{display:flex;min-width:0;flex-direction:column}.cluster-main b{font-size:.82rem}.cluster-main small{margin-top:.12rem;color:#718096;font-size:.66rem}
 .cluster-metrics{font-size:.68rem;color:#64748b;white-space:nowrap}.cluster-priority{padding:.22rem .48rem;border-radius:999px;background:#fff;border:1px solid #e2e8f0;color:#9a5b06;font-size:.66rem;font-weight:700;white-space:nowrap}.cluster-body{padding:.2rem .8rem .85rem}.cluster-analysis{margin-top:.7rem;padding:.75rem;border:1px solid #dbe7f3;border-radius:8px;background:#f7faff;font-size:.75rem}
+.cluster-group-head{display:flex;align-items:center;gap:.55rem;margin:.9rem 0 .4rem;padding:.55rem .8rem;border-left:3px solid #2563eb;border-radius:8px;background:#f8fafc}.cluster-group-name{font-size:.8rem;font-weight:750;color:#1e293b}.cluster-group-tag{font:.68rem ui-monospace,SFMono-Regular,Consolas;color:#64748b;padding:.06rem .38rem;border:1px solid #e2e8f0;border-radius:4px;background:#fff}.cluster-group-count{margin-left:auto;font-size:.68rem;color:#64748b;white-space:nowrap}
 /* 复核优先级 */
 .review-priority-cell{min-width:9rem}.review-priority-cell small{display:block;margin-top:.25rem;color:#718096;font-size:.64rem;line-height:1.35}.priority-badge{display:inline-flex;padding:.2rem .42rem;border-radius:999px;font-size:.66rem;font-weight:750}.priority-high{background:#fee2e2;color:#b91c1c}.priority-medium{background:#fef3c7;color:#a16207}.priority-low{background:#e2e8f0;color:#475569}
 .review-anchors{margin-top:.3rem;color:#64748b;font-size:.66rem;line-height:1.5}.review-anchors code{display:inline-block;margin:.1rem .15rem .1rem 0;padding:.05rem .25rem;border-radius:.25rem;background:#f1f5f9;color:#334155;white-space:normal;word-break:break-all}
@@ -6258,13 +6291,12 @@ def _review_section(review_pairs: list[dict], linker, query_repo_id: str,
         if g.get("review_verdict") not in ("借鉴", "疑似", "规则保留", "复核失败")
         and g.get("model_review_selection") != "supplemental_source"
     ]
-    active_keys = {
-        (g.get("query_file", ""), int(g.get("query_start") or 0),
-         g.get("query_func", "")) for g in rows
-    }
-    n_funcs, n_uncertain, n_retained, n_failed, n_pending, n_supplemental = (
-        len(active_keys), len(uncertain), len(retained),
-        len(failed), len(pending), len(supplemental),
+    # 本节只渲染存疑/保留/失败/未完成四张表；补充来源候选不渲染成独立行，只并入
+    # intro 计数。因此「下列 N 个函数」与 TOC 徽标必须只数会渲染的行，否则会出现
+    # “下列 15 个函数”但表格只有 9 行（6 个补充候选）的前后矛盾。
+    n_funcs = len(uncertain) + len(retained) + len(failed) + len(pending)
+    n_uncertain, n_retained, n_failed, n_pending, n_supplemental = (
+        len(uncertain), len(retained), len(failed), len(pending), len(supplemental),
     )
 
     intro = ('<p class="text-sm text-slate-600 mb-3">'
@@ -6554,11 +6586,16 @@ def _finals_comparison_summary(
 ) -> str:
     metrics = digest.metrics
     closest = str(metrics.get("closest_source") or "未确定")
+    # digest 模块名来自 finals.digests._MODULE_NAMES（如「系统调用」「时钟定时」），与
+    # 报告侧 _MODULE_DISPLAY（如「系统调用与用户 ABI」「时钟与定时器」）不同；两个映射
+    # 都必须收录，否则 tag 查空 → stats 为空 → 有证据的模块也显示「未形成同源证据」。
     tag_by_name = {name: tag for tag, name in _MODULE_DISPLAY.items()}
+    tag_by_name.update({name: tag for tag, name in _MODULE_NAMES.items()})
     module_rows: list[str] = []
     for module in digest.modules:
-        if int(module.evidence_count or 0) <= 0:
-            continue
+        # 不按 evidence_count 过滤：comparison_digest 已跳过 total=0 的模块，任何余下
+        # 模块的可比函数数都 > 0。这里若跳过零证据模块，表格各项分母之和会小于结论
+        # 标题的「N 个可比函数」，读者无法对账（如 209 vs 299）。
         index = len(module_rows) + 1
         tag = tag_by_name.get(module.name, "")
         stats = submodule_stats.get(tag) or {}
@@ -6593,7 +6630,7 @@ def _finals_comparison_summary(
     ) or '<li class="summary-alert"><strong>未形成高风险结论</strong><p>当前证据不足以锁定同源代码。</p></li>'
     year = str(metrics.get("closest_year") or "")
     team = str(metrics.get("closest_team") or "")
-    team_label = team if team.endswith("队") else f"{team} 队"
+    team_label = team_display_label(team)
     institution = str(metrics.get("closest_institution") or "")
     identity = ""
     if year and team:
@@ -6617,7 +6654,7 @@ def _finals_comparison_summary(
     return f"""
 <section id="summary" data-section-id="summary" class="summary-card">
   <div class="summary-kicker">先看结论</div>
-  <h2>经 AI 分析，与 {_ref_repo_anchor(linker, closest)} 最接近</h2>
+  <h2>经分析，与 {_ref_repo_anchor(linker, closest)} 最接近</h2>
   {f'<p class="closest-identity">{identity}</p>' if identity else ''}
   <p class="summary-lead">{html.escape(digest.conclusion)}</p>
   <p class="section-intro"><b>整体比例口径：</b>高置信同源目标函数 ÷ 可比目标函数。
@@ -6730,7 +6767,13 @@ def generate_finals_comparison_html(
         anchored_modules=anchored_modules,
         has_review_evidence=bool(review_pairs or cleared_review_pairs),
     )
-    _toc_lineage, sec_lineage = _lineage_section(query_repo_id, suspects, linker, recall)
+    # 谱系节的“多仓同时命中”必须跨全历史库统计：这里 suspects 是主对比作品（最接近仓库）
+    # 过滤后的列表，直接用会把每个目标函数只算到单个仓库、多仓命中恒为 0，与全库排名表
+    # 的“多仓重复函数”矛盾。overview["similar_sources"] 是筛选出强证据后的统一排名行，
+    # 与全库排名表同一数据源（弱证据仓库不进入“主要历史匹配”，保持不凑数约定）。
+    _toc_lineage, sec_lineage = _lineage_section(
+        query_repo_id, suspects, linker, recall,
+        source_metrics=list(overview.get("similar_sources") or []))
     _toc_clusters, sec_clusters = _cluster_section(
         file_pairs, analysis_html, linker, query_repo_id)
     _toc_review, sec_review = _review_section(

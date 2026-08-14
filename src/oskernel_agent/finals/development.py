@@ -56,6 +56,36 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout
 
 
+def _try_unshallow(repo: Path) -> bool:
+    """浅克隆先补齐完整历史：开发过程报告必须基于完整提交史。
+
+    驱动侧为省带宽/磁盘用 depth=200 浅克隆；gitlab.eduxiji.net 对多并线
+    合并史的 depth 语义会切断部分祖先链（如 T202610008999575-242 被切成
+    905 提交 + 2 条截断线）。在浅克隆上直接分析会误报「无法追溯完整历史」
+    并压低整体置信度。补齐失败时保持浅克隆状态（下游按 shallow 降级表述），
+    不阻塞报告生成。
+    """
+    try:
+        is_shallow = _git(
+            repo, "rev-parse", "--is-shallow-repository"
+        ).strip().lower() == "true"
+    except RuntimeError:
+        return False
+    if not is_shallow:
+        return True
+    result = subprocess.run(
+        ["git", "-C", str(repo), "fetch", "--unshallow", "--tags"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", errors="replace", check=False,
+        timeout=600,
+    )
+    if result.returncode == 0:
+        return True
+    print(f"[development] 浅克隆补齐失败（保持降级标记）："
+          f"{result.stderr.strip()[:200]}", flush=True)
+    return False
+
+
 def collect_commits(repo_path: str | Path) -> tuple[list[dict], bool]:
     """按时间正序读取全部可见提交及 numstat。"""
     repo = Path(repo_path).resolve()
@@ -135,6 +165,15 @@ def _humanize_ai_text(value: object, limit: int) -> str:
     text = re.sub(r"(?<![A-Za-z])dismiss(?![A-Za-z])", "排除", text, flags=re.I)
     text = re.sub(r"(?<![A-Za-z])report(?![A-Za-z])", "列为问题", text, flags=re.I)
     return text
+
+
+def _clean_commit_subject(value: object) -> str:
+    """提交主题是参赛队的原始 git 数据，只去掉结尾省略号再渲染。
+
+    省略号截断门禁只针对 AI 生成文字；真实提交消息带「…」（如「具体测试
+    能不能成功还不知道...」）属于作者原话，不应让整份报告交付失败。
+    """
+    return re.sub(r"[….]+$", "", " ".join(str(value or "").split())).strip()
 
 
 def _remove_repeated_stage_facts(value: str) -> str:
@@ -555,7 +594,7 @@ def analyze_history(
                 "key_commits": [
                     {
                         "sha": commit["sha"],
-                        "subject": commit.get("subject", ""),
+                        "subject": _clean_commit_subject(commit.get("subject", "")),
                         "date": str(commit["date"])[:10],
                         "loc": _changes(commit),
                         "url": (
@@ -615,7 +654,9 @@ def analyze_history(
         "repo_id": repo_id,
         "commits": commits,
         "stages": stages,
-        "authors": authors.most_common(8),
+        # 完整列出全部作者：digest.author_count 是全体作者数，HTML 截断会造成
+        # 「名单数 ≠ author_count」的口径不一致（审计 E3 曾拦截 8 vs 10 实例）。
+        "authors": authors.most_common(),
         "reviews": validated["issues"],
         "evidence": evidence,
         "digest": digest,
@@ -624,7 +665,8 @@ def analyze_history(
 
 
 def _esc(value: object) -> str:
-    return html.escape(str(value or ""), quote=True)
+    # 仅把 None 归一为空串；数值 0 必须原样渲染（str(0 or "") 会吞掉 0）。
+    return html.escape("" if value is None else str(value), quote=True)
 
 
 def render_development_html(analysis: dict) -> str:
@@ -743,7 +785,7 @@ a{{color:#075985;text-decoration:none}}a:hover{{text-decoration:underline}}
 <div class="metric"><b>{_esc(metrics.get('large_commit_threshold', 0))}</b><span>大规模提交阈值（LOC）</span></div>
 </div><div class="panel" style="margin-top:10px"><p><strong>判定口径：</strong>{_esc(minimum_note)}</p>
 <p><strong>大规模提交口径：</strong>{_esc(_THRESHOLD_DEFINITION)}</p>
-<p><strong>主要贡献者：</strong>{authors}</p></div></section>
+<p><strong>贡献者：</strong>{authors}</p></div></section>
 <section><h2>提交历史与开发阶段</h2><div class="stages">{"".join(stage_html)}</div></section>
 </main></body></html>"""
     return explain_terms_in_html(rendered)
@@ -792,13 +834,13 @@ def run_ai_development_analysis(
         "只调用 write_report；content 为合法 JSON 字符串，output_path 必须使用上面的绝对路径。"
     )
 
-    def _delivery_complete(value: dict) -> bool:
+    def _delivery_complete(value: dict) -> bool | str:
         if commits is None:
             return True
         try:
             validate_ai_development_result(value, evidence, commits)
-        except RuntimeError:
-            return False
+        except RuntimeError as exc:
+            return str(exc)
         return True
 
     task = BatchTask(
@@ -827,6 +869,7 @@ def generate_development_report(
     repo = Path(repo_path).resolve()
     output = Path(output_path).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
+    _try_unshallow(repo)   # 浅克隆补齐完整历史后再分析；失败保持 shallow 降级标记
     commits, shallow = collect_commits(repo)
     repository_url = ""
     try:

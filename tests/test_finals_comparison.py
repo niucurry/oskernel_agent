@@ -60,6 +60,28 @@ def test_comparison_digest_sorts_modules_and_states_percentage_basis():
     assert "2025 年 A 队作品" in digest.conclusion
 
 
+def test_comparison_digest_summary_accounts_for_remaining_functions():
+    """分母除了同源与存疑外还含复核未完成/暂未检出函数，摘要必须交代缺口。"""
+    stats = {"sched": {"confirmed": 2, "review": 0, "total": 4}}
+    digest = comparison_digest("2026/new", "2025/A", stats)
+    summary = digest.modules[0].summary
+    assert "2/4 个函数形成高置信同源证据；另有 0 个函数需要人工复核。" in summary
+    assert "其余 2 个函数未形成高置信同源证据。" in summary
+
+
+def test_comparison_digest_summary_omits_remainder_when_accounted():
+    stats = {"fs": {"confirmed": 3, "review": 1, "total": 4}}
+    digest = comparison_digest("2026/new", "2025/A", stats)
+    assert "其余" not in digest.modules[0].summary
+
+
+def test_comparison_digest_placeholder_team_shows_unknown():
+    stats = {"fs": {"confirmed": 1, "review": 0, "total": 1}}
+    digest = comparison_digest("2026/new", "2025/undefined", stats)
+    assert "未知队伍" in digest.conclusion
+    assert "undefined" not in digest.conclusion
+
+
 def test_finals_comparison_html_shows_dynamic_overview_and_closest_evidence():
     suspect = _suspect("2025/A", "open")
     stats = {module: {
@@ -81,7 +103,7 @@ def test_finals_comparison_html_shows_dynamic_overview_and_closest_evidence():
         }, query_repo_path=None,
         linker=None, file_matches=[], file_similar=[], retrieval_contract=None, recall=None,
     )
-    assert "经人工智能（AI）分析，与 2025/A 最接近" in rendered
+    assert "经分析，与 2025/A 最接近" in rendered
     assert "2025 年 · A 队 · 学校信息未提供" in rendered
     assert "参赛队不得修改" not in rendered
     assert "完全由 AI 工具生成" not in rendered
@@ -125,6 +147,34 @@ def test_team_name_already_ending_in_team_suffix_is_not_duplicated():
 
     assert "火箭队 队" not in rendered
     assert "2025 年 火箭队作品" in digest.conclusion
+
+
+def test_finals_summary_module_evidence_links_target_group_heads():
+    suspect = _suspect("2025/A", "open")  # fs 模块 confirmed
+    pairs = SC.collect_file_pairs([suspect])
+    stats = {module: {
+        "confirmed": 0, "review": 0, "review_failed": 0, "review_pending": 0,
+        "review_incomplete": 0, "weak": 0, "original": 0, "total": 0,
+        "copy_pct": 0, "review_pct": 0, "review_incomplete_pct": 0,
+        "original_pct": 0, "top_source": "—",
+    } for module in SC.MODULES}
+    stats["fs"].update({"confirmed": 1, "original": 1, "total": 2,
+                        "copy_pct": .5, "original_pct": .5, "top_source": "2025/A"})
+    rendered, _digest = SC.generate_finals_comparison_html(
+        query_repo_id="2026/new", closest_source="2025/A", suspects=[suspect],
+        submodule_stats=stats, file_pairs=pairs, analysis_html="", review_pairs=[],
+        cleared_review_pairs=[], ai_detect_data={
+            "status": "skipped", "reason": "没有可检测函数",
+            "scope": {"eligible_functions": 0, "analyzed_functions": 0,
+                      "extracted_functions": 0, "borrowed_excluded": 0,
+                      "third_party_excluded": 0},
+        }, query_repo_path=None,
+        linker=None, file_matches=[], file_similar=[], retrieval_contract=None, recall=None,
+    )
+
+    # 汇总表「高置信证据」链接目标 == 簇分组头锚点（锚点已从首张卡片上移到分组头）
+    assert 'href="#module-evidence-fs">高置信证据</a>' in rendered
+    assert '<div id="module-evidence-fs"' in rendered
 
 
 def test_history_overview_selects_strong_sources_without_fixed_count():

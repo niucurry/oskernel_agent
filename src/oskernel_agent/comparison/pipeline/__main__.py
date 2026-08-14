@@ -4,8 +4,9 @@
                          [--resume-from <step>] [--baselines]
 
 按序执行 ingest → fastpath → recall(含 normalize) → exact → segment → metadata
-→ ai_detect → report，每步落盘中间结果，打印每步耗时与漏斗数字。`ai_detect` 默认运行；
-只有显式传入 `--skip-ai-detect` 才跳过，此时不会生成缺少该模块的交付报告。
+→ ai_detect → report，每步落盘中间结果，打印每步耗时与漏斗数字。`ai_detect` 默认跳过
+（本机 3B 检测模型原生崩溃已知）；显式传入 `--ai-detect` 才运行，检测阶段在独立
+子进程执行，原生崩溃被包含为 status="crashed" 诊断产物，报告省略该章并继续。
 （LLM 复核在报告阶段只处理规则难例。）
 """
 
@@ -15,6 +16,7 @@ import argparse
 import gc
 import json
 import re
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -42,12 +44,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--baselines", action="store_true", help="启用基线扣除（需 Qdrant 已有基线数据）")
     ai_group = p.add_mutually_exclusive_group()
     ai_group.add_argument(
-        "--ai-detect", dest="ai_detect", action="store_true", default=True,
-        help="运行 AI 生成代码模型检测（默认；保留该参数以兼容已有命令）",
+        "--ai-detect", dest="ai_detect", action="store_true", default=False,
+        help="显式启用 AI 生成代码模型检测（默认跳过；本机 3B 检测模型原生崩溃已知，"
+             "检测阶段运行在独立子进程，崩溃只影响该章、不影响其余报告）",
     )
     ai_group.add_argument(
         "--skip-ai-detect", dest="ai_detect", action="store_false",
-        help="仅诊断前序阶段；跳过后报告完整性门禁会拒绝生成交付报告",
+        help="跳过 AI 生成代码模型检测（默认行为，保留该参数以兼容已有命令）",
     )
     p.add_argument("--db", default=DEFAULT_DB)
     p.add_argument("--history-config", default="config/repos.yaml",
@@ -65,6 +68,88 @@ def _should_run(step: str, resume_from: str | None) -> bool:
     if resume_from is None:
         return True
     return STEPS.index(step) >= STEPS.index(resume_from)
+
+
+_AI_DETECT_TIMEOUT = 5400
+
+
+def _ai_detect_usable(artifact: dict | None) -> bool:
+    """AI 检测产物能否进入交付报告：仅 status=ok，或经校验的空适用范围。"""
+    if not isinstance(artifact, dict):
+        return False
+    status = str(artifact.get("status") or "")
+    if status == "ok":
+        return True
+    if status == "skipped":
+        # 与报告层 _ai_detect_section 的「不适用」口径一致：scope 必须非空且
+        # 可归属/已分析函数均为 0（有可归属函数却未检测是模型失败，不得放行）。
+        scope = artifact.get("scope")
+        if not isinstance(scope, dict) or not scope:
+            return False
+        try:
+            if (int(scope.get("eligible_functions") or 0) == 0
+                    and int(scope.get("analyzed_functions") or 0) == 0):
+                return True
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def _run_ai_detect_subprocess(
+    repo_path: Path,
+    out: Path,
+    repo_name: str,
+    exclude_files: set[str],
+    exclude_funcs: set[tuple[str, str]],
+) -> dict:
+    """子进程运行 AI 检测（重量级 3B 检测模型）。
+
+    检测模型与主进程的嵌入模型同驻时，本机内存紧张会触发原生分配失败——
+    进程无 traceback 直接退出，任何 Python 异常都捕不住。子进程隔离后：
+    OS 在子进程退出时彻底回收嵌入模型内存，检测模型获得干净进程；即便仍原生
+    崩溃，也只会丢掉这一个子进程，主流水线落盘 status="crashed" 诊断产物并
+    继续前进（报告章由 _ai_detect_usable 门控，缺失即省略，不再整条流水线
+    陪葬、逼驱动整轮 --skip-ai-detect 重跑）。
+    """
+    exclude_path = out / f"{repo_name}_ai_exclude.json"
+    exclude_path.write_text(
+        json.dumps(
+            {"files": sorted(exclude_files), "funcs": sorted(exclude_funcs)},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    log_path = out / f"{repo_name}_ai_detect.log"
+    cmd = [
+        sys.executable, "-m", "oskernel_agent.comparison.ai_detect",
+        "--repo", str(repo_path),
+        "-o", str(out),
+        "--name", repo_name,
+        "--no-progress",
+        "--exclude-file", str(exclude_path),
+    ]
+    try:
+        with log_path.open("w", encoding="utf-8") as lf:
+            proc = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT,
+                                  timeout=_AI_DETECT_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "crashed",
+            "reason": f"检测子进程超时（>{_AI_DETECT_TIMEOUT}s），详见 {log_path.name}",
+        }
+    if proc.returncode != 0:
+        reason = f"检测子进程退出码 {proc.returncode}（原生崩溃无 traceback），详见 {log_path.name}"
+        logger.warning("[ai_detect] {}", reason)
+        return {"status": "crashed", "reason": reason}
+    artifact = out / f"{repo_name}_ai_detect.json"
+    try:
+        payload = json.loads(artifact.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "status": "crashed",
+            "reason": f"检测子进程退出码 0 但未产出合法产物 {artifact.name}",
+        }
+    return payload
 
 
 def _resolve_git_revision(repo_path: Path) -> str:
@@ -395,7 +480,6 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
     # ---- ai_detect（AI 生成代码检测，独立于查重漏斗；失败状态不得进入交付报告）----
     if args.ai_detect and _should_run("ai_detect", args.resume_from):
         release_embedder()   # 报告阶段不再需要嵌入模型，先腾出内存给检测模型
-        from oskernel_agent.comparison.ai_detect.runner import run_ai_detect
         from oskernel_agent.comparison.report.libraries import discover_library_context, match_library
         # 排除借鉴代码：文件级（fastpath 整文件命中）+ 函数级（查重命中的可疑函数），
         # 只对未匹配上的原创代码做 AI 生成检测（借鉴自参考 OS 的代码不计入）
@@ -418,9 +502,24 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
                 }
             except (OSError, json.JSONDecodeError):
                 exclude_funcs = set()
-        res = timed("ai_detect", lambda: run_ai_detect(
-            repo_path, output_dir=out, repo_name=repo_name, show_progress=False,
-            exclude_files=exclude_files, exclude_funcs=exclude_funcs))
+        res = timed("ai_detect", lambda: _run_ai_detect_subprocess(
+            repo_path, out, repo_name, exclude_files, exclude_funcs))
+        if res.get("status") == "crashed":
+            # 原生崩溃无法在进程内捕获：落盘诊断产物供报告层判定，
+            # 主流水线继续前进，不再整条陪葬。
+            crashed_path = out / f"{repo_name}_ai_detect.json"
+            try:
+                crashed_path.write_text(
+                    json.dumps({
+                        "status": "crashed",
+                        "reason": res.get("reason"),
+                        "repo_id": repo_name,
+                        "scope": {},
+                    }, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            except OSError:
+                pass
         funnel["ai_detect_status"] = res.get("status")
         if res.get("status") == "ok":
             funnel["ai_detect"] = res["aggregated"]["overall"]
@@ -438,7 +537,23 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 — 顺序编排
         except (OSError, json.JSONDecodeError):
             report_query_repo_id = repo_name
         _restore_semantic_cache(out, repo_name, report_query_repo_id)
-        report_ai_detect_path = ai_detect_path if args.ai_detect else None
+        report_ai_detect_path = None
+        if args.ai_detect:
+            ai_artifact = None
+            if ai_detect_path.is_file():
+                try:
+                    ai_artifact = json.loads(ai_detect_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    ai_artifact = None
+            if _ai_detect_usable(ai_artifact):
+                report_ai_detect_path = ai_detect_path
+            else:
+                # 检测模型在本机不可用/崩溃：报告省略该章（与 --skip-ai-detect 同构），
+                # 但不再需要整轮重跑；诊断产物（status/reason）保留在 ai_detect.json。
+                logger.warning(
+                    "[pipeline] AI 检测产物不可用于交付（status={}），报告将省略该章",
+                    (ai_artifact or {}).get("status") or "缺失",
+                )
         res = timed("report", lambda: run_semantic_compare(
             suspects_path   = final_path,
             query_repo_path = str(repo_path),

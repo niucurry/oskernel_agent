@@ -13,6 +13,92 @@ from oskernel_agent.finals.development import (
 )
 
 
+def test_esc_renders_numeric_zero_not_empty():
+    """0 变更的关键提交必须渲染为「0 LOC」，而不是空串（str(0 or '') 曾吞掉 0）。"""
+    from oskernel_agent.finals.development import _esc
+
+    assert _esc(0) == "0"
+    assert _esc(3) == "3"
+    assert _esc(None) == ""
+    assert _esc("0 LOC") == "0 LOC"
+
+
+def _shallow_repo(tmp_path):
+    """真实 git 仓库 + 手工 shallow 标记（rev-parse --is-shallow-repository=true）。"""
+    import subprocess
+
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "t@t"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.name", "t"],
+        check=True,
+    )
+    (repo / "f.txt").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "f.txt"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "c1"], check=True)
+    (repo / ".git" / "shallow").write_text("a" * 40 + "\n", encoding="utf-8")
+    return repo
+
+
+def _patch_fetch_run(monkeypatch, on_fetch):
+    """只拦截 fetch 调用（含 --unshallow 的 cmd），其余 git 调用走真实 subprocess。"""
+    import subprocess as real_subprocess
+
+    real_run = real_subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        if "--unshallow" in cmd:
+            return on_fetch(cmd)
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr("oskernel_agent.finals.development.subprocess.run", fake_run)
+
+
+def test_try_unshallow_fetches_when_shallow(tmp_path, monkeypatch):
+    from oskernel_agent.finals.development import _try_unshallow
+
+    repo = _shallow_repo(tmp_path)
+    fetches = []
+
+    def on_fetch(cmd):
+        fetches.append(cmd)
+        return type("R", (), {"returncode": 0, "stderr": ""})()
+
+    _patch_fetch_run(monkeypatch, on_fetch)
+    assert _try_unshallow(repo) is True
+    assert len(fetches) == 1
+    assert "--unshallow" in fetches[0]
+
+
+def test_try_unshallow_keeps_degraded_mark_on_failure(tmp_path, monkeypatch):
+    from oskernel_agent.finals.development import _try_unshallow
+
+    repo = _shallow_repo(tmp_path)
+
+    def on_fetch(_cmd):
+        return type("R", (), {"returncode": 128, "stderr": "网络不可达"})()
+
+    _patch_fetch_run(monkeypatch, on_fetch)
+    assert _try_unshallow(repo) is False
+
+
+def test_try_unshallow_skips_fetch_when_complete(tmp_path, monkeypatch):
+    from oskernel_agent.finals.development import _try_unshallow
+
+    repo = _shallow_repo(tmp_path)
+    (repo / ".git" / "shallow").unlink()
+
+    def on_fetch(_cmd):
+        raise AssertionError("完整克隆不应发起 fetch")
+
+    _patch_fetch_run(monkeypatch, on_fetch)
+    assert _try_unshallow(repo) is True
+
+
 def test_development_cli_default_keeps_only_html(tmp_path, monkeypatch):
     import oskernel_agent.finals.__main__ as cli
     import oskernel_agent.finals.development as development
