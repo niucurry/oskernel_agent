@@ -262,7 +262,7 @@ def test_summary_compacts_long_judgments_to_fit_layout_cap(tmp_path, monkeypatch
     assert len(html_to_text(summary_pdf._render_order_text(summary))) <= 1450
 
 
-def test_summary_allows_negated_test_claim_wording(tmp_path):
+def test_summary_allows_negated_test_claim_wording(tmp_path, monkeypatch):
     """「未发现伪造通过输出」是否定表述，不是把提交信息改写为测试通过结论。"""
     digests = load_digests(_digests(tmp_path))
     payload = _ai_summary().model_dump(mode="json")
