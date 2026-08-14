@@ -2434,7 +2434,7 @@ def run_semantic_analysis(
         except RuntimeError as exc:
             last_error = exc
             logger.warning("[semantic] 第 {}/3 轮完整性校验未过：{}", attempt, exc)
-            # 模型偶发漏回个别功能簇：只针对缺失簇单独补缺请求，最多 3 轮；
+            # 模型偶发漏回个别功能簇：只针对缺失簇单独补缺请求，最多 8 轮；
             # 缺失簇拆成小批并发请求（单次大请求漏检率高），重复/未知 ID 仍走整轮重试。
             def _gap_request(chunk: list[dict]) -> str:
                 msg = _build_analysis_message(
@@ -2506,6 +2506,10 @@ def run_semantic_analysis(
                 continue
             html_content = merged
             break
+        else:
+            # 首轮校验直接通过：同样视为本轮成功，避免落空到未赋值状态
+            html_content = merged
+            break
     if not html_content:
         # 失败取证：保留合并结果，便于核对缺失/重复/未知簇的诊断
         try:
@@ -2513,7 +2517,8 @@ def run_semantic_analysis(
                 merged, encoding="utf-8")
         except OSError:
             pass
-        raise last_error
+        raise last_error if isinstance(last_error, BaseException) else RuntimeError(
+            "语义级分析未完成：模型未返回完整功能簇")
 
     output_path.write_text(html_content, encoding="utf-8")
     html_cache.write_text(html_content, encoding="utf-8")
