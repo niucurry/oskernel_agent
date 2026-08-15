@@ -358,6 +358,30 @@ def normalize_html_language(fragment: str) -> tuple[str, dict]:
     return normalized, stats
 
 
+def _looks_like_natural_english(s: str) -> bool:
+    """英文自然语言句子判定：≥3 个非缩写英文词且带句末标点。"""
+    prose = _strip_noise(s)
+    words = [w for w in _WORD.findall(prose) if not (w.isupper() and len(w) <= 5)]
+    return len(words) >= 3 and bool(re.search(r"[.!?。！？]", prose))
+
+
+def residual_english_acceptable(s: str) -> bool:
+    """残留英文是否仅限标识符/函数名/字段名/术语（无英文自然语言句子）。
+
+    正文块、标题、整字段逐层检查：只要某处残留构成英文自然句即不可接受；
+    术语短语（如 System V IPC、per-hart PLIC context）不构成句子，放行。
+    """
+    for block in _TEXT_BLOCK.findall(s):
+        if _plain_needs_translation(block) and _looks_like_natural_english(block):
+            return False
+    for heading in _HEADING.findall(s):
+        if _looks_like_natural_english(heading):
+            return False
+    if _plain_needs_translation(s) and _looks_like_natural_english(s):
+        return False
+    return True
+
+
 def language_output_complete(data: dict) -> bool:
     """判断生成结果是否满足中文交付要求，供缓存准入使用。"""
     complete = True
