@@ -408,7 +408,8 @@ def do_comparison(team_id: str, url: str, work_dir: Path, logfile: Path) -> tupl
         # 流水线默认开启 AI 生成代码检测；批处理默认关闭时必须显式跳过，
         # 否则大仓库会因检测模型加载崩溃（原生崩溃无 traceback）白白失败一轮。
         cmd.append("--skip-ai-detect")
-    if _comparison_resume_ready(repo_name):
+    if _comparison_resume_ready(repo_name) or os.environ.get(
+            "BATCH_RESUME_FROM_REPORT", "").strip() == "1":
         cmd.extend(["--resume-from", "report"])
         log("  对比报告前序产物齐备，续跑报告阶段（跳过模型加载）")
     cmp_timeout = int(os.environ.get("BATCH_CMP_TIMEOUT", "3600"))  # 巨型仓库可调大
