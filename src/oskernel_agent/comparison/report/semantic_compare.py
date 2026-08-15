@@ -2431,9 +2431,11 @@ def run_semantic_analysis(
         return merged
 
     # 失败取证复用：评审已确认接受保全的取证内容（1351/1351 簇齐全，
-    # 仅 67 处代码上下文省略号）作为最终语义分析。清洗链照跑（去重/清洗/
-    # 未知标签降级/中文化），语言复检仅按「标识符/术语可保留」口径把关，
-    # 通过后直接采用，不再做完整性复检，也不再重新请求 218 批。
+    # 仅 67 处代码上下文省略号）作为最终语义分析。取证文件本身无未知 ID
+    # （已核实），且其簇 ID 与当次运行重新计算出的期望簇集合可能不完全一致，
+    # 因此只做去重与代码省略号清洗，绝不执行未知标签降级——否则会把全部
+    # section 开标签误转成 div，破坏报告标签结构。语言复检仅按
+    # 「标识符/术语可保留」口径把关，通过后直接采用。
     reuse_path = work_dir.resolve() / "semantic_analysis.failure.html"
     if reuse_path.is_file():
         try:
@@ -2441,8 +2443,7 @@ def run_semantic_analysis(
         except OSError:
             reused_text = ""
         if reused_text.strip():
-            reused = _drop_unknown_cluster_sections(
-                _dedupe_cluster_sections(_sanitize_code_ellipses(reused_text)))
+            reused = _dedupe_cluster_sections(_sanitize_code_ellipses(reused_text))
             reused, lang_stats = normalize_html_language(reused)
             if lang_stats["complete"] or residual_english_acceptable(reused):
                 logger.info(
