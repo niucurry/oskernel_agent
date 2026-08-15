@@ -2342,20 +2342,33 @@ def run_semantic_analysis(
         return missing
 
     def _dedupe_cluster_sections(content: str) -> str:
-        """模型偶发对同一功能簇输出多个 section：保留首个，去掉后续重复段。"""
+        """主批次合并清洗：重复 section 去重；未知 ID 先补 cluster- 前缀，
+        仍无法对应到预期簇的 section 直接丢弃（模型偶发编造 ID）。"""
+        expected_ids = {cluster["analysis_id"] for cluster in expected_clusters}
         seen: set[str] = set()
         kept: list[str] = []
-        for piece in re.split(
+        for raw_piece in re.split(
             r"(<section\b.*?</section>)", content, re.IGNORECASE | re.DOTALL
         ):
             match = re.search(
-                r'data-cluster=["\']([^"\']+)["\']', piece, re.IGNORECASE)
+                r'data-cluster=["\']([^"\']+)["\']', raw_piece, re.IGNORECASE)
             if match:
-                cluster_id = match.group(1)
+                raw_id = match.group(1)
+                piece = raw_piece
+                if raw_id in expected_ids:
+                    cluster_id = raw_id
+                elif f"cluster-{raw_id}" in expected_ids:
+                    cluster_id = f"cluster-{raw_id}"
+                    piece = (raw_piece[: match.start(1)] + cluster_id
+                             + raw_piece[match.end(1):])
+                else:
+                    continue  # 编造的未知 ID，丢弃该段
                 if cluster_id in seen:
                     continue
                 seen.add(cluster_id)
-            kept.append(piece)
+                kept.append(piece)
+            else:
+                kept.append(raw_piece)
         return "".join(kept)
 
     def _append_gap_sections(content: str, gap_html: str) -> str:
