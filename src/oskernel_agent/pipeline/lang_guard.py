@@ -175,10 +175,34 @@ _FENCE = re.compile(r"^```[a-zA-Z]*\s*|\s*```$")
 _TRANSLATE_CHUNK_LIMIT = 4000
 
 
+def _translate_oversized_block(block: str, model: str) -> str:
+    """超长英文块（>4000 字符）按句界切成小段逐段翻译，重组回原标签。
+
+    整块直译会被 max_tokens 截断；小段翻译可靠，且保留原开闭标签属性。
+    """
+    m_open = re.match(r"<[^>]+>", block)
+    m_close = re.search(r"</[^>]+>\s*$", block)
+    if not (m_open and m_close):
+        return block
+    open_tag, close_tag = m_open.group(0), m_close.group(0)
+    inner = block[m_open.end():m_close.start()]
+    pieces = re.findall(r".*?[。！？；.!?;](?:\s+|$)", inner)
+    if not pieces or sum(len(p) for p in pieces) < len(inner) * 0.5:
+        # 没有可靠句界：按固定窗口硬切
+        pieces = [inner[i:i + 2000] for i in range(0, len(inner), 2000)]
+    parts: list[str] = []
+    for piece in pieces:
+        translated = _translate(open_tag + piece + close_tag, model)
+        m = re.search(r"<[^>]+>(.*)</[^>]+>\s*$", translated, re.S)
+        parts.append(m.group(1) if m else piece)
+    return open_tag + "".join(parts) + close_tag
+
+
 def _translate_large(s: str, model: str) -> str:
     """大字段（如整份 verdict 正文）按 HTML 文本块拆分翻译后原位回填。
 
     整段直译会被 max_tokens 截断、校验失败；文本块单块很小，翻译可靠。
+    超长块进一步按句界切分逐段翻译，避免漏译触发中文交付门禁。
     """
     if _TEXT_BLOCK.search(s) is None:
         return s
@@ -188,9 +212,11 @@ def _translate_large(s: str, model: str) -> str:
         block = match.group(0)
         inner = match.group(1)
         out.append(s[last:match.start()])
-        if (_plain_needs_translation(inner) or _english_heading(block)) \
-                and len(block) <= _TRANSLATE_CHUNK_LIMIT:
-            out.append(_translate(block, model))
+        if _plain_needs_translation(inner) or _english_heading(block):
+            if len(block) <= _TRANSLATE_CHUNK_LIMIT:
+                out.append(_translate(block, model))
+            else:
+                out.append(_translate_oversized_block(block, model))
         else:
             out.append(block)
         last = match.end()
