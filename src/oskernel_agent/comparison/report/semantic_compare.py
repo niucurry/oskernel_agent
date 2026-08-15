@@ -2330,7 +2330,7 @@ def run_semantic_analysis(
 
     # 模型偶发漏回个别功能簇、返回残缺片段或瞬时调用失败；每轮都是全新请求，
     # 整轮重试最多 3 次，仍不完整则维持 RuntimeError 拒绝交付（与复核门禁一致）。
-    from oskernel_agent.pipeline.lang_guard import normalize_html_language
+    from oskernel_agent.pipeline.lang_guard import normalize_html_language, residual_english_acceptable
 
     def _missing_cluster_ids(content: str) -> list[str]:
         """返回 section 缺失或内容为空的簇 ID（重复/未知 ID 不属于补缺范围）。"""
@@ -2434,11 +2434,15 @@ def run_semantic_analysis(
 
         # 首轮直接生成中文；只有确实检测到英文正文时才保留一次翻译兜底。
         merged, lang_stats = normalize_html_language(merged)
-        if not lang_stats["complete"]:
+        if not lang_stats["complete"] and not residual_english_acceptable(merged):
             last_error = RuntimeError(
                 f"语义级分析未通过中文交付校验：仍有 {lang_stats['remaining']} 处")
             logger.warning("[semantic] 第 {}/3 轮{}", attempt, last_error)
             continue
+        elif not lang_stats["complete"]:
+            logger.warning(
+                "[semantic] 第 {}/3 轮残留英文仅限标识符/术语（{} 处），按 WARNING 放行",
+                attempt, lang_stats["remaining"])
         elif lang_stats["translated"]:
             logger.warning("[semantic] 首轮残留英文，已启用保留的翻译兜底")
 
@@ -2506,11 +2510,15 @@ def run_semantic_analysis(
                 for part in gap_parts:
                     merged = _append_gap_sections(merged, part)
             merged, lang_stats = normalize_html_language(merged)
-            if not lang_stats["complete"]:
+            if not lang_stats["complete"] and not residual_english_acceptable(merged):
                 last_error = RuntimeError(
                     f"语义级分析未通过中文交付校验：仍有 {lang_stats['remaining']} 处")
                 logger.warning("[semantic] 第 {}/3 轮补缺后中文校验未过", attempt)
                 continue
+            elif not lang_stats["complete"]:
+                logger.warning(
+                    "[semantic] 第 {}/3 轮补缺后残留英文仅限标识符/术语（{} 处），按 WARNING 放行",
+                    attempt, lang_stats["remaining"])
             try:
                 validate_complete(merged)
             except RuntimeError as exc2:
