@@ -2431,8 +2431,9 @@ def run_semantic_analysis(
         return merged
 
     # 失败取证复用：上一轮失败时的合并内容（如 1351 簇齐全、仅被省略号/未知
-    # 标签门禁拒绝的取证文件）在现行门禁下复检通过时直接使用，避免重复请求
-    # 218 批。复检链与正式合并完全一致：去重/清洗/未知降级/中文化/完整性。
+    # 标签门禁拒绝的取证文件）先过清洗链，作为首轮基础内容直接走校验+补缺，
+    # 避免重复请求 218 批；簇集合有少量出入时由补缺机制补齐，出入过大再整轮重来。
+    merged_base = ""
     reuse_path = work_dir.resolve() / "semantic_analysis.failure.html"
     if reuse_path.is_file():
         try:
@@ -2440,39 +2441,36 @@ def run_semantic_analysis(
         except OSError:
             reused_text = ""
         if reused_text.strip():
-            reused = _drop_unknown_cluster_sections(
+            merged_base = _drop_unknown_cluster_sections(
                 _dedupe_cluster_sections(_sanitize_code_ellipses(reused_text)))
-            reused, lang_stats = normalize_html_language(reused)
-            if lang_stats["complete"] or residual_english_acceptable(reused):
-                try:
-                    validate_complete(reused)
-                except RuntimeError as exc:
-                    logger.warning("[semantic] 失败取证复检未过，重新生成：{}", exc)
-                else:
-                    logger.info("[semantic] 失败取证复检通过，直接复用（{} 字符）", len(reused))
-                    return reused
+            logger.info("[semantic] 失败取证内容已就绪（{} 字符），首轮优先复用并补缺",
+                        len(merged_base))
 
     html_content = ""
     merged = ""
     last_error: RuntimeError | None = None
     for attempt in range(1, 4):
-        try:
-            responses = [""] * len(messages)
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = [pool.submit(request_batch, index) for index in range(len(messages))]
-                for future in as_completed(futures):
-                    index, response_text = future.result()
-                    responses[index] = response_text
-        except Exception as e:
-            last_error = RuntimeError(f"语义级分析模型调用失败：{type(e).__name__}: {e}")
-            logger.warning("[semantic] 第 {}/3 轮模型调用失败：{}", attempt, last_error)
-            continue
+        if merged_base:
+            merged = merged_base
+            merged_base = ""
+        else:
+            try:
+                responses = [""] * len(messages)
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    futures = [pool.submit(request_batch, index) for index in range(len(messages))]
+                    for future in as_completed(futures):
+                        index, response_text = future.result()
+                        responses[index] = response_text
+            except Exception as e:
+                last_error = RuntimeError(f"语义级分析模型调用失败：{type(e).__name__}: {e}")
+                logger.warning("[semantic] 第 {}/3 轮模型调用失败：{}", attempt, last_error)
+                continue
 
-        # 提取各批 HTML 片段（模型可能在 markdown 代码块里），按原功能簇顺序合并。
-        merged = _dedupe_cluster_sections(_sanitize_code_ellipses("\n".join(
-            _extract_html_from_text(response_text) or response_text
-            for response_text in responses
-        )))
+            # 提取各批 HTML 片段（模型可能在 markdown 代码块里），按原功能簇顺序合并。
+            merged = _dedupe_cluster_sections(_sanitize_code_ellipses("\n".join(
+                _extract_html_from_text(response_text) or response_text
+                for response_text in responses
+            )))
 
         # 首轮直接生成中文；只有确实检测到英文正文时才保留一次翻译兜底。
         merged, lang_stats = normalize_html_language(merged)
