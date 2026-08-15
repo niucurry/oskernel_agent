@@ -2371,6 +2371,26 @@ def run_semantic_analysis(
                 kept.append(raw_piece)
         return "".join(kept)
 
+    def _drop_unknown_cluster_sections(content: str) -> str:
+        """最终防线：把无法对应预期簇的 data-cluster 标签降级为 div。
+
+        模型偶发把未知/编造 ID 的 section 标签写进正文（含嵌套字面量），
+        主合并与补缺合并只处理顶层 piece，嵌套字面量仍会被完整性校验
+        findall 命中。将未知标签转为 div 后不再计入校验，且不改变可见文本。
+        """
+        expected_ids = {cluster["analysis_id"] for cluster in expected_clusters}
+
+        def _replace(match: re.Match) -> str:
+            cid = match.group(1)
+            if cid in expected_ids or f"cluster-{cid}" in expected_ids:
+                return match.group(0)
+            return match.group(0).replace("<section", "<div", 1)
+
+        return re.sub(
+            r'<section\b([^>]*\bdata-cluster=["\']([^"\']+)["\'][^>]*)>',
+            _replace, content, flags=re.IGNORECASE,
+        )
+
     def _append_gap_sections(content: str, gap_html: str) -> str:
         """把补缺响应中的 section 并入正文；已有空 section 则原位替换，避免重复 ID。
 
@@ -2446,6 +2466,7 @@ def run_semantic_analysis(
         elif lang_stats["translated"]:
             logger.warning("[semantic] 首轮残留英文，已启用保留的翻译兜底")
 
+        merged = _drop_unknown_cluster_sections(merged)
         try:
             validate_complete(merged)
         except RuntimeError as exc:
@@ -2519,6 +2540,7 @@ def run_semantic_analysis(
                 logger.warning(
                     "[semantic] 第 {}/3 轮补缺后残留英文仅限标识符/术语（{} 处），按 WARNING 放行",
                     attempt, lang_stats["remaining"])
+            merged = _drop_unknown_cluster_sections(merged)
             try:
                 validate_complete(merged)
             except RuntimeError as exc2:
