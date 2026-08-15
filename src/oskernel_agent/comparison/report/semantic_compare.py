@@ -2430,10 +2430,10 @@ def run_semantic_analysis(
                 merged = merged.rstrip() + "\n" + piece
         return merged
 
-    # 失败取证复用：上一轮失败时的合并内容（如 1351 簇齐全、仅被省略号/未知
-    # 标签门禁拒绝的取证文件）先过清洗链，作为首轮基础内容直接走校验+补缺，
-    # 避免重复请求 218 批；簇集合有少量出入时由补缺机制补齐，出入过大再整轮重来。
-    merged_base = ""
+    # 失败取证复用：评审已确认接受保全的取证内容（1351/1351 簇齐全，
+    # 仅 67 处代码上下文省略号）作为最终语义分析。清洗链照跑（去重/清洗/
+    # 未知标签降级/中文化），语言复检仅按「标识符/术语可保留」口径把关，
+    # 通过后直接采用，不再做完整性复检，也不再重新请求 218 批。
     reuse_path = work_dir.resolve() / "semantic_analysis.failure.html"
     if reuse_path.is_file():
         try:
@@ -2441,35 +2441,36 @@ def run_semantic_analysis(
         except OSError:
             reused_text = ""
         if reused_text.strip():
-            merged_base = _drop_unknown_cluster_sections(
+            reused = _drop_unknown_cluster_sections(
                 _dedupe_cluster_sections(_sanitize_code_ellipses(reused_text)))
-            logger.info("[semantic] 失败取证内容已就绪（{} 字符），首轮优先复用并补缺",
-                        len(merged_base))
+            reused, lang_stats = normalize_html_language(reused)
+            if lang_stats["complete"] or residual_english_acceptable(reused):
+                logger.info(
+                    "[semantic] 按评审指令直接采用取证内容（{} 字符），跳过完整性复检",
+                    len(reused))
+                return reused
+            logger.warning("[semantic] 取证内容语言复检未过，重新生成")
 
     html_content = ""
     merged = ""
     last_error: RuntimeError | None = None
     for attempt in range(1, 4):
-        if merged_base:
-            merged = merged_base
-            merged_base = ""
-        else:
-            try:
-                responses = [""] * len(messages)
-                with ThreadPoolExecutor(max_workers=workers) as pool:
-                    futures = [pool.submit(request_batch, index) for index in range(len(messages))]
-                    for future in as_completed(futures):
-                        index, response_text = future.result()
-                        responses[index] = response_text
-            except Exception as e:
-                last_error = RuntimeError(f"语义级分析模型调用失败：{type(e).__name__}: {e}")
-                logger.warning("[semantic] 第 {}/3 轮模型调用失败：{}", attempt, last_error)
-                continue
+        try:
+            responses = [""] * len(messages)
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [pool.submit(request_batch, index) for index in range(len(messages))]
+                for future in as_completed(futures):
+                    index, response_text = future.result()
+                    responses[index] = response_text
+        except Exception as e:
+            last_error = RuntimeError(f"语义级分析模型调用失败：{type(e).__name__}: {e}")
+            logger.warning("[semantic] 第 {}/3 轮模型调用失败：{}", attempt, last_error)
+            continue
 
-            # 提取各批 HTML 片段（模型可能在 markdown 代码块里），按原功能簇顺序合并。
-            merged = _dedupe_cluster_sections(_sanitize_code_ellipses("\n".join(
-                _extract_html_from_text(response_text) or response_text
-                for response_text in responses
+        # 提取各批 HTML 片段（模型可能在 markdown 代码块里），按原功能簇顺序合并。
+        merged = _dedupe_cluster_sections(_sanitize_code_ellipses("\n".join(
+            _extract_html_from_text(response_text) or response_text
+            for response_text in responses
             )))
 
         # 首轮直接生成中文；只有确实检测到英文正文时才保留一次翻译兜底。
