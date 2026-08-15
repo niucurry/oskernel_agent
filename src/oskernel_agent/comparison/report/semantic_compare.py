@@ -2430,6 +2430,28 @@ def run_semantic_analysis(
                 merged = merged.rstrip() + "\n" + piece
         return merged
 
+    # 失败取证复用：上一轮失败时的合并内容（如 1351 簇齐全、仅被省略号/未知
+    # 标签门禁拒绝的取证文件）在现行门禁下复检通过时直接使用，避免重复请求
+    # 218 批。复检链与正式合并完全一致：去重/清洗/未知降级/中文化/完整性。
+    reuse_path = work_dir.resolve() / "semantic_analysis.failure.html"
+    if reuse_path.is_file():
+        try:
+            reused_text = reuse_path.read_text(encoding="utf-8")
+        except OSError:
+            reused_text = ""
+        if reused_text.strip():
+            reused = _drop_unknown_cluster_sections(
+                _dedupe_cluster_sections(_sanitize_code_ellipses(reused_text)))
+            reused, lang_stats = normalize_html_language(reused)
+            if lang_stats["complete"] or residual_english_acceptable(reused):
+                try:
+                    validate_complete(reused)
+                except RuntimeError as exc:
+                    logger.warning("[semantic] 失败取证复检未过，重新生成：{}", exc)
+                else:
+                    logger.info("[semantic] 失败取证复检通过，直接复用（{} 字符）", len(reused))
+                    return reused
+
     html_content = ""
     merged = ""
     last_error: RuntimeError | None = None
