@@ -66,6 +66,18 @@ def sanitize_code_ellipses(html_text: str) -> str:
     combined = re.compile(
         r"(?:" + _CODE_ELLIPSIS_RE.pattern + r"|" + _CODE_RUN_ELLIPSIS_RE.pattern + r")")
     wrapped = combined.sub(_wrap, protected)
+    # 引号内的省略号（如 "skip...case"、'retry...once'）：引号内容含代码类字符时
+    # 属代码字面量，包进 <code>；纯中文引号内的省略号保持原样（正文省略仍被门禁拦截）。
+    def _wrap_quoted(match: re.Match) -> str:
+        token = match.group(0)
+        inner = token[1:-1]
+        if not re.search(r"[A-Za-z0-9_/\\]{2,}", inner):
+            return token
+        return f"<code>{html.escape(token)}</code>"
+
+    quoted = re.compile(
+        r"[“\"'`][^“”\"'`<>]{0,200}?(?:\.\.\.|…)[^“”\"'`<>]{0,200}?[”\"'`]")
+    wrapped = quoted.sub(_wrap_quoted, wrapped)
     for key, span in placeholders.items():
         wrapped = wrapped.replace(key, span)
     return wrapped
