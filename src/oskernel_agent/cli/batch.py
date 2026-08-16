@@ -158,14 +158,18 @@ def child_env() -> dict:
     return env
 
 
-def run_step(name: str, cmd: list[str], logfile: Path, timeout: int) -> tuple[bool, str]:
+def run_step(name: str, cmd: list[str], logfile: Path, timeout: int,
+             extra_env: dict | None = None) -> tuple[bool, str]:
     log(f"  {name}: {' '.join(cmd)}")
     logfile.parent.mkdir(parents=True, exist_ok=True)
     with logfile.open("w", encoding="utf-8", errors="replace") as lf:
         lf.write(f"# {name}\n# {' '.join(cmd)}\n# start {datetime.now()}\n\n")
         lf.flush()
+        env = child_env()
+        if extra_env:
+            env.update(extra_env)
         try:
-            p = subprocess.run(cmd, cwd=ROOT, env=child_env(), stdout=lf,
+            p = subprocess.run(cmd, cwd=ROOT, env=env, stdout=lf,
                                stderr=subprocess.STDOUT, text=True, timeout=timeout)
             ok = p.returncode == 0
         except subprocess.TimeoutExpired:
@@ -467,6 +471,9 @@ def normalize_comparison_identity(
     html_path.write_text(html.replace(storage_key, team_id), encoding="utf-8")
 
 
+_HARDCODE_CAPACITY_RE = re.compile(r"候选\s*(\d+)\s*条")
+
+
 def do_description(team_id: str, url: str, work_dir: Path, logfile: Path) -> tuple[bool, str]:
     repo_name = fork_to_repo_name(url)
     cloned = REPOS / repo_name  # 对比报告已克隆
@@ -481,6 +488,21 @@ def do_description(team_id: str, url: str, work_dir: Path, logfile: Path) -> tup
         "--keep-intermediates",
     ]
     ok, body = run_step("描述报告", cmd, logfile, timeout=7200)
+    if not ok:
+        # 硬编码容量门是确定性的：候选数超上限必败，盲重试无效。
+        # 按失败信息里的候选数自动提高 AGENT_HARDCODE_SIGNAL_LIMIT 重跑一次，
+        # 让复核覆盖全部候选（报告完整性优先于成本）。
+        match = _HARDCODE_CAPACITY_RE.search(body or "")
+        if match:
+            limit = int(match.group(1)) + 50
+            log(f"  描述报告硬编码候选超上限，自动提高 AGENT_HARDCODE_SIGNAL_LIMIT={limit} 重跑")
+            ok, body = run_step(
+                "描述报告(扩容)",
+                cmd,
+                logfile.with_name(logfile.stem + "_cap" + logfile.suffix),
+                timeout=7200,
+                extra_env={"AGENT_HARDCODE_SIGNAL_LIMIT": str(limit)},
+            )
     digest = dst.with_suffix(".digest.json")
     return ok and dst.exists() and digest.exists(), body
 

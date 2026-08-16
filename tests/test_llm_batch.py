@@ -355,3 +355,52 @@ def test_try_repair_json_recovers_aliased_repair_output(tmp_path, monkeypatch):
     )
 
     assert repaired == {"summary": "修复产物"}
+
+
+def test_empty_spin_skips_json_repair_and_retries(tmp_path, monkeypatch):
+    """模型空转（纯聊天、从不调用 write_report）时跳过 json_repair，直接知情重试。
+
+    空转流程从「初始 → json_repair → 重试」3 次 LLM 调用降为 2 次；
+    repair 不该被调用（没有可修的内容）。
+    """
+    calls = []
+
+    def fake_run(task, timeout):
+        calls.append(task.user_request)
+        return False, "Let me begin. I'll make the calls.", []
+
+    def repair_boom(*_args, **_kwargs):
+        raise AssertionError("空转输出不应触发 json_repair")
+
+    monkeypatch.setattr(llm_batch, "_run_opencode_once", fake_run)
+    monkeypatch.setattr(llm_batch, "_try_repair_json", repair_boom)
+    task = _batch_task(tmp_path)
+    task.cache_enabled = False
+
+    result = llm_batch.run_batch_task(task, schema_hint='{"summary":str}')
+
+    assert len(calls) == 2                     # 初始 + 知情重试
+    assert "未调用 write_report" in calls[1]   # 重试 prompt 显式提示空转
+    assert result.get("_error") == "llm_batch_failed"
+
+
+def test_stdout_json_mention_still_triggers_repair(tmp_path, monkeypatch):
+    """stdout 声明写盘（report.json）时仍触发 json_repair，保守门不误伤。"""
+    captured = []
+
+    def fake_run(task, timeout):
+        return False, "I wrote the result to report.json", []
+
+    def fake_repair(task, raw_text, schema_hint, timeout, repair_validator=None):
+        captured.append(raw_text)
+        return {"summary": "修复后"}
+
+    monkeypatch.setattr(llm_batch, "_run_opencode_once", fake_run)
+    monkeypatch.setattr(llm_batch, "_try_repair_json", fake_repair)
+    task = _batch_task(tmp_path)
+    task.cache_enabled = False
+
+    result = llm_batch.run_batch_task(task, schema_hint='{"summary":str}')
+
+    assert captured                     # repair 被调用
+    assert result == {"summary": "修复后"}
