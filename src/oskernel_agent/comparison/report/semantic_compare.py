@@ -3888,12 +3888,20 @@ def _priority_cell(g: dict) -> str:
 
 
 def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, accent: str,
-                  show_verdict: bool = False, show_priority: bool = False) -> str:
+                  show_verdict: bool = False, show_priority: bool = False,
+                  row_anchor_prefix: str = "",
+                  row_anchor_modules: set[str] | None = None,
+                  row_anchor_used: set[str] | None = None) -> str:
     """渲染一张「按 query 函数聚合候选」的清单表（U3 分类清单 + U6 全候选 + 代码证据）。
-    show_verdict=True 时（疑似借鉴清单）额外加一列「复核结论」展示低端模型的借鉴判定。"""
+
+    show_verdict=True 时（疑似借鉴清单）额外加一列「复核结论」展示低端模型的借鉴判定。
+    row_anchor_* 用于给指定模块的首个评审单元加上可跳转锚点，便于摘要表直接定位到
+    「复核难例」中与该模块对应的条目。
+    """
     if not groups:
         return ""
     bodies = []
+    anchor_used = row_anchor_used if row_anchor_used is not None else set()
     for g in groups:
         colspan = 6 + int(show_verdict) + int(show_priority)
         toggle, panel = _code_evidence(g, colspan, linker, query_repo_id)
@@ -3927,8 +3935,18 @@ def _groups_table(title: str, groups: list[dict], linker, query_repo_id: str, ac
             f'<td class="text-xs align-top whitespace-nowrap">{toggle}</td>'
             '</tr>'
         )
+        anchor_attrs = ""
+        if row_anchor_prefix and row_anchor_modules:
+            mod = str(g.get("module") or "")
+            if mod and mod in row_anchor_modules and mod not in anchor_used:
+                anchor_used.add(mod)
+                anchor_attrs = (
+                    f' id="{html.escape(row_anchor_prefix + "-" + mod)}"'
+                    ' data-jump-anchor="1"'
+                )
         bodies.append(
-            f'<tbody x-data="{{o:false}}" class="border-b border-slate-100">{main}{panel}</tbody>'
+            f'<tbody x-data="{{o:false}}" class="border-b border-slate-100"'
+            f'{anchor_attrs}>{main}{panel}</tbody>'
         )
     verdict_th = ('<th class="text-left p-2 border-b">复核结论</th>' if show_verdict else "")
     priority_th = ('<th class="text-left p-2 border-b">复核优先级</th>' if show_priority else "")
@@ -4918,13 +4936,29 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
   [x-cloak]{display:revert!important}
   .code-body{max-height:none}
 }
+[id]{scroll-margin-top:1.5rem}
+.jump-flash{animation:cmp-jump-flash 2.6s ease-out both}
+.jump-flash>tr>td,.jump-flash tr>td{animation:cmp-cell-flash 2.6s ease-out both}
+.jump-source{background:#dbeafe!important;box-shadow:0 0 0 2px rgba(37,99,235,.28);border-radius:4px}
+@keyframes cmp-jump-flash{
+  0%{box-shadow:inset 0 0 0 3px rgba(37,99,235,.45);background-color:#dbeafe}
+  55%{box-shadow:inset 0 0 0 2px rgba(37,99,235,.18);background-color:#eff6ff}
+  100%{box-shadow:inset 0 0 0 0 rgba(37,99,235,0);background-color:transparent}
+}
+@keyframes cmp-cell-flash{
+  0%{background-color:#dbeafe}
+  55%{background-color:#eff6ff}
+  100%{background-color:transparent}
+}
 </style>
 """
 
-_INIT_SCRIPT = """
+_INIT_SCRIPT = r"""
 <script>
 (function(){
   var chartAttempts=0;
+  var flashTimer=null;
+
   function initECharts(){
     if(typeof echarts==='undefined'){
       chartAttempts+=1;
@@ -4947,29 +4981,168 @@ _INIT_SCRIPT = """
       }catch(e){el.innerHTML='<p class="text-red-500 text-sm p-2">ECharts 配置解析失败: '+e.message+'</p>'}
     });
   }
+
+  function parseInitialOpen(root,key,fallback){
+    var xd=root.getAttribute('x-data')||'';
+    var m=xd.match(new RegExp('(?:^|[,{ ])'+key+'[ ]*:[ ]*(true|false)'));
+    return m ? m[1]==='true' : fallback;
+  }
+
+  function persistSection(root,open){
+    var sid=root.getAttribute('data-section-id')||root.getAttribute('id');
+    if(!sid)return;
+    try{localStorage.setItem('cmp:'+sid,open?'1':'0')}catch(e){}
+  }
+
+  function readPersistedSection(root,fallback){
+    var sid=root.getAttribute('data-section-id')||root.getAttribute('id');
+    if(!sid)return fallback;
+    try{
+      var s=localStorage.getItem('cmp:'+sid);
+      if(s!==null)return s==='1';
+    }catch(e){}
+    return fallback;
+  }
+
+  function installDisclosure(root,opts){
+    var body=opts.body, button=opts.button, icon=opts.icon;
+    if(!body||!button)return;
+    var open=parseInitialOpen(root,opts.key,opts.defaultOpen===true);
+    if(opts.persist)open=readPersistedSection(root,open);
+
+    function render(){
+      body.hidden=!open;
+      if(icon)icon.textContent=open?'▾':'▸';
+      if(button&&opts.renderText)button.textContent=opts.renderText(open);
+    }
+
+    function setOpen(next,persist){
+      open=!!next;
+      render();
+      if(persist!==false&&opts.persist)persistSection(root,open);
+      if(open&&opts.section)document.dispatchEvent(new Event('section:opened'));
+      return open;
+    }
+
+    root.__cmpDisclosure={isOpen:function(){return open},setOpen:setOpen};
+    button.addEventListener('click',function(){
+      setOpen(!open,opts.persist!==false);
+    });
+    render();
+  }
+
   function initDisclosures(){
     document.querySelectorAll('section.report-section[x-data]').forEach(function(root){
-      var body=root.querySelector('.section-body'), button=root.querySelector('.section-toggle');
-      if(!body||!button)return;
-      var open=(root.getAttribute('x-data')||'').indexOf('open:true')>=0;
-      function render(){body.hidden=!open;var icon=button.querySelector('.section-chevron');if(icon)icon.textContent=open?'▾':'▸'}
-      button.addEventListener('click',function(){open=!open;render();if(open)document.dispatchEvent(new Event('section:opened'))});
-      render();
+      installDisclosure(root,{
+        key:'open',defaultOpen:true,persist:true,section:true,
+        body:root.querySelector('.section-body'),
+        button:root.querySelector('.section-toggle'),
+        icon:root.querySelector('.section-chevron')
+      });
     });
     document.querySelectorAll('article.cluster-card[x-data]').forEach(function(root){
-      var body=root.querySelector('.cluster-body'), button=root.querySelector('.cluster-head');
-      if(!body||!button)return;
-      var open=(root.getAttribute('x-data')||'').indexOf('open:true')>=0;
-      function render(){body.hidden=!open;var icon=button.querySelector('.cluster-chevron');if(icon)icon.textContent=open?'▾':'▸'}
-      button.addEventListener('click',function(){open=!open;render()});render();
+      installDisclosure(root,{
+        key:'open',defaultOpen:false,persist:false,section:false,
+        body:root.querySelector('.cluster-body'),
+        button:root.querySelector('.cluster-head'),
+        icon:root.querySelector('.cluster-chevron')
+      });
     });
     document.querySelectorAll('tbody[x-data]').forEach(function(root){
-      var panel=root.querySelector('tr[x-show="o"]'), button=root.querySelector('.code-toggle');
-      if(!panel||!button)return;var open=false;
-      function render(){panel.hidden=!open;button.textContent=open?'收起代码 ▴':'查看代码 ▾'}
-      button.addEventListener('click',function(){open=!open;render()});render();
+      installDisclosure(root,{
+        key:'o',defaultOpen:false,persist:false,section:false,
+        body:root.querySelector('tr[x-show="o"]'),
+        button:root.querySelector('.code-toggle'),
+        icon:null,
+        renderText:function(open){return open?'收起代码 ▴':'查看代码 ▾'}
+      });
     });
   }
+
+  function openAncestors(el,includeSelf){
+    var node=includeSelf===true?el:el.parentElement;
+    while(node){
+      if(node.__cmpDisclosure&&node.__cmpDisclosure.setOpen){
+        node.__cmpDisclosure.setOpen(true,true);
+      }
+      node=node.parentElement;
+    }
+  }
+
+  function scrollToTarget(target){
+    try{target.scrollIntoView({behavior:'smooth',block:'start'})}
+    catch(e){target.scrollIntoView(true)}
+  }
+
+  function clearJumpFlash(){
+    document.querySelectorAll('.jump-flash,.jump-source').forEach(function(el){
+      el.classList.remove('jump-flash');
+      el.classList.remove('jump-source');
+    });
+  }
+
+  function flashTarget(target,source){
+    clearJumpFlash();
+    if(flashTimer)clearTimeout(flashTimer);
+    var els=[target];
+    if(target.tagName==='TBODY'){
+      var row=target.querySelector('tr:not([x-show])');
+      if(row)els.push(row);
+    }else if(target.classList&&target.classList.contains('report-section')){
+      var toggle=target.querySelector('.section-toggle');
+      if(toggle)els.push(toggle);
+    }
+    els.forEach(function(el){
+      if(!el||!el.classList)return;
+      el.classList.remove('jump-flash');
+      void el.offsetWidth;
+      el.classList.add('jump-flash');
+    });
+    if(source&&source.classList){
+      source.classList.remove('jump-source');
+      source.classList.add('jump-source');
+    }
+    flashTimer=setTimeout(clearJumpFlash,2600);
+  }
+
+  function jumpToHash(href,source){
+    if(!href||href.charAt(0)!=='#'||href==='#')return false;
+    var rawId=href.slice(1);
+    var id;
+    try{id=decodeURIComponent(rawId)}catch(e){id=rawId}
+    var target=document.getElementById(id);
+    if(!target)return false;
+    // 跳到 section/cluster 时把它们自身展开；跳到评审行/模块分组时只展开外层折叠区，
+    // 不擅自展开该行的并排代码面板。
+    openAncestors(target,target.tagName==='SECTION'||target.tagName==='ARTICLE');
+    setTimeout(function(){
+      scrollToTarget(target);
+      flashTarget(target,source);
+    },30);
+    try{history.replaceState(null,'',href)}catch(e){}
+    return true;
+  }
+
+  function initEvidenceJumps(){
+    document.addEventListener('click',function(ev){
+      var node=ev.target;
+      while(node&&node.nodeType!==1)node=node.parentNode;
+      while(node&&node!==document){
+        if(node.tagName==='A')break;
+        node=node.parentNode;
+      }
+      if(!node||node===document)return;
+      var href=node.getAttribute('href')||'';
+      if(href.charAt(0)!=='#'||href==='#')return;
+      var id=href.slice(1);
+      var target;
+      try{target=document.getElementById(decodeURIComponent(id))}catch(e){target=document.getElementById(id)}
+      if(!target)return;
+      ev.preventDefault();
+      jumpToHash(href,node);
+    });
+  }
+
   function initScrollSpy(){
     var links=document.querySelectorAll('.toc-link');
     var secs=document.querySelectorAll('[data-section-id]');
@@ -4987,7 +5160,25 @@ _INIT_SCRIPT = """
     },{rootMargin:'-20% 0px -70% 0px',threshold:0});
     secs.forEach(function(s){obs.observe(s)});
   }
-  document.addEventListener('DOMContentLoaded',function(){initDisclosures();initECharts();initScrollSpy()});
+
+  function handleInitialHash(){
+    if(!location.hash||location.hash==='#')return;
+    jumpToHash(location.hash,null);
+  }
+
+  function boot(){
+    initDisclosures();
+    initEvidenceJumps();
+    initECharts();
+    initScrollSpy();
+    handleInitialHash();
+  }
+
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded',boot);
+  }else{
+    boot();
+  }
   document.addEventListener('section:opened',function(){setTimeout(initECharts,30)});
 })();
 </script>
@@ -6453,16 +6644,32 @@ def _review_section(review_pairs: list[dict], linker, query_repo_id: str,
                '不让概率意见清除确定性证据。<div class="flex flex-wrap gap-2 mt-2 text-sm">'
                + "".join(chips) + '</div></div>')
 
+    # 摘要表的「复核难例」链接按模块落到该模块的第一个实际评审条目上；同一模块后续
+    # 条目不再重复占用锚点，避免 HTML 出现重复 id。
+    review_anchor_modules = {str(g.get("module") or "") for g in rows}
+    review_anchor_used: set[str] = set()
     tables = (
         _groups_table("模型有效复核后仍存疑", uncertain, linker, query_repo_id,
-                      "text-amber-700", show_verdict=True, show_priority=True)
+                      "text-amber-700", show_verdict=True, show_priority=True,
+                      row_anchor_prefix="review-evidence",
+                      row_anchor_modules=review_anchor_modules,
+                      row_anchor_used=review_anchor_used)
         + _groups_table("模型阴性与强直接证据冲突（人工复核）", retained,
                         linker, query_repo_id, "text-amber-800",
-                        show_verdict=True, show_priority=True)
+                        show_verdict=True, show_priority=True,
+                        row_anchor_prefix="review-evidence",
+                        row_anchor_modules=review_anchor_modules,
+                        row_anchor_used=review_anchor_used)
         + _groups_table("复核失败（不计为存疑）", failed, linker, query_repo_id,
-                        "text-rose-700", show_verdict=True, show_priority=True)
+                        "text-rose-700", show_verdict=True, show_priority=True,
+                        row_anchor_prefix="review-evidence",
+                        row_anchor_modules=review_anchor_modules,
+                        row_anchor_used=review_anchor_used)
         + _groups_table("复核未完成（不计为存疑）", pending, linker, query_repo_id,
-                        "text-slate-600", show_verdict=True, show_priority=True)
+                        "text-slate-600", show_verdict=True, show_priority=True,
+                        row_anchor_prefix="review-evidence",
+                        row_anchor_modules=review_anchor_modules,
+                        row_anchor_used=review_anchor_used)
     )
     section = _collapsible_html(
         "sec-review", "模型复核难例", intro + summary + tables,
@@ -6708,6 +6915,7 @@ def _finals_comparison_summary(
     *,
     anchored_modules: set[str] | None = None,
     has_review_evidence: bool = False,
+    review_anchor_modules: set[str] | None = None,
 ) -> str:
     metrics = digest.metrics
     closest = str(metrics.get("closest_source") or "未确定")
@@ -6727,15 +6935,24 @@ def _finals_comparison_summary(
         evidence_links: list[str] = []
         if int(stats.get("confirmed") or 0):
             target = (
-                f"#module-evidence-{html.escape(tag)}"
+                f"#module-evidence-{tag}"
                 if tag in (anchored_modules or set()) else "#sec-clusters"
             )
             evidence_links.append(
-                f'<a href="{target}">高置信证据</a>'
+                f'<a class="evidence-jump" data-evidence-kind="confirmed" '
+                f'data-evidence-module="{html.escape(tag)}" '
+                f'href="{html.escape(target, quote=True)}">高置信证据</a>'
             )
         if int(stats.get("review") or 0):
-            target = "#sec-review" if has_review_evidence else "#closest-evidence"
-            evidence_links.append(f'<a href="{target}">复核难例</a>')
+            if has_review_evidence and tag in (review_anchor_modules or set()):
+                target = f"#review-evidence-{tag}"
+            else:
+                target = "#sec-review" if has_review_evidence else "#closest-evidence"
+            evidence_links.append(
+                f'<a class="evidence-jump" data-evidence-kind="review" '
+                f'data-evidence-module="{html.escape(tag)}" '
+                f'href="{html.escape(target, quote=True)}">复核难例</a>'
+            )
         evidence = "、".join(evidence_links) or "未形成同源证据"
         module_rows.append(
             '<tr>'
@@ -6885,12 +7102,17 @@ def generate_finals_comparison_html(
         str(cluster.get("module") or "")
         for cluster in build_similarity_clusters(file_pairs)
     }
+    review_anchor_modules = {
+        str(g.get("module") or "") for g in review_pairs
+        if str(g.get("module") or "")
+    }
     summary_html = _finals_comparison_summary(
         digest,
         linker,
         submodule_stats,
         anchored_modules=anchored_modules,
         has_review_evidence=bool(review_pairs or cleared_review_pairs),
+        review_anchor_modules=review_anchor_modules,
     )
     # 谱系节的“多仓同时命中”必须跨全历史库统计：这里 suspects 是主对比作品（最接近仓库）
     # 过滤后的列表，直接用会把每个目标函数只算到单个仓库、多仓命中恒为 0，与全库排名表

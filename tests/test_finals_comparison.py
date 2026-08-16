@@ -278,3 +278,46 @@ def test_finals_history_overview_rejects_primary_or_total_mismatch():
     wrong_total["distribution_rows"][0]["count"] += 1
     with pytest.raises(RuntimeError, match="分类数量与总函数数"):
         SC._validate_finals_history_overview(wrong_total, expected_primary)
+
+
+def _zero_stats():
+    return {module: {
+        "confirmed": 0, "review": 0, "review_failed": 0, "review_pending": 0,
+        "review_incomplete": 0, "weak": 0, "original": 0, "total": 0,
+        "copy_pct": 0, "review_pct": 0, "review_incomplete_pct": 0,
+        "original_pct": 0, "top_source": "—",
+    } for module in SC.MODULES}
+
+
+def test_finals_review_link_targets_first_module_entry_and_jump_machinery():
+    """摘要表「复核难例」必须落到该模块的实际评审行，而不是只跳到折叠的节标题。"""
+    suspect = _suspect("2025/A", "open")
+    review = SC.collect_file_pairs([suspect])[0]
+    review.update({
+        "review_verdict": "疑似",
+        "review_reason": "共享了可核验的非平凡实现步骤",
+        "review_responsibility": "一致",
+        "review_responsibility_reason": "双方处理同一类打开逻辑",
+        "review_evidence_anchors": ["fn"],
+    })
+    stats = _zero_stats()
+    stats["fs"].update({"confirmed": 1, "review": 1, "total": 2,
+                        "copy_pct": .5, "review_pct": .5, "top_source": "2025/A"})
+    rendered, _digest = SC.generate_finals_comparison_html(
+        query_repo_id="2026/new", closest_source="2025/A", suspects=[suspect],
+        submodule_stats=stats, file_pairs=[], analysis_html="",
+        review_pairs=[review], cleared_review_pairs=[], ai_detect_data={
+            "status": "skipped", "reason": "没有可检测函数",
+            "scope": {"eligible_functions": 0, "analyzed_functions": 0,
+                      "extracted_functions": 0, "borrowed_excluded": 0,
+                      "third_party_excluded": 0},
+        }, query_repo_path=None,
+        linker=None, file_matches=[], file_similar=[], retrieval_contract=None, recall=None,
+    )
+
+    assert 'href="#review-evidence-fs">复核难例</a>' in rendered
+    assert '<tbody x-data="{o:false}" class="border-b border-slate-100" id="review-evidence-fs" data-jump-anchor="1">' in rendered
+    assert 'class="evidence-jump"' in rendered
+    assert 'parseInitialOpen' in rendered
+    assert 'openAncestors' in rendered
+    assert 'jump-flash' in rendered
