@@ -28,7 +28,6 @@ from oskernel_agent.pipeline.tree_builder import (
     _normalize_adjacent_module_paths,
     _normalize_similarity_evidence,
     _validate_subsys_result,
-    _check_hardcode_capacity,
     _validate_hardcode_reviews,
     _hardcode_reviews_needing_repair,
     _normalize_hardcode_repair_items,
@@ -37,7 +36,6 @@ from oskernel_agent.pipeline.tree_builder import (
     _validate_verdict_result,
     _verdict_repair_shape_ok,
     _read_latest_matching,
-    build_tree,
     _process_one_subsys,
     _build_subsys_outputs,
     _restore_one_subsys_from_artifacts,
@@ -342,7 +340,8 @@ def test_all_four_required_hardcode_methods_are_scanned(tmp_path):
     } <= categories
 
 
-def test_hardcode_limit_does_not_let_first_category_hide_other_methods(tmp_path):
+def test_hardcode_scan_returns_every_candidate_without_truncation(tmp_path):
+    """扫描不设候选数量上限：所有命中完整返回，四类都覆盖，truncated 恒 False。"""
     for index in range(8):
         (tmp_path / f"loader{index}.c").write_text(
             f'if (strstr(name, "case{index}.elf")) return 0;\n', encoding="utf-8"
@@ -355,38 +354,62 @@ def test_hardcode_limit_does_not_let_first_category_hide_other_methods(tmp_path)
     )
     (tmp_path / "run.sh").write_text("make test || true\n", encoding="utf-8")
 
-    result = scan_hardcode_signals(tmp_path, limit=4)
-    assert result["truncated"] is True
+    result = scan_hardcode_signals(tmp_path)
+    assert result["truncated"] is False
+    assert result["candidate_count"] == len(result["findings"]) == 11
     assert {item["category"] for item in result["findings"]} == {
         "按测试名或 ELF 名称分支",
         "测试专用缓存策略",
         "疑似写死测试结果",
         "脚本强制忽略失败",
-
     }
     assert all(item["scanned"] for item in result["category_coverage"].values())
 
-def test_default_hardcode_review_capacity_handles_large_kernel():
-    assert integrity_module.DEFAULT_HARDCODE_SIGNAL_LIMIT >= 150
+
+def test_low_confidence_categories_aggregate_per_file(tmp_path):
+    """低置信两类（脚本/缓存）按文件聚合为一条，lines 保留全部命中行；
+    高置信两类（分支/写死输出）保持逐行，评委仍能逐条核对。"""
+    (tmp_path / "test.sh").write_text(
+        "#!/bin/sh\nmake all || true\n./check || true\nexit 0\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "cache.c").write_text(
+        "int a = victim_of_case;\n"
+        + "// " + "x" * 260 + "\n"
+        + "int b = cache_for_benchmark;\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "branch.c").write_text(
+        'if (strstr(name, "case1.elf")) return 0;\n'
+        'if (strstr(name, "case2.elf")) return 0;\n',
+        encoding="utf-8",
+    )
+
+    findings = scan_hardcode_signals(tmp_path)["findings"]
+    branch = [f for f in findings if f["category"] == "按测试名或 ELF 名称分支"]
+    cache = [f for f in findings if f["category"] == "测试专用缓存策略"]
+    script = [f for f in findings if f["category"] == "脚本强制忽略失败"]
+
+    # 高置信逐行：两处分支各自保留
+    assert len(branch) == 2
+    assert {b["line"] for b in branch} == {1, 2}
+    assert "lines" not in branch[0] or branch[0].get("hit_count", 1) == 1
+
+    # 低置信按文件聚合：cache.c 两处命中 → 1 条，lines 保留两行
+    assert len(cache) == 1
+    assert cache[0]["path"] == "cache.c"
+    assert cache[0]["line"] == 1          # 代表行 = 首次命中
+    assert cache[0]["lines"] == [1, 3]
+    assert cache[0]["hit_count"] == 2
+
+    # 低置信按文件聚合：test.sh 三处（两处 || true + 一处 exit 0）→ 1 条
+    assert len(script) == 1
+    assert script[0]["path"] == "test.sh"
+    assert script[0]["lines"] == [2, 3, 4]
+    assert script[0]["hit_count"] == 3
 
 
-def test_hardcode_capacity_check_fails_before_llm_work():
-    """候选超限必须即刻拒绝（T202610006999602-3220 实测 119 条候选撞 100 上限，
-    此前要等 verdict+repair 跑完约 16 分钟才在末次校验报错）。"""
-    facts = {"integrity": {"hardcode": {
-        "truncated": True, "candidate_count": 119, "findings": list(range(100)),
-    }}}
-    with pytest.raises(RuntimeError, match="超过复核上限"):
-        _check_hardcode_capacity(facts)
 
-    ok_facts = {"integrity": {"hardcode": {
-        "truncated": False, "candidate_count": 100, "findings": list(range(100)),
-    }}}
-    _check_hardcode_capacity(ok_facts)  # 不抛
-
-
-
-def test_early_success_exit_in_test_script_is_a_review_candidate(tmp_path):
     script = tmp_path / "tests" / "run.sh"
     script.parent.mkdir()
     script.write_text("#!/bin/sh\nexit 0\nmake test\n", encoding="utf-8")
@@ -1645,24 +1668,6 @@ def test_process_one_subsys_reuses_artifact(tmp_path, monkeypatch):
     _process_one_subsys(node, repo, work_dir, facts=None)
 
     assert node["children"][0]["name"] == "页分配器"
-
-
-def test_build_tree_fails_fast_on_capacity_before_subsys(tmp_path):
-    repo = tmp_path / "repo"
-    source = repo / "src" / "main.c"
-    source.parent.mkdir(parents=True)
-    source.write_text("int kernel_main(void) { return 0; }\n", encoding="utf-8")
-    facts = {"integrity": {"hardcode": {
-        "truncated": True, "candidate_count": 119, "findings": list(range(100)),
-    }}}
-    out_dir = tmp_path / "out"
-
-    with pytest.raises(RuntimeError, match="超过复核上限"):
-        build_tree(repo, "demo", "20260808", facts=facts, output_dir=out_dir)
-
-    # 容量检查发生在 SUBSYS 之前：不应写任何子系统产物或指纹
-    assert not list(out_dir.glob("subsys-*.json"))
-    assert not (out_dir / "subsys.fingerprint.json").exists()
 
 
 def test_hardcode_repair_chunk_caps_single_item(tmp_path):

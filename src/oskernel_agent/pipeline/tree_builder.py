@@ -841,7 +841,9 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         "1. 不要调用 initialize_analysis；工具会根据 repo_path 自动初始化\n"
         "2. 必须逐条复核 facts.integrity.hardcode.findings，并主动搜索四类实现："
         "按测试名/ELF 名分支、针对测试的 cache 替换、直接打印预期输出、修改脚本旁路失败。"
-        "规则命中不是作弊结论；结合上下文给 confirmed/suspected/cleared，说明实现方法、影响和依据。\n"
+        "规则命中不是作弊结论；结合上下文给 confirmed/suspected/cleared，说明实现方法、影响和依据。"
+        "带 lines 数组的条目（测试专用缓存策略、脚本强制忽略失败）是同一文件内该类模式的聚合，"
+        "signal_id 为代表行，结论针对该文件整类模式给出，reason 中可注明其余命中行。\n"
         "3. 本报告不分析编译、构建与运行可用性；正文与 one_line 均不得出现编译通过/失败、"
         "构建入口、双架构编译、镜像编译等表述，也不得评价 Makefile 或容器配置。"
         "结构化 issues 只列可回溯到仓库源码 path:line 的设计或实现问题。"
@@ -1293,8 +1295,15 @@ def _hardcode_source_context(
         ).splitlines()
     except (OSError, TypeError, ValueError):
         return ""
-    start = max(0, line - radius - 1)
-    end = min(len(lines), line + radius)
+    # 低置信聚合项（脚本/缓存）的 lines 列出全部命中行：上下文覆盖整段命中范围，
+    # 而非只环绕代表行，模型才能看到整个文件级模式。代表行仍保留在中心。
+    hit_lines = signal.get("lines") or []
+    if isinstance(hit_lines, list) and len(hit_lines) > 1:
+        start = max(0, min(hit_lines) - 1)
+        end = min(len(lines), max(hit_lines))
+    else:
+        start = max(0, line - radius - 1)
+        end = min(len(lines), line + radius)
     rows = [f"{index + 1}: {lines[index]}" for index in range(start, end)]
     sizes = [len(row.encode("utf-8")) for row in rows]
     total = sum(sizes)
@@ -1368,18 +1377,6 @@ def _hardcode_reviews_needing_repair(
     return targets
 
 
-def _check_hardcode_capacity(facts: dict | None) -> None:
-    """硬编码候选超过复核上限时立即失败，避免 LLM 阶段白跑 16 分钟。"""
-    hardcode = (((facts or {}).get("integrity") or {}).get("hardcode") or {})
-    if hardcode.get("truncated"):
-        raise RuntimeError(
-            "硬编码候选超过复核上限，拒绝生成不完整报告："
-            f"候选 {hardcode.get('candidate_count', '?')} 条，"
-            f"当前上限 {len(hardcode.get('findings') or [])} 条；"
-            "请提高 AGENT_HARDCODE_SIGNAL_LIMIT 后重跑"
-        )
-
-
 def _hardcode_excerpt_from_repo(item: dict, repo_path: Path | None) -> str:
     """按 path:line 从仓库确定性回填代码摘录；读不到时返回空串。"""
     if not repo_path:
@@ -1410,7 +1407,6 @@ def _validate_hardcode_reviews(
     repo_path: Path | None = None,
 ) -> None:
     """确保每条规则线索都经过 AI 复核，且结论能回到真实代码位置。"""
-    _check_hardcode_capacity(facts)
     hardcode = (((facts or {}).get("integrity") or {}).get("hardcode") or {})
     signals = hardcode.get("findings") or []
     reviews = parsed.get("hardcode_reviews") or []
@@ -2032,8 +2028,6 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                        repo_path: Path | None = None) -> dict:
     # 指纹库故障必须在顶层模型开始评分前修复，避免模型看不到工具结果后自行估算原创性。
     _ensure_reference_database(facts)
-    # 硬编码候选超限先拒绝，不必等 verdict/repair 跑完 16 分钟才报错。
-    _check_hardcode_capacity(facts)
     outputs = {
         "json_path":    str(work_dir / "verdict.json"),
         "content_path": str(work_dir / "verdict.html"),
@@ -2175,10 +2169,6 @@ def build_tree(repo_path: Path, repo_name: str, ts: str,
 
     if file_count == 0:
         raise RuntimeError("仓库未找到可索引源文件，拒绝生成空的作品描述报告")
-
-    # B0. 硬编码候选超限先拒绝：与 run_verdict_stage 开头同款门禁，提前到 SUBSYS 之前，
-    #     超限仓库 ~1-2 分钟就红，不再跑完 9 个子系统（~16 分钟）才在 verdict 失败。
-    _check_hardcode_capacity(facts)
 
     # B. SUBSYS 并发分析
     run_subsys_stage(tree_root, repo_path, out_dir, facts)
