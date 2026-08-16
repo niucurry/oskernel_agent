@@ -4299,12 +4299,22 @@ def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
         card_index = 0
         for mod in module_order:
             members = module_groups[mod]
+            group_id = f"cluster-group-{html.escape(mod)}"
+            group_toggle = (
+                f'<button type="button" class="cluster-group-toggle" '
+                f'data-cluster-group="{html.escape(mod)}" '
+                f'data-cluster-count="{len(members)}" aria-controls="{group_id}" '
+                f'aria-expanded="false">展开本组 {len(members)} 簇</button>'
+            )
             parts.append(
+                f'<div class="cluster-module-group" id="{group_id}" '
+                f'data-cluster-group="{html.escape(mod)}">'
                 '<div id="module-evidence-' + html.escape(mod) + '" class="cluster-group-head">'
                 '<span class="cluster-group-name">'
                 + html.escape(_MODULE_DISPLAY.get(mod, mod)) + '</span>'
                 '<code class="cluster-group-tag">' + html.escape(mod) + '</code>'
-                f'<span class="cluster-group-count">{len(members)} 簇</span></div>'
+                f'<span class="cluster-group-count">{len(members)} 簇</span>'
+                + group_toggle + '</div>'
             )
             for c in members:  # 组内保持 build_similarity_clusters 的全局排序（priority 降序）
                 card_index += 1  # 编号全局连续，跨组不重置
@@ -4322,7 +4332,7 @@ def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
                 )
                 parts.append(
                     f'<article class="cluster-card" data-priority="{tone}" '
-                    'x-data="{open:false}">'
+                    f'data-cluster-group="{html.escape(mod)}" x-data="{{open:false}}">'
                     '<button type="button" class="cluster-head" @click="open=!open">'
                     f'<span class="cluster-index">C{card_index:02d}</span>'
                     '<span class="cluster-main">'
@@ -4339,6 +4349,7 @@ def _cluster_section(file_pairs: list[dict], analysis_html: str, linker,
                     f'{_ref_repo_anchor(linker, str(c["source"]))}</div>'
                     f'{_cluster_lineage_html(c)}{table}{analysis}</div></article>'
                 )
+            parts.append('</div>')
         intro = (
             '<div class="section-intro">系统将同一匹配仓库、同一子系统且属于同一功能域的函数合并为一个'
             '“同源事件”。优先级综合代码相似度、有效相似行和内核子系统重要度，并对多仓高频出现的'
@@ -4763,6 +4774,7 @@ _STYLES = r"""
   --muted:#64748b;--blue:#2563eb;--blue-soft:#eff6ff;--red:#dc2626;--amber:#d97706;
   --green:#16803c;--shadow:0 10px 30px rgba(15,23,42,.06)}
 *{box-sizing:border-box}
+[x-cloak]{display:none!important}
 html{scroll-behavior:smooth;scroll-padding-top:1.25rem}
 body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif}
 .layout{display:flex;align-items:flex-start;gap:1.5rem;max-width:1540px;margin:0 auto;padding:1.5rem 1.75rem 4rem}
@@ -4860,6 +4872,7 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
 .cluster-card[data-priority="critical"] .cluster-head{background:#fff7f7}.cluster-index{font:.72rem ui-monospace,SFMono-Regular,Consolas;color:#64748b}.cluster-main{display:flex;min-width:0;flex-direction:column}.cluster-main b{font-size:.82rem}.cluster-main small{margin-top:.12rem;color:#718096;font-size:.66rem}
 .cluster-metrics{font-size:.68rem;color:#64748b;white-space:nowrap}.cluster-priority{padding:.22rem .48rem;border-radius:999px;background:#fff;border:1px solid #e2e8f0;color:#9a5b06;font-size:.66rem;font-weight:700;white-space:nowrap}.cluster-body{padding:.2rem .8rem .85rem}.cluster-analysis{margin-top:.7rem;padding:.75rem;border:1px solid #dbe7f3;border-radius:8px;background:#f7faff;font-size:.75rem}
 .cluster-group-head{display:flex;align-items:center;gap:.55rem;margin:.9rem 0 .4rem;padding:.55rem .8rem;border-left:3px solid #2563eb;border-radius:8px;background:#f8fafc}.cluster-group-name{font-size:.8rem;font-weight:750;color:#1e293b}.cluster-group-tag{font:.68rem ui-monospace,SFMono-Regular,Consolas;color:#64748b;padding:.06rem .38rem;border:1px solid #e2e8f0;border-radius:4px;background:#fff}.cluster-group-count{margin-left:auto;font-size:.68rem;color:#64748b;white-space:nowrap}
+.cluster-module-group{margin-bottom:.2rem}.cluster-group-toggle{flex:0 0 auto;margin-left:.45rem;padding:.22rem .5rem;border:1px solid #c7d8f0;border-radius:999px;background:#fff;color:#2563eb;font-size:.66rem;font-weight:700;cursor:pointer;white-space:nowrap}.cluster-group-toggle:hover{background:#eff6ff;border-color:#93c5fd}
 /* 复核优先级 */
 .review-priority-cell{min-width:9rem}.review-priority-cell small{display:block;margin-top:.25rem;color:#718096;font-size:.64rem;line-height:1.35}.priority-badge{display:inline-flex;padding:.2rem .42rem;border-radius:999px;font-size:.66rem;font-weight:750}.priority-high{background:#fee2e2;color:#b91c1c}.priority-medium{background:#fef3c7;color:#a16207}.priority-low{background:#e2e8f0;color:#475569}
 .review-anchors{margin-top:.3rem;color:#64748b;font-size:.66rem;line-height:1.5}.review-anchors code{display:inline-block;margin:.1rem .15rem .1rem 0;padding:.05rem .25rem;border-radius:.25rem;background:#f1f5f9;color:#334155;white-space:normal;word-break:break-all}
@@ -4873,7 +4886,7 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
 .legend{display:flex;flex-wrap:wrap;gap:.4rem .8rem;margin-top:.7rem;padding:.6rem .7rem;border-radius:8px;background:#f8fafc;
   font-size:.69rem;color:#526175}.legend .dot{display:inline-block;width:.62rem;height:.62rem;border-radius:3px;margin-right:.3rem;vertical-align:-1px}
 /* 代码证据并排 */
-.code-toggle{cursor:pointer;background:none;border:none;padding:0}
+.code-toggle{display:inline-block;cursor:pointer;padding:.2rem .5rem;border:1px solid #c7d8f0;border-radius:999px;background:#f6faff;color:#2563eb;font-size:.72rem;line-height:1.2;white-space:nowrap}.code-toggle:hover{background:#eaf2ff;border-color:#93c5fd;text-decoration:none}
 .code-pair{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--line)}
 .code-col{min-width:0;border-left:1px solid var(--line)}
 .code-col:first-child{border-left:none}
@@ -4940,6 +4953,9 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"PingFang
 .jump-flash{animation:cmp-jump-flash 2.6s ease-out both}
 .jump-flash>tr>td,.jump-flash tr>td{animation:cmp-cell-flash 2.6s ease-out both}
 .jump-source{background:#dbeafe!important;box-shadow:0 0 0 2px rgba(37,99,235,.28);border-radius:4px}
+.evidence-jump{display:inline-block;margin:.08rem .18rem .08rem 0;padding:.14rem .45rem;border:1px solid #bfdbfe;border-radius:999px;background:#eff6ff;color:#1d4ed8;font-size:.72rem;line-height:1.3;text-decoration:none;white-space:nowrap}.evidence-jump:hover{background:#dbeafe;border-color:#93c5fd;text-decoration:none}
+.jump-toast{position:fixed;top:1.1rem;left:50%;transform:translateX(-50%);z-index:60;padding:.5rem .85rem;border-radius:999px;background:#1e3a8a;color:#fff;font-size:.78rem;font-weight:700;box-shadow:0 8px 24px rgba(30,58,138,.32);animation:cmp-toast-in .24s ease-out}.jump-toast:hover{background:#1e40af}
+@keyframes cmp-toast-in{0%{opacity:0;transform:translate(-50%,-.4rem)}100%{opacity:1;transform:translate(-50%,0)}}
 @keyframes cmp-jump-flash{
   0%{box-shadow:inset 0 0 0 3px rgba(37,99,235,.45);background-color:#dbeafe}
   55%{box-shadow:inset 0 0 0 2px rgba(37,99,235,.18);background-color:#eff6ff}
@@ -5012,8 +5028,12 @@ _INIT_SCRIPT = r"""
 
     function render(){
       body.hidden=!open;
+      if(open){body.removeAttribute('x-cloak')}else{body.setAttribute('x-cloak','')}
       if(icon)icon.textContent=open?'▾':'▸';
-      if(button&&opts.renderText)button.textContent=opts.renderText(open);
+      if(button){
+        button.setAttribute('aria-expanded',open?'true':'false');
+        if(opts.renderText)button.textContent=opts.renderText(open);
+      }
     }
 
     function setOpen(next,persist){
@@ -5021,6 +5041,7 @@ _INIT_SCRIPT = r"""
       render();
       if(persist!==false&&opts.persist)persistSection(root,open);
       if(open&&opts.section)document.dispatchEvent(new Event('section:opened'));
+      if(opts.afterChange)opts.afterChange(open);
       return open;
     }
 
@@ -5029,6 +5050,48 @@ _INIT_SCRIPT = r"""
       setOpen(!open,opts.persist!==false);
     });
     render();
+  }
+
+  function closestParent(node,selector){
+    while(node&&node.nodeType===1){
+      if(node.matches&&node.matches(selector))return node;
+      node=node.parentElement;
+    }
+    return null;
+  }
+
+  function syncClusterGroupToggles(){
+    document.querySelectorAll('.cluster-module-group').forEach(function(group){
+      var cards=group.querySelectorAll('article.cluster-card[x-data]');
+      var button=group.querySelector('.cluster-group-toggle');
+      if(!button||!cards.length)return;
+      var allOpen=true;
+      cards.forEach(function(card){
+        if(!card.__cmpDisclosure||!card.__cmpDisclosure.isOpen())allOpen=false;
+      });
+      var count=button.getAttribute('data-cluster-count')||cards.length;
+      button.textContent=(allOpen?'收起本组':'展开本组')+' '+count+' 簇';
+      button.setAttribute('aria-expanded',allOpen?'true':'false');
+    });
+  }
+
+  function initClusterGroupToggles(){
+    document.querySelectorAll('.cluster-group-toggle').forEach(function(button){
+      button.addEventListener('click',function(){
+        var group=closestParent(button,'.cluster-module-group');
+        if(!group)return;
+        var cards=group.querySelectorAll('article.cluster-card[x-data]');
+        var allOpen=true;
+        cards.forEach(function(card){
+          if(!card.__cmpDisclosure||!card.__cmpDisclosure.isOpen())allOpen=false;
+        });
+        var next=!allOpen;
+        cards.forEach(function(card){
+          if(card.__cmpDisclosure)card.__cmpDisclosure.setOpen(next,false);
+        });
+        syncClusterGroupToggles();
+      });
+    });
   }
 
   function initDisclosures(){
@@ -5045,7 +5108,8 @@ _INIT_SCRIPT = r"""
         key:'open',defaultOpen:false,persist:false,section:false,
         body:root.querySelector('.cluster-body'),
         button:root.querySelector('.cluster-head'),
-        icon:root.querySelector('.cluster-chevron')
+        icon:root.querySelector('.cluster-chevron'),
+        afterChange:syncClusterGroupToggles
       });
     });
     document.querySelectorAll('tbody[x-data]').forEach(function(root){
@@ -5081,10 +5145,11 @@ _INIT_SCRIPT = r"""
     });
   }
 
-  function flashTarget(target,source){
+  function flashTarget(target,source,companion){
     clearJumpFlash();
     if(flashTimer)clearTimeout(flashTimer);
     var els=[target];
+    if(companion)els.push(companion);
     if(target.tagName==='TBODY'){
       var row=target.querySelector('tr:not([x-show])');
       if(row)els.push(row);
@@ -5105,6 +5170,38 @@ _INIT_SCRIPT = r"""
     flashTimer=setTimeout(clearJumpFlash,2600);
   }
 
+  function revealFirstCluster(target){
+    var card=null;
+    if(target.classList&&target.classList.contains('cluster-group-head')){
+      var group=closestParent(target,'.cluster-module-group');
+      card=group?group.querySelector('article.cluster-card[x-data]'):null;
+    }else if(target.classList&&target.classList.contains('report-section')&&target.id==='sec-clusters'){
+      card=target.querySelector('article.cluster-card[x-data]');
+    }
+    if(card&&card.__cmpDisclosure){
+      card.__cmpDisclosure.setOpen(true,false);
+      return card.querySelector('.cluster-head')||card;
+    }
+    return null;
+  }
+
+  function showJumpToast(target){
+    var old=document.querySelector('.jump-toast');
+    if(old&&old.parentNode)old.parentNode.removeChild(old);
+    var id=target.id||'';
+    var label='已定位到目标条目';
+    if(id.indexOf('module-evidence-')===0)label='已定位到该模块的高置信证据';
+    else if(id.indexOf('review-evidence-')===0)label='已定位到该模块的复核难例条目';
+    else if(target.classList&&target.classList.contains('report-section'))label='已定位到报告章节';
+    var toast=document.createElement('div');
+    toast.className='jump-toast';
+    toast.textContent='✓ '+label;
+    document.body.appendChild(toast);
+    setTimeout(function(){
+      if(toast.parentNode)toast.parentNode.removeChild(toast);
+    },2400);
+  }
+
   function jumpToHash(href,source){
     if(!href||href.charAt(0)!=='#'||href==='#')return false;
     var rawId=href.slice(1);
@@ -5115,9 +5212,11 @@ _INIT_SCRIPT = r"""
     // 跳到 section/cluster 时把它们自身展开；跳到评审行/模块分组时只展开外层折叠区，
     // 不擅自展开该行的并排代码面板。
     openAncestors(target,target.tagName==='SECTION'||target.tagName==='ARTICLE');
+    var companion=revealFirstCluster(target);
     setTimeout(function(){
       scrollToTarget(target);
-      flashTarget(target,source);
+      flashTarget(target,source,companion);
+      if(source)showJumpToast(target);
     },30);
     try{history.replaceState(null,'',href)}catch(e){}
     return true;
@@ -5168,6 +5267,8 @@ _INIT_SCRIPT = r"""
 
   function boot(){
     initDisclosures();
+    initClusterGroupToggles();
+    syncClusterGroupToggles();
     initEvidenceJumps();
     initECharts();
     initScrollSpy();
@@ -7005,6 +7106,7 @@ def _finals_comparison_summary(
   <ul class="summary-alerts">{findings}</ul>
   <div class="overflow-x-auto"><table><thead><tr><th>模块</th><th>高置信比例</th><th>结论</th><th>实现依据</th></tr></thead>
   <tbody>{module_rows_html}</tbody></table></div>
+  <p class="text-xs text-slate-500 mt-1">点击「实现依据」中的链接会自动展开对应章节、打开首个相关功能簇或评审条目，并高亮提示定位位置。</p>
   {module_visual}
 </section>
 """
