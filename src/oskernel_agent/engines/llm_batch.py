@@ -385,6 +385,18 @@ def _tail_text(text: str, limit: int = 2000) -> str:
     return "...<truncated>...\n" + text[-limit:]
 
 
+_JSON_CLAIM_RE = re.compile(r"[`'\"]?[\w./\\-]+\.jsonl?", re.IGNORECASE)
+
+
+def _json_repair_worthwhile(raw: str, written: list, ok: bool) -> bool:
+    """纯聊天输出不值得再花一次 json_repair 调用；任一条件满足才修复，绝不误伤：
+      - 有落盘内容（written 非空）→ 定向修复；
+      - output_path 已存在（ok）→ 修复损坏文件；
+      - stdout 含 JSON 字面量 { 或声明写盘的 *.json 文件名 → 可能可回收。
+    """
+    return bool(written) or ok or "{" in raw or _JSON_CLAIM_RE.search(raw)
+
+
 def _opencode_message(text: str) -> str:
     # OpenCode 1.17.x on Windows drops or truncates multiline positional messages.
     return re.sub(r"[\r\n]+", " ", text).strip()
@@ -761,7 +773,7 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
                 raw = ""
         if not raw:
             raw = stdout
-        if raw and schema_hint:
+        if raw and schema_hint and _json_repair_worthwhile(raw, written, ok):
             _log(f"[llm_batch] {task.batch_id} 触发 json_repair")
             parsed = _try_repair_json(task, raw, schema_hint, timeout,
                                       repair_validator)
@@ -769,9 +781,12 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
     if parsed is None:
         # 最终重试 1 次（知情重试：附上上次输出片段，让模型对照修正格式）
         _log(f"[llm_batch] {task.batch_id} 重试 1 次")
+        no_write = (not ok) and (not written)   # 空转：无任何落盘内容
         reason = (
             "上次输出不是合法 JSON，或没有写到指定的 output_path。\n"
-            "上次输出片段：\n" + _tail_text(raw or stdout, 1500)
+            + (("检测到上次未调用 write_report，未产生任何输出文件。"
+                "请直接调用 write_report 把结果写到 output_path。\n") if no_write else "")
+            + "上次输出片段：\n" + _tail_text(raw or stdout, 1500)
         )
         retry_task = _retry_task(task, reason)
         ok2, _, written2 = _run_opencode_once(retry_task, timeout)

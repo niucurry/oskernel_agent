@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -18,6 +19,7 @@ from oskernel_agent.finals.integrity import (
 )
 from oskernel_agent.parsers.code_parser import classify_files_by_content
 from oskernel_agent.engines.path_c import TreeSitterEngine
+from oskernel_agent.pipeline import tree_builder
 from oskernel_agent.pipeline.tree_builder import (
     _deterministic_verdict_one_line,
     _fallback_subsystem_for_path,
@@ -35,6 +37,14 @@ from oskernel_agent.pipeline.tree_builder import (
     _validate_verdict_result,
     _verdict_repair_shape_ok,
     _read_latest_matching,
+    build_tree,
+    _process_one_subsys,
+    _build_subsys_outputs,
+    _restore_one_subsys_from_artifacts,
+    _subsys_fingerprint_matches_one,
+    _try_write_subsys_fingerprint,
+    _chunk_hardcode_targets,
+    _hardcode_source_context,
 )
 from oskernel_agent.report_quality import IncompleteReportError
 from oskernel_agent.reports.html_tree import (
@@ -1511,3 +1521,194 @@ def test_description_renderer_hides_dependency_scope_only_issue():
     rendered = render_tree_html(tree)
 
     assert "loopback-oriented" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# 断点续跑 / 提前容量检查 / 修复分块
+
+
+def _mm_subsys_node(repo: Path) -> dict:
+    """构造一个带真实文件清单的「内存管理」子系统节点。"""
+    return {
+        "type": "subsystem",
+        "name": "内存管理",
+        "path": "<subsys>/内存管理",
+        "files": [
+            {"path": "src/mm.c", "name": "mm.c", "lang": "c",
+             "size": 100, "mtime": 123456},
+        ],
+        "children": [],
+    }
+
+
+def _write_valid_subsys_artifact(repo: Path, work_dir: Path,
+                                 subsys_node: dict) -> None:
+    """写入一份能通过 _validate_subsys_result 的完整子系统产物。"""
+    source = repo / "src" / "mm.c"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("int page_alloc(void) { return 0; }\n", encoding="utf-8")
+    outputs = _build_subsys_outputs(subsys_node, work_dir)
+    Path(outputs["json_path"]).write_text(
+        json.dumps({
+            "name": "内存管理",
+            "role": "内存管理",
+            "summary": "分页内存管理子系统摘要",
+            "modules": [{
+                "slot": 1,
+                "name": "页分配器",
+                "summary": "物理页分配接口",
+                "file_paths": ["src/mm.c"],
+            }],
+            "highlights": [],
+            "issues": [],
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    Path(outputs["content_path"]).write_text(
+        "<p>分页内存管理子系统分析。</p>", encoding="utf-8")
+    Path(outputs["module_paths"][0]).write_text(
+        "<p>物理页分配器实现。</p>", encoding="utf-8")
+
+
+def test_subsys_resume_restores_valid_artifact(tmp_path):
+    repo = tmp_path / "repo"
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    node = _mm_subsys_node(repo)
+    _write_valid_subsys_artifact(repo, work_dir, node)
+
+    assert _restore_one_subsys_from_artifacts(node, repo, work_dir) is True
+    assert node["summary"] == "分页内存管理子系统摘要"
+    assert "分页内存管理子系统分析" in node["content"]
+    assert node["children"][0]["name"] == "页分配器"
+
+
+def test_subsys_resume_rejects_missing_or_invalid_artifact(tmp_path):
+    repo = tmp_path / "repo"
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    node = _mm_subsys_node(repo)
+
+    # 1) JSON 缺失 → False（不抛异常）
+    assert _restore_one_subsys_from_artifacts(node, repo, work_dir) is False
+
+    # 2) JSON 损坏 → False
+    outputs = _build_subsys_outputs(node, work_dir)
+    Path(outputs["json_path"]).write_text("{ not json", encoding="utf-8")
+    assert _restore_one_subsys_from_artifacts(node, repo, work_dir) is False
+
+    # 3) module 缺正文（.module-001.md 不存在 → content 读回空 → 校验失败）
+    (repo / "src").mkdir(parents=True, exist_ok=True)
+    (repo / "src" / "mm.c").write_text(
+        "int page_alloc(void) { return 0; }\n", encoding="utf-8")
+    Path(outputs["json_path"]).write_text(
+        json.dumps({"summary": "x", "modules": [{
+            "slot": 1, "name": "页分配器", "summary": "s",
+            "file_paths": ["src/mm.c"],
+        }]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    Path(outputs["content_path"]).write_text("<p>ok</p>", encoding="utf-8")
+    assert _restore_one_subsys_from_artifacts(node, repo, work_dir) is False
+
+
+def test_subsys_resume_gated_by_fingerprint(tmp_path):
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    node = _mm_subsys_node(tmp_path / "repo")
+    tree_root = {"children": [node]}
+
+    # 无指纹 → 不可续跑
+    assert _subsys_fingerprint_matches_one(node, work_dir) is False
+
+    # 写入匹配指纹 → 可续跑
+    _try_write_subsys_fingerprint(tree_root, work_dir)
+    assert _subsys_fingerprint_matches_one(node, work_dir) is True
+
+    # 文件清单变化（size 变）→ 拒绝
+    node["files"][0]["size"] = 200
+    assert _subsys_fingerprint_matches_one(node, work_dir) is False
+
+
+def test_process_one_subsys_reuses_artifact(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    node = _mm_subsys_node(repo)
+    _write_valid_subsys_artifact(repo, work_dir, node)
+    _try_write_subsys_fingerprint({"children": [node]}, work_dir)
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("resume 命中时不应调用 run_batch_task")
+
+    monkeypatch.setattr(tree_builder, "run_batch_task", boom)
+    _process_one_subsys(node, repo, work_dir, facts=None)
+
+    assert node["children"][0]["name"] == "页分配器"
+
+
+def test_build_tree_fails_fast_on_capacity_before_subsys(tmp_path):
+    repo = tmp_path / "repo"
+    source = repo / "src" / "main.c"
+    source.parent.mkdir(parents=True)
+    source.write_text("int kernel_main(void) { return 0; }\n", encoding="utf-8")
+    facts = {"integrity": {"hardcode": {
+        "truncated": True, "candidate_count": 119, "findings": list(range(100)),
+    }}}
+    out_dir = tmp_path / "out"
+
+    with pytest.raises(RuntimeError, match="超过复核上限"):
+        build_tree(repo, "demo", "20260808", facts=facts, output_dir=out_dir)
+
+    # 容量检查发生在 SUBSYS 之前：不应写任何子系统产物或指纹
+    assert not list(out_dir.glob("subsys-*.json"))
+    assert not (out_dir / "subsys.fingerprint.json").exists()
+
+
+def test_hardcode_repair_chunk_caps_single_item(tmp_path):
+    repo = tmp_path / "repo"
+    source = repo / "big.c"
+    source.parent.mkdir(parents=True)
+    source.write_text("int a;\n" * 60, encoding="utf-8")
+    signal = {"path": "big.c", "line": 1, "category": "按测试名或 ELF 名称分支"}
+
+    # 正常路径：source_context 不超过字节上限
+    ctx = _hardcode_source_context(repo, signal)
+    assert len(ctx.encode("utf-8")) <= 12_000
+
+    # 极端兜底：单条 source_context 手动撑爆，分块器也要压回 ≤38KB
+    targets = [{
+        "signal_id": "big.c:1:c",
+        "category": "按测试名或 ELF 名称分支",
+        "path": "big.c", "line": 1,
+        "excerpt": "x", "method": "m", "reason": "r",
+        "confidence": 1,
+        "source_context": "z" * 100_000,
+        "previous_review": {},
+    }]
+    chunks = _chunk_hardcode_targets(targets)
+    assert chunks
+    for chunk in chunks:
+        assert len(json.dumps(chunk, ensure_ascii=False)) <= 38_000
+
+
+def test_hardcode_source_context_keeps_signal_line_when_truncating(tmp_path):
+    repo = tmp_path / "repo"
+    source = repo / "big.c"
+    source.parent.mkdir(parents=True)
+    big_line = "y" * 50_000
+    lines = (
+        ["int a;"] * 2
+        + [big_line]                                   # 远端超长行（窗口内、离信号远）
+        + ["int a;"] * 23
+        + ["int signal_target = 1;"]                  # 信号行（第 27 行）
+        + ["int b;"] * 30
+    )
+    source.write_text("\n".join(lines), encoding="utf-8")
+    signal = {"path": "big.c", "line": 27, "category": "按测试名或 ELF 名称分支"}
+
+    ctx = _hardcode_source_context(repo, signal)
+
+    assert len(ctx.encode("utf-8")) <= 12_000
+    assert "27: int signal_target" in ctx   # 信号行保留
+    assert "yyyy" not in ctx                # 远端超长行被删掉
