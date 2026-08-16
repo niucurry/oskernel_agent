@@ -175,6 +175,12 @@ def test_finals_summary_module_evidence_links_target_group_heads():
     # 汇总表「高置信证据」链接目标 == 簇分组头锚点（锚点已从首张卡片上移到分组头）
     assert 'href="#module-evidence-fs">高置信证据</a>' in rendered
     assert '<div id="module-evidence-fs"' in rendered
+    # 模块内提供「展开/收起本组」控件，避免逐簇点击；跳转脚本会打开首个簇并提示定位成功。
+    assert 'class="cluster-module-group"' in rendered
+    assert 'class="cluster-group-toggle"' in rendered
+    assert '>展开本组 1 簇</button>' in rendered
+    assert 'syncClusterGroupToggles' in rendered
+    assert 'showJumpToast' in rendered
 
 
 def test_history_overview_selects_strong_sources_without_fixed_count():
