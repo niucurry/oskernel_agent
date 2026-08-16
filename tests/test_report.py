@@ -437,6 +437,31 @@ def test_review_section_distinguishes_same_name_functions_at_different_lines():
     assert '返回“疑似” <b>2</b> 个' in section
 
 
+def test_review_section_adds_one_jump_anchor_per_rendered_module():
+    first = _sc_suspect("a.rs", "lookup", "2021/x", "b.rs", "lookup", "review", .81,
+                         module="fs")
+    second = _sc_suspect("m.rs", "map", "2021/x", "n.rs", "map", "review", .80,
+                         module="mm")
+    third = _sc_suspect("s.rs", "sleep", "2021/x", "t.rs", "sleep", "review", .79,
+                         module="mm")
+    groups = SC.collect_file_pairs([first, second, third], keep_tiers=("review", "weak"))
+    for group in groups:
+        group.update({
+            "review_verdict": "疑似",
+            "review_reason": "共享了可核验的非平凡实现步骤",
+            "review_responsibility": "一致",
+            "review_responsibility_reason": "双方处理同一类逻辑",
+            "review_evidence_anchors": ["fn"],
+        })
+
+    _toc, section = SC._review_section(groups, None, "2024/new")
+
+    # 每个模块只占用首个实际渲染条目作为摘要跳转锚点，后续同模块条目不产生重复 id。
+    assert section.count('id="review-evidence-fs"') == 1
+    assert section.count('id="review-evidence-mm"') == 1
+    assert section.index('id="review-evidence-fs"') < section.index('id="review-evidence-mm"')
+
+
 def test_review_section_summarizes_model_cleared_pairs_without_expanding_irrelevant_code():
     suspect = _sc_suspect(
         "os/task.rs", "run_tasks", "2025/history", "task.rs", "run_tasks",
