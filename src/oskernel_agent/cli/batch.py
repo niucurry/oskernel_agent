@@ -164,8 +164,9 @@ def run_step(name: str, cmd: list[str], logfile: Path, timeout: int) -> tuple[bo
     with logfile.open("w", encoding="utf-8", errors="replace") as lf:
         lf.write(f"# {name}\n# {' '.join(cmd)}\n# start {datetime.now()}\n\n")
         lf.flush()
+        env = child_env()
         try:
-            p = subprocess.run(cmd, cwd=ROOT, env=child_env(), stdout=lf,
+            p = subprocess.run(cmd, cwd=ROOT, env=env, stdout=lf,
                                stderr=subprocess.STDOUT, text=True, timeout=timeout)
             ok = p.returncode == 0
         except subprocess.TimeoutExpired:

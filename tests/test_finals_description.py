@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -18,6 +19,7 @@ from oskernel_agent.finals.integrity import (
 )
 from oskernel_agent.parsers.code_parser import classify_files_by_content
 from oskernel_agent.engines.path_c import TreeSitterEngine
+from oskernel_agent.pipeline import tree_builder
 from oskernel_agent.pipeline.tree_builder import (
     _deterministic_verdict_one_line,
     _fallback_subsystem_for_path,
@@ -26,7 +28,6 @@ from oskernel_agent.pipeline.tree_builder import (
     _normalize_adjacent_module_paths,
     _normalize_similarity_evidence,
     _validate_subsys_result,
-    _check_hardcode_capacity,
     _validate_hardcode_reviews,
     _hardcode_reviews_needing_repair,
     _normalize_hardcode_repair_items,
@@ -35,6 +36,13 @@ from oskernel_agent.pipeline.tree_builder import (
     _validate_verdict_result,
     _verdict_repair_shape_ok,
     _read_latest_matching,
+    _process_one_subsys,
+    _build_subsys_outputs,
+    _restore_one_subsys_from_artifacts,
+    _subsys_fingerprint_matches_one,
+    _try_write_subsys_fingerprint,
+    _chunk_hardcode_targets,
+    _hardcode_source_context,
 )
 from oskernel_agent.report_quality import IncompleteReportError
 from oskernel_agent.reports.html_tree import (
@@ -332,7 +340,8 @@ def test_all_four_required_hardcode_methods_are_scanned(tmp_path):
     } <= categories
 
 
-def test_hardcode_limit_does_not_let_first_category_hide_other_methods(tmp_path):
+def test_hardcode_scan_returns_every_candidate_without_truncation(tmp_path):
+    """扫描不设候选数量上限：所有命中完整返回，四类都覆盖，truncated 恒 False。"""
     for index in range(8):
         (tmp_path / f"loader{index}.c").write_text(
             f'if (strstr(name, "case{index}.elf")) return 0;\n', encoding="utf-8"
@@ -345,38 +354,62 @@ def test_hardcode_limit_does_not_let_first_category_hide_other_methods(tmp_path)
     )
     (tmp_path / "run.sh").write_text("make test || true\n", encoding="utf-8")
 
-    result = scan_hardcode_signals(tmp_path, limit=4)
-    assert result["truncated"] is True
+    result = scan_hardcode_signals(tmp_path)
+    assert result["truncated"] is False
+    assert result["candidate_count"] == len(result["findings"]) == 11
     assert {item["category"] for item in result["findings"]} == {
         "按测试名或 ELF 名称分支",
         "测试专用缓存策略",
         "疑似写死测试结果",
         "脚本强制忽略失败",
-
     }
     assert all(item["scanned"] for item in result["category_coverage"].values())
 
-def test_default_hardcode_review_capacity_handles_large_kernel():
-    assert integrity_module.DEFAULT_HARDCODE_SIGNAL_LIMIT >= 150
+
+def test_low_confidence_categories_aggregate_per_file(tmp_path):
+    """低置信两类（脚本/缓存）按文件聚合为一条，lines 保留全部命中行；
+    高置信两类（分支/写死输出）保持逐行，评委仍能逐条核对。"""
+    (tmp_path / "test.sh").write_text(
+        "#!/bin/sh\nmake all || true\n./check || true\nexit 0\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "cache.c").write_text(
+        "int a = victim_of_case;\n"
+        + "// " + "x" * 260 + "\n"
+        + "int b = cache_for_benchmark;\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "branch.c").write_text(
+        'if (strstr(name, "case1.elf")) return 0;\n'
+        'if (strstr(name, "case2.elf")) return 0;\n',
+        encoding="utf-8",
+    )
+
+    findings = scan_hardcode_signals(tmp_path)["findings"]
+    branch = [f for f in findings if f["category"] == "按测试名或 ELF 名称分支"]
+    cache = [f for f in findings if f["category"] == "测试专用缓存策略"]
+    script = [f for f in findings if f["category"] == "脚本强制忽略失败"]
+
+    # 高置信逐行：两处分支各自保留
+    assert len(branch) == 2
+    assert {b["line"] for b in branch} == {1, 2}
+    assert "lines" not in branch[0] or branch[0].get("hit_count", 1) == 1
+
+    # 低置信按文件聚合：cache.c 两处命中 → 1 条，lines 保留两行
+    assert len(cache) == 1
+    assert cache[0]["path"] == "cache.c"
+    assert cache[0]["line"] == 1          # 代表行 = 首次命中
+    assert cache[0]["lines"] == [1, 3]
+    assert cache[0]["hit_count"] == 2
+
+    # 低置信按文件聚合：test.sh 三处（两处 || true + 一处 exit 0）→ 1 条
+    assert len(script) == 1
+    assert script[0]["path"] == "test.sh"
+    assert script[0]["lines"] == [2, 3, 4]
+    assert script[0]["hit_count"] == 3
 
 
-def test_hardcode_capacity_check_fails_before_llm_work():
-    """候选超限必须即刻拒绝（T202610006999602-3220 实测 119 条候选撞 100 上限，
-    此前要等 verdict+repair 跑完约 16 分钟才在末次校验报错）。"""
-    facts = {"integrity": {"hardcode": {
-        "truncated": True, "candidate_count": 119, "findings": list(range(100)),
-    }}}
-    with pytest.raises(RuntimeError, match="超过复核上限"):
-        _check_hardcode_capacity(facts)
 
-    ok_facts = {"integrity": {"hardcode": {
-        "truncated": False, "candidate_count": 100, "findings": list(range(100)),
-    }}}
-    _check_hardcode_capacity(ok_facts)  # 不抛
-
-
-
-def test_early_success_exit_in_test_script_is_a_review_candidate(tmp_path):
     script = tmp_path / "tests" / "run.sh"
     script.parent.mkdir()
     script.write_text("#!/bin/sh\nexit 0\nmake test\n", encoding="utf-8")
@@ -1511,3 +1544,176 @@ def test_description_renderer_hides_dependency_scope_only_issue():
     rendered = render_tree_html(tree)
 
     assert "loopback-oriented" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# 断点续跑 / 提前容量检查 / 修复分块
+
+
+def _mm_subsys_node(repo: Path) -> dict:
+    """构造一个带真实文件清单的「内存管理」子系统节点。"""
+    return {
+        "type": "subsystem",
+        "name": "内存管理",
+        "path": "<subsys>/内存管理",
+        "files": [
+            {"path": "src/mm.c", "name": "mm.c", "lang": "c",
+             "size": 100, "mtime": 123456},
+        ],
+        "children": [],
+    }
+
+
+def _write_valid_subsys_artifact(repo: Path, work_dir: Path,
+                                 subsys_node: dict) -> None:
+    """写入一份能通过 _validate_subsys_result 的完整子系统产物。"""
+    source = repo / "src" / "mm.c"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("int page_alloc(void) { return 0; }\n", encoding="utf-8")
+    outputs = _build_subsys_outputs(subsys_node, work_dir)
+    Path(outputs["json_path"]).write_text(
+        json.dumps({
+            "name": "内存管理",
+            "role": "内存管理",
+            "summary": "分页内存管理子系统摘要",
+            "modules": [{
+                "slot": 1,
+                "name": "页分配器",
+                "summary": "物理页分配接口",
+                "file_paths": ["src/mm.c"],
+            }],
+            "highlights": [],
+            "issues": [],
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    Path(outputs["content_path"]).write_text(
+        "<p>分页内存管理子系统分析。</p>", encoding="utf-8")
+    Path(outputs["module_paths"][0]).write_text(
+        "<p>物理页分配器实现。</p>", encoding="utf-8")
+
+
+def test_subsys_resume_restores_valid_artifact(tmp_path):
+    repo = tmp_path / "repo"
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    node = _mm_subsys_node(repo)
+    _write_valid_subsys_artifact(repo, work_dir, node)
+
+    assert _restore_one_subsys_from_artifacts(node, repo, work_dir) is True
+    assert node["summary"] == "分页内存管理子系统摘要"
+    assert "分页内存管理子系统分析" in node["content"]
+    assert node["children"][0]["name"] == "页分配器"
+
+
+def test_subsys_resume_rejects_missing_or_invalid_artifact(tmp_path):
+    repo = tmp_path / "repo"
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    node = _mm_subsys_node(repo)
+
+    # 1) JSON 缺失 → False（不抛异常）
+    assert _restore_one_subsys_from_artifacts(node, repo, work_dir) is False
+
+    # 2) JSON 损坏 → False
+    outputs = _build_subsys_outputs(node, work_dir)
+    Path(outputs["json_path"]).write_text("{ not json", encoding="utf-8")
+    assert _restore_one_subsys_from_artifacts(node, repo, work_dir) is False
+
+    # 3) module 缺正文（.module-001.md 不存在 → content 读回空 → 校验失败）
+    (repo / "src").mkdir(parents=True, exist_ok=True)
+    (repo / "src" / "mm.c").write_text(
+        "int page_alloc(void) { return 0; }\n", encoding="utf-8")
+    Path(outputs["json_path"]).write_text(
+        json.dumps({"summary": "x", "modules": [{
+            "slot": 1, "name": "页分配器", "summary": "s",
+            "file_paths": ["src/mm.c"],
+        }]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    Path(outputs["content_path"]).write_text("<p>ok</p>", encoding="utf-8")
+    assert _restore_one_subsys_from_artifacts(node, repo, work_dir) is False
+
+
+def test_subsys_resume_gated_by_fingerprint(tmp_path):
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    node = _mm_subsys_node(tmp_path / "repo")
+    tree_root = {"children": [node]}
+
+    # 无指纹 → 不可续跑
+    assert _subsys_fingerprint_matches_one(node, work_dir) is False
+
+    # 写入匹配指纹 → 可续跑
+    _try_write_subsys_fingerprint(tree_root, work_dir)
+    assert _subsys_fingerprint_matches_one(node, work_dir) is True
+
+    # 文件清单变化（size 变）→ 拒绝
+    node["files"][0]["size"] = 200
+    assert _subsys_fingerprint_matches_one(node, work_dir) is False
+
+
+def test_process_one_subsys_reuses_artifact(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    node = _mm_subsys_node(repo)
+    _write_valid_subsys_artifact(repo, work_dir, node)
+    _try_write_subsys_fingerprint({"children": [node]}, work_dir)
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("resume 命中时不应调用 run_batch_task")
+
+    monkeypatch.setattr(tree_builder, "run_batch_task", boom)
+    _process_one_subsys(node, repo, work_dir, facts=None)
+
+    assert node["children"][0]["name"] == "页分配器"
+
+
+def test_hardcode_repair_chunk_caps_single_item(tmp_path):
+    repo = tmp_path / "repo"
+    source = repo / "big.c"
+    source.parent.mkdir(parents=True)
+    source.write_text("int a;\n" * 60, encoding="utf-8")
+    signal = {"path": "big.c", "line": 1, "category": "按测试名或 ELF 名称分支"}
+
+    # 正常路径：source_context 不超过字节上限
+    ctx = _hardcode_source_context(repo, signal)
+    assert len(ctx.encode("utf-8")) <= 12_000
+
+    # 极端兜底：单条 source_context 手动撑爆，分块器也要压回 ≤38KB
+    targets = [{
+        "signal_id": "big.c:1:c",
+        "category": "按测试名或 ELF 名称分支",
+        "path": "big.c", "line": 1,
+        "excerpt": "x", "method": "m", "reason": "r",
+        "confidence": 1,
+        "source_context": "z" * 100_000,
+        "previous_review": {},
+    }]
+    chunks = _chunk_hardcode_targets(targets)
+    assert chunks
+    for chunk in chunks:
+        assert len(json.dumps(chunk, ensure_ascii=False)) <= 38_000
+
+
+def test_hardcode_source_context_keeps_signal_line_when_truncating(tmp_path):
+    repo = tmp_path / "repo"
+    source = repo / "big.c"
+    source.parent.mkdir(parents=True)
+    big_line = "y" * 50_000
+    lines = (
+        ["int a;"] * 2
+        + [big_line]                                   # 远端超长行（窗口内、离信号远）
+        + ["int a;"] * 23
+        + ["int signal_target = 1;"]                  # 信号行（第 27 行）
+        + ["int b;"] * 30
+    )
+    source.write_text("\n".join(lines), encoding="utf-8")
+    signal = {"path": "big.c", "line": 27, "category": "按测试名或 ELF 名称分支"}
+
+    ctx = _hardcode_source_context(repo, signal)
+
+    assert len(ctx.encode("utf-8")) <= 12_000
+    assert "27: int signal_target" in ctx   # 信号行保留
+    assert "yyyy" not in ctx                # 远端超长行被删掉

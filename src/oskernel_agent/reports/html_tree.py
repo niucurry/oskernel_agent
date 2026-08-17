@@ -725,6 +725,10 @@ def _render_hardcode_brief(tree_json: dict, resolver) -> str:
         conclusion = "硬编码候选尚未全部完成结构化 AI 复核，不能下结论。"
         status_text, status_cls = "复核不完整", "status-warn"
 
+    raw_by_id = {
+        str(s.get("signal_id") or ""): s
+        for s in (hardcode.get("findings") or []) if isinstance(s, dict)
+    }
     risky_rows: list[str] = []
     for item in (confirmed + suspected):
         location = str(item.get("path") or "")
@@ -734,10 +738,20 @@ def _render_hardcode_brief(tree_json: dict, resolver) -> str:
         method = str(item.get("method") or "未说明实现方法。")
         reason = str(item.get("reason") or "证据需要复核。")
         review_status = "确认问题" if item.get("status") == "confirmed" else "疑似问题"
+        # 低置信聚合项的代表行外还有其余命中行，一并列出供评委回溯全部位置。
+        raw = raw_by_id.get(str(item.get("signal_id") or ""), {})
+        hit_lines = raw.get("lines") or []
+        others = sorted(
+            {int(ln) for ln in hit_lines if int(ln) != int(raw.get("line") or 0)}
+        ) if hit_lines else []
+        extra = (
+            f'（同类命中另 {len(others)} 处：{"、".join(f"L{ln}" for ln in others[:8])}）'
+            if others else ""
+        )
         risky_rows.append(
             '<li class="finding-row text-sm">'
             f'<strong>{_esc(item.get("category") or "硬编码线索")} · {review_status}</strong>：{_esc(method)} '
-            f'{_esc(reason)}{(" · 证据：" + evidence) if evidence else ""}</li>'
+            f'{_esc(reason)}{extra}{(" · 证据：" + evidence) if evidence else ""}</li>'
         )
     return f"""
 <section id="hardcode" data-section-id="hardcode" class="brief-card p-5 mb-5">

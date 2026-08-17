@@ -34,7 +34,6 @@ _REQUIRED_KERNEL_TARGETS = ("kernel-rv", "kernel-la")
 _AGGREGATE_ENTRY_TARGETS = ("all", "submit")
 _MAX_FILE_BYTES = 2 * 1024 * 1024
 DEFAULT_CONTEST_BUILD_IMAGE = "zhouzhouyi/os-contest:20260510"
-DEFAULT_HARDCODE_SIGNAL_LIMIT = 150
 _BUILD_COPY_SKIP_DIRS = {
     ".git", ".venv", "node_modules", "target", "build", "dist", "__pycache__",
 }
@@ -54,6 +53,10 @@ REQUIRED_HARDCODE_CATEGORIES = (
     "疑似写死测试结果",
     "脚本强制忽略失败",
 )
+
+# 低置信两类规则命中的是「文件级模式」：脚本吞失败、缓存策略与测试名同现。
+# 逐行复核既浪费 token 又不如文件级判断准确，故按文件聚合为一条，保留全部命中行。
+_BATCHED_HARDCODE_CATEGORIES = ("测试专用缓存策略", "脚本强制忽略失败")
 
 _SIGNALS = (
     (
@@ -184,11 +187,41 @@ def analyze_log(path: str | Path | None, *, kind: str) -> dict:
     }
 
 
-def scan_hardcode_signals(repo_path: str | Path, *, limit: int = 20) -> dict:
+def _aggregate_batched_findings(candidates: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """把低置信类别按文件聚合：代表行取首次命中，其余命中行写入 lines 列表。
+
+    同一脚本里多行 `|| true` / `exit 0`，或同一缓存文件里多处 cache+test 同现，
+    复核结论本质是「该文件的整体模式」，逐行给结论既费 token 又可能互相矛盾。
+    聚合不丢位置——lines 保留全部命中行，供报告和定向复核回溯。
+    """
+    aggregated: dict[str, list[dict]] = {
+        category: [] for category in REQUIRED_HARDCODE_CATEGORIES
+    }
+    for category, items in candidates.items():
+        if category not in _BATCHED_HARDCODE_CATEGORIES:
+            aggregated[category] = items
+            continue
+        by_file: dict[str, dict] = {}
+        for item in items:
+            path = str(item.get("path") or "")
+            head = by_file.get(path)
+            if head is None:
+                by_file[path] = {**item, "lines": [int(item["line"])], "hit_count": 1}
+            else:
+                head["lines"].append(int(item["line"]))
+                head["hit_count"] += 1
+        for head in by_file.values():
+            head["lines"] = sorted(head["lines"])
+        aggregated[category] = list(by_file.values())
+    return aggregated
+
+
+def scan_hardcode_signals(repo_path: str | Path) -> dict:
     """扫描可疑源码/脚本局部；每条结果都带真实文件和行号。
 
-    扫描始终遍历完整个仓库并执行四类规则。达到输出上限时按类别轮询取样，避免
-    第一类大量命中耗尽全局名额，导致报告错误地声称其余三类已经检查但实际未检查。
+    扫描始终遍历完整个仓库并执行四类规则，命中全部返回、不设候选数量上限，
+    避免截断导致报告错误地声称某类已检查但实际未检查。低置信两类按文件聚合
+    （见 _BATCHED_HARDCODE_CATEGORIES），高置信两类保持逐行。
     """
     root = Path(repo_path).resolve()
     candidates: dict[str, list[dict]] = {
@@ -281,25 +314,18 @@ def scan_hardcode_signals(repo_path: str | Path, *, limit: int = 20) -> dict:
                     ),
                 })
 
+    # 低置信类按文件聚合（脚本/缓存），高置信类逐行保留；全部返回、不设上限。
     total_candidates = sum(len(items) for items in candidates.values())
-    findings: list[dict] = []
-    # 轮询各类别，先保留每个已命中类别的代表证据，再分配剩余名额。
-    depth = 0
-    bounded_limit = max(0, int(limit))
-    while len(findings) < bounded_limit:
-        added = False
-        for category in REQUIRED_HARDCODE_CATEGORIES:
-            items = candidates[category]
-            if depth < len(items) and len(findings) < bounded_limit:
-                findings.append(items[depth])
-                added = True
-        if not added:
-            break
-        depth += 1
+    aggregated = _aggregate_batched_findings(candidates)
+    findings = [
+        item
+        for category in REQUIRED_HARDCODE_CATEGORIES
+        for item in aggregated[category]
+    ]
 
     return {
         "scanned_files": scanned_files,
-        "truncated": total_candidates > len(findings),
+        "truncated": False,
         "candidate_count": total_candidates,
         "category_coverage": {
             category: {"scanned": True, "matches": len(candidates[category])}
@@ -980,12 +1006,8 @@ def scan_reproducibility(repo_path: str | Path) -> dict:
 
 def collect_integrity_facts(repo_path: str | Path) -> dict:
     """描述报告只做硬编码线索采集，不再分析编译、构建与运行可用性。"""
-    try:
-        signal_limit = max(4, int(os.environ.get("AGENT_HARDCODE_SIGNAL_LIMIT", str(DEFAULT_HARDCODE_SIGNAL_LIMIT))))
-    except ValueError:
-        signal_limit = DEFAULT_HARDCODE_SIGNAL_LIMIT
     return {
-        "hardcode": scan_hardcode_signals(repo_path, limit=signal_limit),
+        "hardcode": scan_hardcode_signals(repo_path),
         "interpretation": (
             "本报告不分析编译、构建与运行可用性，不执行比赛镜像编译验证。"
             "硬编码扫描仅提供待复核线索；只有结合完整源码上下文后，"
