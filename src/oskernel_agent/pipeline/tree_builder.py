@@ -41,6 +41,12 @@ SCHEMA_VERSION = "tree-v3"
 
 MAX_MODULES_PER_SUBSYS = 8   # 每个子系统至多 N 个模块槽位
 MAX_FILES_IN_SUBSYS_PROMPT = 80
+_SUBSYS_FINGERPRINT = "subsys.fingerprint.json"   # SUBSYS 全部成功后写入，供断点续跑判陈旧性
+
+# hardcode 复核分块预算：≤此字节的任意单块不会撑爆模型 read 工具 50KB 截断。
+_HARDCODE_REPAIR_CHUNK_BYTES = 38_000
+# 单条 source_context 的上限（远小于分块预算）：先压每条，再按字节分块。
+_MAX_SOURCE_CONTEXT_BYTES = 12_000
 
 _DEPENDENCY_PATH_PARTS = {
     "vendor", "third_party", "thirdparty", "external", "node_modules", "target",
@@ -485,9 +491,100 @@ def _validate_subsys_result(
         )
 
 
+def _subsys_file_signature(subsys_node: dict) -> list:
+    """该子系统的源文件指纹：(path, mtime, size) 按路径排序。
+
+    mtime 保留原始浮点值不取整——同一秒内编辑文件时 int 截断会漏检。
+    """
+    return sorted(
+        [str(f.get("path") or ""), f.get("mtime"), f.get("size")]
+        for f in subsys_node.get("files") or []
+    )
+
+
+def _try_write_subsys_fingerprint(tree_root: dict, work_dir: Path) -> None:
+    """SUBSYS 全部成功后记录每个子系统的文件指纹；写盘失败静默。
+
+    只在整个阶段成功时调用：中途崩溃则下次无指纹、全部重跑（安全，只是无收益）。
+    """
+    payload = {
+        str(node.get("name") or ""): _subsys_file_signature(node)
+        for node in tree_root.get("children", [])
+        if node.get("type") == "subsystem"
+    }
+    try:
+        (work_dir / _SUBSYS_FINGERPRINT).write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def _subsys_fingerprint_matches_one(subsys_node: dict, work_dir: Path) -> bool:
+    """当前枚举的文件清单与上次 SUBSYS 成功时的指纹一致才算可续跑。"""
+    try:
+        stored = json.loads(
+            (work_dir / _SUBSYS_FINGERPRINT).read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(stored, dict)
+        and stored.get(str(subsys_node.get("name") or ""))
+        == _subsys_file_signature(subsys_node)
+    )
+
+
+def _restore_one_subsys_from_artifacts(
+    subsys_node: dict,
+    repo_path: Path,
+    work_dir: Path,
+) -> bool:
+    """从已通过校验的落盘产物恢复单个子系统；缺失/损坏/校验失败一律返回 False。
+
+    与 load_subsys_stage_from_artifacts 的单子系统逻辑一致，但语义改为
+    「逐子系统判定可恢复」而非「全部有才恢复、缺失即 raise」。恢复时重新执行
+    与正常流水线相同的语言、路径和完整性校验——仓库删文件/路径失效即拒绝恢复。
+    """
+    outputs = _build_subsys_outputs(subsys_node, work_dir)
+    original_path = Path(outputs["json_path"])
+    if not original_path.exists():
+        return False
+    repaired_path = original_path.with_name(f"{original_path.stem}.repair.json")
+    artifact_path = repaired_path if repaired_path.exists() else original_path
+    try:
+        parsed = json.loads(artifact_path.read_text(encoding="utf-8"))
+        parsed["content"] = _read_md_if_exists(Path(outputs["content_path"]))
+        for index, module in enumerate(parsed.get("modules") or [], start=1):
+            slot = int(module.get("slot") or index)
+            module["file_paths"] = _normalize_adjacent_module_paths(
+                module.get("file_paths") or [], repo_path,
+            )
+            if 1 <= slot <= MAX_MODULES_PER_SUBSYS:
+                module["content"] = _read_md_if_exists(
+                    Path(outputs["module_paths"][slot - 1])
+                )
+        from .lang_guard import normalize_tree_language, normalize_tree_titles
+        normalize_tree_language(parsed)
+        normalize_tree_titles(parsed)
+        _validate_subsys_result(parsed, subsys_node["name"], repo_path)
+        _apply_subsys_result(subsys_node, parsed, repo_path)
+    except (OSError, TypeError, ValueError, RuntimeError, json.JSONDecodeError):
+        return False
+    return True
+
+
 def _process_one_subsys(subsys_node: dict, repo_path: Path,
                          work_dir: Path, facts: dict | None) -> None:
     """处理一个子系统节点：跑 LLM、读回所有 .md、填充节点与模块子节点。"""
+    # 断点续跑：产物存在、指纹未变且重新通过校验时复用，不重跑 LLM。
+    # 自动生效（无需开关）；强制全量 = 删除 work_dir/description_tree_work。
+    if (_subsys_fingerprint_matches_one(subsys_node, work_dir)
+            and _restore_one_subsys_from_artifacts(
+                subsys_node, repo_path, work_dir)):
+        print(f"[tree] {subsys_node['name']} 复用已通过校验的 SUBSYS 产物",
+              file=sys.stderr, flush=True)
+        return
     outputs   = _build_subsys_outputs(subsys_node, work_dir)
     out_path  = Path(outputs["json_path"])
     module_paths = outputs["module_paths"]
@@ -598,39 +695,19 @@ def load_subsys_stage_from_artifacts(
 ) -> None:
     """从已通过 AI 生成的阶段产物恢复子系统树，不再次调用模型。
 
-    顶层阶段校验失败不应迫使所有子系统重新分析。JSON 修复产物优先于模型写出的
-    原始 JSON；恢复时仍执行与正常流水线相同的语言、路径和完整性校验。
+    顶层阶段校验失败不应迫使所有子系统重新分析。保持严格契约：任一子系统
+    缺失/损坏/校验失败即 raise。恢复逻辑委托给 _restore_one_subsys_from_artifacts，
+    避免双份逻辑漂移（_process_one_subsys 的断点续跑复用它）。
     """
-    from .lang_guard import normalize_tree_language, normalize_tree_titles
-
     for subsys_node in tree_root.get("children", []):
         if subsys_node.get("type") != "subsystem":
             continue
-        outputs = _build_subsys_outputs(subsys_node, work_dir)
-        original_path = Path(outputs["json_path"])
-        repaired_path = original_path.with_name(f"{original_path.stem}.repair.json")
-        artifact_path = repaired_path if repaired_path.exists() else original_path
-        try:
-            parsed = json.loads(artifact_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        if not _restore_one_subsys_from_artifacts(
+            subsys_node, repo_path, work_dir,
+        ):
             raise RuntimeError(
-                f"无法恢复{subsys_node['name']}阶段产物：{artifact_path}：{exc}"
-            ) from exc
-
-        parsed["content"] = _read_md_if_exists(Path(outputs["content_path"]))
-        for index, module in enumerate(parsed.get("modules") or [], start=1):
-            slot = int(module.get("slot") or index)
-            module["file_paths"] = _normalize_adjacent_module_paths(
-                module.get("file_paths") or [], repo_path,
+                f"无法恢复{subsys_node['name']}阶段产物：缺失、损坏或校验失败"
             )
-            if 1 <= slot <= MAX_MODULES_PER_SUBSYS:
-                module["content"] = _read_md_if_exists(
-                    Path(outputs["module_paths"][slot - 1])
-                )
-        normalize_tree_language(parsed)
-        normalize_tree_titles(parsed)
-        _validate_subsys_result(parsed, subsys_node["name"], repo_path)
-        _apply_subsys_result(subsys_node, parsed, repo_path)
 
 
 def _normalize_adjacent_module_paths(paths: list, repo_path: Path) -> list[str]:
@@ -737,6 +814,9 @@ def run_subsys_stage(tree_root: dict, repo_path: Path,
         if failures:
             raise RuntimeError("子系统语义分析未完整完成，拒绝生成占位报告：" + "；".join(failures))
 
+    # 全部成功才写指纹，供下次断点续跑判定陈旧性（中途崩溃则下次无指纹、全部重跑）。
+    _try_write_subsys_fingerprint(tree_root, work_dir)
+
 
 # 阶段 C：VERDICT（接收子系统总结 + facts 综合评判）
 
@@ -761,7 +841,9 @@ def _build_verdict_request(facts: dict | None, subsys_summaries: list[dict],
         "1. 不要调用 initialize_analysis；工具会根据 repo_path 自动初始化\n"
         "2. 必须逐条复核 facts.integrity.hardcode.findings，并主动搜索四类实现："
         "按测试名/ELF 名分支、针对测试的 cache 替换、直接打印预期输出、修改脚本旁路失败。"
-        "规则命中不是作弊结论；结合上下文给 confirmed/suspected/cleared，说明实现方法、影响和依据。\n"
+        "规则命中不是作弊结论；结合上下文给 confirmed/suspected/cleared，说明实现方法、影响和依据。"
+        "带 lines 数组的条目（测试专用缓存策略、脚本强制忽略失败）是同一文件内该类模式的聚合，"
+        "signal_id 为代表行，结论针对该文件整类模式给出，reason 中可注明其余命中行。\n"
         "3. 本报告不分析编译、构建与运行可用性；正文与 one_line 均不得出现编译通过/失败、"
         "构建入口、双架构编译、镜像编译等表述，也不得评价 Makefile 或容器配置。"
         "结构化 issues 只列可回溯到仓库源码 path:line 的设计或实现问题。"
@@ -1213,11 +1295,31 @@ def _hardcode_source_context(
         ).splitlines()
     except (OSError, TypeError, ValueError):
         return ""
-    start = max(0, line - radius - 1)
-    end = min(len(lines), line + radius)
-    return "\n".join(
-        f"{index + 1}: {lines[index]}" for index in range(start, end)
-    )
+    # 低置信聚合项（脚本/缓存）的 lines 列出全部命中行：上下文覆盖整段命中范围，
+    # 而非只环绕代表行，模型才能看到整个文件级模式。代表行仍保留在中心。
+    hit_lines = signal.get("lines") or []
+    if isinstance(hit_lines, list) and len(hit_lines) > 1:
+        start = max(0, min(hit_lines) - 1)
+        end = min(len(lines), max(hit_lines))
+    else:
+        start = max(0, line - radius - 1)
+        end = min(len(lines), line + radius)
+    rows = [f"{index + 1}: {lines[index]}" for index in range(start, end)]
+    sizes = [len(row.encode("utf-8")) for row in rows]
+    total = sum(sizes)
+    if total > _MAX_SOURCE_CONTEXT_BYTES:
+        # 保留信号行及邻近行：按到信号行的距离从远到近删行，保持文件顺序。
+        # 中心保留保证 _semantic_hardcode_risk 对命中行附近 /musl/busybox 的
+        # 子串检测不受影响（信号行在最中心）。
+        signal_idx = line - 1 - start
+        order = sorted(range(len(rows)), key=lambda k: -abs(k - signal_idx))
+        for k in order:
+            if total <= _MAX_SOURCE_CONTEXT_BYTES:
+                break
+            total -= sizes[k]
+            rows[k] = None
+        rows = [r for r in rows if r is not None]
+    return "\n".join(rows)
 
 
 def _semantic_hardcode_risk(signal: dict, repo_path: Path) -> str:
@@ -1275,18 +1377,6 @@ def _hardcode_reviews_needing_repair(
     return targets
 
 
-def _check_hardcode_capacity(facts: dict | None) -> None:
-    """硬编码候选超过复核上限时立即失败，避免 LLM 阶段白跑 16 分钟。"""
-    hardcode = (((facts or {}).get("integrity") or {}).get("hardcode") or {})
-    if hardcode.get("truncated"):
-        raise RuntimeError(
-            "硬编码候选超过复核上限，拒绝生成不完整报告："
-            f"候选 {hardcode.get('candidate_count', '?')} 条，"
-            f"当前上限 {len(hardcode.get('findings') or [])} 条；"
-            "请提高 AGENT_HARDCODE_SIGNAL_LIMIT 后重跑"
-        )
-
-
 def _hardcode_excerpt_from_repo(item: dict, repo_path: Path | None) -> str:
     """按 path:line 从仓库确定性回填代码摘录；读不到时返回空串。"""
     if not repo_path:
@@ -1317,7 +1407,6 @@ def _validate_hardcode_reviews(
     repo_path: Path | None = None,
 ) -> None:
     """确保每条规则线索都经过 AI 复核，且结论能回到真实代码位置。"""
-    _check_hardcode_capacity(facts)
     hardcode = (((facts or {}).get("integrity") or {}).get("hardcode") or {})
     signals = hardcode.get("findings") or []
     reviews = parsed.get("hardcode_reviews") or []
@@ -1536,6 +1625,54 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _truncate_to_bytes(text: str, limit: int) -> str:
+    """按 UTF-8 字节截断，回退到完整字符边界，不切断多字节字符。"""
+    data = text.encode("utf-8")
+    if len(data) <= limit:
+        return text
+    k = limit
+    while k > 0 and (data[k] & 0xC0) == 0x80:
+        k -= 1
+    return data[:k].decode("utf-8", errors="ignore")
+
+
+def _chunk_hardcode_targets(
+    targets: list[dict],
+    max_items: int = 100,
+) -> list[list[dict]]:
+    """把待复核线索按序列化字节分块，保证任意单块 ≤38KB。
+
+    单条超预算（source_context 已由 _hardcode_source_context 压到 12KB，但
+    previous_review 等其它字段可能异常膨胀）时，逐次截断 source_context 兜底。
+    max_items 兼容原有的 AGENT_HARDCODE_REPAIR_CHUNK 环境变量按条分块。
+    """
+    chunks: list[list[dict]] = []
+    current: list[dict] = []
+    current_size = 0
+    for item in targets:
+        item_size = len(json.dumps(item, ensure_ascii=False))
+        if current and (
+            len(current) >= max_items
+            or current_size + item_size > _HARDCODE_REPAIR_CHUNK_BYTES
+        ):
+            chunks.append(current)
+            current = []
+            current_size = 0
+        while item_size > _HARDCODE_REPAIR_CHUNK_BYTES:
+            ctx = item.get("source_context") or ""
+            if not ctx:
+                break
+            item["source_context"] = _truncate_to_bytes(
+                ctx, _HARDCODE_REPAIR_CHUNK_BYTES // 2,
+            )
+            item_size = len(json.dumps(item, ensure_ascii=False))
+        current.append(item)
+        current_size += item_size
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def repair_verdict_hardcode_reviews(
     parsed: dict,
     facts: dict | None,
@@ -1607,7 +1744,9 @@ def repair_verdict_hardcode_reviews(
     chunk_size = max(1, _env_int("AGENT_HARDCODE_REPAIR_CHUNK", 100))
     repair_timeout = max(60, _env_int("AGENT_HARDCODE_REPAIR_TIMEOUT", 600))
     gap_cap = max(1, _env_int("AGENT_HARDCODE_REPAIR_GAP_CAP", 25))
-    chunks = [targets[i:i + chunk_size] for i in range(0, len(targets), chunk_size)]
+    # 按字节分块（兼容 AGENT_HARDCODE_REPAIR_CHUNK 条数上限）：任意单块 ≤38KB，
+    # 单条 source_context 已由 _hardcode_source_context 压到 12KB。
+    chunks = _chunk_hardcode_targets(targets, max_items=chunk_size)
     reviews_by_id: dict[str, dict] = {}
 
     def _run_repair_task(chunk: list[dict], batch_id: str, chunk_out: Path) -> dict:
@@ -1889,8 +2028,6 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
                        repo_path: Path | None = None) -> dict:
     # 指纹库故障必须在顶层模型开始评分前修复，避免模型看不到工具结果后自行估算原创性。
     _ensure_reference_database(facts)
-    # 硬编码候选超限先拒绝，不必等 verdict/repair 跑完 16 分钟才报错。
-    _check_hardcode_capacity(facts)
     outputs = {
         "json_path":    str(work_dir / "verdict.json"),
         "content_path": str(work_dir / "verdict.html"),
