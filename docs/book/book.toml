@@ -4,6 +4,8 @@ authors = ["牛一强"]
 description = "面向全国大学生操作系统比赛评委的内核作品分析系统：设计与开发日志"
 language = "zh-CN"
 src = "src"
+
+[build]
 build-dir = "build"
 
 [output.html]
