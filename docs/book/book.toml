@@ -1,0 +1,16 @@
+[book]
+title = "OS Kernel Review Agent 开发文档"
+authors = ["牛一强"]
+description = "面向全国大学生操作系统比赛评委的内核作品分析系统：设计与开发日志"
+language = "zh-CN"
+src = "src"
+build-dir = "build"
+
+[output.html]
+git-repository-url = "https://github.com/niucurry/oskernel_agent"
+edit-url-template = "https://github.com/niucurry/oskernel_agent/edit/main/docs/book/src/{path}"
+default-theme = "light"
+
+[output.html.search]
+limit-results = 20
+use-boolean-and = true
