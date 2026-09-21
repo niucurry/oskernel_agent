@@ -27,7 +27,8 @@ jobs:
       - name: Setup mdBook
         uses: peaceiris/actions-mdbook@v2
         with:
-          mdbook-version: "latest"
+          # 固定版本：book.toml 按 mdBook 0.5 的配置结构编写
+          mdbook-version: "v0.5.4"
 
       - name: Build book
         run: mdbook build docs/book
