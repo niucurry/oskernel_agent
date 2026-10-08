@@ -1,0 +1,23 @@
+{
+  "created_at": "2026-10-02T03:57:19.500778+00:00",
+  "native_unique_cases": 154,
+  "native_runs": 308,
+  "all_repeat_equal": true,
+  "selected_development": 32,
+  "selected_evaluation": 46,
+  "selection": "Balanced result categories with fixed seed; no model outputs used. Inputs are disjoint, projects are not independently held out from the experiment author.",
+  "compiler": "x86_64-linux-gnu-gcc-12 (Ubuntu 12.4.0-2ubuntu1~24.04.1) 12.4.0",
+  "rustc": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+  "rust_flags": "--cap-lints allow (old crate denies warnings; no cfg or executable code changed)",
+  "native_programs": {
+    "/home/niu/.cache/oskernel-scope-repair/bin/ring": "d421b66bff8d2cbbdaa50c82decf2977c5a4e122971167b707ece2453886fd72",
+    "/home/niu/.cache/oskernel-scope-repair/bin/json_replace": "9261cb74b9feb76aebe6d7d05b279df89a22f5626461bb2ac66561afc9eb8cfa",
+    "/home/niu/.cache/oskernel-scope-repair/cargo-target/debug/scope-native-probe": "9f0bd130b75f6b114d99296b97f719893009182a0df378ec891bc0cf145b985e"
+  },
+  "limitations": [
+    "Host x86_64, not QEMU or an OS boot",
+    "Zephyr utility macro shim; algorithm source/header unchanged",
+    "No concurrency, pointer aliasing, arbitrary callbacks, or proof of untested behavior",
+    "Four functions in three projects; two functions share a crate"
+  ]
+}

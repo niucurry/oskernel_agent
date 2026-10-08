@@ -1,0 +1,308 @@
+{
+  "created_utc": "2026-10-08T02:24:00.542061+00:00",
+  "purpose": "engineering delivery; no paper effectiveness claim",
+  "base_commit": "326cb9f77e0978c5f6324b4b5fbf3332c31f397e",
+  "full_suite": {
+    "exit_code": 2,
+    "status": "collection_error",
+    "cause": "torch missing; tests/test_ai_detect.py cannot import",
+    "tests_run": 0
+  },
+  "offline_worktree": {
+    "exit_code": 0,
+    "tests": 689,
+    "passed": 682,
+    "skipped": 7,
+    "errors": 0,
+    "failures": 0,
+    "junit_seconds": 4.841,
+    "skip_details": [
+      {
+        "test": "tests.test_embed.test_rename_pair_cosine_high_and_separated",
+        "reason": "codet5p 模型不可用：No module named 'torch'"
+      },
+      {
+        "test": "tests.test_embed.test_embedder_dim",
+        "reason": "codet5p 模型不可用：No module named 'torch'"
+      },
+      {
+        "test": "tests.test_embed.test_build_index_incremental",
+        "reason": "codet5p 模型不可用：No module named 'torch'"
+      },
+      {
+        "test": "tests.test_embed.test_query_top1_hit_on_modified_copy",
+        "reason": "codet5p 模型不可用：No module named 'torch'"
+      },
+      {
+        "test": "tests.test_ingest_config_clone.test_clone_sets_longpaths_on_windows",
+        "reason": "core.longpaths 仅 Windows 需要"
+      },
+      {
+        "test": "tests.test_segment.test_clone_coverage_higher_than_theme_similar",
+        "reason": "codet5p 模型不可用：No module named 'torch'"
+      },
+      {
+        "test": "tests.test_segment.test_run_segment_writes_v2_and_keeps_original",
+        "reason": "codet5p 模型不可用：No module named 'torch'"
+      }
+    ]
+  },
+  "staged_export": {
+    "exit_code": 0,
+    "path": "/tmp/oskernel-engineering-checkout-20261008-rqzcbroy",
+    "wall_seconds": 6.0328675900000235,
+    "tests": 689,
+    "passed": 682,
+    "skipped": 7,
+    "errors": 0,
+    "failures": 0,
+    "junit_seconds": 5.392,
+    "skip_details": [
+      {
+        "test": "tests.test_embed.test_rename_pair_cosine_high_and_separated",
+        "reason": "codet5p 模型不可用：No module named 'torch'"
+      },
+      {
+        "test": "tests.test_embed.test_embedder_dim",
+        "reason": "codet5p 模型不可用：No module named 'torch'"
+      },
+      {
+        "test": "tests.test_embed.test_build_index_incremental",
+        "reason": "codet5p 模型不可用：No module named 'torch'"
+      },
+      {
+        "test": "tests.test_embed.test_query_top1_hit_on_modified_copy",
+        "reason": "codet5p 模型不可用：No module named 'torch'"
+      },
+      {
+        "test": "tests.test_ingest_config_clone.test_clone_sets_longpaths_on_windows",
+        "reason": "core.longpaths 仅 Windows 需要"
+      },
+      {
+        "test": "tests.test_segment.test_clone_coverage_higher_than_theme_similar",
+        "reason": "codet5p 模型不可用：No module named 'torch'"
+      },
+      {
+        "test": "tests.test_segment.test_run_segment_writes_v2_and_keeps_original",
+        "reason": "codet5p 模型不可用：No module named 'torch'"
+      }
+    ]
+  },
+  "excluded_file": "tests/test_ai_detect.py",
+  "source_test_config_snapshot": [
+    {
+      "path": "config/upstream_baselines.yaml",
+      "bytes": 3409,
+      "sha256": "36160b024c545f0f7ca301b27c70dfd23dd108ec8122963a463fe49f10654847"
+    },
+    {
+      "path": "src/oskernel_agent/analysis/repo_facts.py",
+      "bytes": 10082,
+      "sha256": "cee6b1614a40c6e5d8d7a98343d2a5e4a0cafd53b0b4a493d27b023c86818907"
+    },
+    {
+      "path": "src/oskernel_agent/comparison/fastpath/scan.py",
+      "bytes": 12419,
+      "sha256": "8e073c9f4503ca75472c6a0fff7330f4aa512e6ee5772e00be00c1a8c7eb4197"
+    },
+    {
+      "path": "src/oskernel_agent/comparison/metadata/runner.py",
+      "bytes": 21501,
+      "sha256": "85cabe297376c7a1ddb3a7868255a93230c0ded6b546f4e6ee9aa978d867c9ff"
+    },
+    {
+      "path": "src/oskernel_agent/comparison/normalize/runner.py",
+      "bytes": 5646,
+      "sha256": "e922f8c6f938330139cf96e7b09ad609a4bb0aa48b0a21ae24d03fc665f00f3e"
+    },
+    {
+      "path": "src/oskernel_agent/comparison/normalize/source_identity.py",
+      "bytes": 4568,
+      "sha256": "0d6718e8a5ef396a4c4d4b198abd7405157dd08fe8a644a5faf3d2da506cd22f"
+    },
+    {
+      "path": "src/oskernel_agent/comparison/normalize/store.py",
+      "bytes": 10875,
+      "sha256": "c73acc8cc78a7be7a52dad84e98329e78bd26bbe368ef6cb0b3979f3de70c383"
+    },
+    {
+      "path": "src/oskernel_agent/comparison/report/semantic_compare.py",
+      "bytes": 399456,
+      "sha256": "aba8507562215a85383677a520eb78906cd8916b618262af698afe2f4fe66964"
+    },
+    {
+      "path": "src/oskernel_agent/comparison/report/upstream_baselines.py",
+      "bytes": 27969,
+      "sha256": "6183077d2659715e95cc7aa42990add92d7c40bcd30ccba208629dc4ddf76819"
+    },
+    {
+      "path": "src/oskernel_agent/finals/__main__.py",
+      "bytes": 3219,
+      "sha256": "4f8517cadf7e7ed4ddf7c874503742ce9c1d5aea484c08d4c53a4f756e91ec24"
+    },
+    {
+      "path": "src/oskernel_agent/finals/development.py",
+      "bytes": 46152,
+      "sha256": "9b4143f030f0d38ed399b60423ce274479e7428e493f5c11bc8168b82f66a6bd"
+    },
+    {
+      "path": "src/oskernel_agent/finals/digests.py",
+      "bytes": 23338,
+      "sha256": "7d09dad780a64953c37cbe1689c6d9ade7ed8b03bf514cb0f24140305a8dd8de"
+    },
+    {
+      "path": "src/oskernel_agent/finals/integrity.py",
+      "bytes": 43459,
+      "sha256": "b0ccbf5cd402b4dc073a20d1341071851c8af7d6c89c7128608d569a644f107f"
+    },
+    {
+      "path": "src/oskernel_agent/finals/readability.py",
+      "bytes": 14350,
+      "sha256": "ad17ade54efb73ba7920e476b1f142f18b6757cfa9de43c22f0c48c9b1f259f9"
+    },
+    {
+      "path": "src/oskernel_agent/finals/runtime_evidence.py",
+      "bytes": 5104,
+      "sha256": "347e55b49040de4b7244d7f0c7e7783b05197a40ce044a0a8456d74e7935e0bd"
+    },
+    {
+      "path": "src/oskernel_agent/finals/summary_pdf.py",
+      "bytes": 44412,
+      "sha256": "48bb5d3b1c1f296a05a25cc225731650df2d367e53b29cb35e1a30ed0452b001"
+    },
+    {
+      "path": "src/oskernel_agent/pipeline/tree_builder.py",
+      "bytes": 100405,
+      "sha256": "4420ea117aca510317f1a2e73b5703a9dc8934a0cb3075128fff41906f84f2c7"
+    },
+    {
+      "path": "src/oskernel_agent/reports/html_tree.py",
+      "bytes": 58637,
+      "sha256": "a1a20398ba5e5be3951f734ea7dc952eb77482729aed13cc82b1dcbc7b34594f"
+    },
+    {
+      "path": "tests/history_controls.py",
+      "bytes": 5512,
+      "sha256": "00d31ece22b75b937bbf0c0d5b05785314a55686434bcc656d2a020972a9c24a"
+    },
+    {
+      "path": "tests/test_boilerplate_review.py",
+      "bytes": 8655,
+      "sha256": "5a450568c8adaecbe036295384f6f9af9e35cab3321e0729435149a62590fef9"
+    },
+    {
+      "path": "tests/test_description_integrity.py",
+      "bytes": 6156,
+      "sha256": "bd41c9d130d7d71132eb8e6fcbcf9038a03380ab453ca833c127a3e5fe80cec1"
+    },
+    {
+      "path": "tests/test_fastpath_identity.py",
+      "bytes": 3883,
+      "sha256": "093bc1669eeb54e18d4498757994900855e227c47dc17ca22907771a02d5333e"
+    },
+    {
+      "path": "tests/test_finals_description.py",
+      "bytes": 68859,
+      "sha256": "d38ebe1c0f7355e5c9a7293c3278598077134f2c2827642cdf1647fc5abf5e84"
+    },
+    {
+      "path": "tests/test_history_evidence.py",
+      "bytes": 7604,
+      "sha256": "ddd0de5444f21e0e00c579207efb9d50e20b770603f3d8ac28bf7490341a3a06"
+    },
+    {
+      "path": "tests/test_identity_signals.py",
+      "bytes": 1478,
+      "sha256": "5524f89191449e83959d8531b8de4b8eaa6fa334c8c67da3eac43fb37f984c2e"
+    },
+    {
+      "path": "tests/test_metadata.py",
+      "bytes": 19970,
+      "sha256": "afd8b47fca429f69d252156a2dc43137acd657c56c8b6ed6513431d91d116ba9"
+    },
+    {
+      "path": "tests/test_report.py",
+      "bytes": 111315,
+      "sha256": "5bc2374bee07b4f8906a5071b95dd980425a8892e0fa42a651449c1abd08a473"
+    },
+    {
+      "path": "tests/test_runtime_evidence.py",
+      "bytes": 3986,
+      "sha256": "11613f2991b6a9061123c9d0de4c554275e92f147edc1068fdb95822bf7c5a22"
+    },
+    {
+      "path": "tests/test_smp_evidence.py",
+      "bytes": 1680,
+      "sha256": "96ca42f688ec9a358d7336d55f07ccd84ef8577575172d6237a001a588b7dd40"
+    },
+    {
+      "path": "tests/test_summary_fonts.py",
+      "bytes": 1830,
+      "sha256": "20c2e9254c8d7f0f83178386e893ef2a9bd4c4f07116a60e48a88c2cee45f3a0"
+    },
+    {
+      "path": "tests/test_upstream_baselines.py",
+      "bytes": 18273,
+      "sha256": "1f7a1b13128d9553a4e3b8739fb1a70f8c7ce110db4b302988ff8fc30f2f1642"
+    },
+    {
+      "path": "tests/test_upstream_source_guard.py",
+      "bytes": 5974,
+      "sha256": "c8703e64fbd828c66780286f91ce967e2a89d6b6e87b24226acde78845c1c313"
+    }
+  ],
+  "preservation": {
+    "manifest": "/home/niu/agent-archives/description-restart-20261008T021746Z/preservation-before.json",
+    "checked": 3995,
+    "mismatches": [],
+    "files_moved_or_deleted": 0
+  },
+  "secret_scan": {
+    "command": "python3 scripts/check_secrets.py",
+    "exit_code": 0,
+    "finding_count": 0,
+    "scope": "tracked and staged files; known credential patterns"
+  },
+  "whitespace_check": {
+    "command": "git -c core.whitespace=-blank-at-eof diff --cached --check",
+    "exit_code": 0,
+    "note": "preserves original extra EOF blank line in research/description_scope/README.md"
+  },
+  "artifacts": [
+    {
+      "path": "/home/niu/agent-archives/description-restart-20261008T021746Z/oskernel-delivery-20261008-pytest.log",
+      "bytes": 1700,
+      "sha256": "70961d69b522657d92431ab5819fa73db7d890e0e4ee128f2542f1630c499085"
+    },
+    {
+      "path": "/home/niu/agent-archives/description-restart-20261008T021746Z/oskernel-delivery-20261008-pytest.xml",
+      "bytes": 1035,
+      "sha256": "dfb9906c90e4ad7c5584e6b5f8fd50a083dc0760e5bd472a627641fdf2fe8a68"
+    },
+    {
+      "path": "/home/niu/agent-archives/description-restart-20261008T021746Z/oskernel-delivery-20261008-offline.log",
+      "bytes": 1517,
+      "sha256": "3404003b588463a1180bdcacff6522fd067d863093f00fe9a5ba6c1015257bcd"
+    },
+    {
+      "path": "/home/niu/agent-archives/description-restart-20261008T021746Z/oskernel-delivery-20261008-offline.xml",
+      "bytes": 89694,
+      "sha256": "06d6ebd14ad4d90b27e4571faac03f249133dcba5a8596e1637b59e87a9f7e36"
+    },
+    {
+      "path": "/home/niu/agent-archives/description-restart-20261008T021746Z/oskernel-delivery-20261008-export.log",
+      "bytes": 1517,
+      "sha256": "25e90226801905c23d396557688cfd77f55506d57f4b25e49f6384367bcbd14f"
+    },
+    {
+      "path": "/home/niu/agent-archives/description-restart-20261008T021746Z/oskernel-delivery-20261008-export.xml",
+      "bytes": 89953,
+      "sha256": "f7100861d2a49df904b28fb26792139a4fd0a234be9ff1105656cdcb32de7f4a"
+    },
+    {
+      "path": "/home/niu/agent-archives/description-restart-20261008T021746Z/oskernel-delivery-20261008-export.json",
+      "bytes": 374,
+      "sha256": "a0e481645fecc34b72e104529977ccf36c0118ad7fa271ea0ca5de2f4a2993ef"
+    }
+  ]
+}

@@ -133,7 +133,7 @@ def _probe_key_files(repo_path: Path) -> list[dict]:
 
 
 def _probe_smp(repo_path: Path) -> dict:
-    """探测 SMP 状态：NCPU 常量 + 多核唤醒函数是否存在。"""
+    """采集核数和唤醒名称线索，不据源码名称断言 SMP 可用性。"""
     numcpu: int | None = None
     evidence: list[str] = []
     wakeup_present = False
@@ -189,15 +189,21 @@ def _probe_smp(repo_path: Path) -> dict:
     if numcpu is None and not wakeup_present:
         summary = "未确认"
     elif (numcpu or 0) <= 1 and not wakeup_present:
-        summary = "单核"
+        summary = f"源码核数线索为 {numcpu}；构建与运行状态未确认"
     else:
-        summary = "多核"
+        summary = "发现疑似多核相关源码线索；构建与运行状态未确认"
 
     return {
         "numcpu":         numcpu,
         "wakeup_present": wakeup_present,
         "evidence":       evidence[:3],
         "summary":        summary,
+        "status":         "unverified_source_signal" if evidence else "unknown",
+        "source_note": (
+            "核数常量与唤醒名称来自源码静态扫描；同名函数可能属于其他协议，"
+            "代码也可能受配置或目标架构限制。未核对实际编译参数、构建产物和运行日志，"
+            "不能据此确认或否定 SMP 支持，也不能将配置核数等同于已运行核数"
+        ),
     }
 
 

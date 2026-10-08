@@ -1,0 +1,34 @@
+{
+  "kind": "deterministic_regression_witness_not_model_accuracy",
+  "input_plain": "当 fd<0、fd>=NOFILE 或 ofile[fd]==0 时返回 -1。",
+  "input_html": "<p>当 fd&lt;0、fd&gt;=NOFILE 时返回 -1。</p>",
+  "before": {
+    "plain_concise": "当 fd =NOFILE 或 ofile[fd]==0 时返回 -1",
+    "encoded_html_concise": "当 fd =NOFILE 时返回 -1",
+    "digest_module": "检查文件描述符",
+    "digest_issue": "当 fd =NOFILE 或 ofile[fd]==0 时返回 -1"
+  },
+  "before_hashes": {
+    "src/oskernel_agent/finals/readability.py": "9a36bc167db9bcfd3e66cee7da97b7d83a011c0c8fd044ea7deea832d494bfcf",
+    "src/oskernel_agent/finals/digests.py": "98bb5f09dd5277c773ee9416258905446d631ba34cd384b2dbc8812abd5dfa3d",
+    "src/oskernel_agent/pipeline/tree_builder.py": "7a57fb28262a516819bcc4f91a92a2b0bcce786e1167ea18b2798b0bb5178667"
+  },
+  "after": {
+    "plain_concise": "当 fd<0、fd>=NOFILE 或 ofile[fd]==0 时返回 -1",
+    "encoded_html_concise": "当 fd<0、fd>=NOFILE 时返回 -1",
+    "digest_module": "当 fd<0、fd>=NOFILE 或 ofile[fd]==0 时返回 -1",
+    "digest_issue": "当 fd<0、fd>=NOFILE 或 ofile[fd]==0 时返回 -1"
+  },
+  "after_hashes": {
+    "src/oskernel_agent/finals/readability.py": "ad17ade54efb73ba7920e476b1f142f18b6757cfa9de43c22f0c48c9b1f259f9",
+    "src/oskernel_agent/finals/digests.py": "7d09dad780a64953c37cbe1689c6d9ade7ed8b03bf514cb0f24140305a8dd8de",
+    "src/oskernel_agent/pipeline/tree_builder.py": "4420ea117aca510317f1a2e73b5703a9dc8934a0cb3075128fff41906f84f2c7"
+  },
+  "validation": {
+    "passed": 266,
+    "failed": 0,
+    "scope": "description integrity, readability, finals description, report, completeness, report jobs, scope repair",
+    "seconds": 1.9,
+    "not_entire_repository": true
+  }
+}

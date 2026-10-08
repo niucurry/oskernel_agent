@@ -1,0 +1,107 @@
+{
+  "recorded_at": "2026-10-02T09:32:39.790876+00:00",
+  "decision": "stop_extending_this_stage_difference_local_repair_candidate",
+  "scope": "Current implemented candidate, these frozen functions, models and budgets. This is an engineering/research investment decision, not a statistical proof of universal ineffectiveness or of all code-description research being impossible.",
+  "primary_basis": {
+    "completed_samples": 8,
+    "projects": 3,
+    "functions": 4,
+    "repeats": 2,
+    "all_shared_outputs_valid": true,
+    "candidate_identical_to_counterexample_in_all_samples": true,
+    "candidate_changed_final_outputs": 0,
+    "improved_projects": 0,
+    "per_arm_pipeline_calls": {
+      "source_review": 34,
+      "counterexample_rewrite": 29,
+      "loss_local": 37
+    },
+    "per_arm_pipeline_tokens": {
+      "source_review": 68750,
+      "counterexample_rewrite": 67765,
+      "loss_local": 103490
+    },
+    "extra_candidate_calls_fraction": 0.27586206896551735,
+    "extra_candidate_tokens_fraction": 0.52718955212868
+  },
+  "predeclared_rule": "Candidate equal/worse in both repeats without an improved error-coverage tradeoff across projects: stop extending this stage-difference repair method. All eight final texts are identical to the comparator, independently of reader scoring noise.",
+  "quality_gate_result": {
+    "run_complete": true,
+    "controls_pass": true,
+    "all_shared_generations_valid": true,
+    "no_recorded_response_failures": false,
+    "baseline_has_errors": true,
+    "wrong_reduction_at_least_20_percent": false,
+    "language_coverage_within_5pp": true,
+    "improved_projects": [],
+    "at_least_two_projects_improve": false,
+    "calls_within_1_5x": true
+  },
+  "reader_limitations": {
+    "response_length_failures": [
+      {
+        "stage": "ring_item_get/r1/draft_development",
+        "error": "Model response exceeded output budget; produce one shorter JSON action"
+      },
+      {
+        "stage": "ring_item_get/r1/compressed_development",
+        "error": "Model response exceeded output budget; produce one shorter JSON action"
+      },
+      {
+        "stage": "json_replace/r1/compressed_development",
+        "error": "Model response exceeded output budget; produce one shorter JSON action"
+      },
+      {
+        "stage": "json_replace/r1/evaluation/initial",
+        "error": "Model response exceeded output budget; produce one shorter JSON action"
+      }
+    ],
+    "raw_scores_are_proxy_only": true,
+    "raw_error_counts_are_not_verified_description_error_rates": true,
+    "invalid_reading_as_unknown_can_create_false_loss_targets": true,
+    "same_family_writer_and_reader": true
+  },
+  "local_attempts": [
+    {
+      "task": "json_replace",
+      "repeat": 0,
+      "lost_fields": 7,
+      "reason": "development_regression"
+    },
+    {
+      "task": "json_replace",
+      "repeat": 1,
+      "lost_fields": 16,
+      "reason": "length_violation"
+    }
+  ],
+  "rejection_replay": {
+    "calls": 9,
+    "labels": {
+      "original": [
+        "correct",
+        "wrong",
+        "correct"
+      ],
+      "proposed": [
+        "wrong",
+        "wrong",
+        "wrong"
+      ],
+      "source": [
+        "correct",
+        "correct",
+        "correct"
+      ]
+    },
+    "consistent_harm": false,
+    "interpretation": "The preregistered all-repeats stable-harm criterion failed because the original text was also misread once. Do not claim the patch alone caused a stable semantic degradation."
+  },
+  "publication_assessment": "Do not position the current method as a TSE/TOSEM contribution. Execution-guided checking and local repair have prior art; this trial shows no added output benefit and material reliability problems. Cross-repository empirical findings or a different method remain unestablished.",
+  "production_integration": "Candidate not integrated. Deterministic text/HTML and summary-source fixes are retained and separately tested.",
+  "evidence_sha256": {
+    "results.json": "e902a1d0a82473b28248e7603a37671ff5c552872427d89f133a54243a325f52",
+    "analysis.json": "e9ca1f5b2b9659a389b2cfc9548272383f532d631dda1e673bb2be3537ef6795",
+    "replay_results.json": "992f64de7fc8be799a522766a998d7a15dc59989bda356772a630c332606229c"
+  }
+}

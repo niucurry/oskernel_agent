@@ -15,6 +15,7 @@ from .discovery import discover_files
 from .extract import DEFAULT_MIN_LINES, extract_functions
 from .keep_symbols import load_keep_symbols
 from .store import DEFAULT_DB, FunctionStore
+from .source_identity import source_token_fingerprint
 
 DEFAULT_REPOS_ROOT = "data/repos"
 DEFAULT_MAX_LINES = 10000
@@ -102,6 +103,7 @@ def normalize_repo(
             "func_count": len(fns),
             "norm_hash": normalized_file_hash(text, f.lang),
             "raw_hash": raw_file_hash(text),
+            "source_hash": source_token_fingerprint(text, f.lang),
         })
 
     store.write_repo(repo_id, records, file_records=file_records)

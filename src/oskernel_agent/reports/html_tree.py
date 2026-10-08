@@ -563,9 +563,9 @@ def _collect_report_issues(tree_json: dict) -> list[dict]:
     def _add(item: dict, subsystem: str | None = None) -> None:
         nonlocal order
         path = str(item.get("path") or "").strip()
-        quote = clip_at_sentence(normalize_description_claim(
+        quote = normalize_description_claim(
             str(item.get("quote") or ""), path, tree_json.get("facts") or {},
-        ), 150)
+        )
         if is_dependency_scope_only_issue(quote):
             return
         if not path or not quote or not re.search(r"(?::|#L)\d+(?:-L?\d+)?$", path):
@@ -836,7 +836,7 @@ def _clean_capability_claim(value: str, tree_json: dict) -> str:
         text.replace("实现了完整的", "覆盖")
         .replace("实现完整", "覆盖")
         .replace("覆盖完整", "覆盖主要路径")
-        .replace("完整的 TCP/IP 网络协议栈", "基于 smoltcp 的 TCP/IP 网络能力")
+        .replace("完整的 TCP/IP 网络协议栈", "TCP/IP 网络能力")
         .replace("完整定义", "集中定义")
         .replace("等全部", "等多类")
         .replace("与 Linux 主线 UAPI 头文件保持一致", "以兼容 Linux UAPI 为目标")
@@ -846,152 +846,84 @@ def _clean_capability_claim(value: str, tree_json: dict) -> str:
     )
 
 
-def _fit_section_parts(raw_parts: list[str], limit: int = 300) -> list[str]:
-    """在 300 字总预算内保留实现、亮点和局部问题，并把空余预算让给有内容的部分。"""
-    def fit_complete_part(raw: str, cap: int) -> str:
-        """按完整句/分句收束，并保证单个部分绝不突破预算。"""
-        text = remove_ai_filler(html_to_text(raw))
-        if not text or cap <= 0:
-            return ""
-        if len(text) <= cap:
-            return text
-
-        # 优先保留完整的句子或分号分句，避免在术语括号、路径或标识符中间截断。
-        kept = ""
-        for unit in re.split(r"(?<=[。！？；;])", text):
-            if not unit:
-                continue
-            if len(kept) + len(unit) > cap:
-                break
-            kept += unit
-        if kept:
-            return kept.rstrip("；;") + ("。" if kept.endswith(("；", ";")) else "")
-
-        clipped = clip_at_sentence(text, cap)
-        if len(clipped) <= cap:
-            return clipped
-
-        # 单个超长分句没有安全句末时，退到逗号/空格边界并补成完整句。
-        prefix = text[: max(1, cap - 1)]
-        cut = max(prefix.rfind(mark) for mark in "，,、 ")
-        if cut >= max(20, cap // 2):
-            prefix = prefix[:cut]
-        # 若截点落在未闭合括号内，舍弃整个未闭合括号片段。
-        for opening, closing in (("（", "）"), ("(", ")"), ("[", "]")):
-            if prefix.count(opening) > prefix.count(closing):
-                open_at = prefix.rfind(opening)
-                if open_at >= max(20, cap // 2):
-                    prefix = prefix[:open_at]
-        return prefix.rstrip("，,；;、：: ") + "。"
-
-    base_limits = [140, 60, 100]
-    parts = [fit_complete_part(raw, cap) for raw, cap in zip(raw_parts, base_limits)]
-    remaining = limit - sum(len(part) for part in parts)
-    if remaining <= 0:
-        return parts
-    for index, raw in enumerate(raw_parts):
-        if not raw or len(parts[index]) >= len(raw):
-            continue
-        expanded = fit_complete_part(raw, len(parts[index]) + remaining)
-        gained = len(expanded) - len(parts[index])
-        parts[index] = expanded
-        remaining -= gained
-        if remaining <= 0:
-            break
-    return parts
-
-
-_ISSUE_SENTENCE_TERMS = (
-    "未实现", "不支持", "存根", "不完整", "缺乏", "无法", "失败", "错误",
-    "忙等待", "全量刷新", "退化", "瓶颈", "活锁", "非原子", "编码损坏",
-)
+def _statement_key(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip(" 。；;！？")
 
 
 def _remove_assigned_issue_sentences(value: str, issues: list[dict]) -> str:
-    """避免结构摘要用另一种措辞重复本卡已归属的重要/局部问题。"""
-    if not value or not issues:
-        return value
-    issue_identifiers = {
-        token.casefold()
-        for issue in issues
-        for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", str(issue.get("quote") or ""))
-    }
-    issue_terms = {
-        term for term in _ISSUE_SENTENCE_TERMS
-        if any(term in str(issue.get("quote") or "") for issue in issues)
-    }
-    kept: list[str] = []
-    # 逗号可能位于“操作系统（Operating System，OS）”等术语解释内部，
-    # 只按完整句或分号分句去重，避免留下半个括号或残缺语义。
-    for clause in re.split(r"(?<=[。！？；;])", value):
-        lowered = clause.casefold()
-        identifiers = set(re.findall(r"[a-z_][a-z0-9_]{3,}", lowered))
-        repeats_identifier = bool(identifiers & issue_identifiers)
-        repeats_risk = any(term in clause for term in issue_terms)
-        if repeats_identifier or repeats_risk:
-            continue
-        kept.append(clause)
-    return "".join(kept).strip("；。 ")
+    """仅去除整条相同陈述；共享函数名或风险词不意味着语义重复。"""
+    key = _statement_key(value)
+    if key and any(key == _statement_key(str(item.get("quote") or "")) for item in issues):
+        return ""
+    return value
 
 
-def _section_analysis_parts(
+def _section_statements(
     node: dict, parent: dict | None, tree_json: dict,
     assigned_issues: list[dict], major_quotes: set[str],
-) -> list[str]:
-    base = _clean_capability_claim(str(
-        node.get("brief") or node.get("summary") or "未形成可靠的静态模块摘要。"
-    ), tree_json)
-    children = [
-        child for child in (node.get("children") or []) if isinstance(child, dict)
-    ]
-    child_details: list[str] = []
-    for child in children:
-        child_summary = _clean_capability_claim(str(
-            child.get("brief") or child.get("summary") or ""
-        ), tree_json)
-        if child_summary:
-            child_details.append(
-                f"{str(child.get('name') or '子模块')}：{clip_at_sentence(child_summary, 70)}"
-            )
-    implementation = "；".join(part for part in [base, *child_details] if part)
-    for quote in major_quotes:
-        implementation = implementation.replace(quote, "")
-    implementation = _remove_assigned_issue_sentences(implementation, assigned_issues)
-    implementation = re.sub(r"(?:\s*[；;]\s*){2,}", "；", implementation)
-    implementation = re.sub(r"。\s*[；;]|[；;]\s*。", "。", implementation)
+    *, limit: int = 300,
+) -> tuple[list[dict], list[dict]]:
+    """按完整陈述选取概览；超预算陈述放入详情，文本与自身引用一起移动。
 
-    highlights: list[str] = []
-    highlight_evidence: dict[str, str] = {}  # quote → path for flashcard anchors
+    这只保证展示阶段不截断输入陈述，不证明输入本身正确，也不证明不同陈述
+    彼此独立。摘要的语义核验属于上游分析，不能由字符预算代替。
+    """
+    entries: list[dict] = []
+    children = [child for child in node.get("children") or [] if isinstance(child, dict)]
+    excluded = {_statement_key(quote) for quote in major_quotes}
+    excluded.update(_statement_key(str(item.get("quote") or "")) for item in assigned_issues)
+
+    def add(value: str, kind: str, path: str = "", label: str = "") -> None:
+        # summary 是完整输入；brief 可能早已截断，只用于旧产物没有 summary 时。
+        # summary/quote 是纯文本。按 HTML 剥标签会把 fd<0、fd>=NOFILE 中的
+        # 比较条件吃掉；渲染边界统一 _esc，而不把代码运算符当作标签。
+        text = _clean_capability_claim(value, tree_json)
+        if not text or _statement_key(text) in excluded:
+            return
+        entries.append({"text": f"{label}：{text}" if label else text, "kind": kind, "path": path})
+
+    add(str(node.get("summary") or node.get("brief") or "未形成可靠的静态模块摘要。"), "implementation")
+    for child in children:
+        add(str(child.get("summary") or child.get("brief") or ""), "implementation",
+            label=str(child.get("name") or "子模块"))
     for source in [node, *children]:
         for item in source.get("highlights") or []:
-            if not isinstance(item, dict):
-                continue
-            quote = _clean_capability_claim(str(item.get("quote") or ""), tree_json)
-            if quote and quote not in major_quotes:
-                highlights.append(quote)
-                item_path = str(item.get("path") or "")
-                if item_path and quote not in highlight_evidence:
-                    highlight_evidence[quote] = item_path
+            if isinstance(item, dict):
+                add(str(item.get("quote") or ""), "highlight", str(item.get("path") or ""))
     if parent is not None:
         scope = _section_scope(node)
         for item in parent.get("highlights") or []:
-            if not isinstance(item, dict) or not item.get("path"):
-                continue
-            if _path_without_line(str(item["path"])) not in scope:
-                continue
-            quote = _clean_capability_claim(str(item.get("quote") or ""), tree_json)
-            if quote and quote not in major_quotes:
-                highlights.append(quote)
-                if quote not in highlight_evidence:
-                    highlight_evidence[quote] = str(item.get("path") or "")
-    strengths = "；".join(dict.fromkeys(highlights))
-    strengths = _remove_assigned_issue_sentences(strengths, assigned_issues)
-    local = "；".join(
-        str(item.get("quote") or "") for item in assigned_issues if not item.get("major")
-    )
-    parts = _fit_section_parts([implementation, strengths, local])
-    parts.append(highlight_evidence)
-    return parts
+            if isinstance(item, dict) and item.get("path"):
+                if _path_without_line(str(item["path"])) in scope:
+                    add(str(item.get("quote") or ""), "highlight", str(item["path"]))
+
+    visible: list[dict] = []
+    deferred: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    remaining = max(0, limit)
+    for entry in entries:
+        key = (entry["text"], entry["kind"], entry["path"])
+        if key in seen:
+            continue
+        seen.add(key)
+        if len(entry["text"]) <= remaining:
+            visible.append(entry)
+            remaining -= len(entry["text"])
+        else:
+            deferred.append(entry)
+    return visible, deferred
+
+
+def _render_statement_items(entries: list[dict], resolver) -> str:
+    lines: list[str] = []
+    for entry in entries:
+        path = entry["path"]
+        citation = (
+            f' <span class="text-xs text-slate-400">（{_resolve_path_anchor(path, resolver)}）</span>'
+            if path else ""
+        )
+        lines.append(f'<li>{_esc(entry["text"])}{citation}</li>')
+    return '<ul class="list-disc pl-4 mt-1 space-y-0.5">' + "".join(lines) + '</ul>'
 
 
 def _render_evidence_list(label: str, paths: list[str], resolver) -> str:
@@ -1049,29 +981,23 @@ def _render_all_subsystems(tree_json: dict, resolver) -> str:
         name = section["name"]
         node = section["node"]
         local_issues = section["issues"]
-        result = _section_analysis_parts(
+        visible, deferred = _section_statements(
             node, section["parent"], tree_json, local_issues, major_quotes,
         )
-        implementation, strengths, local = result[0], result[1], result[2]
-        highlight_paths = result[3] if len(result) > 3 else {}
-        paragraphs = [
-            f'<p class="text-sm leading-relaxed"><strong>静态实现：</strong>{_esc(implementation)}</p>'
-        ]
-        if strengths:
-            hl_parts = [s.strip() for s in strengths.split("；") if s.strip()]
-            hl_lines = []
-            for quote_text in hl_parts:
-                path = highlight_paths.get(quote_text, "")
-                path_html = (
-                    f' <span class="text-xs text-slate-400">（{_resolve_path_anchor(path, resolver)}）</span>'
-                    if path else ""
-                )
-                hl_lines.append(f"<li>{_esc(quote_text)}{path_html}</li>")
-            if hl_lines:
+        paragraphs: list[str] = []
+        for kind, label in (("implementation", "静态实现"), ("highlight", "实现亮点")):
+            entries = [entry for entry in visible if entry["kind"] == kind]
+            if entries:
                 paragraphs.append(
-                    '<div class="text-sm leading-relaxed"><strong>实现亮点：</strong>'
-                    f'<ul class="list-disc pl-4 mt-1 space-y-0.5">{"".join(hl_lines)}</ul></div>'
+                    f'<div class="text-sm leading-relaxed"><strong>{label}：</strong>'
+                    f'{_render_statement_items(entries, resolver)}</div>'
                 )
+        if deferred:
+            paragraphs.append(
+                '<details class="text-sm mt-2" data-description-overflow="true">'
+                f'<summary>补充实现与亮点（{len(deferred)} 条完整说明）</summary>'
+                f'{_render_statement_items(deferred, resolver)}</details>'
+            )
         if local_issues:
             local_lines = []
             for item in local_issues:
@@ -1092,10 +1018,15 @@ def _render_all_subsystems(tree_json: dict, resolver) -> str:
                     f'<ul class="list-disc pl-4 mt-1 space-y-0.5">{"".join(local_lines)}</ul></div>'
                 )
         implementation_evidence = _section_evidence(node, section["parent"])
-        analysis_chars = len(implementation) + len(strengths) + len(local)
+        analysis_chars = sum(len(entry["text"]) for entry in visible)
+        detail_chars = sum(len(entry["text"]) for entry in deferred)
+        issue_chars = sum(
+            len(str(item.get("quote") or "")) for item in local_issues if not item.get("major")
+        )
         cards.append(
             f'<article class="core-card" data-subsystem="{_esc(name)}" '
-            f'data-analysis-chars="{analysis_chars}">'
+            f'data-analysis-chars="{analysis_chars}" data-detail-chars="{detail_chars}" '
+            f'data-issue-chars="{issue_chars}">'
             f'<h3 class="font-bold mb-1">{_esc(name)}</h3>'
             f'{"".join(paragraphs)}'
             f'{_render_evidence_list("实现依据", implementation_evidence, resolver)}'
@@ -1104,7 +1035,7 @@ def _render_all_subsystems(tree_json: dict, resolver) -> str:
     return f"""
 <section id="modules" data-section-id="modules" class="brief-card p-5 mb-5">
   <h2 class="text-xl font-bold mb-1">模块概览</h2>
-  <p class="text-xs text-slate-500 mb-3">按仓库实际设计拆分并列模块；笼统“其他”会展开为真实子模块。每项分析不超过 300 字，重要问题不重复，低风险局部问题在所属模块内说明；实现依据覆盖各子模块的代表位置。第三方库本身不计作作品缺陷或自研亮点，只评价项目适配代码及系统可见行为。</p>
+  <p class="text-xs text-slate-500 mb-3">按仓库实际设计拆分并列模块；笼统“其他”会展开为真实子模块。每项概览正文不超过 300 字；超出篇幅的实现与亮点可展开查看完整说明。问题陈述完整保留，重要问题集中列示，低风险局部问题在所属模块内说明；实现依据覆盖各子模块的代表位置。第三方库本身不计作作品缺陷或自研亮点，只评价项目适配代码及系统可见行为。</p>
   <div>{"".join(cards)}</div>
 </section>
 """
@@ -1232,7 +1163,8 @@ def _render_tree_node_static(node: dict, depth: int, resolver,
     name = _esc(node.get("name") or path or "/")
     role = _esc(node.get("role", ""))
     summary_text = concise_module_summary(
-        node.get("brief") or node.get("summary") or node.get("content") or ""
+        node.get("brief") or node.get("summary") or node.get("content") or "",
+        input_is_html=not bool(node.get("brief") or node.get("summary")),
     )
     summary = linkify_html(_esc(summary_text), resolver)
     open_default = "true" if depth <= 1 else "false"

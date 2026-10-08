@@ -23,8 +23,9 @@ def _pair(qf, cf, tier="confirmed", score=0.96):
 # ── 文件级路径过滤 ────────────────────────────────────────────────────────────
 
 def test_is_excluded_file_path_upstream_root():
-    assert UB.is_excluded_file_path("arceos/ulib/axlibc/build.rs") == "upstream_vendored"
-    assert UB.is_excluded_file_path("arceos/api/arceos_api/src/macros.rs") == "upstream_vendored"
+    assert UB.is_excluded_file_path("arceos/ulib/axlibc/build.rs") == "abi_constrained"
+    # 上游目录中的文件可能含本地改动；目录本身不能构成完整来源证据。
+    assert UB.is_excluded_file_path("arceos/api/arceos_api/src/macros.rs") is None
 
 
 def test_is_excluded_file_path_abi_build_rs():

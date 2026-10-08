@@ -13,6 +13,9 @@ from oskernel_agent.comparison.exact.matcher import ExactMatcher, remap_spans
 from oskernel_agent.comparison.exact.verify import tier_of
 from oskernel_agent.comparison.models import is_baseline_repo
 from oskernel_agent.comparison.normalize.normalizer import normalize_snippet
+from oskernel_agent.comparison.normalize.source_identity import (
+    complete_source_reference, reference_covers_query,
+)
 from oskernel_agent.comparison.normalize.store import DEFAULT_DB
 from oskernel_agent.comparison.report.libraries import discover_library_context, tag_library_reuse
 
@@ -128,13 +131,13 @@ def channel_baseline(
     性能：去重 query 与 candidate 的 normalized_code，各一次矩阵乘批量算对基线集的相似度
     （~2546 基线向量；双侧各 ~1000 唯一代码 → 2 次 GPU 矩阵乘，秒级），再回填。
 
-    向量相似只负责高召回发现候选；最终排除必须由目标函数与实际基线源码的逐行证据
+    向量相似只负责高召回发现候选；目标级排除必须由完整源码身份
     支持。历史候选若比基线多出显著覆盖则保留，避免公共基线标签吞掉真正的队际同源证据。
 
     两条候选发现路径（见 is_baseline_derived）：
-      - 双侧同基线（强信号）：query 与 candidate 都命中同一基线函数 > bilateral_threshold → 两队共同衍生自上游。
-        覆盖「4 队共同改造 rcore-v3 原始函数、互相 1.0 但对原始版 sim<0.85」的因果倒置场景。
-      - 单侧 query 命中基线：query 与某基线函数相似 > baseline_sim_threshold → vendored/紧随上游。
+      - 双侧同基线：query 与 candidate 都命中同一基线函数 > bilateral_threshold。
+      - 单侧 query 命中基线：query 与某基线函数相似 > baseline_sim_threshold。
+    这些只发现参考；共同改造后的函数仍有本地修改，不能整体排除。
     """
     suspects = data["suspects"]
 
@@ -224,7 +227,7 @@ def channel_baseline(
         candidate = pair.get("candidate_func") or {}
         evidence = pair.get("evidence") or {}
         similarity, matched = pair_line_evidence(pair)
-        return {
+        reference = {
             "function_id": evidence.get("baseline_function_id"),
             "repo_id": candidate.get("repo_id", ""),
             "file_path": candidate.get("file_path", ""),
@@ -235,6 +238,11 @@ def channel_baseline(
             "matched_lines": matched,
             "vector_similarity": evidence.get("vector_similarity"),
         }
+        complete = complete_source_reference(pair)
+        reference["coverage_complete"] = complete is not None
+        if complete:
+            reference.update(complete)
+        return reference
 
     def _baseline_reference_note(pair: dict) -> str:
         ref = _baseline_reference(pair)
@@ -263,12 +271,13 @@ def channel_baseline(
             ev["baseline_query_scope"] = False
             ev["baseline_source_substantive"] = has_substantive_baseline_evidence(s)
             ev["baseline_reference"] = _baseline_reference(s)
+            ev["baseline_coverage_complete"] = ev["baseline_reference"]["coverage_complete"]
             s["tier"] = "baseline_derived"
             s["baseline_note"] = (
                 "候选函数直接来自显式公共基线仓库；"
-                + ("已形成可传播的直接代码证据；"
-                   if ev["baseline_source_substantive"]
-                   else "当前直接代码证据不足，不传播为目标函数级排除；")
+                + ("完整源码 token 一致，可用于目标函数级排除；"
+                   if ev["baseline_coverage_complete"]
+                   else "未证明完整源码覆盖，不传播为目标函数级排除；")
                 + _baseline_reference_note(s)
             )
             n += 1
@@ -323,6 +332,18 @@ def channel_baseline(
         ev = s.setdefault("evidence", {})
         ev["baseline_overlap"] = True
         ev["baseline_reference"] = _baseline_reference(strongest)
+        complete = next((item for item in baselines if reference_covers_query(
+            s.get("query_func") or {}, complete_source_reference(item))), None)
+        if complete is None:
+            ev["baseline_coverage_incomplete"] = True
+            s["baseline_note"] = (
+                "目标函数与公共基线存在局部代码重合，但未证明整函数被上游解释；"
+                "保留当前历史候选待核对；" + _baseline_reference_note(strongest)
+            )
+            continue
+        ev["baseline_reference"] = _baseline_reference(complete)
+        ev["baseline_coverage_complete"] = reference_covers_query(
+            s.get("query_func") or {}, ev["baseline_reference"])
         if has_incremental_history_evidence(s, baselines):
             ev = s.setdefault("evidence", {})
             ev["baseline_incremental_evidence"] = True
@@ -338,6 +359,7 @@ def channel_baseline(
             continue
         ev["baseline_flag"] = True
         ev["baseline_query_scope"] = True
+        ev["baseline_original_tier"] = s.get("tier")
         s["tier"] = "baseline_derived"
         s["baseline_note"] = (
             (vector_basis_by_query.get(_query_key(s)) or "目标函数有已验证的公共基线来源")

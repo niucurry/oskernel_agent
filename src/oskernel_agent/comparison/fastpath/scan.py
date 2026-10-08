@@ -1,4 +1,4 @@
-"""L0 文件指纹扫描：新作品逐文件规范化哈希 → 查历史 files 表同 hash（异 repo）。
+"""L0 文件指纹扫描：召回历史文件，并核验完整源码身份（异 repo）。
 
 命中即整文件复制：产出 {repo}_filematch.json，并返回需在 recall 跳过的文件清单。
 """
@@ -11,11 +11,12 @@ from pathlib import Path
 
 from loguru import logger
 
-from oskernel_agent.comparison.exact.matcher import normalized_file_hash, normalized_file_lines
+from oskernel_agent.comparison.exact.matcher import normalized_file_hash, normalized_file_lines, raw_file_hash
 from oskernel_agent.comparison.models import is_baseline_repo
 from oskernel_agent.comparison.normalize.discovery import discover_files, is_test_or_benchmark_path
 from oskernel_agent.comparison.normalize.runner import DEFAULT_MAX_LINES, DEFAULT_REPOS_ROOT, derive_repo_id
 from oskernel_agent.comparison.normalize.store import DEFAULT_DB, FunctionStore
+from oskernel_agent.comparison.normalize.source_identity import source_token_fingerprint
 
 DEFAULT_OUTPUT_DIR = "data/output"
 
@@ -59,6 +60,8 @@ def scan_repo(
     matched: list[dict] = []
     skip_files: list[str] = []
     common_files = 0
+    unverified_hash_candidates = 0
+    rejected_hash_candidates = 0
     with FunctionStore(db_path) as store:
         for f in files:
             # discover_files 已过滤；这里保留防御，避免自定义发现器或旧调用路径绕过。
@@ -73,11 +76,22 @@ def scan_repo(
             if len(normalized_file_lines(text, f.lang)) < min_file_lines:
                 continue
             nh = normalized_file_hash(text, f.lang)
-            hist = [
-                h for h in store.find_files_by_norm_hash(nh, exclude_repo_id=repo_id)
+            rh = raw_file_hash(text)
+            sh = source_token_fingerprint(text, f.lang)
+            candidates = [
+                h for h in store.find_file_identity_candidates(nh, rh, sh, exclude_repo_id=repo_id)
                 if (h.get("lang") or "").lower() == f.lang.lower()
                 and not is_test_or_benchmark_path(h.get("file_path", ""))
             ]
+            hist = []
+            for h in candidates:
+                if h.get("raw_hash") == rh or (sh and h.get("source_hash") == sh):
+                    hist.append(h)
+                elif sh and h.get("source_hash"):
+                    rejected_hash_candidates += 1
+                else:
+                    # 缺少完整源码指纹的旧记录不能凭正则格式哈希跳过召回。
+                    unverified_hash_candidates += 1
             if not hist:
                 continue
             repo_ids = {h["repo_id"] for h in hist}
@@ -94,6 +108,8 @@ def scan_repo(
                 "lang": f.lang,
                 "line_count": text.count("\n") + 1,
                 "norm_hash": nh,
+                "source_hash": sh,
+                "identity_basis": "raw_or_source_tokens",
                 "hist_repo_count": repo_count,
                 "matches": [
                     {"repo_id": h["repo_id"], "file_path": h["file_path"],
@@ -108,6 +124,8 @@ def scan_repo(
         "scanned_files": len(files),
         "matched_files": matched,
         "common_files": common_files,
+        "unverified_hash_candidates": unverified_hash_candidates,
+        "rejected_hash_candidates": rejected_hash_candidates,
         "skip_files": skip_files,
     }
     out_dir = Path(output_dir)

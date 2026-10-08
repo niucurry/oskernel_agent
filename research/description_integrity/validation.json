@@ -1,0 +1,59 @@
+{
+  "date": "2026-09-27",
+  "tests": {
+    "passed": 331,
+    "failed": 0,
+    "seconds": 2.37,
+    "scope": "Selected production description, report and finals tests; not the entire repository test suite",
+    "command": "FINALS_CJK_FONT=/tmp/oskernel-description-fonts/NotoSansSC-Regular.ttf FINALS_CJK_BOLD_FONT=/tmp/oskernel-description-fonts/NotoSansSC-Bold.ttf PYTHONPATH=/tmp/oskernel-description-test-deps:src:. python3 -m pytest -q tests/test_description_integrity.py tests/test_summary_fonts.py tests/test_finals_readability.py tests/test_finals_description.py tests/test_report.py tests/test_report_completeness.py tests/test_report_jobs.py tests/test_finals_cleanup.py tests/test_finals_comparison.py tests/test_finals_development.py tests/test_finals_summary_pdf.py --tb=short"
+  },
+  "baseline_before_edits": {
+    "passed": 101,
+    "failed": 4,
+    "scope": [
+      "tests/test_finals_readability.py",
+      "tests/test_finals_description.py"
+    ],
+    "failure_cause": "Four build tests mocked which(git) as docker; fixture repaired without changing build runtime"
+  },
+  "temporary_dependencies": {
+    "loguru": "0.7.3",
+    "pypdf": "6.19.0",
+    "reportlab": "5.0.1",
+    "python-dotenv": "1.2.3",
+    "lizard": "1.23.0",
+    "pillow": "12.3.0"
+  },
+  "font": {
+    "source": "https://raw.githubusercontent.com/notofonts/noto-cjk/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans/Variable/TTF/Subset/NotoSansSC-VF.ttf",
+    "instantiation": "fontTools.varLib.instancer wght=400 and wght=700",
+    "sha256": {
+      "NotoSansSC-Bold.ttf": "2cae60850f239085ad166c8fb0e1d06f5c5e80bee2a5e1148dc1539a078311ea",
+      "NotoSansSC-Regular.ttf": "e7801e37d5b4ba1b672d1cd9ae3b6780ea48d16dfdf35a32580cf4e94f10b5cb",
+      "NotoSansSC-VF.ttf": "d68bafcb48a2707749396aa12bbbd833cb70401f3a9a689fd2902c7e0d295964"
+    }
+  },
+  "pdf_smoke": {
+    "fixture": "tests/test_finals_summary_pdf.py::_ai_summary",
+    "real_contest_data": false,
+    "pages": 1,
+    "page_size": "A4",
+    "links": 0,
+    "text_chars": 551,
+    "raster_visually_checked": true
+  },
+  "frozen_research_files": {
+    "checked": 37,
+    "mismatches": []
+  },
+  "changed_code_sha256": {
+    "src/oskernel_agent/finals/digests.py": "98bb5f09dd5277c773ee9416258905446d631ba34cd384b2dbc8812abd5dfa3d",
+    "src/oskernel_agent/finals/summary_pdf.py": "48bb5d3b1c1f296a05a25cc225731650df2d367e53b29cb35e1a30ed0452b001",
+    "src/oskernel_agent/reports/html_tree.py": "f3fc2dd362a7c8c0ce37aad0614ca5c40aed4d8920b51f0069fd125ac0a2bb32",
+    "src/oskernel_agent/pipeline/tree_builder.py": "7a57fb28262a516819bcc4f91a92a2b0bcce786e1167ea18b2798b0bb5178667",
+    "tests/test_finals_description.py": "d38ebe1c0f7355e5c9a7293c3278598077134f2c2827642cdf1647fc5abf5e84",
+    "tests/test_description_integrity.py": "058e6d851549e17cf5622f72eeded9a7b3e2f0a5d1801b4a8b5273bf8887026e",
+    "tests/test_summary_fonts.py": "20c2e9254c8d7f0f83178386e893ef2a9bd4c4f07116a60e48a88c2cee45f3a0"
+  },
+  "new_model_experiment_calls": 0
+}

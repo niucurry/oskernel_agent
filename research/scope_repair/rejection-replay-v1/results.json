@@ -1,0 +1,338 @@
+{
+  "status": "completed",
+  "readings": [
+    {
+      "kind": "original",
+      "repeat": 2,
+      "score": {
+        "correct": 2,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 2,
+        "details": [
+          {
+            "case": "json_replace-d05",
+            "field": "outcome",
+            "actual": "false",
+            "expected": "false",
+            "label": "correct"
+          },
+          {
+            "case": "json_replace-d05",
+            "field": "state",
+            "actual": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "expected": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "label": "correct"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "source",
+      "repeat": 2,
+      "score": {
+        "correct": 2,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 2,
+        "details": [
+          {
+            "case": "json_replace-d05",
+            "field": "outcome",
+            "actual": "false",
+            "expected": "false",
+            "label": "correct"
+          },
+          {
+            "case": "json_replace-d05",
+            "field": "state",
+            "actual": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "expected": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "label": "correct"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "proposed",
+      "repeat": 2,
+      "score": {
+        "correct": 1,
+        "wrong": 1,
+        "unknown": 0,
+        "total": 2,
+        "details": [
+          {
+            "case": "json_replace-d05",
+            "field": "outcome",
+            "actual": "false",
+            "expected": "false",
+            "label": "correct"
+          },
+          {
+            "case": "json_replace-d05",
+            "field": "state",
+            "actual": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": "old"
+            },
+            "expected": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "label": "wrong"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "proposed",
+      "repeat": 1,
+      "score": {
+        "correct": 1,
+        "wrong": 1,
+        "unknown": 0,
+        "total": 2,
+        "details": [
+          {
+            "case": "json_replace-d05",
+            "field": "outcome",
+            "actual": "false",
+            "expected": "false",
+            "label": "correct"
+          },
+          {
+            "case": "json_replace-d05",
+            "field": "state",
+            "actual": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": "old"
+            },
+            "expected": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "label": "wrong"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "original",
+      "repeat": 0,
+      "score": {
+        "correct": 1,
+        "wrong": 1,
+        "unknown": 0,
+        "total": 2,
+        "details": [
+          {
+            "case": "json_replace-d05",
+            "field": "outcome",
+            "actual": "false",
+            "expected": "false",
+            "label": "correct"
+          },
+          {
+            "case": "json_replace-d05",
+            "field": "state",
+            "actual": {
+              "parent": {
+                "item": 7
+              },
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "expected": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "label": "wrong"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "original",
+      "repeat": 1,
+      "score": {
+        "correct": 2,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 2,
+        "details": [
+          {
+            "case": "json_replace-d05",
+            "field": "outcome",
+            "actual": "false",
+            "expected": "false",
+            "label": "correct"
+          },
+          {
+            "case": "json_replace-d05",
+            "field": "state",
+            "actual": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "expected": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "label": "correct"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "source",
+      "repeat": 1,
+      "score": {
+        "correct": 2,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 2,
+        "details": [
+          {
+            "case": "json_replace-d05",
+            "field": "outcome",
+            "actual": "false",
+            "expected": "false",
+            "label": "correct"
+          },
+          {
+            "case": "json_replace-d05",
+            "field": "state",
+            "actual": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "expected": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "label": "correct"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "source",
+      "repeat": 0,
+      "score": {
+        "correct": 2,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 2,
+        "details": [
+          {
+            "case": "json_replace-d05",
+            "field": "outcome",
+            "actual": "false",
+            "expected": "false",
+            "label": "correct"
+          },
+          {
+            "case": "json_replace-d05",
+            "field": "state",
+            "actual": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "expected": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "label": "correct"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "proposed",
+      "repeat": 0,
+      "score": {
+        "correct": 1,
+        "wrong": 1,
+        "unknown": 0,
+        "total": 2,
+        "details": [
+          {
+            "case": "json_replace-d05",
+            "field": "outcome",
+            "actual": "false",
+            "expected": "false",
+            "label": "correct"
+          },
+          {
+            "case": "json_replace-d05",
+            "field": "state",
+            "actual": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": "old"
+            },
+            "expected": {
+              "parent": null,
+              "replacement_exists": true,
+              "replacement_key": null
+            },
+            "label": "wrong"
+          }
+        ]
+      }
+    }
+  ],
+  "failures": [],
+  "selected_field_labels": {
+    "original": [
+      "correct",
+      "wrong",
+      "correct"
+    ],
+    "proposed": [
+      "wrong",
+      "wrong",
+      "wrong"
+    ],
+    "source": [
+      "correct",
+      "correct",
+      "correct"
+    ]
+  },
+  "consistent_harm": false,
+  "calls": 9,
+  "usage": {
+    "prompt_tokens": 7254,
+    "completion_tokens": 14685,
+    "total_tokens": 21939
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "kind": "synthetic_regression_witnesses_not_natural_error_rates",
+  "implementation": "working_tree",
+  "passed": 8,
+  "total": 8,
+  "witnesses": [
+    {
+      "id": "no_invented_dependency",
+      "input": "构建了完整的 TCP/IP 网络协议栈。",
+      "output": "构建了TCP/IP 网络能力",
+      "contract_holds": true
+    },
+    {
+      "id": "no_keyword_based_deletion",
+      "input": "fork 失败时回收页框；mmap 失败时保留旧映射。",
+      "output": "fork 失败时回收页框；mmap 失败时保留旧映射。",
+      "contract_holds": true
+    },
+    {
+      "id": "no_invented_fallback_or_lost_independent_sentence",
+      "input": "覆盖 120 个系统调用。未知编号由 dispatch 返回 ENOSYS；失败时保留旧映射。",
+      "output": "函数定义正则扫描识别到 48/60 个标准系统调用名称；该计数只表示接口线索，不代表语义可用或测试通过。未知编号由 dispatch 返回 ENOSYS；失败时保留旧映射",
+      "contract_holds": true
+    },
+    {
+      "id": "long_statement_available_intact",
+      "input": "模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，但仅在单核配置下启用回收。",
+      "output": "\n<section id=\"modules\" data-section-id=\"modules\" class=\"brief-card p-5 mb-5\">\n  <h2 class=\"text-xl font-bold mb-1\">模块概览</h2>\n  <p class=\"text-xs text-slate-500 mb-3\">按仓库实际设计拆分并列模块；笼统“其他”会展开为真实子模块。每项概览正文不超过 300 字；超出篇幅的实现与亮点可展开查看完整说明。问题陈述完整保留，重要问题集中列示，低风险局部问题在所属模块内说明；实现依据覆盖各子模块的代表位置。第三方库本身不计作作品缺陷或自研亮点，只评价项目适配代码及系统可见行为。</p>\n  <div><article class=\"core-card\" data-subsystem=\"内存\" data-analysis-chars=\"0\" data-detail-chars=\"362\" data-issue-chars=\"0\"><h3 class=\"font-bold mb-1\">内存</h3><details class=\"text-sm mt-2\" data-description-overflow=\"true\"><summary>补充实现与亮点（1 条完整说明）</summary><ul class=\"list-disc pl-4 mt-1 space-y-0.5\"><li>模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，模块维护映射与页框引用计数，但仅在单核配置下启用回收</li></ul></details><div class=\"text-xs text-slate-500 mt-2\"><strong>实现依据：</strong><ul class=\"inline\" data-evidence-count=\"1\"><li class=\"inline mr-3\"><a class=\"file-jump\" href=\"#kernel/mm.c:1\">kernel/mm.c:1</a></li></ul></div></article></div>\n</section>\n",
+      "contract_holds": true
+    },
+    {
+      "id": "plain_comparisons_not_treated_as_html",
+      "input": "当 fd<0、fd>=NOFILE 或 ofile[fd]==0 时返回 -1。",
+      "output": "\n<section id=\"modules\" data-section-id=\"modules\" class=\"brief-card p-5 mb-5\">\n  <h2 class=\"text-xl font-bold mb-1\">模块概览</h2>\n  <p class=\"text-xs text-slate-500 mb-3\">按仓库实际设计拆分并列模块；笼统“其他”会展开为真实子模块。每项概览正文不超过 300 字；超出篇幅的实现与亮点可展开查看完整说明。问题陈述完整保留，重要问题集中列示，低风险局部问题在所属模块内说明；实现依据覆盖各子模块的代表位置。第三方库本身不计作作品缺陷或自研亮点，只评价项目适配代码及系统可见行为。</p>\n  <div><article class=\"core-card\" data-subsystem=\"内存\" data-analysis-chars=\"39\" data-detail-chars=\"0\" data-issue-chars=\"0\"><h3 class=\"font-bold mb-1\">内存</h3><div class=\"text-sm leading-relaxed\"><strong>静态实现：</strong><ul class=\"list-disc pl-4 mt-1 space-y-0.5\"><li>当 fd&lt;0、fd&gt;=NOFILE 或 ofile[fd]==0 时返回 -1</li></ul></div><div class=\"text-xs text-slate-500 mt-2\"><strong>实现依据：</strong><ul class=\"inline\" data-evidence-count=\"1\"><li class=\"inline mr-3\"><a class=\"file-jump\" href=\"#kernel/mm.c:1\">kernel/mm.c:1</a></li></ul></div></article></div>\n</section>\n",
+      "contract_holds": true
+    },
+    {
+      "id": "semicolon_highlight_keeps_own_citation",
+      "input": "映射成功后更新引用计数；撤销时同步回收空闲页框。",
+      "output": "\n<section id=\"modules\" data-section-id=\"modules\" class=\"brief-card p-5 mb-5\">\n  <h2 class=\"text-xl font-bold mb-1\">模块概览</h2>\n  <p class=\"text-xs text-slate-500 mb-3\">按仓库实际设计拆分并列模块；笼统“其他”会展开为真实子模块。每项概览正文不超过 300 字；超出篇幅的实现与亮点可展开查看完整说明。问题陈述完整保留，重要问题集中列示，低风险局部问题在所属模块内说明；实现依据覆盖各子模块的代表位置。第三方库本身不计作作品缺陷或自研亮点，只评价项目适配代码及系统可见行为。</p>\n  <div><article class=\"core-card\" data-subsystem=\"内存\" data-analysis-chars=\"27\" data-detail-chars=\"0\" data-issue-chars=\"0\"><h3 class=\"font-bold mb-1\">内存</h3><div class=\"text-sm leading-relaxed\"><strong>静态实现：</strong><ul class=\"list-disc pl-4 mt-1 space-y-0.5\"><li>管理页表</li></ul></div><div class=\"text-sm leading-relaxed\"><strong>实现亮点：</strong><ul class=\"list-disc pl-4 mt-1 space-y-0.5\"><li>映射成功后更新引用计数；撤销时同步回收空闲页框 <span class=\"text-xs text-slate-400\">（<a class=\"file-jump\" href=\"#kernel/mm.c:42\">kernel/mm.c:42</a>）</span></li></ul></div><div class=\"text-xs text-slate-500 mt-2\"><strong>实现依据：</strong><ul class=\"inline\" data-evidence-count=\"1\"><li class=\"inline mr-3\"><a class=\"file-jump\" href=\"#kernel/mm.c:42\">kernel/mm.c:42</a></li></ul></div></article></div>\n</section>\n",
+      "contract_holds": true
+    },
+    {
+      "id": "long_issue_keeps_qualification",
+      "input": "资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，此问题只影响调试配置。",
+      "output": "\n<section id=\"modules\" data-section-id=\"modules\" class=\"brief-card p-5 mb-5\">\n  <h2 class=\"text-xl font-bold mb-1\">模块概览</h2>\n  <p class=\"text-xs text-slate-500 mb-3\">按仓库实际设计拆分并列模块；笼统“其他”会展开为真实子模块。每项概览正文不超过 300 字；超出篇幅的实现与亮点可展开查看完整说明。问题陈述完整保留，重要问题集中列示，低风险局部问题在所属模块内说明；实现依据覆盖各子模块的代表位置。第三方库本身不计作作品缺陷或自研亮点，只评价项目适配代码及系统可见行为。</p>\n  <div><article class=\"core-card\" data-subsystem=\"内存\" data-analysis-chars=\"4\" data-detail-chars=\"0\" data-issue-chars=\"218\"><h3 class=\"font-bold mb-1\">内存</h3><div class=\"text-sm leading-relaxed\"><strong>静态实现：</strong><ul class=\"list-disc pl-4 mt-1 space-y-0.5\"><li>管理页表</li></ul></div><div class=\"text-sm leading-relaxed\"><strong>局部问题：</strong><ul class=\"list-disc pl-4 mt-1 space-y-0.5\"><li>资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，资源回收路径需要人工复核，此问题只影响调试配置 <span class=\"text-xs text-slate-400\">（<a class=\"file-jump\" href=\"#kernel/mm.c:50\">kernel/mm.c:50</a>）</span></li></ul></div><div class=\"text-xs text-slate-500 mt-2\"><strong>实现依据：</strong><ul class=\"inline\" data-evidence-count=\"1\"><li class=\"inline mr-3\"><a class=\"file-jump\" href=\"#kernel/mm.c:1\">kernel/mm.c:1</a></li></ul></div></article></div>\n</section>\n",
+      "contract_holds": true
+    },
+    {
+      "id": "prompt_samples_all_three_directories",
+      "input": {
+        "a": 100,
+        "b": 2,
+        "c": 2
+      },
+      "output": [
+        "a",
+        "b",
+        "c"
+      ],
+      "contract_holds": true
+    }
+  ],
+  "module_sha256": {
+    "src/oskernel_agent/finals/digests.py": "98bb5f09dd5277c773ee9416258905446d631ba34cd384b2dbc8812abd5dfa3d",
+    "src/oskernel_agent/reports/html_tree.py": "f3fc2dd362a7c8c0ce37aad0614ca5c40aed4d8920b51f0069fd125ac0a2bb32",
+    "src/oskernel_agent/pipeline/tree_builder.py": "7a57fb28262a516819bcc4f91a92a2b0bcce786e1167ea18b2798b0bb5178667"
+  }
+}

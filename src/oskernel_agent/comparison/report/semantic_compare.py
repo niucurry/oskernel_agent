@@ -43,6 +43,9 @@ from oskernel_agent.comparison.metadata.baseline import (has_incremental_history
                                    pair_line_evidence)
 from oskernel_agent.comparison.models import is_baseline_repo
 from oskernel_agent.comparison.normalize.classify import load_classifier
+from oskernel_agent.comparison.normalize.source_identity import (
+    complete_source_reference, reference_covers_query,
+)
 from oskernel_agent.comparison.normalize.discovery import is_test_or_benchmark_path
 from oskernel_agent.comparison.retrieval_contract import (CONTRACT_VERSION, contract_errors,
                                     require_complete_contract)
@@ -269,15 +272,47 @@ def _tag_query_level_baselines(suspects: list[dict]) -> int:
         ev["baseline_flag"] = True
         ev["baseline_query_scope"] = False
         ev["baseline_source_substantive"] = has_substantive_baseline_evidence(s)
+        reference = complete_source_reference(s)
+        ev["baseline_coverage_complete"] = reference is not None
+        if reference:
+            ev["baseline_reference"] = reference
         if s.get("tier") == "baseline_derived":
             continue
         s["tier"] = "baseline_derived"
         s["baseline_note"] = (
             "候选函数直接来自显式公共基线仓库；"
-            + ("已形成可传播的直接代码证据"
-               if ev["baseline_source_substantive"]
-               else "当前直接代码证据不足，不传播为目标函数级排除")
+            + ("完整源码 token 一致，可用于目标函数级排除"
+               if ev["baseline_coverage_complete"]
+               else "未证明完整源码覆盖，不传播为目标函数级排除")
         )
+        changed += 1
+
+    complete_by_query: dict[tuple, dict] = {}
+    for item in suspects:
+        reference = complete_source_reference(item)
+        if reference:
+            complete_by_query[_query_key(item.get("query_func") or {})] = reference
+
+    # Old artifacts may have propagated partial/vector evidence to a whole-query
+    # tier. Recover a reviewable history candidate unless current source or its
+    # bound reference actually establishes complete coverage.
+    for s in suspects:
+        if s.get("reuse_library") or is_baseline_repo(str(
+            (s.get("candidate_func") or {}).get("repo_id") or "")):
+            continue
+        if s.get("tier") != "baseline_derived":
+            continue
+        q = s.get("query_func") or {}
+        ev = s.setdefault("evidence", {})
+        if (reference_covers_query(q, ev.get("baseline_reference"))
+                or reference_covers_query(q, complete_by_query.get(_query_key(q)))):
+            continue
+        original = ev.get("baseline_original_tier")
+        s["tier"] = original if original in {"confirmed", "review", "weak"} else "review"
+        ev["baseline_flag"] = False
+        ev["baseline_query_scope"] = False
+        ev["baseline_coverage_incomplete"] = True
+        s["baseline_note"] = "旧基线标签未提供完整源码覆盖证据；恢复为待核对历史候选"
         changed += 1
 
     baseline_by_query: dict[tuple, list[dict]] = defaultdict(list)
@@ -294,6 +329,17 @@ def _tag_query_level_baselines(suspects: list[dict]) -> int:
             continue
         baselines = baseline_by_query.get(_query_key(s.get("query_func") or {}), [])
         if s.get("tier") not in ("confirmed", "review", "weak") or not baselines:
+            continue
+        q = s.get("query_func") or {}
+        complete_reference = next((reference for item in baselines
+            if reference_covers_query(q, reference := complete_source_reference(item))), None)
+        if complete_reference is None:
+            complete_reference = next(((item.get("evidence") or {}).get("baseline_reference")
+                for item in baselines if reference_covers_query(q,
+                    (item.get("evidence") or {}).get("baseline_reference"))), None)
+        if complete_reference is None:
+            s.setdefault("evidence", {})["baseline_coverage_incomplete"] = True
+            s["baseline_note"] = "公共基线只解释部分代码或参考缺失；保留历史候选待核对"
             continue
         query_scope = any(
             bool((item.get("evidence") or {}).get("baseline_query_scope"))
@@ -321,6 +367,9 @@ def _tag_query_level_baselines(suspects: list[dict]) -> int:
             )
             continue
         s.setdefault("evidence", {})["baseline_flag"] = True
+        s["evidence"]["baseline_reference"] = complete_reference
+        s["evidence"]["baseline_coverage_complete"] = True
+        s["evidence"]["baseline_original_tier"] = s.get("tier")
         s["tier"] = "baseline_derived"
         s["baseline_note"] = (
             "目标函数已有候选证明来自公共基线；当前候选未提供扣除基线后的增量同源证据"
@@ -1493,6 +1542,8 @@ def _candidate_from_suspect(s: dict) -> dict:
         "ref_end": c.get("end_line", 0),
         "ref_code": c.get("raw_code") or "",
         "normalized_fingerprint_match": bool(ev.get("normalized_fingerprint_match")),
+        "upstream_path_hint": s.get("upstream_path_hint"),
+        "baseline_coverage_incomplete": bool(ev.get("baseline_coverage_incomplete")),
         "unique_string_matches": int(ev.get("unique_string_matches") or 0),
         "segment_evidence": _segment_evidence_is_sufficient(ev),
         "substantive_partial_match": _has_substantive_partial_match(s),
@@ -3320,10 +3371,10 @@ def _exclusion_totals(suspects: list[dict], recall: dict | None = None, *,
             return "upstream"
         if s.get("tier") == "baseline_derived":
             ev = s.get("evidence") or {}
-            # 只有真正通过基线源码复核（baseline_query_scope / baseline_source_substantive）
-            # 才计为「基线衍生」；其余弱候选仅按档位标记、未复核，单列「基线弱候选（待人工
-            # 复核）」，不能冒充已通过基线源码复核的排除项。
-            if ev.get("baseline_query_scope") or ev.get("baseline_source_substantive"):
+            # 只有当前源码身份或绑定到当前源码的完整参考才计为「基线衍生」。
+            # 局部重合、旧布尔标签及未核验参考仍单列待核对。
+            if (complete_source_reference(s) or reference_covers_query(
+                    s.get("query_func") or {}, ev.get("baseline_reference"))):
                 return "baseline"
             return "baseline_unverified"
         if s.get("false_positive") or s.get("internal_arch_dup"):
@@ -3721,6 +3772,8 @@ def _candidates_cell(group: dict, linker) -> str:
                if c.get("cross_arch_signal") else "")
             + (' <span class="text-amber-700" title="标准化汇编仍可能被直接复制；仅作复核提示">汇编样板提示</span>'
                if c.get("boilerplate_asm_signal") else "")
+            + (' <span class="text-amber-700">存在上游线索，完整来源待核对</span>'
+               if c.get("upstream_path_hint") or c.get("baseline_coverage_incomplete") else "")
             + f' <span class="text-slate-400">{html.escape(ck)}</span>'
             '</li>'
         )
@@ -5625,8 +5678,8 @@ def _false_positive_section(fp_funcs: list[dict], linker, query_repo_id: str) ->
 def _upstream_baseline_section(ub_funcs: list[dict], linker, query_repo_id: str) -> tuple[str, str]:
     """上游基线 / ABI 受限代码 小节：vendored 上游 OS + Linux/POSIX ABI 受限实现（不计入借鉴）。
 
-    ① 双方 file_path 在同一 upstream_root（例如 arceos 或 rcore）下且相对路径相同 → 双方 vendored
-    了同一份上游文件，非跨队抄袭；② 受 ABI 规范硬性限制的唯一性实现（stat 转换、syscall
+    ① 目标函数的完整源码 token 与显式上游参考一致；路径只是来源线索。
+    ② 受 ABI 规范硬性限制的唯一性实现（stat 转换、syscall
     shim、build.rs 等），只有一种正确写法。两类已从借鉴 KPI/清单剔除，此处分组单列供核对。
     """
     if not ub_funcs:
@@ -5687,9 +5740,10 @@ def _upstream_baseline_section(ub_funcs: list[dict], linker, query_repo_id: str)
         blocks.append(
             '<div class="text-sm font-semibold text-slate-700 mt-3 mb-1">'
             f'vendored 上游基线（{len(uv)} 个函数）</div>'
-            '<p class="text-xs text-slate-500 mb-1">双方文件路径位于同一上游根（如 '
-            '<code>arceos/</code>）下、且相对路径相同——即双方都整库签入了同一份上游 OS/框架，'
-            '逐字相同属必然，<b>非跨队抄袭</b>。队伍自研的新模块（其他队无同名相对路径）不受影响。</p>'
+            '<p class="text-xs text-slate-500 mb-1">下列目标函数的完整源码 token '
+            '与显式上游参考一致，忽略注释和空白，保留名称、常量和字符串。'
+            '路径相同只提供来源线索；未解释的本地修改继续保留待核对。'
+            '这里只核对源码来源，不判断运行语义或作者意图。</p>'
             '<div class="overflow-x-auto"><table class="w-full text-sm border-collapse">'
             '<thead><tr class="bg-slate-50 text-slate-600">'
             '<th class="text-left p-2 border-b">函数</th><th class="text-left p-2 border-b">新作品 文件:行</th>'
@@ -7669,8 +7723,8 @@ def run_semantic_compare(
     )
 
     # 文件整体相似：用「已剔除嫌疑对」口径计算（vendored 上游 / ABI / 库复用 / 公共样板 /
-    # 误报 不计入），这样 arceos/build.rs、macros.rs、C 库、examples 等脚手架文件不会被
-    # 报为整体相似。file_matches（逐字节整文件相同）按路径口径剔除同类脚手架。
+    # 误报 不计入）。文件级只沿用库和 ABI/脚手架路径策略；上游目录中的本地修改
+    # 不能因路径被隐藏。L0 的整文件身份来自原文或保留字面量的完整源码指纹。
     non_excluded = [s for s in report_suspects if not _is_excluded_pair(s)]
     file_similar = aggregate_file_similarity(non_excluded, recall, query_repo_path=query_repo_path)
     file_similar = [f for f in file_similar

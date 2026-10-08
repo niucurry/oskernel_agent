@@ -677,8 +677,8 @@ def test_module_issue_dedup_keeps_term_parentheses_intact():
 
     result = _remove_assigned_issue_sentences(value, issues)
 
-    assert result == "其他实现说明"
-    assert "Operating System，" not in result
+    assert result == value
+    assert "Operating System，OS）" in result
 
 def test_contest_build_verification_uses_temporary_copy_and_records_artifacts(
     tmp_path, monkeypatch,
@@ -689,7 +689,11 @@ def test_contest_build_verification_uses_temporary_copy_and_records_artifacts(
         "kernel-rv:\n\t@true\nkernel-la:\n\t@true\n", encoding="utf-8",
     )
 
-    monkeypatch.setattr(integrity_module.shutil, "which", lambda _name: "docker")
+    real_which = integrity_module.shutil.which
+    monkeypatch.setattr(
+        integrity_module.shutil, "which",
+        lambda name: "docker" if name == "docker" else real_which(name),
+    )
 
     def fake_docker(command, *, timeout):
         if command[1:3] == ["version", "--format"]:
@@ -788,7 +792,11 @@ def test_contest_build_verification_separates_compile_failure_from_environment_e
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "Makefile").write_text("all:\n\t@true\n", encoding="utf-8")
-    monkeypatch.setattr(integrity_module.shutil, "which", lambda _name: "docker")
+    real_which = integrity_module.shutil.which
+    monkeypatch.setattr(
+        integrity_module.shutil, "which",
+        lambda name: "docker" if name == "docker" else real_which(name),
+    )
 
     def fake_docker(command, *, timeout):
         if command[1] == "version":
@@ -814,7 +822,11 @@ def test_contest_build_verification_treats_offline_toolchain_download_as_environ
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "Makefile").write_text("all:\n\t@true\n", encoding="utf-8")
-    monkeypatch.setattr(integrity_module.shutil, "which", lambda _name: "docker")
+    real_which = integrity_module.shutil.which
+    monkeypatch.setattr(
+        integrity_module.shutil, "which",
+        lambda name: "docker" if name == "docker" else real_which(name),
+    )
 
     def fake_docker(command, *, timeout):
         if command[1] == "version":
@@ -856,7 +868,11 @@ def test_make_all_must_produce_both_root_artifacts_fresh(tmp_path, monkeypatch):
     repo.mkdir()
     (repo / "Makefile").write_text("all:\n\t@true\n", encoding="utf-8")
     (repo / "kernel-la").write_bytes(b"stale-la")  # 构建前残留产物不应被当成结果
-    monkeypatch.setattr(integrity_module.shutil, "which", lambda _name: "docker")
+    real_which = integrity_module.shutil.which
+    monkeypatch.setattr(
+        integrity_module.shutil, "which",
+        lambda name: "docker" if name == "docker" else real_which(name),
+    )
 
     def fake_docker(command, *, timeout):
         if command[1] == "version":
@@ -1018,7 +1034,7 @@ def test_low_severity_incomplete_feature_stays_in_its_module():
     assert "调试接口尚未实现，当前返回 ENOSYS" in rendered
 
 
-def test_module_summary_does_not_paraphrase_an_important_issue_again():
+def test_module_summary_is_not_deleted_for_sharing_an_issue_identifier():
     tree = _tree()
     subsystem = tree["tree"]["children"][0]
     subsystem["summary"] = (
@@ -1034,7 +1050,8 @@ def test_module_summary_does_not_paraphrase_an_important_issue_again():
     modules = re.search(r'<section id="modules"[\s\S]*?</section>', rendered).group(0)
 
     assert "SCHED_DEADLINE" in rendered
-    assert "SCHED_DEADLINE" not in modules
+    assert "SCHED_DEADLINE" in modules
+    assert "调度策略框架支持多种策略" in modules
 
 
 def test_syscall_count_is_labeled_as_a_static_signal_and_never_overclaims():
@@ -1451,7 +1468,8 @@ def test_description_softens_unverified_absolute_capability_claims():
     cleaned = _clean_capability_claim(claim, {"facts": {}})
 
     assert "覆盖主要路径" in cleaned
-    assert "基于 smoltcp 的 TCP/IP 网络能力" in cleaned
+    assert "TCP/IP 网络能力" in cleaned
+    assert "smoltcp" not in cleaned
     assert "集中定义接口" in cleaned
     assert "以兼容 Linux UAPI 为目标" in cleaned
     assert "为用户程序二进制兼容提供接口基础" in cleaned

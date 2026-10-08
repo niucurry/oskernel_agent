@@ -13,7 +13,16 @@ from oskernel_agent.comparison.report import semantic_compare as SC
 def _q(fp, fn, lang="rust", start=10, module="arch"):
     return {"repo_id": "2026/new", "file_path": fp, "func_name": fn,
             "start_line": start, "end_line": start + 9, "module_tag": module,
-            "lang": lang, "raw_code": "fn f(){}"}
+            "lang": lang, "raw_code": f"fn {fn}(){{}}"}
+
+
+def _with_upstream_reference(pair):
+    from oskernel_agent.comparison.normalize.source_identity import complete_source_reference
+    query = pair['query_func']
+    base = dict(query, repo_id='0/baseline_arceos')
+    pair.setdefault('evidence', {})['baseline_reference'] = complete_source_reference(
+        {'query_func': query, 'candidate_func': base})
+    return pair
 
 
 def _pair(qf, cf, tier="confirmed", score=0.96):
@@ -94,6 +103,7 @@ def test_tag_upstream_baselines_catches_framework_path():
         "exact_match_lines": 8,
         "function_identity_relation": "exact_counterpart",
     }
+    _with_upstream_reference(s)
     UB.tag_upstream_baselines([s])
     assert s.get("upstream_vendored")  # 被标为上游基线
     # 只有路径提示、没有 pair 代码证据时不能把任意候选归入共同上游。
@@ -243,6 +253,7 @@ def test_tag_and_exclude_integration():
         _pair(_q("arceos/modules/asynctask/src/task.rs", "from"),
               _q("2024/x/crates/taskctx/src/task.rs", "from")),
     ]
+    _with_upstream_reference(suspects[0])
     counts = UB.tag_upstream_baselines(suspects)
     assert counts == {"upstream_vendored": 1, "abi_constrained": 1}
     assert UB.is_upstream_vendored_pair(suspects[0])  # 已打标
@@ -279,6 +290,7 @@ def test_upstream_baseline_stats_grouping():
         _pair(_q("api/src/file/fs.rs", "metadata_to_kstat"),
               _q("2025/o/api/src/file/fs.rs", "metadata_to_kstat")),
     ]
+    _with_upstream_reference(suspects[0])
     UB.tag_upstream_baselines(suspects)
     stats = UB.upstream_baseline_stats(suspects)
     assert len(stats) == 2

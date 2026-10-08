@@ -11,9 +11,18 @@
 
 ## 文档
 
+- [新任务提示词：只研究 OS 代码描述系统](docs/description-research-restart-2026-10-08.md)
+- [工程交接：保留的修复与验证范围](docs/engineering-handoff-2026-10-08.md)
+- [历史重新选题交接：旧主线与负结果](docs/research-handoff-next-method-2026-10-02.md)
+- [已停止的描述研究：清理与归档](docs/retired-description-experiments-2026-10-02.md)
+- [历史 Python 先导：方法对照与评测诊断](docs/description-scope-pilot-2026-09-28.md)
+- [历史 C/Rust 对照：候选淘汰证据与生产修复](docs/description-scope-c-rust-trial-2026-10-02.md)
+- [描述报告修复与可复现回放](research/description_integrity/README.md)
+- [旧实验清理、归档与恢复](docs/retired-experiments-2026-09-27.md)
+- [历史研究转向与负结果](docs/research-pivot-decision.md)
+- [历史方法的新颖性与证据审查](docs/novelty-and-evidence-audit.md)
+- [项目结构](docs/project-map.md)
 - [设计方案与技术文档](docs/design-specification.pdf)
-- [决赛报告设计说明](docs/finals-report-plan.md)
-- [项目进展演示稿](docs/progress-presentation.pptx)
 
 ## 安装
 
@@ -94,6 +103,14 @@ python -m oskernel_agent.finals development \
 ```
 
 Git 提交次数、日期、代码变更行数（LOC）和文件明细由程序复算；AI 只负责问题判断和阶段归纳。虚假提交、阶段重叠、历史缺口或模型输出不完整都会触发交付失败。
+
+### 外部运行日志核对
+
+```bash
+python -m oskernel_agent.finals audit-run --log qemu.log --output runtime-audit.html
+```
+
+当前识别 RT-Thread utest 的完整测试轮次，保留原汇总判定与断言失败位置；断言失败后仍汇总通过标为 `inconsistent`，未结束、零测例或未识别协议标为 `unknown`。退出码为 0（该轮判定一致且报告通过）、1（失败或矛盾）、2（未知或输入错误）；输出支持 `.json`。这项检查不执行仓库代码；日志通过只能说明该轮判定未发现矛盾，不能证明内核能力、测试充分性或日志真实性。它是独立核对入口，未自动接入作品描述报告。
 
 ### 一对一报告产出
 
@@ -199,12 +216,23 @@ cd frontend && npm run build
 
 - 严重问题和模块不因版面配额被静默截断；
 - 报告中的提交、函数、文件和行号必须能回到原始证据；
+- 浅克隆边界和未测量父差分的合并变更量保持未知；作者声明日期不作为实际工作起止时间；
 - 公共上游、第三方库、比赛基线、ABI 受限实现和机械误报不得混入同源比例；
 - 召回库或索引代际不完整时拒绝生成“未检出相似”结论；
 - AI 调用失败、结构化输出无效或复核未覆盖全部候选时拒绝交付；
 - 正式报告完全由工具生成，参赛队无需且不得后处理 HTML/PDF。
 
 ## 维护工具
+
+后续研究仅面向描述系统，要求见 [新任务提示词](docs/description-research-restart-2026-10-08.md)。
+此前对比、性能和内核缺陷方向停止投入；相关代码仅保留已有工程修复，实验记录保留为历史材料。
+最新开发历史证据修正与负结果见 [历史证据实验](docs/research-history-evidence-gate-2026-10-07.md)，
+公开移植样本的来源适用性检查见 [自然上游真值实验](docs/research-natural-upstream-gate-2026-10-07.md)。
+两者均未建立合适的论文方法；工程修正与研究效果分别记录。
+描述报告的确定性回放位于 `research/description_integrity/`。
+`research/description_scope/` 与 `research/scope_repair/` 仅保留旧实验结论和归档索引，
+实验代码已移除；详见 [描述研究清理记录](docs/retired-description-experiments-2026-10-02.md)。
+更早的行为图实验见 [旧实验清理记录](docs/retired-experiments-2026-09-27.md)。
 
 | 命令 | 用途 |
 |---|---|
@@ -214,3 +242,5 @@ cd frontend && npm run build
 | `python scripts/stitch_fragments.py` | 在诊断模式下恢复已完成的模型分片 |
 
 许可证见 [LICENSE](LICENSE)。
+
+本轮性能基准的固定故障原型、强基线与停止依据见 [研究记录](docs/research-performance-validity-2026-10-07.md)；受控计数与操作失败可共存，普通 POSIX 预检已覆盖当前收益，尚无新论文方法效果。可恢复构建缓存和 NoAxiom 准备未知也在该记录中保存。

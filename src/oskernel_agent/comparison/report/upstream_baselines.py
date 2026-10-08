@@ -4,9 +4,8 @@
 限制的唯一性实现」当成跨队借鉴，虚高了外部重复率。两类均**降级 / 归类**不丢弃——从借鉴
 KPI/清单剔除，另单列小节供人工核。配置见 config/upstream_baselines.yaml。
 
-1. upstream_vendored：双方 file_path 在同一 upstream_root（如 arceos）段下、且该段之后
-   的相对路径相同 → 双方都 vendored 了同一份上游文件，非跨队抄袭。安全性：队伍自研的新
-   模块（如 arceos/modules/asynctask/）在其他队无同名相对路径，不触发本规则。
+1. upstream_vendored：目标函数完整源码 token 与显式上游参考一致；路径相同仅产生
+   upstream_path_hint，不据此排除本地修改。引用保留名称、常量与字符串，缺失参考保持待核对。
 2. abi_constrained：无条件排除明确的构建/兼容层路径；ABI 上下文目录和泛化名称还必须通过
    薄适配器代码形态检查。复杂系统调用、单个裸数字或名称本身不构成排除理由。
 
@@ -22,6 +21,9 @@ from functools import lru_cache
 from pathlib import Path
 
 import yaml
+from oskernel_agent.comparison.normalize.source_identity import (
+    complete_source_reference, reference_covers_query,
+)
 
 DEFAULT_UPSTREAM_PATH = "config/upstream_baselines.yaml"
 
@@ -217,12 +219,12 @@ def is_upstream_framework_path(file_path: str, *, roots: tuple[str, ...] | None 
 
 
 def is_upstream_vendored_pair(s: dict, *, path: str | None = None) -> str | None:
-    """双方都在同一 upstream_root 下、且相对路径相同 → 返回该 root 名，否则 None。
+    """同上游根及相对路径提供来源线索，返回 root；不证明完整代码来自上游。
 
     两条命中路径（任一即可）：① 双方 file_path 在某 root 段下、相对路径相同；
     ② query 在某 root 下、candidate 路径**以 query 的相对路径为后缀**（其他队把上游
     vendored 到不同目录结构下，如 `AstrancE/api/arceos_api/...` 之于 `arceos/api/arceos_api/...`）。
-    队伍自研的新模块（其他队无同名相对路径）不命中，故不会被误降。
+    新模块不匹配也不能证明原创；分类排除另需显式上游完整源码覆盖。
     """
     roots, _, _, _, _ = load_upstream_registry(path)
     q = (s.get("query_func") or {}).get("file_path", "")
@@ -389,15 +391,12 @@ def is_abi_constrained(s: dict, *, path: str | None = None) -> bool:
 
 
 def is_excluded_file_path(file_path: str, *, path: str | None = None) -> str | None:
-    """文件级路径口径：该文件本身属上游基线 vendored 或 ABI 受限 → 返回类别，否则 None。
+    """仅返回现有 ABI/脚手架路径策略；上游目录不能证明整个文件未经修改。
 
-    用于 file_matches（整文件相同，无 suspect 级标签可判）：文件位于 upstream_root 段下
-    → 'upstream_vendored'；命中 ABI path glob → 'abi_constrained'。队伍自研模块在其他队
-    无逐字相同副本，不会进 file_matches，故路径口径不会误伤自研代码。
+    完整文件的上游身份须在 L0 用已索引的公开基线源码核验。这里不再按
+    upstream_root 清除跨队相同文件，以保留框架目录中的本地改动供核对。
     """
-    roots, path_globs, _, _, _ = load_upstream_registry(path)
-    if _rel_under_root(file_path, roots) or is_upstream_framework_path(file_path, roots=roots):
-        return "upstream_vendored"
+    _, path_globs, _, _, _ = load_upstream_registry(path)
     fp = (file_path or "").replace("\\", "/").lower()
     if any(_glob_in_path(g, fp) for g in path_globs):
         return "abi_constrained"
@@ -459,17 +458,23 @@ def tag_upstream_baselines(suspects: list[dict], *, path: str | None = None) -> 
     roots, path_globs, name_regexes, context_paths, adapter_names = load_upstream_registry(path)
     uv_keys: set[tuple] = set()
     abi_keys: set[tuple] = set()
+    references: dict[tuple, list[dict]] = {}
+    for pair in suspects:
+        ref = complete_source_reference(pair)
+        q = pair.get("query_func") or {}
+        key = (q.get("file_path"), q.get("func_name"), q.get("start_line"))
+        if ref:
+            references.setdefault(key, []).append(ref)
     for s in suspects:
         for k in (
             "upstream_vendored", "abi_constrained", "upstream_basis",
             "abi_basis", "upstream_source_valid",
+            "upstream_path_hint", "upstream_reference",
         ):
             s.pop(k, None)                       # 清旧标（重算幂等）
         if s.get("reuse_library") or s.get("false_positive"):
             continue
-        # 上游基线判据（任一）：① 双侧同相对路径/后缀（vendored 同版本）；
-        # ② query 落在上游框架固有模块目录下（如 arceos/modules/axfs/，从 baseline 派生模块集）
-        # ——②覆盖候选队改模块名(axfs→axfs-ng)/版本差异拉低向量相似度等漏判。
+        # 上游路径/后缀只给来源线索；排除还须有完整的独立基线源码证据。
         root = is_upstream_vendored_pair(s, path=path)
         upstream_basis = "paired_relative_path" if root else ""
         if not root:
@@ -484,11 +489,25 @@ def tag_upstream_baselines(suspects: list[dict], *, path: str | None = None) -> 
                 root = root or "upstream"
                 upstream_basis = "framework_path_with_code_evidence"
         if root:
-            s["upstream_vendored"] = root
-            s["upstream_basis"] = upstream_basis
-            s["upstream_source_valid"] = True
-            uv_keys.add(_query_key(s))
-            continue                              # 上游基线优先于 ABI（更具体）
+            s["upstream_path_hint"] = root
+            q = s.get("query_func") or {}
+            key = (q.get("file_path"), q.get("func_name"), q.get("start_line"))
+            candidates = references.get(key, []) + [
+                (s.get("evidence") or {}).get("baseline_reference") or {}
+            ]
+            ref = next((ref for ref in candidates
+                if reference_covers_query(q, ref)
+                and _baseline_root_key(str(ref.get("repo_id") or "").replace("\\", "/").rsplit("/", 1)[-1], roots)
+                    == _root_key(root)), None)
+            if ref and not (s.get("evidence") or {}).get("baseline_incremental_evidence"):
+                s["upstream_vendored"] = root
+                s["upstream_basis"] = "complete_upstream_source_tokens"
+                s["upstream_reference"] = ref
+                s["upstream_source_valid"] = True
+                uv_keys.add(_query_key(s))
+                continue                          # 已证实上游优先于 ABI
+            s["upstream_basis"] = upstream_basis + "_unverified"
+            s["upstream_source_valid"] = False
         basis = _abi_basis(
             s.get("query_func") or {}, path_globs, name_regexes, context_paths, adapter_names,
         )
@@ -543,6 +562,7 @@ def upstream_baseline_stats(suspects: list[dict]) -> list[dict]:
         item = seen[key]
         # 同一 query 的标签可能分布在多条候选对上；只从有独立 pair 证据的候选中择优归因。
         if s.get("upstream_source_valid"):
+            source_function = s.get("upstream_reference") or c
             ev = s.get("evidence") or {}
             rank = (
                 int(bool(ev.get("normalized_fingerprint_match"))),
@@ -553,9 +573,9 @@ def upstream_baseline_stats(suspects: list[dict]) -> list[dict]:
             if item["_source_rank"] is None or rank > item["_source_rank"]:
                 item["_source_rank"] = rank
                 item["source"] = {
-                    "repo": c.get("repo_id", ""), "file": c.get("file_path", ""),
-                    "func": c.get("func_name", ""), "start": c.get("start_line", 0),
-                    "sim": round(_raw_line_similarity(s), 3),
+                    "repo": source_function.get("repo_id", ""), "file": source_function.get("file_path", ""),
+                    "func": source_function.get("func_name", ""), "start": source_function.get("start_line", 0),
+                    "sim": 1.0 if s.get("upstream_reference") else round(_raw_line_similarity(s), 3),
                 }
     out = list(seen.values())
     for item in out:

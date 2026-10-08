@@ -26,7 +26,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase.ttfonts import TTFont, TTFError
 from reportlab.platypus import (
     HRFlowable,
     KeepTogether,
@@ -211,18 +211,34 @@ def _font_candidates() -> tuple[list[Path], list[Path]]:
 
 def _register_fonts() -> tuple[str, str]:
     regular_candidates, bold_candidates = _font_candidates()
-    regular = next((path for path in regular_candidates if str(path) and path.is_file()), None)
-    if regular is None:
+
+    def register_first_supported(name: str, candidates: list[Path]) -> None:
+        if name in pdfmetrics.getRegisteredFontNames():
+            return
+        errors: list[str] = []
+        for path in dict.fromkeys(candidates):
+            if not path.is_file():
+                continue
+            args = {"subfontIndex": 0} if path.suffix.lower() == ".ttc" else {}
+            try:
+                font = TTFont(name, str(path), **args)
+                if any(ord(char) not in font.face.charToGlyph for char in "AI0123中文"):
+                    errors.append(f"{path.name}: 缺少摘要所需的中英文基本字形")
+                    continue
+                pdfmetrics.registerFont(font)
+                return
+            except (TTFError, OSError) as exc:
+                # TTC 只是容器；Noto CJK 的 CFF/PostScript 轮廓不能用 TTFont
+                # 嵌入。继续寻找支持的 TrueType 字体，不能只检查文件存在。
+                errors.append(f"{path.name}: {exc}")
+        detail = "; ".join(errors)
         raise SummaryPdfError(
-            "未找到中文字体；请用 FINALS_CJK_FONT 指向可嵌入的 TTF/TTC 字体"
+            "未找到可嵌入的中文 TrueType 字体；请用 FINALS_CJK_FONT 指定支持的 TTF/TTC"
+            + (f"（{detail}）" if detail else "")
         )
-    bold = next((path for path in bold_candidates if str(path) and path.is_file()), regular)
-    if "FinalsSans" not in pdfmetrics.getRegisteredFontNames():
-        regular_args = {"subfontIndex": 0} if regular.suffix.lower() == ".ttc" else {}
-        pdfmetrics.registerFont(TTFont("FinalsSans", str(regular), **regular_args))
-    if "FinalsSansBold" not in pdfmetrics.getRegisteredFontNames():
-        bold_args = {"subfontIndex": 0} if bold.suffix.lower() == ".ttc" else {}
-        pdfmetrics.registerFont(TTFont("FinalsSansBold", str(bold), **bold_args))
+
+    register_first_supported("FinalsSans", regular_candidates)
+    register_first_supported("FinalsSansBold", [*bold_candidates, *regular_candidates])
     return "FinalsSans", "FinalsSansBold"
 
 

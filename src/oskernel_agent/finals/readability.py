@@ -175,9 +175,9 @@ def remove_ai_filler(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip(" ，。；")
 
 
-def clip_at_sentence(value: str, limit: int) -> str:
+def clip_at_sentence(value: str, limit: int, *, input_is_html: bool = True) -> str:
     """在完整句子或分句边界收束，并严格遵守字符预算。"""
-    text = remove_ai_filler(html_to_text(value))
+    text = remove_ai_filler(html_to_text(value) if input_is_html else value)
     if len(text) <= limit:
         return text
     if limit <= 1:
@@ -322,11 +322,11 @@ def ai_disclaimer_html(kind: str) -> str:
     )
 
 
-def concise_module_summary(value: str) -> str:
+def concise_module_summary(value: str, *, input_is_html: bool = True) -> str:
     # 先解释术语再限长；反过来会让补入的中文全称把已截到 300 字的摘要再次撑长。
-    plain = remove_ai_filler(html_to_text(value))
+    plain = remove_ai_filler(html_to_text(value) if input_is_html else value)
     return clip_at_sentence(
-        explain_terms_on_first_use(plain), MODULE_SUMMARY_LIMIT,
+        explain_terms_on_first_use(plain), MODULE_SUMMARY_LIMIT, input_is_html=False,
     )
 
 

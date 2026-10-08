@@ -709,6 +709,9 @@ def test_report_boundary_removes_explicit_baseline_from_history_sources():
         "os/mm.rs", "map", "2025/team", "mm.rs", "map", "confirmed", .9,
         exact=9,
     )
+    for item in [baseline, history]:
+        item["query_func"]["raw_code"] = "fn map() {}"
+        item["candidate_func"]["raw_code"] = "fn map() {}"
 
     changed = SC._tag_query_level_baselines([baseline, history])
 

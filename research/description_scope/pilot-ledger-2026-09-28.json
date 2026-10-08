@@ -1,0 +1,184 @@
+{
+  "kind": "development_only",
+  "runs": [
+    {
+      "run": "run-v3",
+      "status": "completed",
+      "calls": 31,
+      "response_models": [
+        "deepseek-flash"
+      ],
+      "usage": {
+        "prompt_tokens": 24584,
+        "completion_tokens": 6974,
+        "total_tokens": 31558
+      },
+      "results_sha256": "7e6e219282d0da296ea5b0ee67aa19ed1e676c0289cb51cb9b93491b9985c985"
+    },
+    {
+      "run": "reader-diagnostic-v1",
+      "status": "reader_controls_failed",
+      "calls": 8,
+      "response_models": [
+        "deepseek-v4-pro"
+      ],
+      "usage": {
+        "prompt_tokens": 5687,
+        "completion_tokens": 2230,
+        "total_tokens": 7917
+      },
+      "results_sha256": "d90a560fa5ff67a8ce922972bb8eadbf31349d0fc134765b97f1a5f8f0cfb8a0"
+    },
+    {
+      "run": "reader-diagnostic-v2",
+      "status": "completed_development_replay",
+      "calls": 15,
+      "response_models": [
+        "deepseek-v4-pro"
+      ],
+      "usage": {
+        "prompt_tokens": 11507,
+        "completion_tokens": 4403,
+        "total_tokens": 15910
+      },
+      "results_sha256": "03b7ebb413bb074e906e905702e9fbe644ea774c9e621572a2119cc71a3f8cad"
+    },
+    {
+      "run": "scope-intervention-v1",
+      "status": "completed",
+      "calls": 9,
+      "response_models": [
+        "deepseek-v4-pro"
+      ],
+      "usage": {
+        "prompt_tokens": 6471,
+        "completion_tokens": 2683,
+        "total_tokens": 9154
+      },
+      "results_sha256": "2ecfb9cf511ecea2cc3eed991f3df51e0815a4d7ea65ed561667369d0b4ccf0b"
+    }
+  ],
+  "successful_model_calls": 63,
+  "usage": {
+    "prompt_tokens": 48249,
+    "completion_tokens": 16290,
+    "total_tokens": 64539
+  },
+  "intervention_by_arm": {
+    "original": [
+      {
+        "repeat": 0,
+        "correct": 19,
+        "wrong": 3,
+        "unknown": 0,
+        "total": 22,
+        "primary": {
+          "correct": 0,
+          "wrong": 3,
+          "unknown": 0
+        }
+      },
+      {
+        "repeat": 1,
+        "correct": 19,
+        "wrong": 3,
+        "unknown": 0,
+        "total": 22,
+        "primary": {
+          "correct": 0,
+          "wrong": 3,
+          "unknown": 0
+        }
+      },
+      {
+        "repeat": 2,
+        "correct": 19,
+        "wrong": 3,
+        "unknown": 0,
+        "total": 22,
+        "primary": {
+          "correct": 0,
+          "wrong": 3,
+          "unknown": 0
+        }
+      }
+    ],
+    "guard_restored": [
+      {
+        "repeat": 0,
+        "correct": 22,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 22,
+        "primary": {
+          "correct": 3,
+          "wrong": 0,
+          "unknown": 0
+        }
+      },
+      {
+        "repeat": 1,
+        "correct": 22,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 22,
+        "primary": {
+          "correct": 3,
+          "wrong": 0,
+          "unknown": 0
+        }
+      },
+      {
+        "repeat": 2,
+        "correct": 22,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 22,
+        "primary": {
+          "correct": 3,
+          "wrong": 0,
+          "unknown": 0
+        }
+      }
+    ],
+    "same_length_sham": [
+      {
+        "repeat": 0,
+        "correct": 19,
+        "wrong": 3,
+        "unknown": 0,
+        "total": 22,
+        "primary": {
+          "correct": 0,
+          "wrong": 3,
+          "unknown": 0
+        }
+      },
+      {
+        "repeat": 1,
+        "correct": 19,
+        "wrong": 3,
+        "unknown": 0,
+        "total": 22,
+        "primary": {
+          "correct": 0,
+          "wrong": 3,
+          "unknown": 0
+        }
+      },
+      {
+        "repeat": 2,
+        "correct": 19,
+        "wrong": 3,
+        "unknown": 0,
+        "total": 22,
+        "primary": {
+          "correct": 0,
+          "wrong": 3,
+          "unknown": 0
+        }
+      }
+    ]
+  },
+  "note": "Rejected historical calls in run-v1/run-v2 are separate. Token usage is provider-reported, not a monetary invoice. Intervention edits are assistant-authored, not automatic method outputs."
+}

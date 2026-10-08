@@ -4,8 +4,8 @@
   functions(id, repo_id, file_path, start_line, end_line, func_name,
             module_tag, lang, raw_code, normalized_code)
   unique_strings(repo_id, func_id, string_value)   -- func_id 外键指向 functions.id
-  files(id, repo_id, file_path, lang, line_count, func_count, norm_hash, raw_hash)
-            -- L0 文件指纹层：整文件规范化哈希，供 fastpath 检测整文件复制
+  files(id, repo_id, file_path, lang, line_count, func_count, norm_hash, raw_hash, source_hash)
+            -- L0 候选发现与完整源码身份核验；旧 source_hash 为空
 
 按 repo_id 幂等写入：重跑同一仓库会先删除其旧记录再插入。
 """
@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS files (
     line_count  INTEGER NOT NULL,
     func_count  INTEGER NOT NULL,
     norm_hash   TEXT NOT NULL,   -- 去注释+折叠空白+去空行后 sha1（消化格式差异）
-    raw_hash    TEXT NOT NULL    -- 原文 sha1（逐字节相同判定）
+    raw_hash    TEXT NOT NULL,   -- 原文 sha1（逐字节相同判定）
+    source_hash TEXT             -- 保留字面量的完整源码 token 指纹；旧索引为空
 );
 CREATE INDEX IF NOT EXISTS idx_files_repo ON files(repo_id);
 CREATE INDEX IF NOT EXISTS idx_files_norm_hash ON files(norm_hash);
@@ -83,6 +84,12 @@ class FunctionStore:
 
     def _migrate(self) -> None:
         """为旧库补召回字段与索引（幂等）。"""
+        file_cols = {r[1] for r in self.conn.execute("PRAGMA table_info(files)")}
+        if "source_hash" not in file_cols:
+            # 旧库没有完整文件源码，不能从 norm_hash 推断这个字段。
+            self.conn.execute("ALTER TABLE files ADD COLUMN source_hash TEXT")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_files_source_hash ON files(source_hash)")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_files_raw_hash ON files(raw_hash)")
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(functions)")}
         if "feature_tokens" not in cols:
             self.conn.execute("ALTER TABLE functions ADD COLUMN feature_tokens TEXT NOT NULL DEFAULT '[]'")
@@ -167,13 +174,14 @@ class FunctionStore:
         return func_id
 
     def add_file(self, repo_id: str, file_path: str, lang: str, line_count: int,
-                 func_count: int, norm_hash: str, raw_hash: str) -> None:
+                 func_count: int, norm_hash: str, raw_hash: str,
+                 source_hash: str | None = None) -> None:
         """插入一条文件指纹记录（L0 文件层）。"""
         self.conn.execute(
             """INSERT INTO files
-               (repo_id, file_path, lang, line_count, func_count, norm_hash, raw_hash)
-               VALUES (?,?,?,?,?,?,?)""",
-            (repo_id, file_path, lang, line_count, func_count, norm_hash, raw_hash),
+               (repo_id, file_path, lang, line_count, func_count, norm_hash, raw_hash, source_hash)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (repo_id, file_path, lang, line_count, func_count, norm_hash, raw_hash, source_hash),
         )
 
     def write_repo(
@@ -185,7 +193,7 @@ class FunctionStore:
         """替换式写入一个仓库的全部函数记录（rec, strings, feature_tokens），返回写入条数。
 
         file_records 给定时同步写入 files 表（L0 文件指纹）：每条
-        {file_path, lang, line_count, func_count, norm_hash, raw_hash}。
+        {file_path, lang, line_count, func_count, norm_hash, raw_hash, source_hash(可选)}。
         """
         self.clear_repo(repo_id)
         for rec, strings, *rest in records:
@@ -193,7 +201,7 @@ class FunctionStore:
             self.add_function(rec, strings, feature_tokens)
         for fr in file_records or []:
             self.add_file(repo_id, fr["file_path"], fr["lang"], fr["line_count"],
-                          fr["func_count"], fr["norm_hash"], fr["raw_hash"])
+                          fr["func_count"], fr["norm_hash"], fr["raw_hash"], fr.get("source_hash"))
         self.conn.commit()
         return len(records)
 
@@ -201,9 +209,22 @@ class FunctionStore:
         """按规范化哈希查历史文件（用于 fastpath 整文件复制检测）。"""
         self.conn.row_factory = sqlite3.Row
         rows = self.conn.execute(
-            "SELECT repo_id, file_path, lang, line_count, func_count, norm_hash, raw_hash "
+            "SELECT repo_id, file_path, lang, line_count, func_count, norm_hash, raw_hash, source_hash "
             "FROM files WHERE norm_hash=?",
             (norm_hash,),
+        ).fetchall()
+        return [dict(r) for r in rows if r["repo_id"] != exclude_repo_id]
+
+    def find_file_identity_candidates(
+        self, norm_hash: str, raw_hash: str, source_hash: str | None,
+        *, exclude_repo_id: str | None = None,
+    ) -> list[dict]:
+        """旧格式指纹只用于召回；完整源码身份仍由扫描器核验。"""
+        self.conn.row_factory = sqlite3.Row
+        rows = self.conn.execute(
+            "SELECT repo_id, file_path, lang, line_count, func_count, norm_hash, raw_hash, source_hash "
+            "FROM files WHERE norm_hash=? OR raw_hash=? OR source_hash=?",
+            (norm_hash, raw_hash, source_hash),
         ).fetchall()
         return [dict(r) for r in rows if r["repo_id"] != exclude_repo_id]
 

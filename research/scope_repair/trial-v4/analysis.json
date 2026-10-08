@@ -1,0 +1,1346 @@
+{
+  "results_sha256": "e902a1d0a82473b28248e7603a37671ff5c552872427d89f133a54243a325f52",
+  "status": "completed",
+  "samples": 8,
+  "valid_shared_generations": 8,
+  "aggregates": {
+    "all": {
+      "initial": {
+        "correct": 133,
+        "wrong": 17,
+        "unknown": 34,
+        "total": 184,
+        "correct_coverage": 0.7228260869565217
+      },
+      "source_review": {
+        "correct": 133,
+        "wrong": 17,
+        "unknown": 34,
+        "total": 184,
+        "correct_coverage": 0.7228260869565217
+      },
+      "counterexample_rewrite": {
+        "correct": 133,
+        "wrong": 17,
+        "unknown": 34,
+        "total": 184,
+        "correct_coverage": 0.7228260869565217
+      },
+      "loss_local": {
+        "correct": 133,
+        "wrong": 17,
+        "unknown": 34,
+        "total": 184,
+        "correct_coverage": 0.7228260869565217
+      }
+    },
+    "language/c": {
+      "initial": {
+        "correct": 45,
+        "wrong": 17,
+        "unknown": 34,
+        "total": 96,
+        "correct_coverage": 0.46875
+      },
+      "source_review": {
+        "correct": 45,
+        "wrong": 17,
+        "unknown": 34,
+        "total": 96,
+        "correct_coverage": 0.46875
+      },
+      "counterexample_rewrite": {
+        "correct": 45,
+        "wrong": 17,
+        "unknown": 34,
+        "total": 96,
+        "correct_coverage": 0.46875
+      },
+      "loss_local": {
+        "correct": 45,
+        "wrong": 17,
+        "unknown": 34,
+        "total": 96,
+        "correct_coverage": 0.46875
+      }
+    },
+    "project/Zephyr v4.1.0": {
+      "initial": {
+        "correct": 29,
+        "wrong": 17,
+        "unknown": 2,
+        "total": 48,
+        "correct_coverage": 0.6041666666666666
+      },
+      "source_review": {
+        "correct": 29,
+        "wrong": 17,
+        "unknown": 2,
+        "total": 48,
+        "correct_coverage": 0.6041666666666666
+      },
+      "counterexample_rewrite": {
+        "correct": 29,
+        "wrong": 17,
+        "unknown": 2,
+        "total": 48,
+        "correct_coverage": 0.6041666666666666
+      },
+      "loss_local": {
+        "correct": 29,
+        "wrong": 17,
+        "unknown": 2,
+        "total": 48,
+        "correct_coverage": 0.6041666666666666
+      }
+    },
+    "repeat/0": {
+      "initial": {
+        "correct": 75,
+        "wrong": 9,
+        "unknown": 8,
+        "total": 92,
+        "correct_coverage": 0.8152173913043478
+      },
+      "source_review": {
+        "correct": 75,
+        "wrong": 9,
+        "unknown": 8,
+        "total": 92,
+        "correct_coverage": 0.8152173913043478
+      },
+      "counterexample_rewrite": {
+        "correct": 75,
+        "wrong": 9,
+        "unknown": 8,
+        "total": 92,
+        "correct_coverage": 0.8152173913043478
+      },
+      "loss_local": {
+        "correct": 75,
+        "wrong": 9,
+        "unknown": 8,
+        "total": 92,
+        "correct_coverage": 0.8152173913043478
+      }
+    },
+    "language/rust": {
+      "initial": {
+        "correct": 88,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 88,
+        "correct_coverage": 1.0
+      },
+      "source_review": {
+        "correct": 88,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 88,
+        "correct_coverage": 1.0
+      },
+      "counterexample_rewrite": {
+        "correct": 88,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 88,
+        "correct_coverage": 1.0
+      },
+      "loss_local": {
+        "correct": 88,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 88,
+        "correct_coverage": 1.0
+      }
+    },
+    "project/heapless 0.8.0": {
+      "initial": {
+        "correct": 88,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 88,
+        "correct_coverage": 1.0
+      },
+      "source_review": {
+        "correct": 88,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 88,
+        "correct_coverage": 1.0
+      },
+      "counterexample_rewrite": {
+        "correct": 88,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 88,
+        "correct_coverage": 1.0
+      },
+      "loss_local": {
+        "correct": 88,
+        "wrong": 0,
+        "unknown": 0,
+        "total": 88,
+        "correct_coverage": 1.0
+      }
+    },
+    "repeat/1": {
+      "initial": {
+        "correct": 58,
+        "wrong": 8,
+        "unknown": 26,
+        "total": 92,
+        "correct_coverage": 0.6304347826086957
+      },
+      "source_review": {
+        "correct": 58,
+        "wrong": 8,
+        "unknown": 26,
+        "total": 92,
+        "correct_coverage": 0.6304347826086957
+      },
+      "counterexample_rewrite": {
+        "correct": 58,
+        "wrong": 8,
+        "unknown": 26,
+        "total": 92,
+        "correct_coverage": 0.6304347826086957
+      },
+      "loss_local": {
+        "correct": 58,
+        "wrong": 8,
+        "unknown": 26,
+        "total": 92,
+        "correct_coverage": 0.6304347826086957
+      }
+    },
+    "project/cJSON v1.7.18": {
+      "initial": {
+        "correct": 16,
+        "wrong": 0,
+        "unknown": 32,
+        "total": 48,
+        "correct_coverage": 0.3333333333333333
+      },
+      "source_review": {
+        "correct": 16,
+        "wrong": 0,
+        "unknown": 32,
+        "total": 48,
+        "correct_coverage": 0.3333333333333333
+      },
+      "counterexample_rewrite": {
+        "correct": 16,
+        "wrong": 0,
+        "unknown": 32,
+        "total": 48,
+        "correct_coverage": 0.3333333333333333
+      },
+      "loss_local": {
+        "correct": 16,
+        "wrong": 0,
+        "unknown": 32,
+        "total": 48,
+        "correct_coverage": 0.3333333333333333
+      }
+    }
+  },
+  "rows": [
+    {
+      "task": "ring_item_get",
+      "repeat": 0,
+      "status": "completed",
+      "compressed_characters": 144,
+      "lost_development_fields": 0,
+      "arms": {
+        "initial": {
+          "correct": 15,
+          "wrong": 9,
+          "unknown": 0,
+          "total": 24,
+          "correct_coverage": 0.625
+        },
+        "source_review": {
+          "correct": 15,
+          "wrong": 9,
+          "unknown": 0,
+          "total": 24,
+          "correct_coverage": 0.625,
+          "accepted": true,
+          "reason": "passes_observed_development_inputs_only",
+          "changed_from_initial": false
+        },
+        "loss_local": {
+          "correct": 15,
+          "wrong": 9,
+          "unknown": 0,
+          "total": 24,
+          "correct_coverage": 0.625,
+          "accepted": false,
+          "reason": "no_targeted_errors",
+          "changed_from_initial": false
+        },
+        "counterexample_rewrite": {
+          "correct": 15,
+          "wrong": 9,
+          "unknown": 0,
+          "total": 24,
+          "correct_coverage": 0.625,
+          "accepted": false,
+          "reason": "no_targeted_errors",
+          "changed_from_initial": false
+        }
+      },
+      "development_read_failures": [],
+      "candidate_identical_to_counterexample": true
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 0,
+      "status": "completed",
+      "compressed_characters": 100,
+      "lost_development_fields": 0,
+      "arms": {
+        "initial": {
+          "correct": 20,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 20,
+          "correct_coverage": 1.0
+        },
+        "source_review": {
+          "correct": 20,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 20,
+          "correct_coverage": 1.0,
+          "accepted": true,
+          "reason": "passes_observed_development_inputs_only",
+          "changed_from_initial": false
+        },
+        "loss_local": {
+          "correct": 20,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 20,
+          "correct_coverage": 1.0,
+          "accepted": false,
+          "reason": "no_targeted_errors",
+          "changed_from_initial": false
+        },
+        "counterexample_rewrite": {
+          "correct": 20,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 20,
+          "correct_coverage": 1.0,
+          "accepted": false,
+          "reason": "no_targeted_errors",
+          "changed_from_initial": false
+        }
+      },
+      "development_read_failures": [],
+      "candidate_identical_to_counterexample": true
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 1,
+      "status": "completed",
+      "compressed_characters": 119,
+      "lost_development_fields": 0,
+      "arms": {
+        "initial": {
+          "correct": 24,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 24,
+          "correct_coverage": 1.0
+        },
+        "source_review": {
+          "correct": 24,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 24,
+          "correct_coverage": 1.0,
+          "accepted": true,
+          "reason": "passes_observed_development_inputs_only",
+          "changed_from_initial": false
+        },
+        "loss_local": {
+          "correct": 24,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 24,
+          "correct_coverage": 1.0,
+          "accepted": false,
+          "reason": "no_targeted_errors",
+          "changed_from_initial": false
+        },
+        "counterexample_rewrite": {
+          "correct": 24,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 24,
+          "correct_coverage": 1.0,
+          "accepted": false,
+          "reason": "no_targeted_errors",
+          "changed_from_initial": false
+        }
+      },
+      "development_read_failures": [],
+      "candidate_identical_to_counterexample": true
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 1,
+      "status": "completed",
+      "compressed_characters": 84,
+      "lost_development_fields": 0,
+      "arms": {
+        "initial": {
+          "correct": 20,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 20,
+          "correct_coverage": 1.0
+        },
+        "loss_local": {
+          "correct": 20,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 20,
+          "correct_coverage": 1.0,
+          "accepted": false,
+          "reason": "no_targeted_errors",
+          "changed_from_initial": false
+        },
+        "counterexample_rewrite": {
+          "correct": 20,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 20,
+          "correct_coverage": 1.0,
+          "accepted": false,
+          "reason": "no_targeted_errors",
+          "changed_from_initial": false
+        },
+        "source_review": {
+          "correct": 20,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 20,
+          "correct_coverage": 1.0,
+          "accepted": true,
+          "reason": "passes_observed_development_inputs_only",
+          "changed_from_initial": false
+        }
+      },
+      "development_read_failures": [],
+      "candidate_identical_to_counterexample": true
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 1,
+      "status": "completed",
+      "compressed_characters": 83,
+      "lost_development_fields": 0,
+      "arms": {
+        "initial": {
+          "correct": 14,
+          "wrong": 8,
+          "unknown": 2,
+          "total": 24,
+          "correct_coverage": 0.5833333333333334
+        },
+        "loss_local": {
+          "correct": 14,
+          "wrong": 8,
+          "unknown": 2,
+          "total": 24,
+          "correct_coverage": 0.5833333333333334,
+          "accepted": false,
+          "reason": "no_targeted_errors",
+          "changed_from_initial": false
+        },
+        "counterexample_rewrite": {
+          "correct": 14,
+          "wrong": 8,
+          "unknown": 2,
+          "total": 24,
+          "correct_coverage": 0.5833333333333334,
+          "accepted": true,
+          "reason": "passes_observed_development_inputs_only",
+          "changed_from_initial": false
+        },
+        "source_review": {
+          "correct": 14,
+          "wrong": 8,
+          "unknown": 2,
+          "total": 24,
+          "correct_coverage": 0.5833333333333334,
+          "accepted": true,
+          "reason": "passes_observed_development_inputs_only",
+          "changed_from_initial": false
+        }
+      },
+      "development_read_failures": [
+        {
+          "stage": "ring_item_get/r1/draft_development",
+          "error": "Model response exceeded output budget; produce one shorter JSON action"
+        },
+        {
+          "stage": "ring_item_get/r1/compressed_development",
+          "error": "Model response exceeded output budget; produce one shorter JSON action"
+        }
+      ],
+      "candidate_identical_to_counterexample": true
+    },
+    {
+      "task": "json_replace",
+      "repeat": 0,
+      "status": "completed",
+      "compressed_characters": 148,
+      "lost_development_fields": 7,
+      "arms": {
+        "initial": {
+          "correct": 16,
+          "wrong": 0,
+          "unknown": 8,
+          "total": 24,
+          "correct_coverage": 0.6666666666666666
+        },
+        "counterexample_rewrite": {
+          "correct": 16,
+          "wrong": 0,
+          "unknown": 8,
+          "total": 24,
+          "correct_coverage": 0.6666666666666666,
+          "accepted": true,
+          "reason": "passes_observed_development_inputs_only",
+          "changed_from_initial": false
+        },
+        "loss_local": {
+          "correct": 16,
+          "wrong": 0,
+          "unknown": 8,
+          "total": 24,
+          "correct_coverage": 0.6666666666666666,
+          "accepted": false,
+          "reason": "development_regression",
+          "changed_from_initial": false
+        },
+        "source_review": {
+          "correct": 16,
+          "wrong": 0,
+          "unknown": 8,
+          "total": 24,
+          "correct_coverage": 0.6666666666666666,
+          "accepted": true,
+          "reason": "passes_observed_development_inputs_only",
+          "changed_from_initial": false
+        }
+      },
+      "development_read_failures": [],
+      "candidate_identical_to_counterexample": true
+    },
+    {
+      "task": "json_replace",
+      "repeat": 1,
+      "status": "completed",
+      "compressed_characters": 278,
+      "lost_development_fields": 16,
+      "arms": {
+        "initial": {
+          "correct": 0,
+          "wrong": 0,
+          "unknown": 24,
+          "total": 24,
+          "correct_coverage": 0.0
+        },
+        "source_review": {
+          "correct": 0,
+          "wrong": 0,
+          "unknown": 24,
+          "total": 24,
+          "correct_coverage": 0.0,
+          "accepted": true,
+          "reason": "passes_observed_development_inputs_only",
+          "changed_from_initial": false
+        },
+        "counterexample_rewrite": {
+          "correct": 0,
+          "wrong": 0,
+          "unknown": 24,
+          "total": 24,
+          "correct_coverage": 0.0,
+          "accepted": true,
+          "reason": "passes_observed_development_inputs_only",
+          "changed_from_initial": false
+        },
+        "loss_local": {
+          "correct": 0,
+          "wrong": 0,
+          "unknown": 24,
+          "total": 24,
+          "correct_coverage": 0.0,
+          "accepted": false,
+          "reason": "length_violation",
+          "changed_from_initial": false
+        }
+      },
+      "development_read_failures": [
+        {
+          "stage": "json_replace/r1/compressed_development",
+          "error": "Model response exceeded output budget; produce one shorter JSON action"
+        }
+      ],
+      "candidate_identical_to_counterexample": true
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 0,
+      "status": "completed",
+      "compressed_characters": 126,
+      "lost_development_fields": 0,
+      "arms": {
+        "initial": {
+          "correct": 24,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 24,
+          "correct_coverage": 1.0
+        },
+        "source_review": {
+          "correct": 24,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 24,
+          "correct_coverage": 1.0,
+          "accepted": true,
+          "reason": "passes_observed_development_inputs_only",
+          "changed_from_initial": false
+        },
+        "loss_local": {
+          "correct": 24,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 24,
+          "correct_coverage": 1.0,
+          "accepted": false,
+          "reason": "no_targeted_errors",
+          "changed_from_initial": false
+        },
+        "counterexample_rewrite": {
+          "correct": 24,
+          "wrong": 0,
+          "unknown": 0,
+          "total": 24,
+          "correct_coverage": 1.0,
+          "accepted": false,
+          "reason": "no_targeted_errors",
+          "changed_from_initial": false
+        }
+      },
+      "development_read_failures": [],
+      "candidate_identical_to_counterexample": true
+    }
+  ],
+  "edits": [
+    {
+      "task": "ring_item_get",
+      "repeat": 0,
+      "arm": "source_review",
+      "changed_original_fraction": 0.0,
+      "final_characters": 144
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 0,
+      "arm": "loss_local",
+      "changed_original_fraction": 0.0,
+      "final_characters": 144
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 0,
+      "arm": "counterexample_rewrite",
+      "changed_original_fraction": 0.0,
+      "final_characters": 144
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 0,
+      "arm": "source_review",
+      "changed_original_fraction": 0.0,
+      "final_characters": 100
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 0,
+      "arm": "loss_local",
+      "changed_original_fraction": 0.0,
+      "final_characters": 100
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 0,
+      "arm": "counterexample_rewrite",
+      "changed_original_fraction": 0.0,
+      "final_characters": 100
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 1,
+      "arm": "source_review",
+      "changed_original_fraction": 0.0,
+      "final_characters": 119
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 1,
+      "arm": "loss_local",
+      "changed_original_fraction": 0.0,
+      "final_characters": 119
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 1,
+      "arm": "counterexample_rewrite",
+      "changed_original_fraction": 0.0,
+      "final_characters": 119
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 1,
+      "arm": "loss_local",
+      "changed_original_fraction": 0.0,
+      "final_characters": 84
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 1,
+      "arm": "counterexample_rewrite",
+      "changed_original_fraction": 0.0,
+      "final_characters": 84
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 1,
+      "arm": "source_review",
+      "changed_original_fraction": 0.0,
+      "final_characters": 84
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 1,
+      "arm": "loss_local",
+      "changed_original_fraction": 0.0,
+      "final_characters": 83
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 1,
+      "arm": "counterexample_rewrite",
+      "changed_original_fraction": 0.0,
+      "final_characters": 83
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 1,
+      "arm": "source_review",
+      "changed_original_fraction": 0.0,
+      "final_characters": 83
+    },
+    {
+      "task": "json_replace",
+      "repeat": 0,
+      "arm": "counterexample_rewrite",
+      "changed_original_fraction": 0.0,
+      "final_characters": 148
+    },
+    {
+      "task": "json_replace",
+      "repeat": 0,
+      "arm": "loss_local",
+      "changed_original_fraction": 0.0,
+      "final_characters": 148
+    },
+    {
+      "task": "json_replace",
+      "repeat": 0,
+      "arm": "source_review",
+      "changed_original_fraction": 0.0,
+      "final_characters": 148
+    },
+    {
+      "task": "json_replace",
+      "repeat": 1,
+      "arm": "source_review",
+      "changed_original_fraction": 0.0,
+      "final_characters": 278
+    },
+    {
+      "task": "json_replace",
+      "repeat": 1,
+      "arm": "counterexample_rewrite",
+      "changed_original_fraction": 0.0,
+      "final_characters": 278
+    },
+    {
+      "task": "json_replace",
+      "repeat": 1,
+      "arm": "loss_local",
+      "changed_original_fraction": 0.0,
+      "final_characters": 278
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 0,
+      "arm": "source_review",
+      "changed_original_fraction": 0.0,
+      "final_characters": 126
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 0,
+      "arm": "loss_local",
+      "changed_original_fraction": 0.0,
+      "final_characters": 126
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 0,
+      "arm": "counterexample_rewrite",
+      "changed_original_fraction": 0.0,
+      "final_characters": 126
+    }
+  ],
+  "identical_description_reader_checks": [
+    {
+      "task": "ring_item_get",
+      "repeat": 0,
+      "arms": [
+        "initial",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 0,
+      "arms": [
+        "initial",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 0,
+      "arms": [
+        "loss_local",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 0,
+      "arms": [
+        "counterexample_rewrite",
+        "initial"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 0,
+      "arms": [
+        "counterexample_rewrite",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 0,
+      "arms": [
+        "counterexample_rewrite",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 0,
+      "arms": [
+        "initial",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 20
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 0,
+      "arms": [
+        "initial",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 20
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 0,
+      "arms": [
+        "loss_local",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 20
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 0,
+      "arms": [
+        "counterexample_rewrite",
+        "initial"
+      ],
+      "field_disagreements": 0,
+      "total": 20
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 0,
+      "arms": [
+        "counterexample_rewrite",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 20
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 0,
+      "arms": [
+        "counterexample_rewrite",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 20
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 1,
+      "arms": [
+        "initial",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 1,
+      "arms": [
+        "initial",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 1,
+      "arms": [
+        "loss_local",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 1,
+      "arms": [
+        "counterexample_rewrite",
+        "initial"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 1,
+      "arms": [
+        "counterexample_rewrite",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 1,
+      "arms": [
+        "counterexample_rewrite",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 1,
+      "arms": [
+        "initial",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 20
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 1,
+      "arms": [
+        "initial",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 20
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 1,
+      "arms": [
+        "loss_local",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 20
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 1,
+      "arms": [
+        "counterexample_rewrite",
+        "initial"
+      ],
+      "field_disagreements": 0,
+      "total": 20
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 1,
+      "arms": [
+        "counterexample_rewrite",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 20
+    },
+    {
+      "task": "vec_insert",
+      "repeat": 1,
+      "arms": [
+        "counterexample_rewrite",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 20
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 1,
+      "arms": [
+        "initial",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 1,
+      "arms": [
+        "initial",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 1,
+      "arms": [
+        "loss_local",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 1,
+      "arms": [
+        "counterexample_rewrite",
+        "initial"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 1,
+      "arms": [
+        "counterexample_rewrite",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "ring_item_get",
+      "repeat": 1,
+      "arms": [
+        "counterexample_rewrite",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "json_replace",
+      "repeat": 0,
+      "arms": [
+        "initial",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "json_replace",
+      "repeat": 0,
+      "arms": [
+        "initial",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "json_replace",
+      "repeat": 0,
+      "arms": [
+        "counterexample_rewrite",
+        "initial"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "json_replace",
+      "repeat": 0,
+      "arms": [
+        "counterexample_rewrite",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "json_replace",
+      "repeat": 0,
+      "arms": [
+        "counterexample_rewrite",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "json_replace",
+      "repeat": 0,
+      "arms": [
+        "loss_local",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "json_replace",
+      "repeat": 1,
+      "arms": [
+        "initial",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "json_replace",
+      "repeat": 1,
+      "arms": [
+        "initial",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "json_replace",
+      "repeat": 1,
+      "arms": [
+        "counterexample_rewrite",
+        "initial"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "json_replace",
+      "repeat": 1,
+      "arms": [
+        "counterexample_rewrite",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "json_replace",
+      "repeat": 1,
+      "arms": [
+        "counterexample_rewrite",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "json_replace",
+      "repeat": 1,
+      "arms": [
+        "loss_local",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 0,
+      "arms": [
+        "initial",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 0,
+      "arms": [
+        "initial",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 0,
+      "arms": [
+        "loss_local",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 0,
+      "arms": [
+        "counterexample_rewrite",
+        "initial"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 0,
+      "arms": [
+        "counterexample_rewrite",
+        "source_review"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    },
+    {
+      "task": "vec_extend",
+      "repeat": 0,
+      "arms": [
+        "counterexample_rewrite",
+        "loss_local"
+      ],
+      "field_disagreements": 0,
+      "total": 24
+    }
+  ],
+  "pipeline_cost_excluding_control_and_evaluation": {
+    "source_review": {
+      "calls": 34,
+      "prompt_tokens": 30927,
+      "completion_tokens": 37823,
+      "total_tokens": 68750
+    },
+    "counterexample_rewrite": {
+      "calls": 29,
+      "prompt_tokens": 30278,
+      "completion_tokens": 37487,
+      "total_tokens": 67765
+    },
+    "loss_local": {
+      "calls": 37,
+      "prompt_tokens": 34726,
+      "completion_tokens": 68764,
+      "total_tokens": 103490
+    }
+  },
+  "actual_calls": 56,
+  "actual_usage": {
+    "prompt_tokens": 56446,
+    "completion_tokens": 106211,
+    "total_tokens": 162657
+  },
+  "gates": {
+    "run_complete": true,
+    "controls_pass": true,
+    "all_shared_generations_valid": true,
+    "no_recorded_response_failures": false,
+    "baseline_has_errors": true,
+    "wrong_reduction_at_least_20_percent": false,
+    "language_coverage_within_5pp": true,
+    "improved_projects": [],
+    "at_least_two_projects_improve": false,
+    "calls_within_1_5x": true
+  },
+  "candidate_identical_to_counterexample_samples": 8,
+  "limitations": [
+    "Descriptive pilot: no significance test or independent-field assumption",
+    "Two repeated generations per function are not independent programs",
+    "Analytic per-arm costs charge shared work to each arm and exclude evaluation; full-run usage is separately reported",
+    "Local means exact-span edit interface, not guaranteed small semantic change",
+    "Invalid shared generations remain in total denominators as unknown"
+  ]
+}

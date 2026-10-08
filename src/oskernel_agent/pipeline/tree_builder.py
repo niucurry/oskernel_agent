@@ -336,12 +336,22 @@ def _files_for_subsys_prompt(files: list[dict]) -> list[dict]:
         picked = files
     else:
         # 覆盖更多目录和语言，比简单取前 N 个更利于 agent 建立子系统轮廓。
-        ranked: list[tuple[tuple[str, str, str], dict]] = []
+        groups: dict[tuple[str, str], list[dict]] = {}
         for f in files:
             path = str(f.get("path", ""))
-            top_dir = path.split("/", 1)[0]
-            ranked.append(((top_dir, str(f.get("lang", "")), path), f))
-        picked = [f for _, f in sorted(ranked)[:limit]]
+            directory = path.rsplit("/", 1)[0] if "/" in path else ""
+            groups.setdefault((directory, str(f.get("lang", ""))), []).append(f)
+        buckets = [sorted(groups[key], key=lambda f: str(f.get("path", "")))
+                   for key in sorted(groups)]
+        picked = []
+        offset = 0
+        while len(picked) < limit:
+            for bucket in buckets:
+                if offset < len(bucket):
+                    picked.append(bucket[offset])
+                    if len(picked) == limit:
+                        break
+            offset += 1
     return [
         {"path": f["path"], "name": f["name"], "lang": f["lang"]}
         for f in picked
@@ -654,7 +664,8 @@ def _apply_subsys_result(subsys_node: dict, parsed: dict, repo_path: Path) -> No
     subsys_node["summary"]    = parsed.get("summary", "")
     subsys_node["content"]    = parsed.get("content", "")
     subsys_node["brief"]      = concise_module_summary(
-        parsed.get("summary") or parsed.get("content") or subsys_node["name"]
+        parsed.get("summary") or parsed.get("content") or subsys_node["name"],
+        input_is_html=not bool(parsed.get("summary")) and bool(parsed.get("content")),
     )
     subsys_node["highlights"] = parsed.get("highlights", [])
     subsys_node["issues"]     = parsed.get("issues", [])
@@ -681,7 +692,8 @@ def _apply_subsys_result(subsys_node: dict, parsed: dict, repo_path: Path) -> No
             "path":       f"{subsys_node['path']}/m{slot:03d}",
             "summary":    module_summary,
             "brief":      concise_module_summary(
-                module_summary or module_content or m.get("name", f"模块 {slot}")
+                module_summary or module_content or m.get("name", f"模块 {slot}"),
+                input_is_html=not bool(module_summary) and bool(module_content),
             ),
             "file_paths": module_paths,
             "content":    module_content,

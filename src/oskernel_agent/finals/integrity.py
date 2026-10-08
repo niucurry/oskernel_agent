@@ -62,6 +62,18 @@ _SIGNALS = (
     (
         "按测试名或 ELF 名称分支",
         re.compile(
+            r"\bif[^\n]{0,160}\bends_with\s*\(\s*[\"']\.sh[\"']\s*\)"
+            r"[\s\S]{0,600}(?:busybox|/bin/(?:sh|bash))"
+            r"[\s\S]{0,250}\b(?:load_file|load_app|execve)\s*\(",
+            re.I,
+        ),
+        0.65,
+        "加载器按 .sh 后缀改用 shell；需核对 ELF 内容识别的优先级，并用同字节、"
+        "不同文件名的直接 exec 结果复核。该线索不证明测试特化或违规。",
+    ),
+    (
+        "按测试名或 ELF 名称分支",
+        re.compile(
             r"(?:if|match)[^\n]{0,160}(?:is_err\s*\(|is_none\s*\(|enoent|not[_ ]found)"
             r"[^\n]*\{[\s\S]{0,1200}(?:open_inode|open_file)\s*\(\s*[\"']"
             r"[^\"'\n]*(?:test(?:case)?|ltp|benchmark|busybox|\.elf)[^\"'\n]*[\"']",
@@ -161,6 +173,14 @@ def analyze_log(path: str | Path | None, *, kind: str) -> dict:
             "errors": ["指定的日志文件不存在"],
         }
     text = log_path.read_text(encoding="utf-8", errors="replace")[-1_000_000:]
+    if kind in {"test", "run"}:
+        from .runtime_evidence import parse_utest_log
+        scoped = parse_utest_log(text)
+        if scoped is not None:
+            return {
+                "kind": kind, "provided": True, "path": str(log_path),
+                **scoped, "errors": [item["text"][:360] for item in scoped["failure_evidence"][:6]],
+            }
     error_matches = list(_ERROR_RE.finditer(text))
     success_matches = list(_SUCCESS_RE.finditer(text))
     error_lines = [

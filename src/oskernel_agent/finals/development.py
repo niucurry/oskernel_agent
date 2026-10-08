@@ -9,7 +9,7 @@ import re
 import statistics
 import subprocess
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from oskernel_agent.engines.llm_batch import BatchTask, run_batch_task
@@ -35,8 +35,8 @@ _UNVERIFIED_RUNTIME_CLAIM_RE = re.compile(
     r"|(?:通过|跑通)(?!率).{0,12}(?:测试套件|测试|用例|LTP)"
 )
 _THRESHOLD_DEFINITION = (
-    "有变更的提交少于 8 次时，阈值固定为 1000 LOC；否则取 1000 与"
-    "提交变更量中位数的 5 倍向上取整后的较大值。"
+    "已测量且有变更的提交少于 8 次时，阈值固定为 1000 LOC；否则取 1000 与"
+    "已测量提交变更量中位数的 5 倍向上取整后的较大值。未测量变更不参与判定。"
 )
 
 
@@ -87,7 +87,11 @@ def _try_unshallow(repo: Path) -> bool:
 
 
 def collect_commits(repo_path: str | Path) -> tuple[list[dict], bool]:
-    """按时间正序读取全部可见提交及 numstat。"""
+    """按 Git 遍历逆序读取可见提交；作者日期不保证按此顺序递增。
+
+    默认 merge numstat 没有测量父差分，浅边界还会被当作空树创建。
+    两者保留原始观察，但不冒充已知变更量。
+    """
     repo = Path(repo_path).resolve()
     shallow = _git(repo, "rev-parse", "--is-shallow-repository").strip().lower() == "true"
     raw = _git(
@@ -96,7 +100,8 @@ def collect_commits(repo_path: str | Path) -> tuple[list[dict], bool]:
         "--reverse",
         "--date=iso-strict",
         "--numstat",
-        "--format=@@@%H%x1f%aI%x1f%an%x1f%s",
+        "--diff-merges=off",
+        "--format=@@@%H%x1f%aI%x1f%cI%x1f%P%x1f%an%x1f%s",
     )
     commits: list[dict] = []
     current: dict | None = None
@@ -104,14 +109,17 @@ def collect_commits(repo_path: str | Path) -> tuple[list[dict], bool]:
         if line.startswith("@@@"):
             if current:
                 commits.append(current)
-            parts = line[3:].split("\x1f", 3)
-            if len(parts) != 4:
+            parts = line[3:].split("\x1f", 5)
+            if len(parts) != 6:
                 current = None
                 continue
-            sha, date, author, subject = parts
+            sha, date, committer_date, parents, author, subject = parts
             current = {
                 "sha": sha,
                 "date": date,
+                "author_date": date,
+                "committer_date": committer_date,
+                "parents": parents.split(),
                 "author": author,
                 "subject": subject,
                 "additions": 0,
@@ -134,11 +142,60 @@ def collect_commits(repo_path: str | Path) -> tuple[list[dict], bool]:
         )
     if current:
         commits.append(current)
+    boundary_ids: set[str] = set()
+    if shallow:
+        try:
+            boundary_path = Path(_git(repo, "rev-parse", "--git-path", "shallow").strip())
+            if not boundary_path.is_absolute():
+                boundary_path = repo / boundary_path
+            boundary_ids = set(boundary_path.read_text(encoding="ascii").splitlines())
+        except (RuntimeError, OSError, UnicodeError):
+            # Below, parentless visible commits still get original-object checks.
+            pass
+    for commit in commits:
+        boundary = commit["sha"] in boundary_ids
+        original_parents_known = True
+        if shallow and (boundary or not commit["parents"]):
+            try:
+                header = _git(repo, "cat-file", "-p", commit["sha"]).split("\n\n", 1)[0]
+                commit["parents"] = [
+                    line[7:] for line in header.splitlines()
+                    if line.startswith("parent ")
+                ]
+                boundary = boundary or bool(commit["parents"])
+            except RuntimeError:
+                boundary = True
+                original_parents_known = False
+        commit["is_shallow_boundary"] = boundary
+        if boundary and (commit["parents"] or not original_parents_known):
+            basis = "shallow_boundary_unresolved"
+        elif len(commit["parents"]) > 1:
+            basis = "merge_numstat_unmeasured"
+        else:
+            basis = "parent_numstat" if commit["parents"] else "root_empty_tree"
+        commit["change_metrics_basis"] = basis
+        commit["change_metrics_complete"] = basis in {"parent_numstat", "root_empty_tree"}
+        if not commit["change_metrics_complete"]:
+            commit["numstat_observation"] = {
+                "additions": commit["additions"], "deletions": commit["deletions"],
+                "files": commit["files"],
+            }
+            commit.update(additions=None, deletions=None, files=[])
     return commits, shallow
 
 
 def _changes(commit: dict) -> int:
+    if commit.get("change_metrics_complete") is False:
+        return 0  # Internal known subtotal; user-visible unknown is kept separately.
     return int(commit.get("additions") or 0) + int(commit.get("deletions") or 0)
+
+
+def _change_summary(loc: int, unknown: int, count: int) -> str:
+    if unknown and unknown == count:
+        return f"变更量未知（{unknown} 次提交）"
+    if unknown:
+        return f"可核对变更 {loc} LOC；{unknown} 次提交变更未知"
+    return f"变更 {loc} LOC"
 
 
 def _date(value: str) -> datetime:
@@ -154,7 +211,7 @@ def _large_threshold(commits: list[dict]) -> int:
 
 def _short_text(value: object, limit: int) -> str:
     text = " ".join(str(value or "").split())
-    return clip_at_sentence(text, limit)
+    return clip_at_sentence(text, limit, input_is_html=False)
 
 
 def _humanize_ai_text(value: object, limit: int) -> str:
@@ -187,6 +244,8 @@ def _remove_repeated_stage_facts(value: str) -> str:
 
 
 def _top_commit_files(commit: dict, limit: int = 4) -> list[dict]:
+    if commit.get("change_metrics_complete") is False:
+        return []
     rows = []
     for item in commit.get("files") or []:
         loc = int(item.get("additions") or 0) + int(item.get("deletions") or 0)
@@ -212,8 +271,12 @@ def build_development_evidence(
         candidates.append(
             {
                 "candidate_id": "commit-count",
-                "kind": "提交次数不足",
-                "fact": f"可见提交 {len(commits)} 次，章程最低要求 {min_commits} 次。",
+                "kind": "提交次数待核对" if shallow else "提交次数不足",
+                "fact": (
+                    f"当前浅历史可见 {len(commits)} 次，最低要求 {min_commits} 次；"
+                    "历史不完整，不能判定实际提交次数不足。"
+                    if shallow else f"可见提交 {len(commits)} 次，章程最低要求 {min_commits} 次。"
+                ),
                 "commit_shas": [],
                 "must_report": True,
             }
@@ -285,8 +348,12 @@ def build_development_evidence(
                 "index": index,
                 "sha": str(commit["sha"])[:12],
                 "date": str(commit.get("date") or "")[:10],
+                "author_date": commit.get("author_date", commit.get("date")),
+                "committer_date": commit.get("committer_date"),
+                "parents": commit.get("parents"),
                 "subject": _short_text(commit.get("subject"), 120),
-                "loc": _changes(commit),
+                "loc": None if commit.get("change_metrics_complete") is False else _changes(commit),
+                "change_metrics_basis": commit.get("change_metrics_basis", "provided_numstat"),
                 "files": _top_commit_files(commit),
             }
         )
@@ -300,6 +367,11 @@ def build_development_evidence(
             if min_commits is not None
             else "章程最低提交次数未配置，不能判断是否提交缺失。"
         ),
+        "history_source_note": (
+            "提交顺序来自 Git 遍历，日期为作者声明时间；提交者时间与父关系另有记录，"
+            "均不能证明实际工作时间、投入或作者身份。浅边界和未测量合并差分的变更量保持未知。"
+        ),
+        "unknown_change_commit_count": sum(c.get("change_metrics_complete") is False for c in commits),
         "large_commit_threshold": threshold,
         "large_commit_threshold_definition": _THRESHOLD_DEFINITION,
         "candidates": candidates,
@@ -505,6 +577,8 @@ def validate_ai_development_result(
 def _stage_file_stats(stage_commits: list[dict]) -> list[dict]:
     totals: Counter[str] = Counter()
     for commit in stage_commits:
+        if commit.get("change_metrics_complete") is False:
+            continue
         for item in commit.get("files") or []:
             path = str(item.get("path") or "")
             if path:
@@ -580,6 +654,7 @@ def analyze_history(
     for number, ai_stage in enumerate(validated["stages"], start=1):
         stage_commits = commits[ai_stage["start_index"] : ai_stage["end_index"] + 1]
         key_commits = [commit_by_sha[sha] for sha in ai_stage["key_shas"]]
+        dates = [_date(str(c["date"])).astimezone(timezone.utc) for c in stage_commits]
         stages.append(
             {
                 "number": number,
@@ -587,16 +662,20 @@ def analyze_history(
                 "conclusion": ai_stage["conclusion"],
                 "reason": ai_stage["reason"],
                 "confidence": ai_stage["confidence"],
-                "start": str(stage_commits[0]["date"])[:10],
-                "end": str(stage_commits[-1]["date"])[:10],
+                "start": min(dates).date().isoformat(),
+                "end": max(dates).date().isoformat(),
+                "date_basis": "作者声明日期范围（UTC），不是实际工作起止时间",
                 "commit_count": len(stage_commits),
                 "loc": sum(_changes(commit) for commit in stage_commits),
+                "unknown_change_commit_count": sum(
+                    c.get("change_metrics_complete") is False for c in stage_commits
+                ),
                 "key_commits": [
                     {
                         "sha": commit["sha"],
                         "subject": _clean_commit_subject(commit.get("subject", "")),
                         "date": str(commit["date"])[:10],
-                        "loc": _changes(commit),
+                        "loc": None if commit.get("change_metrics_complete") is False else _changes(commit),
                         "url": (
                             f"{repository_url.rstrip('/')}/-/commit/{commit['sha']}"
                             if repository_url else ""
@@ -609,7 +688,10 @@ def analyze_history(
         )
 
     authors = Counter(str(commit.get("author") or "未知") for commit in commits)
-    dates = [str(commit.get("date") or "")[:10] for commit in commits if commit.get("date")]
+    dates = [
+        _date(str(commit["date"])).astimezone(timezone.utc)
+        for commit in commits if commit.get("date")
+    ]
     reported = sum(review["status"] == "report" for review in validated["issues"])
     dismissed = sum(review["status"] == "dismiss" for review in validated["issues"])
     digest = ReportDigest(
@@ -627,7 +709,10 @@ def analyze_history(
                 name=f"阶段 {stage['number']}：{stage['name']}",
                 summary=concise_module_summary(
                     f"{stage['conclusion']} {stage['start']} 至 {stage['end']}，"
-                    f"{stage['commit_count']} 次提交，代码变更行数（LOC）为 {stage['loc']}。"
+                    f"{stage['commit_count']} 次提交，"
+                    f"{_change_summary(stage['loc'], stage['unknown_change_commit_count'], stage['commit_count'])}。"
+                    f"{stage['date_basis']}。",
+                    input_is_html=False,
                 ),
                 evidence_count=len(stage["key_commits"]),
             )
@@ -637,8 +722,10 @@ def analyze_history(
             "commit_count": len(commits),
             "minimum_commits": min_commits,
             "minimum_rule_configured": min_commits is not None,
-            "start_date": dates[0] if dates else "",
-            "end_date": dates[-1] if dates else "",
+            "start_date": min(dates).date().isoformat() if dates else "",
+            "end_date": max(dates).date().isoformat() if dates else "",
+            "date_basis": "作者声明日期范围（UTC）",
+            "unknown_change_commit_count": evidence["unknown_change_commit_count"],
             "author_count": len(authors),
             "large_commit_threshold": evidence["large_commit_threshold"],
             "large_commit_count": sum(
@@ -712,7 +799,9 @@ def render_development_html(analysis: dict) -> str:
                 if item.get("url") else f'<code>{_esc(item["sha"][:12])}</code>'
             )
             + f' · {_esc(item["date"])} · '
-            f'{_esc(item["subject"])} · {_esc(item["loc"])} LOC</li>'
+            f'{_esc(item["subject"])} · '
+            + ("变更未知" if item["loc"] is None else f'{_esc(item["loc"])} LOC')
+            + '</li>'
             for item in stage["key_commits"]
         )
         primary_files = stage["files"][:_PRIMARY_STAGE_FILES]
@@ -731,7 +820,10 @@ def render_development_html(analysis: dict) -> str:
             f'<span>AI 置信度 {round(stage["confidence"] * 100)}%</span></div>'
             f'<p class="stage-conclusion">{_esc(stage["conclusion"])}</p>'
             f'<p>{_esc(stage["start"])} 至 {_esc(stage["end"])}；'
-            f'{stage["commit_count"]} 次提交；变更 {stage["loc"]} LOC。</p>'
+            f'{stage["commit_count"]} 次提交；'
+            f'{_esc(_change_summary(stage["loc"], stage.get("unknown_change_commit_count", 0), stage["commit_count"]))}。</p>'
+            + (f'<p class="reason">{_esc(stage["date_basis"])}</p>' if stage.get("date_basis") else "")
+            +
             f'<p class="reason"><strong>划分依据：</strong>{_esc(stage["reason"])}</p>'
             f'<div class="stage-evidence"><div><strong>关键提交（标题原文）</strong><ul>{commits}</ul></div>'
             f'<div><strong>主要文件</strong><p>{files}</p>{extra_files_html}</div></div></article>'
@@ -750,6 +842,9 @@ def render_development_html(analysis: dict) -> str:
         if metrics.get("minimum_rule_configured")
         else "章程最低提交次数未配置，本报告不判断“提交缺失”。"
     )
+    if metrics.get("shallow"):
+        minimum_note += " 当前历史不完整，可见次数不能证明实际次数不足。"
+    source_note = analysis.get("evidence", {}).get("history_source_note", "")
     title = f"{_esc(digest.repo_id)} 开发过程分析报告"
     disclaimer = ai_disclaimer_html("development")
     rendered = f"""<!DOCTYPE html>
@@ -780,11 +875,12 @@ a{{color:#075985;text-decoration:none}}a:hover{{text-decoration:underline}}
 <section><h2>历史概况</h2><div class="metrics">
 <div class="metric"><b>{_esc(metrics.get('commit_count', 0))}</b><span>可见提交</span></div>
 <div class="metric"><b>{_esc(minimum)}</b><span>章程最低提交次数</span></div>
-<div class="metric"><b>{_esc(metrics.get('start_date') or '-')}</b><span>最早提交</span></div>
-<div class="metric"><b>{_esc(metrics.get('end_date') or '-')}</b><span>最近提交</span></div>
+<div class="metric"><b>{_esc(metrics.get('start_date') or '-')}</b><span>最早作者声明日期（UTC）</span></div>
+<div class="metric"><b>{_esc(metrics.get('end_date') or '-')}</b><span>最近作者声明日期（UTC）</span></div>
 <div class="metric"><b>{_esc(metrics.get('large_commit_threshold', 0))}</b><span>大规模提交阈值（LOC）</span></div>
 </div><div class="panel" style="margin-top:10px"><p><strong>判定口径：</strong>{_esc(minimum_note)}</p>
 <p><strong>大规模提交口径：</strong>{_esc(_THRESHOLD_DEFINITION)}</p>
+<p><strong>历史证据范围：</strong>{_esc(source_note)}</p>
 <p><strong>贡献者：</strong>{authors}</p></div></section>
 <section><h2>提交历史与开发阶段</h2><div class="stages">{"".join(stage_html)}</div></section>
 </main></body></html>"""

@@ -11,6 +11,7 @@ from .readability import (
     clip_at_sentence,
     concise_module_summary,
     explain_terms_on_first_use,
+    html_to_text,
     remove_ai_filler,
 )
 
@@ -141,7 +142,8 @@ def _reviewed_hardcode_findings(verdict: dict, integrity: dict) -> list[Finding]
         count_text = f"共发现 {len(items)} 处同类实现。" if len(items) > 1 else ""
         detail = concise_module_summary(
             f"{count_text}实现方法：{representative['method']}。"
-            f"AI 分析：{representative['reason']}"
+            f"AI 分析：{representative['reason']}",
+            input_is_html=False,
         )
         evidence: list[EvidenceRef] = []
         seen_locations: set[tuple[str, int | None]] = set()
@@ -180,20 +182,33 @@ def normalize_description_claim(value: str, path: str, facts: dict) -> str:
     ))
     if not has_count_claim or not ("系统调用" in text or "syscall" in text.casefold()):
         return text
-    if "nisyscall" in text.casefold() or "ENOSYS" in text:
-        return (
-            f"sys_nisyscall 对未实现编号返回 ENOSYS；函数定义正则扫描识别到 "
-            f"{count}/{total} 个标准名称，该数字不代表接口语义可用。"
-        )
     dispatch = syscall.get("dispatch_count")
     dispatch_note = (
         f"；SYS_* 分发表静态识别到 {int(dispatch)} 个不同分支"
         if isinstance(dispatch, int) and dispatch > 0 else ""
     )
-    return (
+    scan_note = (
         f"函数定义正则扫描识别到 {count}/{total} 个标准系统调用名称；"
         f"该计数只表示接口线索{dispatch_note}，不代表语义可用或测试通过。"
     )
+    # 只替换含数量声明的句子。ENOSYS 不能证明名为 sys_nisyscall 的函数存在，
+    # 更不能成为丢弃其余独立行为描述的理由。
+    parts = re.split(r"(?<=[。！？；;])", text)
+    result: list[str] = []
+    added_note = False
+    for part in parts:
+        has_syscall = bool(re.search(r"系统调用|syscall|调用号", part, re.I))
+        has_number = bool(re.search(
+            r"\b\d+\s*/\s*\d+\b|(?<!\d)\d+\s*\+?\s*(?:个\s*)?(?:标准\s*)?(?:Linux\s*)?(?:系统调用|syscall|调用号)",
+            part, re.I,
+        ))
+        if has_syscall and has_number:
+            if not added_note:
+                result.append(scan_note)
+                added_note = True
+        else:
+            result.append(part)
+    return "".join(result)
 
 
 def normalize_description_conclusion(value: str, verdict: dict) -> str:
@@ -274,7 +289,7 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
         source_name = Path(issue_path.path).name or "未知文件"
         findings.append(Finding(
             title=f"源码实现问题：{source_name}",
-            detail=concise_module_summary(quote),
+            detail=concise_module_summary(quote, input_is_html=False),
             severity=_severity(str(item.get("severity") or "medium"), quote),
             confidence=_confidence_ratio(item.get("confidence"), default=0.5),
             source="description",
@@ -302,7 +317,7 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             source_name = Path(issue_path.path).name or "未知文件"
             findings.append(Finding(
                 title=f"源码实现问题：{source_name}",
-                detail=concise_module_summary(quote),
+                detail=concise_module_summary(quote, input_is_html=False),
                 severity=_severity(str(item.get("severity") or "medium"), quote),
                 confidence=_confidence_ratio(item.get("confidence"), default=0.75),
                 source="description",
@@ -311,16 +326,20 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
 
     modules: list[ModuleDigest] = []
     for name, subsystem, _parent in description_review_sections(tree):
-        summary = normalize_description_claim(str(
-            subsystem.get("brief") or subsystem.get("summary")
-            or subsystem.get("content") or "未形成模块摘要。"
-        ), "", facts)
+        # summary/brief are plain JSON text. Only content is an HTML fragment.
+        # Prefer the original summary to an already truncated brief.
+        raw_summary = subsystem.get("summary") or subsystem.get("brief")
+        if not raw_summary:
+            raw_summary = html_to_text(str(subsystem.get("content") or "")) or "未形成模块摘要。"
+        summary = normalize_description_claim(str(raw_summary), "", facts)
         children = [
             child for child in (subsystem.get("children") or []) if isinstance(child, dict)
         ]
         modules.append(ModuleDigest(
             name=name,
-            summary=clip_at_sentence(explain_terms_on_first_use(str(summary)), 160),
+            summary=clip_at_sentence(
+                explain_terms_on_first_use(str(summary)), 160, input_is_html=False,
+            ),
             evidence_count=(
                 len(subsystem.get("highlights") or []) + len(subsystem.get("issues") or [])
                 + sum(len(child.get("file_paths") or []) for child in children)

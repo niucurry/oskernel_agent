@@ -374,11 +374,12 @@ def test_explicit_baseline_candidate_without_direct_code_does_not_propagate_per_
 
 def test_explicit_baseline_candidate_with_direct_code_propagates_per_query():
     query = {"file_path": "src/mm.rs", "start_line": 20, "func_name": "map",
-             "normalized_code": "Q"}
+             "normalized_code": "Q", "lang": "rust", "raw_code": "fn map() {}"}
     direct = {
         "tier": "review", "query_func": query,
         "candidate_func": {
             "repo_id": "data/repos/0/baseline_kernel", "normalized_code": "B",
+            "lang": "rust", "func_name": "map", "raw_code": "fn map() {}",
         },
         "evidence": {"line_similarity": 0.9, "exact_match_lines": 10},
     }

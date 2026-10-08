@@ -8,10 +8,10 @@
 #    这不是跨队抄袭，而是双方都 vendored 了同一份上游。本系统在 metadata 通道2 的
 #    「双侧都命中同一上游基线函数」向量扣除因候选侧是「另一队的 vendored 副本」而非
 #    上游本身、且各队对副本改动不一，常不触发（baseline_derived=0）；故在此加一条
-#    **路径口径**：双方 file_path 在同一 upstream_root 段下、且该段之后的相对路径相同，
-#    即判为「vendored 上游基线」（upstream_vendored），从借鉴 KPI/清单剔除，单列小节。
-#    安全性：队伍自研的新模块（如 arceos/modules/asynctask/）在其他队无同名相对路径，
-#    不会触发本规则，故自研代码不会被误剔除。
+#    路径只产生上游来源线索（upstream_path_hint）。只有目标函数完整源码 token
+#    与显式公共上游参考一致时，才标 upstream_vendored 并从借鉴清单剔除。
+#    核对忽略注释和空白，保留名称、常量及字符串；上游文件内的本地修改继续待核对。
+#    缺少参考、解析失败或不支持的语言不能据路径排除，也不能因此认定存在借鉴。
 #
 # 2. 受 Linux/POSIX ABI 限制的唯一性实现（abi_constrained）：
 #    `metadata_to_kstat`（按 Linux struct kstat 字段布局转换）、`dummy_stat_fs`、

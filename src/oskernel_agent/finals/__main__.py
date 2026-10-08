@@ -30,11 +30,23 @@ def build_parser() -> argparse.ArgumentParser:
     summary.add_argument("--comparison-digest", required=True)
     summary.add_argument("--repo-id", default="")
     summary.add_argument("--output", required=True, help="输出 PDF 路径")
+    audit = commands.add_parser("audit-run", help="核对外部运行日志中的测试判定一致性")
+    audit.add_argument("--log", required=True, help="本地运行日志路径")
+    audit.add_argument("--output", required=True, help="输出 JSON 或 HTML 路径")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "audit-run":
+        from .runtime_evidence import write_runtime_audit
+        try:
+            result = write_runtime_audit(args.log, args.output)
+        except (OSError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return {"passed": 0, "failed": 1, "inconsistent": 1}.get(result["status"], 2)
     if args.command == "development":
         from .development import generate_development_report
         result = generate_development_report(

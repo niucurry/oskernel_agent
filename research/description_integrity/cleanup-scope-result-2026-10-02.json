@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-02",
+  "completed_at": "2026-10-02T16:09:35.168179+00:00",
+  "status": "complete",
+  "archive": "/home/niu/agent-archives/retired-description-20261002T155545Z/experiments.tar.gz",
+  "archive_sha256": "bc9583655fe305eab2b7335f639905291d6c9e88d2e8dab7608b076e05b026d0",
+  "archive_bytes": 10221061,
+  "archived_entries": 974,
+  "original_frozen_files_verified": 491,
+  "removed_entries": 957,
+  "removed_workspace_files": 690,
+  "removed_workspace_file_bytes": 5059395,
+  "removed_external_cache_file_bytes": 42882547,
+  "retired_roots": [
+    "research/description_scope",
+    "research/scope_repair"
+  ],
+  "retired_single_files": [
+    "tests/test_description_scope_experiment.py",
+    "tests/test_scope_repair.py",
+    "docs/agent-runtime-and-evaluation-design.md",
+    "docs/contrastive-description-research-proposal-2026-09-27.md",
+    "docs/description-scope-research-decision-2026-09-27.md",
+    "research/description_integrity/protocol.json",
+    "research/description_integrity/annotation-template.json"
+  ],
+  "retained_summary_files": [
+    "research/description_scope/pilot-ledger-2026-09-28.json",
+    "research/scope_repair/decision.json",
+    "research/scope_repair/ledger.json",
+    "research/scope_repair/completion-audit.json",
+    "research/scope_repair/trial-v4/analysis.json",
+    "research/scope_repair/prepared/native-validation.json",
+    "research/scope_repair/rejection-replay-v1/results.json"
+  ],
+  "preserved_production_python_files": 132,
+  "preserved_legacy_summary_files": 17,
+  "preserved_test_dependencies": "/home/niu/.cache/oskernel-description-test-deps",
+  "preserved_test_fonts": "/home/niu/.cache/oskernel-description-fonts",
+  "note": "The 491-file frozen experiment remains intact inside the verified archive. Removed source/traces are intentionally absent from the active tree; original relative paths can be restored in a separate directory.",
+  "additional_generated_cache_removals": [
+    {
+      "path": "tests/__pycache__/test_scope_repair.cpython-312-pytest-9.1.0.pyc",
+      "bytes": 24833,
+      "sha256": "f0caccf2859d387588223051b39d8e4456c000481a4e971b84f41ab236a54d02"
+    },
+    {
+      "path": "tests/__pycache__/test_description_scope_experiment.cpython-312-pytest-9.1.0.pyc",
+      "bytes": 20090,
+      "sha256": "144dbd2dd6712e8a03f4a64d903c7e75634c6610d118a933bf57a2dac1196e0a"
+    }
+  ],
+  "additional_generated_cache_note": "Two reproducible bytecode caches of the removed tests; no unique experiment data. Deleted without archiving.",
+  "removed_workspace_files_including_generated_caches": 692,
+  "deletion_completed_at": "2026-10-02T15:57:05.766446+00:00",
+  "validation_record": "/home/niu/agent/research/description_integrity/cleanup-scope-validation-2026-10-02.json",
+  "validation_sha256": "85315873b73c1b0a790501ff11454c8c563ebb9bde44a0ef4f095ccff209f410",
+  "production_regression": {
+    "passed": 337,
+    "failed": 0,
+    "exit_code": 0,
+    "duration_seconds": 2.74
+  },
+  "documentation_updated": [
+    "README.md",
+    "docs/research-handoff-next-method-2026-10-02.md",
+    "docs/description-scope-c-rust-trial-2026-10-02.md",
+    "docs/description-scope-pilot-2026-09-28.md",
+    "docs/retired-description-experiments-2026-10-02.md",
+    "docs/retired-experiments-2026-09-27.md",
+    "docs/research-pivot-decision.md",
+    "research/description_integrity/README.md",
+    "research/description_scope/README.md",
+    "research/scope_repair/README.md"
+  ]
+}
