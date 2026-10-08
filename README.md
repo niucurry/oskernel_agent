@@ -13,14 +13,6 @@
 
 - [新任务提示词：只研究 OS 代码描述系统](docs/description-research-restart-2026-10-08.md)
 - [工程交接：保留的修复与验证范围](docs/engineering-handoff-2026-10-08.md)
-- [历史重新选题交接：旧主线与负结果](docs/research-handoff-next-method-2026-10-02.md)
-- [已停止的描述研究：清理与归档](docs/retired-description-experiments-2026-10-02.md)
-- [历史 Python 先导：方法对照与评测诊断](docs/description-scope-pilot-2026-09-28.md)
-- [历史 C/Rust 对照：候选淘汰证据与生产修复](docs/description-scope-c-rust-trial-2026-10-02.md)
-- [描述报告修复与可复现回放](research/description_integrity/README.md)
-- [旧实验清理、归档与恢复](docs/retired-experiments-2026-09-27.md)
-- [历史研究转向与负结果](docs/research-pivot-decision.md)
-- [历史方法的新颖性与证据审查](docs/novelty-and-evidence-audit.md)
 - [项目结构](docs/project-map.md)
 - [设计方案与技术文档](docs/design-specification.pdf)
 
@@ -225,14 +217,7 @@ cd frontend && npm run build
 ## 维护工具
 
 后续研究仅面向描述系统，要求见 [新任务提示词](docs/description-research-restart-2026-10-08.md)。
-此前对比、性能和内核缺陷方向停止投入；相关代码仅保留已有工程修复，实验记录保留为历史材料。
-最新开发历史证据修正与负结果见 [历史证据实验](docs/research-history-evidence-gate-2026-10-07.md)，
-公开移植样本的来源适用性检查见 [自然上游真值实验](docs/research-natural-upstream-gate-2026-10-07.md)。
-两者均未建立合适的论文方法；工程修正与研究效果分别记录。
-描述报告的确定性回放位于 `research/description_integrity/`。
-`research/description_scope/` 与 `research/scope_repair/` 仅保留旧实验结论和归档索引，
-实验代码已移除；详见 [描述研究清理记录](docs/retired-description-experiments-2026-10-02.md)。
-更早的行为图实验见 [旧实验清理记录](docs/retired-experiments-2026-09-27.md)。
+生产仓库保留系统代码与必要回归测试；已停止的实验代码和记录已移至仓库外，归档入口见 [工程交接](docs/engineering-handoff-2026-10-08.md)。
 
 | 命令 | 用途 |
 |---|---|
@@ -242,5 +227,3 @@ cd frontend && npm run build
 | `python scripts/stitch_fragments.py` | 在诊断模式下恢复已完成的模型分片 |
 
 许可证见 [LICENSE](LICENSE)。
-
-本轮性能基准的固定故障原型、强基线与停止依据见 [研究记录](docs/research-performance-validity-2026-10-07.md)；受控计数与操作失败可共存，普通 POSIX 预检已覆盖当前收益，尚无新论文方法效果。可恢复构建缓存和 NoAxiom 准备未知也在该记录中保存。

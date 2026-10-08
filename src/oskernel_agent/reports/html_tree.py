@@ -850,14 +850,6 @@ def _statement_key(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip(" 。；;！？")
 
 
-def _remove_assigned_issue_sentences(value: str, issues: list[dict]) -> str:
-    """仅去除整条相同陈述；共享函数名或风险词不意味着语义重复。"""
-    key = _statement_key(value)
-    if key and any(key == _statement_key(str(item.get("quote") or "")) for item in issues):
-        return ""
-    return value
-
-
 def _section_statements(
     node: dict, parent: dict | None, tree_json: dict,
     assigned_issues: list[dict], major_quotes: set[str],

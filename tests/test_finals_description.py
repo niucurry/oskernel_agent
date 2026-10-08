@@ -47,7 +47,7 @@ from oskernel_agent.pipeline.tree_builder import (
 from oskernel_agent.report_quality import IncompleteReportError
 from oskernel_agent.reports.html_tree import (
     _clean_capability_claim,
-    _remove_assigned_issue_sentences,
+    _render_all_subsystems,
     render_tree_html,
     write_tree_html,
 )
@@ -673,11 +673,18 @@ def test_module_issue_dedup_keeps_term_parentheses_intact():
         "网络层包含操作系统（Operating System，OS）Socket 抽象；"
         "其他实现说明。"
     )
-    issues = [{"quote": "OS Socket 层无法连接真实网卡"}]
+    item = {
+        "name": "网络管理", "type": "subsystem", "summary": value,
+        "file_paths": ["kernel/net.c"], "children": [],
+        "issues": [{"quote": "OS Socket 层无法连接真实网卡",
+                    "path": "kernel/net.c:42", "severity": "low"}],
+    }
+    result = _render_all_subsystems(
+        {"tree": {"children": [item]}, "facts": {}, "verdict": {}},
+        lambda path, line: f"#{path}:{line}",
+    )
 
-    result = _remove_assigned_issue_sentences(value, issues)
-
-    assert result == value
+    assert value.rstrip("。") in result
     assert "Operating System，OS）" in result
 
 def test_contest_build_verification_uses_temporary_copy_and_records_artifacts(

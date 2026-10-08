@@ -7,7 +7,6 @@ from oskernel_agent.finals.readability import concise_module_summary
 from oskernel_agent.pipeline.tree_builder import _files_for_subsys_prompt
 from oskernel_agent.reports.html_tree import (
     _clean_capability_claim,
-    _remove_assigned_issue_sentences,
     _render_all_subsystems,
     _section_statements,
 )
@@ -30,8 +29,11 @@ def test_capability_cleanup_does_not_invent_a_library():
 
 def test_shared_risk_word_does_not_delete_independent_behavior():
     text = "mmap 失败时保留旧映射。"
-    assert _remove_assigned_issue_sentences(text, [{"quote": "fork 失败时泄漏页框"}]) == text
-    assert _remove_assigned_issue_sentences(text, [{"quote": text}]) == ""
+    issue = {"quote": "fork 失败时泄漏页框", "path": "kernel/mm.c:42", "severity": "low"}
+    output = render(node(text, file_paths=["kernel/mm.c"], issues=[issue]))
+    assert html.escape(text.rstrip("。")) in output
+    output = render(node(text, file_paths=["kernel/mm.c"], issues=[dict(issue, quote=text)]))
+    assert output.count(html.escape(text.rstrip("。"))) == 1
 
 
 def test_syscall_correction_keeps_other_sentences_and_does_not_invent_handler():
