@@ -11,8 +11,6 @@
 
 ## 文档
 
-- [新任务提示词：只研究 OS 代码描述系统](docs/research/description-research-restart-2026-10-08.md)
-- [工程交接：保留的修复与验证范围](docs/research/engineering-handoff-2026-10-08.md)
 - [项目结构](docs/project-map.md)
 - [设计方案与技术文档](docs/design-specification.pdf)
 
@@ -215,9 +213,6 @@ cd frontend && npm run build
 - 正式报告完全由工具生成，参赛队无需且不得后处理 HTML/PDF。
 
 ## 维护工具
-
-后续研究仅面向描述系统，要求见 [新任务提示词](docs/research/description-research-restart-2026-10-08.md)。
-生产仓库保留系统代码与必要回归测试；已停止的实验代码和记录已移至仓库外，归档入口见 [工程交接](docs/research/engineering-handoff-2026-10-08.md)。
 
 | 命令 | 用途 |
 |---|---|
