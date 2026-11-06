@@ -1,0 +1,11 @@
+{
+  "archive": "/home/niu/agent-archives/description-stage2-20261008T063818Z/experiments.tar.gz",
+  "sha256": "7ead1d10e7547b8fbddb75958d16f60236412592941b4016875a2b5c517b3fde",
+  "archive_bytes": 4062009,
+  "members": 686,
+  "logical_bytes": 21650236,
+  "verification": "every tar member independently read and SHA256 compared; credential absence checked",
+  "goal_status": "active; method not found",
+  "unique_stage2_requests": 15,
+  "stage2_actual_tokens": 163209
+}

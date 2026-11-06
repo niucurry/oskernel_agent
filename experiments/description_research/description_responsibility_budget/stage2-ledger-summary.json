@@ -1,0 +1,21 @@
+{
+  "timestamp_utc": "2026-10-08T06:35:47Z",
+  "requests": 15,
+  "reported_tokens": 163209,
+  "usage_unknown_requests": 0,
+  "request_ceiling": 60,
+  "token_ceiling": 200000,
+  "remaining_requests": 45,
+  "remaining_reported_tokens": 36791,
+  "prior_stage": {
+    "requests": 35,
+    "reported_tokens": 136170,
+    "unknown_usage": 1,
+    "reserve_tokens": 20000
+  },
+  "cumulative_unique_requests": 50,
+  "cumulative_reported_tokens": 299379,
+  "duplicate_archived_reply_copies": "not charged or counted again",
+  "cpu": "exact cumulative CPU not instrumented; no CPU guarantee inferred from pytest counts",
+  "method_status": "no suitable method yet; current goal active"
+}

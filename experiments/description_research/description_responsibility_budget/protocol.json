@@ -1,0 +1,49 @@
+{
+  "stage": "description research stage 2, mechanism different from registration binding retrieval",
+  "status": "preflight frozen before deterministic selection and model outcomes",
+  "hypothesis": "Source-only object type coverage allocation exposes documented kernel responsibility families more evenly than a simple identifier-family round robin under the same UTF-8 evidence budget.",
+  "selection_not_claim": "lexicographic minimax is established optimization; any contribution requires demonstrating the OS description failure and incremental value over simple and coverage-based methods, not claiming a new greedy algorithm",
+  "budgets": {
+    "model_requests": 60,
+    "reported_actual_tokens": 200000,
+    "subprocess_cpu_seconds": 7200,
+    "unknown_usage_reserve_per_request": 20000
+  },
+  "prior_stage": {
+    "requests": 35,
+    "reported_tokens": 136170,
+    "failed_unknown_usage_requests": 1,
+    "not_included_in_stage2_budget": true
+  },
+  "no_call_preflight": {
+    "development": "ThreadX portable core",
+    "reference": "maintainer documented API service identities, separately extracted from official manual and Ctags original definitions",
+    "context_bytes": [
+      6000,
+      12000,
+      24000
+    ],
+    "gate": "at both 12000 and 24000 bytes candidate must expose at least 10 percentage points more documented service families than strongest simple baseline, with no worse covered documented service count; otherwise retire without model calls",
+    "no_confirmation_tuning": true
+  },
+  "confirmation_if_gate_passes": [
+    "ChibiOS portable RT core",
+    "NuttX sched sources with user-reference API intersection"
+  ],
+  "preflight_arms": [
+    "production default read excerpts after production file sampler",
+    "identifier family round robin ordered by shortest complete body",
+    "cost-normalized identifier weighted coverage",
+    "object type lexicographic minimax"
+  ],
+  "fairness": "All deterministic arms have full same source snapshot access and same complete-body packing limit. No oracle labels or manual text enter selectors. Source metadata parsing is counted as preprocessing; production excerpt includes unmodified comments and is not called an exact end-to-end production arm.",
+  "reference_limits": [
+    "API-family exposure is a prerequisite to evidence-backed module documentation, not semantic correctness of free prose",
+    "A documented API is not proven runnable or compatible by its identity",
+    "No judge comprehension/time claim",
+    "Source snapshots are public OS slices, not contest submissions; previous historical project exposure unknown, no blind-test claim"
+  ],
+  "stop": "Failure to beat the simple strong selector in development ends this mechanism; do not change groups, budgets, reference denominator or prompt to rescue it. If passes, freeze generation and held-out protocol before model calls.",
+  "timestamp_utc": "2026-10-08T05:39:58Z",
+  "source_unit_repair": "v1 invalid AST function units; v2 shared Ctags complete definitions; no gate/budget/family denominator changes"
+}

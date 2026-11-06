@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "plan_id": "sleeplock-recall-acceptance",
+  "items": [
+    {
+      "id": "lock-owner-state",
+      "dimension": "功能性",
+      "score_impact": 20,
+      "question": "获取、释放和检查睡眠锁时，如何更新和读取锁状态与持有者信息？",
+      "scope": "kernel/sleeplock.c 的睡眠锁状态管理源码路径",
+      "decision_rule": "区分源码事实、上下文保留与运行行为；没有执行测试时不宣称运行验证通过。",
+      "score_effect": "本次不计分。",
+      "subsystems": [
+        "同步机制"
+      ],
+      "evidence": [
+        {
+          "id": "initsleeplock",
+          "purpose": "核对状态更新及调用关系",
+          "path": "kernel/sleeplock.c",
+          "symbol": "initsleeplock"
+        },
+        {
+          "id": "acquiresleep",
+          "purpose": "核对状态更新及调用关系",
+          "path": "kernel/sleeplock.c",
+          "symbol": "acquiresleep"
+        },
+        {
+          "id": "releasesleep",
+          "purpose": "核对状态更新及调用关系",
+          "path": "kernel/sleeplock.c",
+          "symbol": "releasesleep"
+        },
+        {
+          "id": "holdingsleep",
+          "purpose": "核对状态更新及调用关系",
+          "path": "kernel/sleeplock.c",
+          "symbol": "holdingsleep"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "utc": "2026-10-08T08:11:49Z",
+  "files": {
+    "/home/niu/agent-research/description_runtime_grounding/protocol.json": "f85957fa76d1ce3ab42e42ccf0f1bd6d22255f54c874470aef1dbe9e0f7b790e",
+    "/home/niu/agent-research/description_runtime_grounding/run.py": "65517970f5fab4e89cc3c217005466e288d82d53b466c79b29fc80c3c7d75f59",
+    "/home/niu/agent-research/description_runtime_grounding/reference-service-identities.json": "f3f93ba710b7f3fa6ab45f2642f60fed4b0a44356d74a9db014cc5e73a5590ac",
+    "/home/niu/agent-research/description_runtime_grounding/original-system-prompt.txt": "4ac9b52ee6be103481605eac8b01935b16b27960f5502b075c919dbc518338df",
+    "/home/niu/agent-research/description_runtime_grounding/original-user-request.txt": "9e168efce5e611e82ada947a5db1598c172ae2a7355f09cdcfe2fb49e5a85ab5",
+    "/home/niu/agent/src/oskernel_agent/cli/mcp_server.py": "65fe767418621b82c13d2254a6387815d646404495f38b9d2baf5d93010d6524",
+    "/home/niu/agent/src/oskernel_agent/pipeline/tree_builder.py": "e36e7b4a0f78d39f49cedfa1a6ea305506a1ee0cc111548d268a09e73ce12f9c"
+  },
+  "versions": {
+    "pydantic": "2.13.5",
+    "tree-sitter": "0.25.2",
+    "tree-sitter-c": "0.24.1",
+    "networkx": "3.7"
+  },
+  "mcp_loaded_source": "/home/niu/.cache/oskernel-description-mcp-v1/python-sdk-1.26.0/src/mcp/__init__.py",
+  "mcp_author_version": "1.26.0; exact GitHub source and retrieval SHA in mcp-sdk-retrieval.json, not the installed 2.x metadata",
+  "mcp_tools": 15
+}

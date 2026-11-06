@@ -1,0 +1,31 @@
+{
+  "controls": [
+    {
+      "case": "legacy-system",
+      "field": "system",
+      "returncode": 0,
+      "timeout": false,
+      "wall_seconds": 2.4846020610020787,
+      "local_http_requests": 2,
+      "remote_model_requests": 0,
+      "expected_system_sha256": "4ac9b52ee6be103481605eac8b01935b16b27960f5502b075c919dbc518338df",
+      "exact_expected_system_delivered": false,
+      "has_user_sentinel": true,
+      "quality": "not measured; fixed mock response has no semantic inference"
+    },
+    {
+      "case": "correct-prompt",
+      "field": "prompt",
+      "returncode": 0,
+      "timeout": false,
+      "wall_seconds": 2.3264692279990413,
+      "local_http_requests": 2,
+      "remote_model_requests": 0,
+      "expected_system_sha256": "4ac9b52ee6be103481605eac8b01935b16b27960f5502b075c919dbc518338df",
+      "exact_expected_system_delivered": true,
+      "has_user_sentinel": true,
+      "quality": "not measured; fixed mock response has no semantic inference"
+    }
+  ],
+  "remote_model_requests": 0
+}

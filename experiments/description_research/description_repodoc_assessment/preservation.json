@@ -1,0 +1,11 @@
+{
+  "archive": "/home/niu/agent-archives/description-repodoc-assessment-20261008T073723Z/assessment.tar.gz",
+  "sha256": "dffd8a8c20a8e70c930d44a94e0763b8d6283df45e0971adcd4473b86b63d93f",
+  "archive_bytes": 171507,
+  "members": 30,
+  "verification": "all members read back and SHA256 matched; private API key absent",
+  "model_requests": 0,
+  "goal_status": "active; suitable method not established",
+  "input_archive": "/home/niu/agent-archives/description-stage2-20261008T063818Z/experiments.tar.gz",
+  "input_archive_sha256": "7ead1d10e7547b8fbddb75958d16f60236412592941b4016875a2b5c517b3fde"
+}

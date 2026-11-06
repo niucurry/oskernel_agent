@@ -1,0 +1,36 @@
+{
+  "utc": "2026-10-08T09:53:42.305496+00:00",
+  "decision": "reject_as_new_paper_method; retain useful engineering fixes",
+  "failure_classification": {
+    "prototype": "Narrow equivalent-expression translation checked against original C; no report-consumer gain over exact-C-expression template, 10/12 vs 10/12 in one probe",
+    "reference": "Independent GCC scalar answer reference valid for its fixed finite scope; no arbitrary Chinese report truth oracle",
+    "evaluation": "Model arithmetic errors appear even when report formulas are exact; consumer correctness cannot be attributed solely to generation quality",
+    "novelty": "ASAP explicitly permits arbitrary automatically extracted semantic analyses. Adding quotient formulas alone does not establish a new mechanism",
+    "resource": "No model/API/format failures in this phase. Resource exhaustion does not explain no gain."
+  },
+  "hypothesis_status": "Full LLM-augmented generator hypothesis and two-repeat/heldout confirmation NOT tested; applicability preflight failed to justify spending more on an ordinary augmentation. No claim that every possible algebraic method is disproved.",
+  "stopped_work": [
+    "No revised prompts or reader repairs",
+    "No new LLM generators or repeat sampling to rescue this candidate",
+    "No heldout repository or function, because candidate was not promoted"
+  ],
+  "requests": 12,
+  "reported_tokens": 77260,
+  "unknown_requests": 0,
+  "production_requests": 8,
+  "production_tokens": 74359,
+  "pilot_consumer_requests": 4,
+  "pilot_consumer_tokens": 2901,
+  "paid_new_candidate_generator_requests": 0,
+  "cpu_seconds_measured": 15.247359999999999,
+  "cpu_boundary": "Selected actual experiment processes measured; preparation self CPU and retrieval not fully aggregated, not silently zero",
+  "actual_invoice_cost": "unknown; current balance preflight and same-day official pricing source retained, no free-inference claim",
+  "pricing_source": "https://api-docs.deepseek.com/quick_start/pricing",
+  "latest_pricing_retrieval": "web timeout after calls; no new exact price claim",
+  "budget_parent": {
+    "requests": 60,
+    "actual_tokens": 200000,
+    "subbudgets_not_extended": true
+  },
+  "scope": "Only description systems. No comparison innovation or retired three lines restarted."
+}

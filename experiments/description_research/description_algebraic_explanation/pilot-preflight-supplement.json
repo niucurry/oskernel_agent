@@ -1,0 +1,29 @@
+{
+  "utc": "2026-10-08T09:40:06.224468+00:00",
+  "parent_protocol_sha256": "168f86948fb669ab133ce10d4d62eabfc94aacb85f963fffaeedf00bf6f2e0b3",
+  "purpose": "Before paid pilot generations, check whether the applicable deterministic exact-expression baseline saturates the frozen bounded reference. If 12/12, >=2/12 improvement is mathematically impossible: stop generation/confirmation, keep prototype and production diagnostics. This implements existing failure gate, not a relaxed gate.",
+  "questions_sha256": "ee504bd961f36ff328d651fb8381c7451005f7aed678e7c97dbf4d9d15d000b0",
+  "answers_sha256": "72587f6628c6797c90728dd5a04f7f156cebbb793ec191236f59b155f6ee45e8",
+  "report_mask": "Replace each exact macro name with stable opaque identity only in consumer input, for every report/control; this reuses retired identity diagnostic as a safeguard for a genuinely different generator, not a new named method",
+  "names_only": "Opaque symbol list and native width, no roles or source; a leakage/guessing diagnostic, not quality baseline",
+  "cost_rule": "Requests with identical messages/parameters reuse previous result and SHA. No key saved. No unknown request retry. 24/60k pilot cap, original production 8/74359 already counted in parent stage.",
+  "reports": {
+    "template-report.md": {
+      "sha256": "1ddda780f962a1527b7b099a13104c1df1d3de955914655623aa8ea81d3895a2",
+      "characters": 527
+    },
+    "normal-form-template-report.md": {
+      "sha256": "216e06db77d57bf438ff8e2207473cd2aeba7f780ac1a5f164d013a6a9631715",
+      "characters": 519
+    },
+    "production-module-plain.md": {
+      "sha256": "c03b87e713785b9fea5e3363b7e1c46ac0960421e93f8cefc031d924c663a4b5",
+      "characters": 637
+    },
+    "names-only-report.md": {
+      "sha256": "ab90a82466032f4b0402ec51bc9864e566a39ac58e93ae82210245f56c4b6649",
+      "characters": 85
+    }
+  },
+  "production_width": "Original module text mentions 64-bit; study common scalar input target is native size_t 64. No whole OS or target platform claim."
+}

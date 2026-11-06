@@ -1,0 +1,221 @@
+{
+  "primary": {
+    "production_reader": {
+      "reference_bindings": 66,
+      "correct": 39,
+      "wrong": 0,
+      "unknown": 8,
+      "omitted": 19,
+      "complete_evidence": 9,
+      "unsupported_extra_claims": 14,
+      "cells": 6
+    },
+    "bm25_chunks": {
+      "reference_bindings": 66,
+      "correct": 66,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 14,
+      "unsupported_extra_claims": 0,
+      "cells": 6
+    },
+    "codewiki_components": {
+      "reference_bindings": 66,
+      "correct": 11,
+      "wrong": 0,
+      "unknown": 29,
+      "omitted": 26,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 4,
+      "cells": 6
+    },
+    "interface_witness": {
+      "reference_bindings": 66,
+      "correct": 66,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 66,
+      "unsupported_extra_claims": 0,
+      "cells": 6
+    },
+    "simple_lookup": {
+      "reference_bindings": 66,
+      "correct": 66,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 66,
+      "unsupported_extra_claims": 0,
+      "cells": 6
+    }
+  },
+  "format_diagnostic_only": {
+    "production_reader": {
+      "reference_bindings": 66,
+      "correct": 45,
+      "wrong": 0,
+      "unknown": 9,
+      "omitted": 12,
+      "complete_evidence": 9,
+      "unsupported_extra_claims": 7
+    },
+    "bm25_chunks": {
+      "reference_bindings": 66,
+      "correct": 66,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 14,
+      "unsupported_extra_claims": 0
+    },
+    "codewiki_components": {
+      "reference_bindings": 66,
+      "correct": 11,
+      "wrong": 0,
+      "unknown": 29,
+      "omitted": 26,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 4
+    },
+    "interface_witness": {
+      "reference_bindings": 66,
+      "correct": 66,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 66,
+      "unsupported_extra_claims": 0
+    },
+    "simple_lookup": {
+      "reference_bindings": 66,
+      "correct": 66,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 66,
+      "unsupported_extra_claims": 0
+    }
+  },
+  "diagnostics_and_failures": [
+    {
+      "repo": "rtthread",
+      "repeat": 1,
+      "arm": "production_reader",
+      "diagnostic_only": "table-prefixed field names",
+      "original_fields": [
+        "_dev_fops.close",
+        "_dev_fops.read",
+        "_dev_fops.write",
+        "_dev_fops.ioctl",
+        "_dev_fops.getdents",
+        "_dev_fops.poll",
+        "_dev_fops.flush"
+      ]
+    },
+    {
+      "repo": "riot",
+      "repeat": 0,
+      "arm": "codewiki_components",
+      "status": "api_failure"
+    }
+  ],
+  "candidate_vs_simple": [
+    {
+      "repo": "rtthread",
+      "repeat": 0,
+      "context_equal": true,
+      "output_equal": true,
+      "candidate_complete": 13,
+      "baseline_complete": 13
+    },
+    {
+      "repo": "rtthread",
+      "repeat": 1,
+      "context_equal": true,
+      "output_equal": true,
+      "candidate_complete": 13,
+      "baseline_complete": 13
+    },
+    {
+      "repo": "riot",
+      "repeat": 0,
+      "context_equal": true,
+      "output_equal": true,
+      "candidate_complete": 4,
+      "baseline_complete": 4
+    },
+    {
+      "repo": "riot",
+      "repeat": 1,
+      "context_equal": true,
+      "output_equal": true,
+      "candidate_complete": 4,
+      "baseline_complete": 4
+    },
+    {
+      "repo": "mynewt",
+      "repeat": 0,
+      "context_equal": false,
+      "output_equal": false,
+      "candidate_complete": 16,
+      "baseline_complete": 16
+    },
+    {
+      "repo": "mynewt",
+      "repeat": 1,
+      "context_equal": false,
+      "output_equal": false,
+      "candidate_complete": 16,
+      "baseline_complete": 16
+    }
+  ],
+  "method_costs": {
+    "production_reader": {
+      "independent_required_requests": 12,
+      "reported_tokens": 43886,
+      "calls_without_usage": []
+    },
+    "bm25_chunks": {
+      "independent_required_requests": 6,
+      "reported_tokens": 25893,
+      "calls_without_usage": []
+    },
+    "codewiki_components": {
+      "independent_required_requests": 6,
+      "reported_tokens": 19260,
+      "calls_without_usage": [
+        14
+      ]
+    },
+    "interface_witness": {
+      "independent_required_requests": 6,
+      "reported_tokens": 14302,
+      "calls_without_usage": []
+    },
+    "simple_lookup": {
+      "independent_required_requests": 6,
+      "reported_tokens": 14403,
+      "calls_without_usage": []
+    }
+  },
+  "actual_requests": 32,
+  "requests_with_usage": 31,
+  "reported_actual_tokens": 109962,
+  "tokens_of_failed_tls_call": "unknown; not treated as zero; predeclared additional global probe reserves 20000 tokens conservatively",
+  "freeze_mismatches": [],
+  "decision": "reject interface_witness as research method: no gain beyond simple lookup in development or either confirmation repository",
+  "failure_class": "mechanism adds no distinct evidence beyond ordinary lookup; not format failure, API absence or reference instability of the candidate",
+  "claim_limit": "Only explicit binding identities and cited input lines; no accuracy claim about free Chinese prose, runtime capability, complete production reports or judges",
+  "limitations": [
+    "production_reader is a bounded stage adapter, not the unchanged full production prompt; additional original production SUBSYS probe reported separately",
+    "production allocation also saw a default-read source excerpt before its final 10000-byte context; source information is not precisely matched across this arm and deterministic arms",
+    "official CodeWiki C components plus common BM25 is not full hierarchical CodeWiki with complete-source agent tools",
+    "post-hoc table-prefix normalization is diagnostic and cannot replace frozen metric",
+    "No length-matched natural prose semantic evaluation: all arms share output ceiling, but actual string lengths differ and candidate descriptions are longer than several adapters",
+    "Ctags and compiler projection support limited references; not OS build or live dispatch execution",
+    "Three repositories and two generation repetitions; no independent-judge study or significance inference",
+    "Provider balance snapshots both report CNY 1.55 to two decimals; zero visible delta cannot establish zero charge or eventual billing"
+  ]
+}

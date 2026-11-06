@@ -1,0 +1,3568 @@
+[
+  {
+    "task": {
+      "repo": "rtthread",
+      "partition": "development",
+      "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+      "table": "_dev_fops"
+    },
+    "repeat": 0,
+    "arm": "production_reader",
+    "context_bytes": 9716,
+    "context_sha256": "d4b27e7059b4ba4ac2cd64354b06fb2e1dc7add2c6cb1a6fe21ad64bd46c3cd0",
+    "allocation": {
+      "allocation_status": "ok",
+      "requested_reads": [
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+          "start_line": 80,
+          "end_line": 280
+        },
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+          "start_line": 280,
+          "end_line": 460
+        },
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+          "start_line": 460,
+          "end_line": 555
+        },
+        {
+          "path": "components/dfs/dfs_v2/include/dfs_file.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/include/dfs_vfs.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/src/dfs_vnode.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/src/dfs_file.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devtmpfs.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/include/dfs.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/src/dfs_private.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/filesystems/skeleton/skeleton.c",
+          "start_line": null,
+          "end_line": null
+        }
+      ],
+      "retained_reads": [
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+          "start_line": 80,
+          "end_line": 280
+        },
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+          "start_line": 460,
+          "end_line": 555
+        },
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.h",
+          "start_line": null,
+          "end_line": null
+        }
+      ],
+      "tool_errors": [
+        "invalid_path"
+      ],
+      "call": 1
+    },
+    "call_ref": {
+      "call": 2
+    },
+    "output": {
+      "module_description": "devfs 文件系统操作表 _dev_fops 的接口实现模块，将文件操作绑定到设备文件读写、控制、轮询等函数。",
+      "claims": [
+        {
+          "role": "_dev_fops",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "devfs 文件操作表，绑定各文件操作函数，源码材料未显示其定义与赋值。"
+        },
+        {
+          "role": "close",
+          "implementation": "dfs_devfs_close",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:86",
+          "description": "关闭设备文件，调用设备 fops 或 rt_device_close。"
+        },
+        {
+          "role": "read",
+          "implementation": "dfs_devfs_read",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:140",
+          "description": "读取设备文件，按单位移位调用设备读接口。"
+        },
+        {
+          "role": "write",
+          "implementation": "dfs_devfs_write",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:176",
+          "description": "写入设备文件，按单位移位调用设备写接口。"
+        },
+        {
+          "role": "ioctl",
+          "implementation": "dfs_devfs_ioctl",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:216",
+          "description": "设备文件控制，调用设备 fops 或 rt_device_control。"
+        },
+        {
+          "role": "getdents",
+          "implementation": "dfs_devfs_getdents",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:246",
+          "description": "获取目录项，直接返回 -RT_ENOSYS。"
+        },
+        {
+          "role": "poll",
+          "implementation": "dfs_devfs_poll",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:255",
+          "description": "轮询设备文件，调用设备 fops 的 poll。"
+        },
+        {
+          "role": "flush",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "刷新设备文件，源码材料被截断未显示实现。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 13,
+      "correct": 6,
+      "wrong": 0,
+      "unknown": 1,
+      "omitted": 6,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 1,
+      "duplicate_claims": 0,
+      "output_string_characters": 795
+    }
+  },
+  {
+    "task": {
+      "repo": "rtthread",
+      "partition": "development",
+      "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+      "table": "_dev_fops"
+    },
+    "repeat": 0,
+    "arm": "bm25_chunks",
+    "context_bytes": 9984,
+    "context_sha256": "420a1687c43bfc1a25e98439c7347d183cdd2242311e184d0f09f8d34e1a080e",
+    "allocation": null,
+    "call_ref": {
+      "call": 3
+    },
+    "output": {
+      "module_description": "devfs 文件操作表 _dev_fops 定义了设备文件系统的文件操作接口，包括打开、关闭、读写、控制、目录读取、轮询、刷新、定位、截断、内存映射和文件锁等操作。",
+      "claims": [
+        {
+          "role": "open",
+          "implementation": "dfs_devfs_open",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:418",
+          "definition": "unknown",
+          "description": "打开设备文件"
+        },
+        {
+          "role": "close",
+          "implementation": "dfs_devfs_close",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:419",
+          "definition": "unknown",
+          "description": "关闭设备文件"
+        },
+        {
+          "role": "read",
+          "implementation": "dfs_devfs_read",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:420",
+          "definition": "unknown",
+          "description": "从设备文件读取数据"
+        },
+        {
+          "role": "write",
+          "implementation": "dfs_devfs_write",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:421",
+          "definition": "unknown",
+          "description": "向设备文件写入数据"
+        },
+        {
+          "role": "ioctl",
+          "implementation": "dfs_devfs_ioctl",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:422",
+          "definition": "unknown",
+          "description": "设备文件控制操作"
+        },
+        {
+          "role": "getdents",
+          "implementation": "dfs_devfs_getdents",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:423",
+          "definition": "unknown",
+          "description": "读取设备目录项"
+        },
+        {
+          "role": "poll",
+          "implementation": "dfs_devfs_poll",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:424",
+          "definition": "unknown",
+          "description": "设备文件轮询操作"
+        },
+        {
+          "role": "flush",
+          "implementation": "dfs_devfs_flush",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:426",
+          "definition": "unknown",
+          "description": "刷新设备文件缓冲区"
+        },
+        {
+          "role": "lseek",
+          "implementation": "dfs_devfs_lseek",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:427",
+          "definition": "unknown",
+          "description": "设置设备文件读写位置"
+        },
+        {
+          "role": "truncate",
+          "implementation": "dfs_devfs_truncate",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:428",
+          "definition": "unknown",
+          "description": "截断设备文件"
+        },
+        {
+          "role": "mmap",
+          "implementation": "dfs_devfs_mmap",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:429",
+          "definition": "unknown",
+          "description": "内存映射设备文件"
+        },
+        {
+          "role": "lock",
+          "implementation": "dfs_devfs_lock",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:430",
+          "definition": "unknown",
+          "description": "设备文件锁操作"
+        },
+        {
+          "role": "flock",
+          "implementation": "dfs_devfs_flock",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:431",
+          "definition": "unknown",
+          "description": "设备文件 flock 操作"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 13,
+      "correct": 13,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1204
+    }
+  },
+  {
+    "task": {
+      "repo": "rtthread",
+      "partition": "development",
+      "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+      "table": "_dev_fops"
+    },
+    "repeat": 0,
+    "arm": "codewiki_components",
+    "context_bytes": 9946,
+    "context_sha256": "be7bb74e38c39b55418dfc5ccf9713649c88c81b2a9cf2c3a3197e0edd30fb7c",
+    "allocation": null,
+    "call_ref": {
+      "call": 4
+    },
+    "output": {
+      "module_description": "devfs 文件系统操作表 _dev_fops 的接口实现模块，负责将文件操作映射到设备驱动。",
+      "claims": [
+        {
+          "role": "poll",
+          "implementation": "dfs_devfs_poll",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:255",
+          "description": "轮询设备文件事件，转发到设备驱动的 poll 操作。"
+        },
+        {
+          "role": "flush",
+          "implementation": "dfs_devfs_flush",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:278",
+          "description": "刷新设备文件，转发到设备驱动的 flush 操作。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 13,
+      "correct": 2,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 11,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 252
+    }
+  },
+  {
+    "task": {
+      "repo": "rtthread",
+      "partition": "development",
+      "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+      "table": "_dev_fops"
+    },
+    "repeat": 0,
+    "arm": "interface_witness",
+    "context_bytes": 4657,
+    "context_sha256": "4736fadec71c50a56610a87cb9eb080fd8787d3c7e394aa0da794ca1081013b9",
+    "allocation": null,
+    "call_ref": {
+      "call": 5
+    },
+    "output": {
+      "module_description": "devfs 文件操作表 _dev_fops 将设备文件系统的打开、关闭、读写、控制、目录读取、轮询、刷新、定位、截断、内存映射及文件锁等操作绑定到对应的 dfs_devfs_* 实现函数。",
+      "claims": [
+        {
+          "role": "open",
+          "implementation": "dfs_devfs_open",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:418",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:24",
+          "description": "打开设备文件，处理引用计数并初始化文件对象。"
+        },
+        {
+          "role": "close",
+          "implementation": "dfs_devfs_close",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:419",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:86",
+          "description": "关闭设备文件，释放相关资源并递减引用计数。"
+        },
+        {
+          "role": "read",
+          "implementation": "dfs_devfs_read",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:420",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:140",
+          "description": "从设备读取数据到用户缓冲区。"
+        },
+        {
+          "role": "write",
+          "implementation": "dfs_devfs_write",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:421",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:176",
+          "description": "将用户缓冲区数据写入设备。"
+        },
+        {
+          "role": "ioctl",
+          "implementation": "dfs_devfs_ioctl",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:422",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:216",
+          "description": "对设备执行控制命令。"
+        },
+        {
+          "role": "getdents",
+          "implementation": "dfs_devfs_getdents",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:423",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:246",
+          "description": "读取设备目录项，当前返回不支持。"
+        },
+        {
+          "role": "poll",
+          "implementation": "dfs_devfs_poll",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:424",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:255",
+          "description": "轮询设备事件状态。"
+        },
+        {
+          "role": "flush",
+          "implementation": "dfs_devfs_flush",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:426",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:278",
+          "description": "刷新设备文件缓冲区。"
+        },
+        {
+          "role": "lseek",
+          "implementation": "dfs_devfs_lseek",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:427",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:301",
+          "description": "调整设备文件的读写位置。"
+        },
+        {
+          "role": "truncate",
+          "implementation": "dfs_devfs_truncate",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:428",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:324",
+          "description": "截断设备文件到指定长度。"
+        },
+        {
+          "role": "mmap",
+          "implementation": "dfs_devfs_mmap",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:429",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:347",
+          "description": "将设备文件映射到内存地址空间。"
+        },
+        {
+          "role": "lock",
+          "implementation": "dfs_devfs_lock",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:430",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:370",
+          "description": "对设备文件加锁。"
+        },
+        {
+          "role": "flock",
+          "implementation": "dfs_devfs_flock",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:431",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:393",
+          "description": "对设备文件执行 flock 操作。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 13,
+      "correct": 13,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 13,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1859
+    }
+  },
+  {
+    "task": {
+      "repo": "rtthread",
+      "partition": "development",
+      "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+      "table": "_dev_fops"
+    },
+    "repeat": 0,
+    "arm": "simple_lookup",
+    "context_bytes": 4657,
+    "context_sha256": "4736fadec71c50a56610a87cb9eb080fd8787d3c7e394aa0da794ca1081013b9",
+    "allocation": null,
+    "call_ref": {
+      "reused_call": 5
+    },
+    "output": {
+      "module_description": "devfs 文件操作表 _dev_fops 将设备文件系统的打开、关闭、读写、控制、目录读取、轮询、刷新、定位、截断、内存映射及文件锁等操作绑定到对应的 dfs_devfs_* 实现函数。",
+      "claims": [
+        {
+          "role": "open",
+          "implementation": "dfs_devfs_open",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:418",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:24",
+          "description": "打开设备文件，处理引用计数并初始化文件对象。"
+        },
+        {
+          "role": "close",
+          "implementation": "dfs_devfs_close",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:419",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:86",
+          "description": "关闭设备文件，释放相关资源并递减引用计数。"
+        },
+        {
+          "role": "read",
+          "implementation": "dfs_devfs_read",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:420",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:140",
+          "description": "从设备读取数据到用户缓冲区。"
+        },
+        {
+          "role": "write",
+          "implementation": "dfs_devfs_write",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:421",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:176",
+          "description": "将用户缓冲区数据写入设备。"
+        },
+        {
+          "role": "ioctl",
+          "implementation": "dfs_devfs_ioctl",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:422",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:216",
+          "description": "对设备执行控制命令。"
+        },
+        {
+          "role": "getdents",
+          "implementation": "dfs_devfs_getdents",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:423",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:246",
+          "description": "读取设备目录项，当前返回不支持。"
+        },
+        {
+          "role": "poll",
+          "implementation": "dfs_devfs_poll",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:424",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:255",
+          "description": "轮询设备事件状态。"
+        },
+        {
+          "role": "flush",
+          "implementation": "dfs_devfs_flush",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:426",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:278",
+          "description": "刷新设备文件缓冲区。"
+        },
+        {
+          "role": "lseek",
+          "implementation": "dfs_devfs_lseek",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:427",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:301",
+          "description": "调整设备文件的读写位置。"
+        },
+        {
+          "role": "truncate",
+          "implementation": "dfs_devfs_truncate",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:428",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:324",
+          "description": "截断设备文件到指定长度。"
+        },
+        {
+          "role": "mmap",
+          "implementation": "dfs_devfs_mmap",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:429",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:347",
+          "description": "将设备文件映射到内存地址空间。"
+        },
+        {
+          "role": "lock",
+          "implementation": "dfs_devfs_lock",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:430",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:370",
+          "description": "对设备文件加锁。"
+        },
+        {
+          "role": "flock",
+          "implementation": "dfs_devfs_flock",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:431",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:393",
+          "description": "对设备文件执行 flock 操作。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 13,
+      "correct": 13,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 13,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1859
+    }
+  },
+  {
+    "task": {
+      "repo": "rtthread",
+      "partition": "development",
+      "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+      "table": "_dev_fops"
+    },
+    "repeat": 1,
+    "arm": "production_reader",
+    "context_bytes": 9716,
+    "context_sha256": "d4b27e7059b4ba4ac2cd64354b06fb2e1dc7add2c6cb1a6fe21ad64bd46c3cd0",
+    "allocation": {
+      "allocation_status": "ok",
+      "requested_reads": [
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+          "start_line": 80,
+          "end_line": 280
+        },
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+          "start_line": 280,
+          "end_line": 460
+        },
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+          "start_line": 460,
+          "end_line": 555
+        },
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/include/dfs_file.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/include/dfs_vfs.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/src/dfs_vnode.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devtmpfs.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/src/dfs_file.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "components/dfs/dfs_v2/include/dfs_dentry.h",
+          "start_line": null,
+          "end_line": null
+        }
+      ],
+      "retained_reads": [
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+          "start_line": 80,
+          "end_line": 280
+        },
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+          "start_line": 460,
+          "end_line": 555
+        },
+        {
+          "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.h",
+          "start_line": null,
+          "end_line": null
+        }
+      ],
+      "tool_errors": [],
+      "call": 6
+    },
+    "call_ref": {
+      "call": 7
+    },
+    "output": {
+      "module_description": "devfs 文件系统模块，为 /dev 下设备节点提供文件操作接口，将 dfs_file 的 open/close/read/write/ioctl/poll 等调用转发到 rt_device 或设备 fops。",
+      "claims": [
+        {
+          "role": "_dev_fops.close",
+          "implementation": "dfs_devfs_close",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:86",
+          "description": "关闭设备文件，转发到设备 fops->close 或 rt_device_close。"
+        },
+        {
+          "role": "_dev_fops.read",
+          "implementation": "dfs_devfs_read",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:140",
+          "description": "读取设备数据，转发到设备 fops->read 或 rt_device_read。"
+        },
+        {
+          "role": "_dev_fops.write",
+          "implementation": "dfs_devfs_write",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:176",
+          "description": "写入设备数据，转发到设备 fops->write 或 rt_device_write。"
+        },
+        {
+          "role": "_dev_fops.ioctl",
+          "implementation": "dfs_devfs_ioctl",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:216",
+          "description": "设备控制，转发到设备 fops->ioctl 或 rt_device_control。"
+        },
+        {
+          "role": "_dev_fops.getdents",
+          "implementation": "dfs_devfs_getdents",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:246",
+          "description": "获取目录项，当前实现直接返回 -RT_ENOSYS。"
+        },
+        {
+          "role": "_dev_fops.poll",
+          "implementation": "dfs_devfs_poll",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:255",
+          "description": "轮询设备事件，转发到设备 fops->poll。"
+        },
+        {
+          "role": "_dev_fops.flush",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "unknown"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 13,
+      "correct": 0,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 13,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 7,
+      "duplicate_claims": 0,
+      "output_string_characters": 898
+    }
+  },
+  {
+    "task": {
+      "repo": "rtthread",
+      "partition": "development",
+      "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+      "table": "_dev_fops"
+    },
+    "repeat": 1,
+    "arm": "bm25_chunks",
+    "context_bytes": 9984,
+    "context_sha256": "420a1687c43bfc1a25e98439c7347d183cdd2242311e184d0f09f8d34e1a080e",
+    "allocation": null,
+    "call_ref": {
+      "call": 8
+    },
+    "output": {
+      "module_description": "devfs 文件操作表 _dev_fops 定义了设备文件系统的文件操作接口，包括打开、关闭、读写、控制、目录读取、轮询、刷新、定位、截断、内存映射和锁操作。",
+      "claims": [
+        {
+          "role": "open",
+          "implementation": "dfs_devfs_open",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:418",
+          "definition": "unknown",
+          "description": "打开设备文件"
+        },
+        {
+          "role": "close",
+          "implementation": "dfs_devfs_close",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:419",
+          "definition": "unknown",
+          "description": "关闭设备文件"
+        },
+        {
+          "role": "read",
+          "implementation": "dfs_devfs_read",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:420",
+          "definition": "unknown",
+          "description": "从设备文件读取数据"
+        },
+        {
+          "role": "write",
+          "implementation": "dfs_devfs_write",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:421",
+          "definition": "unknown",
+          "description": "向设备文件写入数据"
+        },
+        {
+          "role": "ioctl",
+          "implementation": "dfs_devfs_ioctl",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:422",
+          "definition": "unknown",
+          "description": "设备文件控制操作"
+        },
+        {
+          "role": "getdents",
+          "implementation": "dfs_devfs_getdents",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:423",
+          "definition": "unknown",
+          "description": "读取设备目录项"
+        },
+        {
+          "role": "poll",
+          "implementation": "dfs_devfs_poll",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:424",
+          "definition": "unknown",
+          "description": "设备文件轮询操作"
+        },
+        {
+          "role": "flush",
+          "implementation": "dfs_devfs_flush",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:426",
+          "definition": "unknown",
+          "description": "刷新设备文件缓冲区"
+        },
+        {
+          "role": "lseek",
+          "implementation": "dfs_devfs_lseek",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:427",
+          "definition": "unknown",
+          "description": "设置设备文件读写位置"
+        },
+        {
+          "role": "truncate",
+          "implementation": "dfs_devfs_truncate",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:428",
+          "definition": "unknown",
+          "description": "截断设备文件"
+        },
+        {
+          "role": "mmap",
+          "implementation": "dfs_devfs_mmap",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:429",
+          "definition": "unknown",
+          "description": "内存映射设备文件"
+        },
+        {
+          "role": "lock",
+          "implementation": "dfs_devfs_lock",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:430",
+          "definition": "unknown",
+          "description": "设备文件锁操作"
+        },
+        {
+          "role": "flock",
+          "implementation": "dfs_devfs_flock",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:431",
+          "definition": "unknown",
+          "description": "设备文件文件锁操作"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 13,
+      "correct": 13,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1197
+    }
+  },
+  {
+    "task": {
+      "repo": "rtthread",
+      "partition": "development",
+      "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+      "table": "_dev_fops"
+    },
+    "repeat": 1,
+    "arm": "codewiki_components",
+    "context_bytes": 9946,
+    "context_sha256": "be7bb74e38c39b55418dfc5ccf9713649c88c81b2a9cf2c3a3197e0edd30fb7c",
+    "allocation": null,
+    "call_ref": {
+      "call": 9
+    },
+    "output": {
+      "module_description": "devfs 文件系统操作表 _dev_fops 的接口实现模块，负责将设备文件操作映射到具体函数，如轮询和刷新。",
+      "claims": [
+        {
+          "role": "poll",
+          "implementation": "dfs_devfs_poll",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:255",
+          "description": "设备文件轮询接口，调用底层设备 poll 操作。"
+        },
+        {
+          "role": "flush",
+          "implementation": "dfs_devfs_flush",
+          "binding": "unknown",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:278",
+          "description": "设备文件刷新接口，调用底层设备 flush 操作。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 13,
+      "correct": 2,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 11,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 259
+    }
+  },
+  {
+    "task": {
+      "repo": "rtthread",
+      "partition": "development",
+      "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+      "table": "_dev_fops"
+    },
+    "repeat": 1,
+    "arm": "interface_witness",
+    "context_bytes": 4657,
+    "context_sha256": "4736fadec71c50a56610a87cb9eb080fd8787d3c7e394aa0da794ca1081013b9",
+    "allocation": null,
+    "call_ref": {
+      "call": 10
+    },
+    "output": {
+      "module_description": "devfs 文件操作表 _dev_fops 将设备文件系统的打开、关闭、读写、控制、目录读取、轮询、刷新、定位、截断、内存映射及文件锁等操作绑定到对应的 dfs_devfs_* 实现函数。",
+      "claims": [
+        {
+          "role": "open",
+          "implementation": "dfs_devfs_open",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:418",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:24",
+          "description": "打开设备文件，处理引用计数与设备初始化。"
+        },
+        {
+          "role": "close",
+          "implementation": "dfs_devfs_close",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:419",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:86",
+          "description": "关闭设备文件，释放相关资源。"
+        },
+        {
+          "role": "read",
+          "implementation": "dfs_devfs_read",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:420",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:140",
+          "description": "从设备读取数据到用户缓冲区。"
+        },
+        {
+          "role": "write",
+          "implementation": "dfs_devfs_write",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:421",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:176",
+          "description": "将用户缓冲区数据写入设备。"
+        },
+        {
+          "role": "ioctl",
+          "implementation": "dfs_devfs_ioctl",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:422",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:216",
+          "description": "对设备执行控制命令。"
+        },
+        {
+          "role": "getdents",
+          "implementation": "dfs_devfs_getdents",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:423",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:246",
+          "description": "读取目录项，当前实现返回不支持。"
+        },
+        {
+          "role": "poll",
+          "implementation": "dfs_devfs_poll",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:424",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:255",
+          "description": "轮询设备事件状态。"
+        },
+        {
+          "role": "flush",
+          "implementation": "dfs_devfs_flush",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:426",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:278",
+          "description": "刷新设备文件缓冲区。"
+        },
+        {
+          "role": "lseek",
+          "implementation": "dfs_devfs_lseek",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:427",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:301",
+          "description": "调整设备文件读写位置。"
+        },
+        {
+          "role": "truncate",
+          "implementation": "dfs_devfs_truncate",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:428",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:324",
+          "description": "截断设备文件到指定长度。"
+        },
+        {
+          "role": "mmap",
+          "implementation": "dfs_devfs_mmap",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:429",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:347",
+          "description": "将设备文件映射到内存。"
+        },
+        {
+          "role": "lock",
+          "implementation": "dfs_devfs_lock",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:430",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:370",
+          "description": "对设备文件加锁。"
+        },
+        {
+          "role": "flock",
+          "implementation": "dfs_devfs_flock",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:431",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:393",
+          "description": "对设备文件执行 flock 操作。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 13,
+      "correct": 13,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 13,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1845
+    }
+  },
+  {
+    "task": {
+      "repo": "rtthread",
+      "partition": "development",
+      "path": "components/dfs/dfs_v2/filesystems/devfs/devfs.c",
+      "table": "_dev_fops"
+    },
+    "repeat": 1,
+    "arm": "simple_lookup",
+    "context_bytes": 4657,
+    "context_sha256": "4736fadec71c50a56610a87cb9eb080fd8787d3c7e394aa0da794ca1081013b9",
+    "allocation": null,
+    "call_ref": {
+      "reused_call": 10
+    },
+    "output": {
+      "module_description": "devfs 文件操作表 _dev_fops 将设备文件系统的打开、关闭、读写、控制、目录读取、轮询、刷新、定位、截断、内存映射及文件锁等操作绑定到对应的 dfs_devfs_* 实现函数。",
+      "claims": [
+        {
+          "role": "open",
+          "implementation": "dfs_devfs_open",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:418",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:24",
+          "description": "打开设备文件，处理引用计数与设备初始化。"
+        },
+        {
+          "role": "close",
+          "implementation": "dfs_devfs_close",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:419",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:86",
+          "description": "关闭设备文件，释放相关资源。"
+        },
+        {
+          "role": "read",
+          "implementation": "dfs_devfs_read",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:420",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:140",
+          "description": "从设备读取数据到用户缓冲区。"
+        },
+        {
+          "role": "write",
+          "implementation": "dfs_devfs_write",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:421",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:176",
+          "description": "将用户缓冲区数据写入设备。"
+        },
+        {
+          "role": "ioctl",
+          "implementation": "dfs_devfs_ioctl",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:422",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:216",
+          "description": "对设备执行控制命令。"
+        },
+        {
+          "role": "getdents",
+          "implementation": "dfs_devfs_getdents",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:423",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:246",
+          "description": "读取目录项，当前实现返回不支持。"
+        },
+        {
+          "role": "poll",
+          "implementation": "dfs_devfs_poll",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:424",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:255",
+          "description": "轮询设备事件状态。"
+        },
+        {
+          "role": "flush",
+          "implementation": "dfs_devfs_flush",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:426",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:278",
+          "description": "刷新设备文件缓冲区。"
+        },
+        {
+          "role": "lseek",
+          "implementation": "dfs_devfs_lseek",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:427",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:301",
+          "description": "调整设备文件读写位置。"
+        },
+        {
+          "role": "truncate",
+          "implementation": "dfs_devfs_truncate",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:428",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:324",
+          "description": "截断设备文件到指定长度。"
+        },
+        {
+          "role": "mmap",
+          "implementation": "dfs_devfs_mmap",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:429",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:347",
+          "description": "将设备文件映射到内存。"
+        },
+        {
+          "role": "lock",
+          "implementation": "dfs_devfs_lock",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:430",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:370",
+          "description": "对设备文件加锁。"
+        },
+        {
+          "role": "flock",
+          "implementation": "dfs_devfs_flock",
+          "binding": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:431",
+          "definition": "components/dfs/dfs_v2/filesystems/devfs/devfs.c:393",
+          "description": "对设备文件执行 flock 操作。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 13,
+      "correct": 13,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 13,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1845
+    }
+  },
+  {
+    "task": {
+      "repo": "riot",
+      "partition": "confirmation",
+      "path": "sys/fs/constfs/constfs.c",
+      "table": "constfs_file_ops"
+    },
+    "repeat": 0,
+    "arm": "production_reader",
+    "context_bytes": 9457,
+    "context_sha256": "edb4c69c5533e8adcd42c630b4c97293fa51c67963ce931a9db642b276f4239b",
+    "allocation": {
+      "allocation_status": "ok",
+      "requested_reads": [
+        {
+          "path": "sys/fs/constfs/constfs.c",
+          "start_line": 81,
+          "end_line": 215
+        },
+        {
+          "path": "sys/include/vfs.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/devfs.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/auto_init_devfs.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/random.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/hwrng.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/random-vfs.h",
+          "start_line": null,
+          "end_line": null
+        }
+      ],
+      "retained_reads": [
+        {
+          "path": "sys/fs/constfs/constfs.c",
+          "start_line": 81,
+          "end_line": 215
+        },
+        {
+          "path": "sys/fs/devfs/auto_init_devfs.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/random.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/hwrng.c",
+          "start_line": null,
+          "end_line": null
+        }
+      ],
+      "tool_errors": [],
+      "call": 11
+    },
+    "call_ref": {
+      "call": 12
+    },
+    "output": {
+      "module_description": "constfs 文件系统模块，提供只读文件操作接口，包括 stat、statvfs、fstat、lseek、open、read 和 opendir 等函数实现。",
+      "claims": [
+        {
+          "role": "stat",
+          "implementation": "constfs_stat",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:83",
+          "description": "获取文件状态信息，通过路径查找文件并填充 stat 结构。"
+        },
+        {
+          "role": "statvfs",
+          "implementation": "constfs_statvfs",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:105",
+          "description": "获取文件系统状态信息，填充 statvfs 结构。"
+        },
+        {
+          "role": "fstat",
+          "implementation": "constfs_fstat",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:132",
+          "description": "获取已打开文件的状态信息，填充 stat 结构。"
+        },
+        {
+          "role": "lseek",
+          "implementation": "constfs_lseek",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:142",
+          "description": "调整文件读写位置，支持 SEEK_SET、SEEK_CUR 和 SEEK_END。"
+        },
+        {
+          "role": "open",
+          "implementation": "constfs_open",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:166",
+          "description": "打开文件，仅支持只读模式，通过路径查找文件。"
+        },
+        {
+          "role": "read",
+          "implementation": "constfs_read",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:188",
+          "description": "从文件读取数据到缓冲区，更新文件位置。"
+        },
+        {
+          "role": "opendir",
+          "implementation": "constfs_opendir",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:206",
+          "description": "打开目录，仅支持根目录，初始化目录私有数据。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 4,
+      "correct": 4,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 3,
+      "duplicate_claims": 0,
+      "output_string_characters": 634
+    }
+  },
+  {
+    "task": {
+      "repo": "riot",
+      "partition": "confirmation",
+      "path": "sys/fs/constfs/constfs.c",
+      "table": "constfs_file_ops"
+    },
+    "repeat": 0,
+    "arm": "bm25_chunks",
+    "context_bytes": 9978,
+    "context_sha256": "7d4dc27ea0acd23548dddf9f94a9ec3d56c7454488168cb247f0e4a923f3bef6",
+    "allocation": null,
+    "call_ref": {
+      "call": 13
+    },
+    "output": {
+      "module_description": "constfs 文件操作表，定义文件级操作如 fstat、lseek、open、read，绑定到对应实现函数。",
+      "claims": [
+        {
+          "role": "fstat",
+          "implementation": "constfs_fstat",
+          "binding": "sys/fs/constfs/constfs.c:56",
+          "definition": "sys/fs/constfs/constfs.c:132",
+          "description": "获取文件状态信息，填充 stat 结构。"
+        },
+        {
+          "role": "lseek",
+          "implementation": "constfs_lseek",
+          "binding": "sys/fs/constfs/constfs.c:57",
+          "definition": "sys/fs/constfs/constfs.c:142",
+          "description": "调整文件读写位置，支持 SEEK_SET、SEEK_CUR、SEEK_END。"
+        },
+        {
+          "role": "open",
+          "implementation": "constfs_open",
+          "binding": "sys/fs/constfs/constfs.c:58",
+          "definition": "sys/fs/constfs/constfs.c:166",
+          "description": "打开文件，仅支持只读，查找文件并设置私有数据。"
+        },
+        {
+          "role": "read",
+          "implementation": "constfs_read",
+          "binding": "sys/fs/constfs/constfs.c:59",
+          "definition": "sys/fs/constfs/constfs.c:188",
+          "description": "从文件读取数据到缓冲区，更新文件位置。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 4,
+      "correct": 4,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 4,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 444
+    }
+  },
+  {
+    "task": {
+      "repo": "riot",
+      "partition": "confirmation",
+      "path": "sys/fs/constfs/constfs.c",
+      "table": "constfs_file_ops"
+    },
+    "repeat": 0,
+    "arm": "codewiki_components",
+    "context_bytes": 9988,
+    "context_sha256": "acc94de3ac821aec9de042ac6e3a3d34eee8b5b5243321f5d6f16436432839d0",
+    "allocation": null,
+    "call_ref": {
+      "call": 14
+    },
+    "output": null,
+    "evaluation": {
+      "status": "api_failure",
+      "reference_bindings": 4,
+      "correct": 0,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 4,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0
+    }
+  },
+  {
+    "task": {
+      "repo": "riot",
+      "partition": "confirmation",
+      "path": "sys/fs/constfs/constfs.c",
+      "table": "constfs_file_ops"
+    },
+    "repeat": 0,
+    "arm": "interface_witness",
+    "context_bytes": 1737,
+    "context_sha256": "b16a5e9c3cbabed4982e66063fb037158a8a37c8c95736a62fb21cb08f36dcb6",
+    "allocation": null,
+    "call_ref": {
+      "call": 15
+    },
+    "output": {
+      "module_description": "constfs 文件操作表，为只读常量文件系统提供文件级操作接口，包括状态查询、定位、打开与读取。",
+      "claims": [
+        {
+          "role": "fstat",
+          "implementation": "constfs_fstat",
+          "binding": "sys/fs/constfs/constfs.c:56",
+          "definition": "sys/fs/constfs/constfs.c:132",
+          "description": "查询文件状态并写入 stat 缓冲区。"
+        },
+        {
+          "role": "lseek",
+          "implementation": "constfs_lseek",
+          "binding": "sys/fs/constfs/constfs.c:57",
+          "definition": "sys/fs/constfs/constfs.c:142",
+          "description": "调整文件读写偏移位置。"
+        },
+        {
+          "role": "open",
+          "implementation": "constfs_open",
+          "binding": "sys/fs/constfs/constfs.c:58",
+          "definition": "sys/fs/constfs/constfs.c:166",
+          "description": "打开常量文件，仅支持只读访问。"
+        },
+        {
+          "role": "read",
+          "implementation": "constfs_read",
+          "binding": "sys/fs/constfs/constfs.c:59",
+          "definition": "sys/fs/constfs/constfs.c:188",
+          "description": "从文件当前位置读取数据到目标缓冲区。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 4,
+      "correct": 4,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 4,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 400
+    }
+  },
+  {
+    "task": {
+      "repo": "riot",
+      "partition": "confirmation",
+      "path": "sys/fs/constfs/constfs.c",
+      "table": "constfs_file_ops"
+    },
+    "repeat": 0,
+    "arm": "simple_lookup",
+    "context_bytes": 1737,
+    "context_sha256": "b16a5e9c3cbabed4982e66063fb037158a8a37c8c95736a62fb21cb08f36dcb6",
+    "allocation": null,
+    "call_ref": {
+      "reused_call": 15
+    },
+    "output": {
+      "module_description": "constfs 文件操作表，为只读常量文件系统提供文件级操作接口，包括状态查询、定位、打开与读取。",
+      "claims": [
+        {
+          "role": "fstat",
+          "implementation": "constfs_fstat",
+          "binding": "sys/fs/constfs/constfs.c:56",
+          "definition": "sys/fs/constfs/constfs.c:132",
+          "description": "查询文件状态并写入 stat 缓冲区。"
+        },
+        {
+          "role": "lseek",
+          "implementation": "constfs_lseek",
+          "binding": "sys/fs/constfs/constfs.c:57",
+          "definition": "sys/fs/constfs/constfs.c:142",
+          "description": "调整文件读写偏移位置。"
+        },
+        {
+          "role": "open",
+          "implementation": "constfs_open",
+          "binding": "sys/fs/constfs/constfs.c:58",
+          "definition": "sys/fs/constfs/constfs.c:166",
+          "description": "打开常量文件，仅支持只读访问。"
+        },
+        {
+          "role": "read",
+          "implementation": "constfs_read",
+          "binding": "sys/fs/constfs/constfs.c:59",
+          "definition": "sys/fs/constfs/constfs.c:188",
+          "description": "从文件当前位置读取数据到目标缓冲区。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 4,
+      "correct": 4,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 4,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 400
+    }
+  },
+  {
+    "task": {
+      "repo": "riot",
+      "partition": "confirmation",
+      "path": "sys/fs/constfs/constfs.c",
+      "table": "constfs_file_ops"
+    },
+    "repeat": 1,
+    "arm": "production_reader",
+    "context_bytes": 9457,
+    "context_sha256": "edb4c69c5533e8adcd42c630b4c97293fa51c67963ce931a9db642b276f4239b",
+    "allocation": {
+      "allocation_status": "ok",
+      "requested_reads": [
+        {
+          "path": "sys/fs/constfs/constfs.c",
+          "start_line": 81,
+          "end_line": 215
+        },
+        {
+          "path": "sys/include/vfs.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/devfs.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/auto_init_devfs.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/random.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/hwrng.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/random-vfs.h",
+          "start_line": null,
+          "end_line": null
+        }
+      ],
+      "retained_reads": [
+        {
+          "path": "sys/fs/constfs/constfs.c",
+          "start_line": 81,
+          "end_line": 215
+        },
+        {
+          "path": "sys/fs/devfs/auto_init_devfs.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/random.c",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "sys/fs/devfs/hwrng.c",
+          "start_line": null,
+          "end_line": null
+        }
+      ],
+      "tool_errors": [],
+      "call": 16
+    },
+    "call_ref": {
+      "call": 17
+    },
+    "output": {
+      "module_description": "constfs 文件系统模块实现只读文件操作，提供 stat、statvfs、fstat、lseek、open、read 和 opendir 等接口，用于访问静态文件数据。",
+      "claims": [
+        {
+          "role": "stat",
+          "implementation": "constfs_stat",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:83",
+          "description": "获取指定路径文件的状态信息。"
+        },
+        {
+          "role": "statvfs",
+          "implementation": "constfs_statvfs",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:105",
+          "description": "获取文件系统整体状态信息。"
+        },
+        {
+          "role": "fstat",
+          "implementation": "constfs_fstat",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:132",
+          "description": "获取已打开文件的状态信息。"
+        },
+        {
+          "role": "lseek",
+          "implementation": "constfs_lseek",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:142",
+          "description": "调整文件读写位置。"
+        },
+        {
+          "role": "open",
+          "implementation": "constfs_open",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:166",
+          "description": "以只读方式打开指定文件。"
+        },
+        {
+          "role": "read",
+          "implementation": "constfs_read",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:188",
+          "description": "从文件当前位置读取数据。"
+        },
+        {
+          "role": "opendir",
+          "implementation": "constfs_opendir",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:206",
+          "description": "打开根目录用于遍历。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 4,
+      "correct": 4,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 3,
+      "duplicate_claims": 0,
+      "output_string_characters": 541
+    }
+  },
+  {
+    "task": {
+      "repo": "riot",
+      "partition": "confirmation",
+      "path": "sys/fs/constfs/constfs.c",
+      "table": "constfs_file_ops"
+    },
+    "repeat": 1,
+    "arm": "bm25_chunks",
+    "context_bytes": 9978,
+    "context_sha256": "7d4dc27ea0acd23548dddf9f94a9ec3d56c7454488168cb247f0e4a923f3bef6",
+    "allocation": null,
+    "call_ref": {
+      "call": 18
+    },
+    "output": {
+      "module_description": "constfs 文件操作表，定义只读文件系统的文件级操作，包括 fstat、lseek、open、read 四个显式函数绑定。",
+      "claims": [
+        {
+          "role": "fstat",
+          "implementation": "constfs_fstat",
+          "binding": "sys/fs/constfs/constfs.c:56",
+          "definition": "sys/fs/constfs/constfs.c:132",
+          "description": "获取文件状态信息，填充 struct stat。"
+        },
+        {
+          "role": "lseek",
+          "implementation": "constfs_lseek",
+          "binding": "sys/fs/constfs/constfs.c:57",
+          "definition": "sys/fs/constfs/constfs.c:142",
+          "description": "调整文件读写偏移量，支持 SEEK_SET、SEEK_CUR、SEEK_END。"
+        },
+        {
+          "role": "open",
+          "implementation": "constfs_open",
+          "binding": "sys/fs/constfs/constfs.c:58",
+          "definition": "sys/fs/constfs/constfs.c:166",
+          "description": "打开文件，仅支持只读，查找文件并设置私有数据。"
+        },
+        {
+          "role": "read",
+          "implementation": "constfs_read",
+          "binding": "sys/fs/constfs/constfs.c:59",
+          "definition": "sys/fs/constfs/constfs.c:188",
+          "description": "从文件读取数据到缓冲区，更新文件偏移量。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 4,
+      "correct": 4,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 4,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 458
+    }
+  },
+  {
+    "task": {
+      "repo": "riot",
+      "partition": "confirmation",
+      "path": "sys/fs/constfs/constfs.c",
+      "table": "constfs_file_ops"
+    },
+    "repeat": 1,
+    "arm": "codewiki_components",
+    "context_bytes": 9988,
+    "context_sha256": "acc94de3ac821aec9de042ac6e3a3d34eee8b5b5243321f5d6f16436432839d0",
+    "allocation": null,
+    "call_ref": {
+      "call": 19
+    },
+    "output": {
+      "module_description": "constfs 是只读常量文件系统，其 vfs_file_ops 操作表为打开文件提供 open、lseek、fstat 等接口实现。",
+      "claims": [
+        {
+          "role": "open",
+          "implementation": "constfs_open",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:166",
+          "description": "在常量文件表中线性查找并打开只读文件。"
+        },
+        {
+          "role": "lseek",
+          "implementation": "constfs_lseek",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:142",
+          "description": "按 whence 调整并返回文件读写位置。"
+        },
+        {
+          "role": "fstat",
+          "implementation": "constfs_fstat",
+          "binding": "unknown",
+          "definition": "sys/fs/constfs/constfs.c:132",
+          "description": "填充打开文件的 stat 状态信息。"
+        },
+        {
+          "role": "close",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "unknown"
+        },
+        {
+          "role": "fcntl",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "unknown"
+        },
+        {
+          "role": "read",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "unknown"
+        },
+        {
+          "role": "write",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "unknown"
+        },
+        {
+          "role": "fsync",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "unknown"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 4,
+      "correct": 3,
+      "wrong": 0,
+      "unknown": 1,
+      "omitted": 0,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 4,
+      "duplicate_claims": 0,
+      "output_string_characters": 446
+    }
+  },
+  {
+    "task": {
+      "repo": "riot",
+      "partition": "confirmation",
+      "path": "sys/fs/constfs/constfs.c",
+      "table": "constfs_file_ops"
+    },
+    "repeat": 1,
+    "arm": "interface_witness",
+    "context_bytes": 1737,
+    "context_sha256": "b16a5e9c3cbabed4982e66063fb037158a8a37c8c95736a62fb21cb08f36dcb6",
+    "allocation": null,
+    "call_ref": {
+      "call": 20
+    },
+    "output": {
+      "module_description": "constfs 文件操作表，为只读常量文件系统提供文件级操作，包括状态查询、定位、打开和读取。",
+      "claims": [
+        {
+          "role": "fstat",
+          "implementation": "constfs_fstat",
+          "binding": "sys/fs/constfs/constfs.c:56",
+          "definition": "sys/fs/constfs/constfs.c:132",
+          "description": "获取文件状态信息并写入 stat 缓冲区。"
+        },
+        {
+          "role": "lseek",
+          "implementation": "constfs_lseek",
+          "binding": "sys/fs/constfs/constfs.c:57",
+          "definition": "sys/fs/constfs/constfs.c:142",
+          "description": "调整文件读写偏移量。"
+        },
+        {
+          "role": "open",
+          "implementation": "constfs_open",
+          "binding": "sys/fs/constfs/constfs.c:58",
+          "definition": "sys/fs/constfs/constfs.c:166",
+          "description": "打开文件，仅支持只读访问。"
+        },
+        {
+          "role": "read",
+          "implementation": "constfs_read",
+          "binding": "sys/fs/constfs/constfs.c:59",
+          "definition": "sys/fs/constfs/constfs.c:188",
+          "description": "从文件当前位置读取数据到目标缓冲区。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 4,
+      "correct": 4,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 4,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 397
+    }
+  },
+  {
+    "task": {
+      "repo": "riot",
+      "partition": "confirmation",
+      "path": "sys/fs/constfs/constfs.c",
+      "table": "constfs_file_ops"
+    },
+    "repeat": 1,
+    "arm": "simple_lookup",
+    "context_bytes": 1737,
+    "context_sha256": "b16a5e9c3cbabed4982e66063fb037158a8a37c8c95736a62fb21cb08f36dcb6",
+    "allocation": null,
+    "call_ref": {
+      "reused_call": 20
+    },
+    "output": {
+      "module_description": "constfs 文件操作表，为只读常量文件系统提供文件级操作，包括状态查询、定位、打开和读取。",
+      "claims": [
+        {
+          "role": "fstat",
+          "implementation": "constfs_fstat",
+          "binding": "sys/fs/constfs/constfs.c:56",
+          "definition": "sys/fs/constfs/constfs.c:132",
+          "description": "获取文件状态信息并写入 stat 缓冲区。"
+        },
+        {
+          "role": "lseek",
+          "implementation": "constfs_lseek",
+          "binding": "sys/fs/constfs/constfs.c:57",
+          "definition": "sys/fs/constfs/constfs.c:142",
+          "description": "调整文件读写偏移量。"
+        },
+        {
+          "role": "open",
+          "implementation": "constfs_open",
+          "binding": "sys/fs/constfs/constfs.c:58",
+          "definition": "sys/fs/constfs/constfs.c:166",
+          "description": "打开文件，仅支持只读访问。"
+        },
+        {
+          "role": "read",
+          "implementation": "constfs_read",
+          "binding": "sys/fs/constfs/constfs.c:59",
+          "definition": "sys/fs/constfs/constfs.c:188",
+          "description": "从文件当前位置读取数据到目标缓冲区。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 4,
+      "correct": 4,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 4,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 397
+    }
+  },
+  {
+    "task": {
+      "repo": "mynewt",
+      "partition": "confirmation",
+      "path": "fs/nffs/src/nffs.c",
+      "table": "nffs_ops"
+    },
+    "repeat": 0,
+    "arm": "production_reader",
+    "context_bytes": 8750,
+    "context_sha256": "acff2409e49e10136a1f71583ae13922bf70a38046cf40024c470c015e4c6a54",
+    "allocation": {
+      "allocation_status": "ok",
+      "requested_reads": [
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 80,
+          "end_line": 135
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 188,
+          "end_line": 244
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 253,
+          "end_line": 326
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 340,
+          "end_line": 420
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 438,
+          "end_line": 492
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 510,
+          "end_line": 583
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 601,
+          "end_line": 688
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 696,
+          "end_line": 782
+        },
+        {
+          "path": "fs/fs/include/fs/fs_if.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "fs/nffs/include/nffs/nffs.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "fs/nffs/src/nffs_priv.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "fs/fs/include/fs/fs.h",
+          "start_line": null,
+          "end_line": null
+        }
+      ],
+      "retained_reads": [
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 80,
+          "end_line": 135
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 188,
+          "end_line": 244
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 253,
+          "end_line": 326
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 340,
+          "end_line": 420
+        }
+      ],
+      "tool_errors": [],
+      "call": 21
+    },
+    "call_ref": {
+      "call": 22
+    },
+    "output": {
+      "module_description": "nffs_ops 是 NFFS 文件系统的操作表，将文件、目录操作接口绑定到 nffs 模块的静态实现函数，提供打开、关闭、读写、定位、删除、重命名、目录遍历等文件系统操作。",
+      "claims": [
+        {
+          "role": "f_open",
+          "implementation": "nffs_open",
+          "binding": "fs/nffs/src/nffs.c:81",
+          "definition": "fs/nffs/src/nffs.c:189",
+          "description": "打开指定路径的文件，返回文件句柄。"
+        },
+        {
+          "role": "f_close",
+          "implementation": "nffs_close",
+          "binding": "fs/nffs/src/nffs.c:82",
+          "definition": "fs/nffs/src/nffs.c:230",
+          "description": "关闭文件句柄，若文件已删除且无其他引用则删除。"
+        },
+        {
+          "role": "f_read",
+          "implementation": "nffs_read",
+          "binding": "fs/nffs/src/nffs.c:83",
+          "definition": "fs/nffs/src/nffs.c:341",
+          "description": "从文件当前偏移读取指定长度数据。"
+        },
+        {
+          "role": "f_write",
+          "implementation": "nffs_write",
+          "binding": "fs/nffs/src/nffs.c:84",
+          "definition": "fs/nffs/src/nffs.c:364",
+          "description": "向文件当前偏移写入指定长度数据。"
+        },
+        {
+          "role": "f_flush",
+          "implementation": "nffs_flush",
+          "binding": "fs/nffs/src/nffs.c:85",
+          "definition": "fs/nffs/src/nffs.c:254",
+          "description": "刷新文件缓冲，当前实现直接返回成功。"
+        },
+        {
+          "role": "f_seek",
+          "implementation": "nffs_seek",
+          "binding": "fs/nffs/src/nffs.c:87",
+          "definition": "fs/nffs/src/nffs.c:274",
+          "description": "将文件读写指针定位到指定偏移。"
+        },
+        {
+          "role": "f_getpos",
+          "implementation": "nffs_getpos",
+          "binding": "fs/nffs/src/nffs.c:88",
+          "definition": "fs/nffs/src/nffs.c:294",
+          "description": "获取文件当前读写偏移。"
+        },
+        {
+          "role": "f_filelen",
+          "implementation": "nffs_file_len",
+          "binding": "fs/nffs/src/nffs.c:89",
+          "definition": "fs/nffs/src/nffs.c:316",
+          "description": "获取文件当前长度。"
+        },
+        {
+          "role": "f_unlink",
+          "implementation": "nffs_unlink",
+          "binding": "fs/nffs/src/nffs.c:91",
+          "definition": "fs/nffs/src/nffs.c:399",
+          "description": "删除指定路径的文件或目录。"
+        },
+        {
+          "role": "f_rename",
+          "implementation": "nffs_rename",
+          "binding": "fs/nffs/src/nffs.c:92",
+          "definition": "unknown",
+          "description": "重命名文件或目录。"
+        },
+        {
+          "role": "f_mkdir",
+          "implementation": "nffs_mkdir",
+          "binding": "fs/nffs/src/nffs.c:93",
+          "definition": "unknown",
+          "description": "创建目录。"
+        },
+        {
+          "role": "f_opendir",
+          "implementation": "nffs_opendir",
+          "binding": "fs/nffs/src/nffs.c:95",
+          "definition": "unknown",
+          "description": "打开目录，返回目录句柄。"
+        },
+        {
+          "role": "f_readdir",
+          "implementation": "nffs_readdir",
+          "binding": "fs/nffs/src/nffs.c:96",
+          "definition": "unknown",
+          "description": "读取目录中的下一个条目。"
+        },
+        {
+          "role": "f_closedir",
+          "implementation": "nffs_closedir",
+          "binding": "fs/nffs/src/nffs.c:97",
+          "definition": "unknown",
+          "description": "关闭目录句柄。"
+        },
+        {
+          "role": "f_dirent_name",
+          "implementation": "nffs_dirent_name",
+          "binding": "fs/nffs/src/nffs.c:99",
+          "definition": "unknown",
+          "description": "获取目录条目的名称。"
+        },
+        {
+          "role": "f_dirent_is_dir",
+          "implementation": "nffs_dirent_is_dir",
+          "binding": "fs/nffs/src/nffs.c:100",
+          "definition": "unknown",
+          "description": "判断目录条目是否为目录。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 16,
+      "correct": 16,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 9,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1195
+    }
+  },
+  {
+    "task": {
+      "repo": "mynewt",
+      "partition": "confirmation",
+      "path": "fs/nffs/src/nffs.c",
+      "table": "nffs_ops"
+    },
+    "repeat": 0,
+    "arm": "bm25_chunks",
+    "context_bytes": 9884,
+    "context_sha256": "6a9e59ff8547db276f7f5b6b30acbaabc7e1ccb5afd28f28bebbf1eaaf8bcf0b",
+    "allocation": null,
+    "call_ref": {
+      "call": 23
+    },
+    "output": {
+      "module_description": "nffs_ops 是 NFFS 文件系统的操作表，将通用文件系统接口绑定到 NFFS 的具体实现函数，提供文件打开、关闭、读写、定位、目录操作等功能。",
+      "claims": [
+        {
+          "role": "f_open",
+          "implementation": "nffs_open",
+          "binding": "fs/nffs/src/nffs.c:81",
+          "definition": "unknown",
+          "description": "打开文件，根据访问标志创建或打开文件。"
+        },
+        {
+          "role": "f_close",
+          "implementation": "nffs_close",
+          "binding": "fs/nffs/src/nffs.c:82",
+          "definition": "fs/nffs/src/nffs.c:230",
+          "description": "关闭文件，释放文件资源。"
+        },
+        {
+          "role": "f_read",
+          "implementation": "nffs_read",
+          "binding": "fs/nffs/src/nffs.c:83",
+          "definition": "unknown",
+          "description": "从文件读取数据。"
+        },
+        {
+          "role": "f_write",
+          "implementation": "nffs_write",
+          "binding": "fs/nffs/src/nffs.c:84",
+          "definition": "unknown",
+          "description": "向文件写入数据。"
+        },
+        {
+          "role": "f_flush",
+          "implementation": "nffs_flush",
+          "binding": "fs/nffs/src/nffs.c:85",
+          "definition": "fs/nffs/src/nffs.c:254",
+          "description": "刷新文件缓冲区，当前实现直接返回成功。"
+        },
+        {
+          "role": "f_seek",
+          "implementation": "nffs_seek",
+          "binding": "fs/nffs/src/nffs.c:87",
+          "definition": "fs/nffs/src/nffs.c:274",
+          "description": "设置文件读写位置。"
+        },
+        {
+          "role": "f_getpos",
+          "implementation": "nffs_getpos",
+          "binding": "fs/nffs/src/nffs.c:88",
+          "definition": "unknown",
+          "description": "获取当前文件读写位置。"
+        },
+        {
+          "role": "f_filelen",
+          "implementation": "nffs_file_len",
+          "binding": "fs/nffs/src/nffs.c:89",
+          "definition": "unknown",
+          "description": "获取文件长度。"
+        },
+        {
+          "role": "f_unlink",
+          "implementation": "nffs_unlink",
+          "binding": "fs/nffs/src/nffs.c:91",
+          "definition": "unknown",
+          "description": "删除文件。"
+        },
+        {
+          "role": "f_rename",
+          "implementation": "nffs_rename",
+          "binding": "fs/nffs/src/nffs.c:92",
+          "definition": "unknown",
+          "description": "重命名文件。"
+        },
+        {
+          "role": "f_mkdir",
+          "implementation": "nffs_mkdir",
+          "binding": "fs/nffs/src/nffs.c:93",
+          "definition": "unknown",
+          "description": "创建目录。"
+        },
+        {
+          "role": "f_opendir",
+          "implementation": "nffs_opendir",
+          "binding": "fs/nffs/src/nffs.c:95",
+          "definition": "unknown",
+          "description": "打开目录。"
+        },
+        {
+          "role": "f_readdir",
+          "implementation": "nffs_readdir",
+          "binding": "fs/nffs/src/nffs.c:96",
+          "definition": "unknown",
+          "description": "读取目录项。"
+        },
+        {
+          "role": "f_closedir",
+          "implementation": "nffs_closedir",
+          "binding": "fs/nffs/src/nffs.c:97",
+          "definition": "unknown",
+          "description": "关闭目录。"
+        },
+        {
+          "role": "f_dirent_name",
+          "implementation": "nffs_dirent_name",
+          "binding": "fs/nffs/src/nffs.c:99",
+          "definition": "unknown",
+          "description": "获取目录项名称。"
+        },
+        {
+          "role": "f_dirent_is_dir",
+          "implementation": "nffs_dirent_is_dir",
+          "binding": "fs/nffs/src/nffs.c:100",
+          "definition": "unknown",
+          "description": "判断目录项是否为目录。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 16,
+      "correct": 16,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 3,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1032
+    }
+  },
+  {
+    "task": {
+      "repo": "mynewt",
+      "partition": "confirmation",
+      "path": "fs/nffs/src/nffs.c",
+      "table": "nffs_ops"
+    },
+    "repeat": 0,
+    "arm": "codewiki_components",
+    "context_bytes": 9986,
+    "context_sha256": "6380b415276e757705301a4ff6104254673124bec93a69d421d6a830645014a3",
+    "allocation": null,
+    "call_ref": {
+      "call": 24
+    },
+    "output": {
+      "module_description": "nffs_ops 是 NFFS 文件系统的操作表，将通用文件系统接口绑定到 NFFS 的具体实现函数，如打开、关闭、读写等。",
+      "claims": [
+        {
+          "role": "f_open",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "打开文件，创建或获取文件句柄。"
+        },
+        {
+          "role": "f_close",
+          "implementation": "nffs_close",
+          "binding": "unknown",
+          "definition": "fs/nffs/src/nffs.c:230",
+          "description": "关闭文件，释放相关资源。"
+        },
+        {
+          "role": "f_read",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "从文件读取数据。"
+        },
+        {
+          "role": "f_write",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "向文件写入数据。"
+        },
+        {
+          "role": "f_flush",
+          "implementation": "nffs_flush",
+          "binding": "unknown",
+          "definition": "fs/nffs/src/nffs.c:254",
+          "description": "刷新文件缓冲区，当前实现直接返回成功。"
+        },
+        {
+          "role": "f_seek",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "设置文件读写位置。"
+        },
+        {
+          "role": "f_getpos",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "获取当前文件读写位置。"
+        },
+        {
+          "role": "f_filelen",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "获取文件长度。"
+        },
+        {
+          "role": "f_unlink",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "删除文件。"
+        },
+        {
+          "role": "f_rename",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "重命名文件。"
+        },
+        {
+          "role": "f_mkdir",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "创建目录。"
+        },
+        {
+          "role": "f_opendir",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "打开目录。"
+        },
+        {
+          "role": "f_readdir",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "读取目录项。"
+        },
+        {
+          "role": "f_closedir",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "关闭目录。"
+        },
+        {
+          "role": "f_dirent_name",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "获取目录项名称。"
+        },
+        {
+          "role": "f_dirent_is_dir",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "判断目录项是否为目录。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 16,
+      "correct": 2,
+      "wrong": 0,
+      "unknown": 14,
+      "omitted": 0,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 709
+    }
+  },
+  {
+    "task": {
+      "repo": "mynewt",
+      "partition": "confirmation",
+      "path": "fs/nffs/src/nffs.c",
+      "table": "nffs_ops"
+    },
+    "repeat": 0,
+    "arm": "interface_witness",
+    "context_bytes": 4973,
+    "context_sha256": "aba0d061ea91d02e4da75eee774f0e3befa3a6257bddd4bec8734e6a60b1f068",
+    "allocation": null,
+    "call_ref": {
+      "call": 25
+    },
+    "output": {
+      "module_description": "nffs_ops 是 NFFS 文件系统的操作表，将通用文件系统接口绑定到 NFFS 的具体实现函数。",
+      "claims": [
+        {
+          "role": "f_open",
+          "implementation": "nffs_open",
+          "binding": "fs/nffs/src/nffs.c:81",
+          "definition": "fs/nffs/src/nffs.c:189",
+          "description": "打开指定路径的文件并返回文件句柄。"
+        },
+        {
+          "role": "f_close",
+          "implementation": "nffs_close",
+          "binding": "fs/nffs/src/nffs.c:82",
+          "definition": "fs/nffs/src/nffs.c:230",
+          "description": "关闭文件句柄并释放相关资源。"
+        },
+        {
+          "role": "f_read",
+          "implementation": "nffs_read",
+          "binding": "fs/nffs/src/nffs.c:83",
+          "definition": "fs/nffs/src/nffs.c:341",
+          "description": "从文件读取指定长度的数据到缓冲区。"
+        },
+        {
+          "role": "f_write",
+          "implementation": "nffs_write",
+          "binding": "fs/nffs/src/nffs.c:84",
+          "definition": "fs/nffs/src/nffs.c:364",
+          "description": "向文件写入指定长度的数据。"
+        },
+        {
+          "role": "f_flush",
+          "implementation": "nffs_flush",
+          "binding": "fs/nffs/src/nffs.c:85",
+          "definition": "fs/nffs/src/nffs.c:254",
+          "description": "刷新文件缓冲区，当前实现直接返回成功。"
+        },
+        {
+          "role": "f_seek",
+          "implementation": "nffs_seek",
+          "binding": "fs/nffs/src/nffs.c:87",
+          "definition": "fs/nffs/src/nffs.c:274",
+          "description": "设置文件读写位置到指定偏移量。"
+        },
+        {
+          "role": "f_getpos",
+          "implementation": "nffs_getpos",
+          "binding": "fs/nffs/src/nffs.c:88",
+          "definition": "fs/nffs/src/nffs.c:294",
+          "description": "获取文件当前读写位置偏移量。"
+        },
+        {
+          "role": "f_filelen",
+          "implementation": "nffs_file_len",
+          "binding": "fs/nffs/src/nffs.c:89",
+          "definition": "fs/nffs/src/nffs.c:316",
+          "description": "获取文件长度并输出到指定指针。"
+        },
+        {
+          "role": "f_unlink",
+          "implementation": "nffs_unlink",
+          "binding": "fs/nffs/src/nffs.c:91",
+          "definition": "fs/nffs/src/nffs.c:399",
+          "description": "删除指定路径的文件。"
+        },
+        {
+          "role": "f_rename",
+          "implementation": "nffs_rename",
+          "binding": "fs/nffs/src/nffs.c:92",
+          "definition": "fs/nffs/src/nffs.c:439",
+          "description": "重命名文件或目录。"
+        },
+        {
+          "role": "f_mkdir",
+          "implementation": "nffs_mkdir",
+          "binding": "fs/nffs/src/nffs.c:93",
+          "definition": "fs/nffs/src/nffs.c:473",
+          "description": "创建指定路径的目录。"
+        },
+        {
+          "role": "f_opendir",
+          "implementation": "nffs_opendir",
+          "binding": "fs/nffs/src/nffs.c:95",
+          "definition": "fs/nffs/src/nffs.c:511",
+          "description": "打开指定路径的目录并返回目录句柄。"
+        },
+        {
+          "role": "f_readdir",
+          "implementation": "nffs_readdir",
+          "binding": "fs/nffs/src/nffs.c:96",
+          "definition": "fs/nffs/src/nffs.c:552",
+          "description": "读取目录中的下一个目录项。"
+        },
+        {
+          "role": "f_closedir",
+          "implementation": "nffs_closedir",
+          "binding": "fs/nffs/src/nffs.c:97",
+          "definition": "fs/nffs/src/nffs.c:573",
+          "description": "关闭目录句柄并释放相关资源。"
+        },
+        {
+          "role": "f_dirent_name",
+          "implementation": "nffs_dirent_name",
+          "binding": "fs/nffs/src/nffs.c:99",
+          "definition": "fs/nffs/src/nffs.c:602",
+          "description": "获取目录项的名称并输出到缓冲区。"
+        },
+        {
+          "role": "f_dirent_is_dir",
+          "implementation": "nffs_dirent_is_dir",
+          "binding": "fs/nffs/src/nffs.c:100",
+          "definition": "fs/nffs/src/nffs.c:629",
+          "description": "判断目录项是否为目录。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 16,
+      "correct": 16,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 16,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1283
+    }
+  },
+  {
+    "task": {
+      "repo": "mynewt",
+      "partition": "confirmation",
+      "path": "fs/nffs/src/nffs.c",
+      "table": "nffs_ops"
+    },
+    "repeat": 0,
+    "arm": "simple_lookup",
+    "context_bytes": 5143,
+    "context_sha256": "85e9f715f7bd461d53dc4997ea890e81ebd204158e3af6162f325ff62e21cd4c",
+    "allocation": null,
+    "call_ref": {
+      "call": 26
+    },
+    "output": {
+      "module_description": "nffs_ops 是 NFFS 文件系统的操作表，将文件、目录操作接口绑定到 nffs 模块的具体实现函数。",
+      "claims": [
+        {
+          "role": "f_open",
+          "implementation": "nffs_open",
+          "binding": "fs/nffs/src/nffs.c:81",
+          "definition": "fs/nffs/src/nffs.c:189",
+          "description": "打开文件，返回文件句柄。"
+        },
+        {
+          "role": "f_close",
+          "implementation": "nffs_close",
+          "binding": "fs/nffs/src/nffs.c:82",
+          "definition": "fs/nffs/src/nffs.c:230",
+          "description": "关闭文件句柄。"
+        },
+        {
+          "role": "f_read",
+          "implementation": "nffs_read",
+          "binding": "fs/nffs/src/nffs.c:83",
+          "definition": "fs/nffs/src/nffs.c:341",
+          "description": "从文件读取数据。"
+        },
+        {
+          "role": "f_write",
+          "implementation": "nffs_write",
+          "binding": "fs/nffs/src/nffs.c:84",
+          "definition": "fs/nffs/src/nffs.c:364",
+          "description": "向文件写入数据。"
+        },
+        {
+          "role": "f_flush",
+          "implementation": "nffs_flush",
+          "binding": "fs/nffs/src/nffs.c:85",
+          "definition": "fs/nffs/src/nffs.c:254",
+          "description": "刷新文件缓冲区，当前直接返回成功。"
+        },
+        {
+          "role": "f_seek",
+          "implementation": "nffs_seek",
+          "binding": "fs/nffs/src/nffs.c:87",
+          "definition": "fs/nffs/src/nffs.c:274",
+          "description": "设置文件读写位置。"
+        },
+        {
+          "role": "f_getpos",
+          "implementation": "nffs_getpos",
+          "binding": "fs/nffs/src/nffs.c:88",
+          "definition": "fs/nffs/src/nffs.c:294",
+          "description": "获取当前文件读写位置。"
+        },
+        {
+          "role": "f_filelen",
+          "implementation": "nffs_file_len",
+          "binding": "fs/nffs/src/nffs.c:89",
+          "definition": "fs/nffs/src/nffs.c:316",
+          "description": "获取文件长度。"
+        },
+        {
+          "role": "f_unlink",
+          "implementation": "nffs_unlink",
+          "binding": "fs/nffs/src/nffs.c:91",
+          "definition": "fs/nffs/src/nffs.c:399",
+          "description": "删除文件。"
+        },
+        {
+          "role": "f_rename",
+          "implementation": "nffs_rename",
+          "binding": "fs/nffs/src/nffs.c:92",
+          "definition": "fs/nffs/src/nffs.c:439",
+          "description": "重命名文件。"
+        },
+        {
+          "role": "f_mkdir",
+          "implementation": "nffs_mkdir",
+          "binding": "fs/nffs/src/nffs.c:93",
+          "definition": "fs/nffs/src/nffs.c:473",
+          "description": "创建目录。"
+        },
+        {
+          "role": "f_opendir",
+          "implementation": "nffs_opendir",
+          "binding": "fs/nffs/src/nffs.c:95",
+          "definition": "fs/nffs/src/nffs.c:511",
+          "description": "打开目录，返回目录句柄。"
+        },
+        {
+          "role": "f_readdir",
+          "implementation": "nffs_readdir",
+          "binding": "fs/nffs/src/nffs.c:96",
+          "definition": "fs/nffs/src/nffs.c:552",
+          "description": "读取目录项。"
+        },
+        {
+          "role": "f_closedir",
+          "implementation": "nffs_closedir",
+          "binding": "fs/nffs/src/nffs.c:97",
+          "definition": "fs/nffs/src/nffs.c:573",
+          "description": "关闭目录句柄。"
+        },
+        {
+          "role": "f_dirent_name",
+          "implementation": "nffs_dirent_name",
+          "binding": "fs/nffs/src/nffs.c:99",
+          "definition": "fs/nffs/src/nffs.c:602",
+          "description": "获取目录项名称。"
+        },
+        {
+          "role": "f_dirent_is_dir",
+          "implementation": "nffs_dirent_is_dir",
+          "binding": "fs/nffs/src/nffs.c:100",
+          "definition": "fs/nffs/src/nffs.c:629",
+          "description": "判断目录项是否为目录。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 16,
+      "correct": 16,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 16,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1201
+    }
+  },
+  {
+    "task": {
+      "repo": "mynewt",
+      "partition": "confirmation",
+      "path": "fs/nffs/src/nffs.c",
+      "table": "nffs_ops"
+    },
+    "repeat": 1,
+    "arm": "production_reader",
+    "context_bytes": 8750,
+    "context_sha256": "acff2409e49e10136a1f71583ae13922bf70a38046cf40024c470c015e4c6a54",
+    "allocation": {
+      "allocation_status": "ok",
+      "requested_reads": [
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 80,
+          "end_line": 135
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 188,
+          "end_line": 244
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 253,
+          "end_line": 326
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 340,
+          "end_line": 420
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 438,
+          "end_line": 492
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 510,
+          "end_line": 583
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 601,
+          "end_line": 688
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 696,
+          "end_line": 782
+        },
+        {
+          "path": "fs/fs/include/fs/fs.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "fs/fs/include/fs/fs_if.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "fs/nffs/include/nffs/nffs.h",
+          "start_line": null,
+          "end_line": null
+        },
+        {
+          "path": "fs/nffs/src/nffs_priv.h",
+          "start_line": null,
+          "end_line": null
+        }
+      ],
+      "retained_reads": [
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 80,
+          "end_line": 135
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 188,
+          "end_line": 244
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 253,
+          "end_line": 326
+        },
+        {
+          "path": "fs/nffs/src/nffs.c",
+          "start_line": 340,
+          "end_line": 420
+        }
+      ],
+      "tool_errors": [],
+      "call": 27
+    },
+    "call_ref": {
+      "call": 28
+    },
+    "output": {
+      "module_description": "nffs_ops 是 NFFS 文件系统的操作表，将文件、目录操作接口绑定到 nffs 模块的具体实现函数。",
+      "claims": [
+        {
+          "role": "f_open",
+          "implementation": "nffs_open",
+          "binding": "fs/nffs/src/nffs.c:81",
+          "definition": "fs/nffs/src/nffs.c:188",
+          "description": "打开指定路径的文件，返回文件句柄。"
+        },
+        {
+          "role": "f_close",
+          "implementation": "nffs_close",
+          "binding": "fs/nffs/src/nffs.c:82",
+          "definition": "fs/nffs/src/nffs.c:229",
+          "description": "关闭文件句柄，若已取消链接且为最后句柄则删除文件。"
+        },
+        {
+          "role": "f_read",
+          "implementation": "nffs_read",
+          "binding": "fs/nffs/src/nffs.c:83",
+          "definition": "fs/nffs/src/nffs.c:340",
+          "description": "从文件当前偏移读取指定长度数据。"
+        },
+        {
+          "role": "f_write",
+          "implementation": "nffs_write",
+          "binding": "fs/nffs/src/nffs.c:84",
+          "definition": "fs/nffs/src/nffs.c:363",
+          "description": "向文件当前偏移写入指定长度数据。"
+        },
+        {
+          "role": "f_flush",
+          "implementation": "nffs_flush",
+          "binding": "fs/nffs/src/nffs.c:85",
+          "definition": "fs/nffs/src/nffs.c:253",
+          "description": "刷新文件，当前实现直接返回成功。"
+        },
+        {
+          "role": "f_seek",
+          "implementation": "nffs_seek",
+          "binding": "fs/nffs/src/nffs.c:87",
+          "definition": "fs/nffs/src/nffs.c:273",
+          "description": "将文件读写指针定位到指定偏移。"
+        },
+        {
+          "role": "f_getpos",
+          "implementation": "nffs_getpos",
+          "binding": "fs/nffs/src/nffs.c:88",
+          "definition": "fs/nffs/src/nffs.c:293",
+          "description": "获取文件当前读写位置。"
+        },
+        {
+          "role": "f_filelen",
+          "implementation": "nffs_file_len",
+          "binding": "fs/nffs/src/nffs.c:89",
+          "definition": "fs/nffs/src/nffs.c:315",
+          "description": "获取指定打开文件的当前长度。"
+        },
+        {
+          "role": "f_unlink",
+          "implementation": "nffs_unlink",
+          "binding": "fs/nffs/src/nffs.c:91",
+          "definition": "fs/nffs/src/nffs.c:398",
+          "description": "删除指定路径的文件或目录，目录递归删除。"
+        },
+        {
+          "role": "f_rename",
+          "implementation": "unknown",
+          "binding": "fs/nffs/src/nffs.c:92",
+          "definition": "unknown",
+          "description": "重命名文件或目录，实现函数未在材料中提供。"
+        },
+        {
+          "role": "f_mkdir",
+          "implementation": "unknown",
+          "binding": "fs/nffs/src/nffs.c:93",
+          "definition": "unknown",
+          "description": "创建目录，实现函数未在材料中提供。"
+        },
+        {
+          "role": "f_opendir",
+          "implementation": "unknown",
+          "binding": "fs/nffs/src/nffs.c:95",
+          "definition": "unknown",
+          "description": "打开目录，实现函数未在材料中提供。"
+        },
+        {
+          "role": "f_readdir",
+          "implementation": "unknown",
+          "binding": "fs/nffs/src/nffs.c:96",
+          "definition": "unknown",
+          "description": "读取目录项，实现函数未在材料中提供。"
+        },
+        {
+          "role": "f_closedir",
+          "implementation": "unknown",
+          "binding": "fs/nffs/src/nffs.c:97",
+          "definition": "unknown",
+          "description": "关闭目录，实现函数未在材料中提供。"
+        },
+        {
+          "role": "f_dirent_name",
+          "implementation": "unknown",
+          "binding": "fs/nffs/src/nffs.c:99",
+          "definition": "unknown",
+          "description": "获取目录项名称，实现函数未在材料中提供。"
+        },
+        {
+          "role": "f_dirent_is_dir",
+          "implementation": "unknown",
+          "binding": "fs/nffs/src/nffs.c:100",
+          "definition": "unknown",
+          "description": "判断目录项是否为目录，实现函数未在材料中提供。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 16,
+      "correct": 9,
+      "wrong": 0,
+      "unknown": 7,
+      "omitted": 0,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1197
+    }
+  },
+  {
+    "task": {
+      "repo": "mynewt",
+      "partition": "confirmation",
+      "path": "fs/nffs/src/nffs.c",
+      "table": "nffs_ops"
+    },
+    "repeat": 1,
+    "arm": "bm25_chunks",
+    "context_bytes": 9884,
+    "context_sha256": "6a9e59ff8547db276f7f5b6b30acbaabc7e1ccb5afd28f28bebbf1eaaf8bcf0b",
+    "allocation": null,
+    "call_ref": {
+      "call": 29
+    },
+    "output": {
+      "module_description": "nffs_ops 是 NFFS 文件系统的操作表，将通用文件系统接口绑定到 NFFS 的具体实现函数，提供文件打开、关闭、读写、定位、目录操作等能力。",
+      "claims": [
+        {
+          "role": "f_open",
+          "implementation": "nffs_open",
+          "binding": "fs/nffs/src/nffs.c:81",
+          "definition": "unknown",
+          "description": "打开文件，返回文件句柄。"
+        },
+        {
+          "role": "f_close",
+          "implementation": "nffs_close",
+          "binding": "fs/nffs/src/nffs.c:82",
+          "definition": "fs/nffs/src/nffs.c:230",
+          "description": "关闭文件，释放资源。"
+        },
+        {
+          "role": "f_read",
+          "implementation": "nffs_read",
+          "binding": "fs/nffs/src/nffs.c:83",
+          "definition": "unknown",
+          "description": "从文件读取数据。"
+        },
+        {
+          "role": "f_write",
+          "implementation": "nffs_write",
+          "binding": "fs/nffs/src/nffs.c:84",
+          "definition": "unknown",
+          "description": "向文件写入数据。"
+        },
+        {
+          "role": "f_flush",
+          "implementation": "nffs_flush",
+          "binding": "fs/nffs/src/nffs.c:85",
+          "definition": "fs/nffs/src/nffs.c:254",
+          "description": "刷新文件缓冲区，当前直接返回成功。"
+        },
+        {
+          "role": "f_seek",
+          "implementation": "nffs_seek",
+          "binding": "fs/nffs/src/nffs.c:87",
+          "definition": "fs/nffs/src/nffs.c:274",
+          "description": "设置文件读写位置。"
+        },
+        {
+          "role": "f_getpos",
+          "implementation": "nffs_getpos",
+          "binding": "fs/nffs/src/nffs.c:88",
+          "definition": "unknown",
+          "description": "获取当前文件读写位置。"
+        },
+        {
+          "role": "f_filelen",
+          "implementation": "nffs_file_len",
+          "binding": "fs/nffs/src/nffs.c:89",
+          "definition": "unknown",
+          "description": "获取文件长度。"
+        },
+        {
+          "role": "f_unlink",
+          "implementation": "nffs_unlink",
+          "binding": "fs/nffs/src/nffs.c:91",
+          "definition": "unknown",
+          "description": "删除文件。"
+        },
+        {
+          "role": "f_rename",
+          "implementation": "nffs_rename",
+          "binding": "fs/nffs/src/nffs.c:92",
+          "definition": "unknown",
+          "description": "重命名文件。"
+        },
+        {
+          "role": "f_mkdir",
+          "implementation": "nffs_mkdir",
+          "binding": "fs/nffs/src/nffs.c:93",
+          "definition": "unknown",
+          "description": "创建目录。"
+        },
+        {
+          "role": "f_opendir",
+          "implementation": "nffs_opendir",
+          "binding": "fs/nffs/src/nffs.c:95",
+          "definition": "unknown",
+          "description": "打开目录，返回目录句柄。"
+        },
+        {
+          "role": "f_readdir",
+          "implementation": "nffs_readdir",
+          "binding": "fs/nffs/src/nffs.c:96",
+          "definition": "unknown",
+          "description": "读取目录项。"
+        },
+        {
+          "role": "f_closedir",
+          "implementation": "nffs_closedir",
+          "binding": "fs/nffs/src/nffs.c:97",
+          "definition": "unknown",
+          "description": "关闭目录句柄。"
+        },
+        {
+          "role": "f_dirent_name",
+          "implementation": "nffs_dirent_name",
+          "binding": "fs/nffs/src/nffs.c:99",
+          "definition": "unknown",
+          "description": "获取目录项名称。"
+        },
+        {
+          "role": "f_dirent_is_dir",
+          "implementation": "nffs_dirent_is_dir",
+          "binding": "fs/nffs/src/nffs.c:100",
+          "definition": "unknown",
+          "description": "判断目录项是否为目录。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 16,
+      "correct": 16,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 3,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1030
+    }
+  },
+  {
+    "task": {
+      "repo": "mynewt",
+      "partition": "confirmation",
+      "path": "fs/nffs/src/nffs.c",
+      "table": "nffs_ops"
+    },
+    "repeat": 1,
+    "arm": "codewiki_components",
+    "context_bytes": 9986,
+    "context_sha256": "6380b415276e757705301a4ff6104254673124bec93a69d421d6a830645014a3",
+    "allocation": null,
+    "call_ref": {
+      "call": 30
+    },
+    "output": {
+      "module_description": "nffs_ops 是 NFFS 文件系统的操作表，其显式函数字段绑定到 nffs.c 中的 nffs_* 实现，提供文件打开、关闭、读写、刷新等接口。",
+      "claims": [
+        {
+          "role": "f_open",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "打开文件，返回文件句柄。"
+        },
+        {
+          "role": "f_close",
+          "implementation": "nffs_close",
+          "binding": "unknown",
+          "definition": "fs/nffs/src/nffs.c:229",
+          "description": "关闭文件，释放资源。"
+        },
+        {
+          "role": "f_read",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "从文件读取数据。"
+        },
+        {
+          "role": "f_write",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "向文件写入数据。"
+        },
+        {
+          "role": "f_flush",
+          "implementation": "nffs_flush",
+          "binding": "unknown",
+          "definition": "fs/nffs/src/nffs.c:253",
+          "description": "刷新文件缓冲区，当前返回成功。"
+        },
+        {
+          "role": "f_seek",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "设置文件读写位置。"
+        },
+        {
+          "role": "f_getpos",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "获取当前文件读写位置。"
+        },
+        {
+          "role": "f_filelen",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "获取文件长度。"
+        },
+        {
+          "role": "f_unlink",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "删除文件。"
+        },
+        {
+          "role": "f_rename",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "重命名文件。"
+        },
+        {
+          "role": "f_mkdir",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "创建目录。"
+        },
+        {
+          "role": "f_opendir",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "打开目录。"
+        },
+        {
+          "role": "f_readdir",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "读取目录项。"
+        },
+        {
+          "role": "f_closedir",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "关闭目录。"
+        },
+        {
+          "role": "f_dirent_name",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "获取目录项名称。"
+        },
+        {
+          "role": "f_dirent_is_dir",
+          "implementation": "unknown",
+          "binding": "unknown",
+          "definition": "unknown",
+          "description": "判断目录项是否为目录。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 16,
+      "correct": 2,
+      "wrong": 0,
+      "unknown": 14,
+      "omitted": 0,
+      "complete_evidence": 0,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 713
+    }
+  },
+  {
+    "task": {
+      "repo": "mynewt",
+      "partition": "confirmation",
+      "path": "fs/nffs/src/nffs.c",
+      "table": "nffs_ops"
+    },
+    "repeat": 1,
+    "arm": "interface_witness",
+    "context_bytes": 4973,
+    "context_sha256": "aba0d061ea91d02e4da75eee774f0e3befa3a6257bddd4bec8734e6a60b1f068",
+    "allocation": null,
+    "call_ref": {
+      "call": 31
+    },
+    "output": {
+      "module_description": "nffs_ops 是 NFFS 文件系统的操作表，将文件、目录及目录项操作绑定到 nffs.c 中的静态实现函数。",
+      "claims": [
+        {
+          "role": "f_open",
+          "implementation": "nffs_open",
+          "binding": "fs/nffs/src/nffs.c:81",
+          "definition": "fs/nffs/src/nffs.c:189",
+          "description": "打开文件并返回文件对象。"
+        },
+        {
+          "role": "f_close",
+          "implementation": "nffs_close",
+          "binding": "fs/nffs/src/nffs.c:82",
+          "definition": "fs/nffs/src/nffs.c:230",
+          "description": "关闭文件对象。"
+        },
+        {
+          "role": "f_read",
+          "implementation": "nffs_read",
+          "binding": "fs/nffs/src/nffs.c:83",
+          "definition": "fs/nffs/src/nffs.c:341",
+          "description": "从文件读取数据。"
+        },
+        {
+          "role": "f_write",
+          "implementation": "nffs_write",
+          "binding": "fs/nffs/src/nffs.c:84",
+          "definition": "fs/nffs/src/nffs.c:364",
+          "description": "向文件写入数据。"
+        },
+        {
+          "role": "f_flush",
+          "implementation": "nffs_flush",
+          "binding": "fs/nffs/src/nffs.c:85",
+          "definition": "fs/nffs/src/nffs.c:254",
+          "description": "刷新文件，当前直接返回成功。"
+        },
+        {
+          "role": "f_seek",
+          "implementation": "nffs_seek",
+          "binding": "fs/nffs/src/nffs.c:87",
+          "definition": "fs/nffs/src/nffs.c:274",
+          "description": "设置文件读写偏移。"
+        },
+        {
+          "role": "f_getpos",
+          "implementation": "nffs_getpos",
+          "binding": "fs/nffs/src/nffs.c:88",
+          "definition": "fs/nffs/src/nffs.c:294",
+          "description": "获取文件当前偏移。"
+        },
+        {
+          "role": "f_filelen",
+          "implementation": "nffs_file_len",
+          "binding": "fs/nffs/src/nffs.c:89",
+          "definition": "fs/nffs/src/nffs.c:316",
+          "description": "获取文件长度。"
+        },
+        {
+          "role": "f_unlink",
+          "implementation": "nffs_unlink",
+          "binding": "fs/nffs/src/nffs.c:91",
+          "definition": "fs/nffs/src/nffs.c:399",
+          "description": "删除文件。"
+        },
+        {
+          "role": "f_rename",
+          "implementation": "nffs_rename",
+          "binding": "fs/nffs/src/nffs.c:92",
+          "definition": "fs/nffs/src/nffs.c:439",
+          "description": "重命名文件或目录。"
+        },
+        {
+          "role": "f_mkdir",
+          "implementation": "nffs_mkdir",
+          "binding": "fs/nffs/src/nffs.c:93",
+          "definition": "fs/nffs/src/nffs.c:473",
+          "description": "创建目录。"
+        },
+        {
+          "role": "f_opendir",
+          "implementation": "nffs_opendir",
+          "binding": "fs/nffs/src/nffs.c:95",
+          "definition": "fs/nffs/src/nffs.c:511",
+          "description": "打开目录并返回目录对象。"
+        },
+        {
+          "role": "f_readdir",
+          "implementation": "nffs_readdir",
+          "binding": "fs/nffs/src/nffs.c:96",
+          "definition": "fs/nffs/src/nffs.c:552",
+          "description": "读取目录项。"
+        },
+        {
+          "role": "f_closedir",
+          "implementation": "nffs_closedir",
+          "binding": "fs/nffs/src/nffs.c:97",
+          "definition": "fs/nffs/src/nffs.c:573",
+          "description": "关闭目录对象。"
+        },
+        {
+          "role": "f_dirent_name",
+          "implementation": "nffs_dirent_name",
+          "binding": "fs/nffs/src/nffs.c:99",
+          "definition": "fs/nffs/src/nffs.c:602",
+          "description": "获取目录项名称。"
+        },
+        {
+          "role": "f_dirent_is_dir",
+          "implementation": "nffs_dirent_is_dir",
+          "binding": "fs/nffs/src/nffs.c:100",
+          "definition": "fs/nffs/src/nffs.c:629",
+          "description": "判断目录项是否为目录。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 16,
+      "correct": 16,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 16,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1202
+    }
+  },
+  {
+    "task": {
+      "repo": "mynewt",
+      "partition": "confirmation",
+      "path": "fs/nffs/src/nffs.c",
+      "table": "nffs_ops"
+    },
+    "repeat": 1,
+    "arm": "simple_lookup",
+    "context_bytes": 5143,
+    "context_sha256": "85e9f715f7bd461d53dc4997ea890e81ebd204158e3af6162f325ff62e21cd4c",
+    "allocation": null,
+    "call_ref": {
+      "call": 32
+    },
+    "output": {
+      "module_description": "nffs_ops 是 NFFS 文件系统的操作表，将文件、目录操作接口绑定到 nffs 模块的具体实现函数。",
+      "claims": [
+        {
+          "role": "f_open",
+          "implementation": "nffs_open",
+          "binding": "fs/nffs/src/nffs.c:81",
+          "definition": "fs/nffs/src/nffs.c:189",
+          "description": "打开文件，返回文件句柄。"
+        },
+        {
+          "role": "f_close",
+          "implementation": "nffs_close",
+          "binding": "fs/nffs/src/nffs.c:82",
+          "definition": "fs/nffs/src/nffs.c:230",
+          "description": "关闭文件句柄。"
+        },
+        {
+          "role": "f_read",
+          "implementation": "nffs_read",
+          "binding": "fs/nffs/src/nffs.c:83",
+          "definition": "fs/nffs/src/nffs.c:341",
+          "description": "从文件读取数据。"
+        },
+        {
+          "role": "f_write",
+          "implementation": "nffs_write",
+          "binding": "fs/nffs/src/nffs.c:84",
+          "definition": "fs/nffs/src/nffs.c:364",
+          "description": "向文件写入数据。"
+        },
+        {
+          "role": "f_flush",
+          "implementation": "nffs_flush",
+          "binding": "fs/nffs/src/nffs.c:85",
+          "definition": "fs/nffs/src/nffs.c:254",
+          "description": "刷新文件缓冲区。"
+        },
+        {
+          "role": "f_seek",
+          "implementation": "nffs_seek",
+          "binding": "fs/nffs/src/nffs.c:87",
+          "definition": "fs/nffs/src/nffs.c:274",
+          "description": "设置文件读写位置。"
+        },
+        {
+          "role": "f_getpos",
+          "implementation": "nffs_getpos",
+          "binding": "fs/nffs/src/nffs.c:88",
+          "definition": "fs/nffs/src/nffs.c:294",
+          "description": "获取当前文件读写位置。"
+        },
+        {
+          "role": "f_filelen",
+          "implementation": "nffs_file_len",
+          "binding": "fs/nffs/src/nffs.c:89",
+          "definition": "fs/nffs/src/nffs.c:316",
+          "description": "获取文件长度。"
+        },
+        {
+          "role": "f_unlink",
+          "implementation": "nffs_unlink",
+          "binding": "fs/nffs/src/nffs.c:91",
+          "definition": "fs/nffs/src/nffs.c:399",
+          "description": "删除文件。"
+        },
+        {
+          "role": "f_rename",
+          "implementation": "nffs_rename",
+          "binding": "fs/nffs/src/nffs.c:92",
+          "definition": "fs/nffs/src/nffs.c:439",
+          "description": "重命名文件。"
+        },
+        {
+          "role": "f_mkdir",
+          "implementation": "nffs_mkdir",
+          "binding": "fs/nffs/src/nffs.c:93",
+          "definition": "fs/nffs/src/nffs.c:473",
+          "description": "创建目录。"
+        },
+        {
+          "role": "f_opendir",
+          "implementation": "nffs_opendir",
+          "binding": "fs/nffs/src/nffs.c:95",
+          "definition": "fs/nffs/src/nffs.c:511",
+          "description": "打开目录，返回目录句柄。"
+        },
+        {
+          "role": "f_readdir",
+          "implementation": "nffs_readdir",
+          "binding": "fs/nffs/src/nffs.c:96",
+          "definition": "fs/nffs/src/nffs.c:552",
+          "description": "读取目录项。"
+        },
+        {
+          "role": "f_closedir",
+          "implementation": "nffs_closedir",
+          "binding": "fs/nffs/src/nffs.c:97",
+          "definition": "fs/nffs/src/nffs.c:573",
+          "description": "关闭目录句柄。"
+        },
+        {
+          "role": "f_dirent_name",
+          "implementation": "nffs_dirent_name",
+          "binding": "fs/nffs/src/nffs.c:99",
+          "definition": "fs/nffs/src/nffs.c:602",
+          "description": "获取目录项名称。"
+        },
+        {
+          "role": "f_dirent_is_dir",
+          "implementation": "nffs_dirent_is_dir",
+          "binding": "fs/nffs/src/nffs.c:100",
+          "definition": "fs/nffs/src/nffs.c:629",
+          "description": "判断目录项是否为目录。"
+        }
+      ]
+    },
+    "evaluation": {
+      "status": "ok",
+      "reference_bindings": 16,
+      "correct": 16,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "complete_evidence": 16,
+      "unsupported_extra_claims": 0,
+      "duplicate_claims": 0,
+      "output_string_characters": 1192
+    }
+  }
+]

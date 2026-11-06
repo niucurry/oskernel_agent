@@ -1,0 +1,16 @@
+{
+  "repo": "/home/niu/agent-recall-probe-20261029/original/T202510486995194-334",
+  "subsystem": "同步机制",
+  "files": [
+    "kernel/sleeplock.c",
+    "kernel/spinlock.c"
+  ],
+  "model": "deepseek-flash",
+  "maximum_probe_functions": 12,
+  "maximum_additional_recall_rereads": 2,
+  "sample_ratio": 0.15,
+  "calls_probe": true,
+  "paid_api_requires_confirmation": true,
+  "normal_path": "1 个 SUBSYS 报告会话、1 次批量提问、2 个源码复核会话；每个会话可能包含多次 API 请求",
+  "conditional_cost": "缺证据和召回异常可补读；语义分歧可追加复核，报告最多修订一次；供应商实际计费，未预设金额上限"
+}

@@ -1,0 +1,19 @@
+{
+  "tag": "pro-base",
+  "model": "deepseek-v4-pro",
+  "context_limit": 1048576,
+  "output_limit": 32768,
+  "compaction": "off",
+  "informed": false,
+  "extra_files": [],
+  "targets": 6,
+  "repair_rounds": 2,
+  "started": 1793281746.1340048,
+  "response_error": "llm_batch_failed",
+  "finished_main": 1793281755.9397867,
+  "accepted_batch": null,
+  "session": null,
+  "stream_status": null,
+  "read_evidence": {},
+  "audit_files": []
+}

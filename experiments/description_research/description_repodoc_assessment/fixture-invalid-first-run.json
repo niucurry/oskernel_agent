@@ -1,0 +1,7 @@
+{
+  "status": "environment_entrypoint_failure",
+  "error": "FileNotFoundError: gcc; installed compiler is /usr/bin/gcc-12",
+  "model_calls": 0,
+  "correction": "Use the available versioned compiler executable; fix local inventory adapter to retain the dictionary return value before rerun. Author code remains unchanged.",
+  "interpretation": "No extractor result or source quality score from the failed first attempt"
+}

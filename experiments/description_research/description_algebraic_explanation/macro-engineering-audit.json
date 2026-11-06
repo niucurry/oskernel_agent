@@ -1,0 +1,30 @@
+{
+  "source_symbols_after": {
+    "symbols": [
+      [
+        "MEM_ALIGN_MASK",
+        60
+      ],
+      [
+        "MEM_ALIGN_PREV",
+        68
+      ],
+      [
+        "MEM_ALIGN_NEXT",
+        79
+      ],
+      [
+        "MEM_IS_ALIGNED",
+        90
+      ],
+      [
+        "MEM_IS_VALID_ALIGNMENT",
+        98
+      ]
+    ],
+    "status": "partial"
+  },
+  "real_header_interfaces": 5,
+  "before": "Actual production raw analyze_subtree result had zero quick symbols; unchanged original chalign.h has five callable macros",
+  "quality_claim": "Inventory visibility only, production already read full header; no demonstrated report quality increase"
+}

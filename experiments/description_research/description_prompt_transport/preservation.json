@@ -1,0 +1,9 @@
+{
+  "archive": "/home/niu/agent-archives/description-prompt-transport-20261008T092851Z/experiment.tar.gz",
+  "sha256": "111b88c13af85983e08f81058400a2b83b2ac9c20d0f1ab6661887d10a49c1fb",
+  "archive_bytes": 5652272,
+  "verified_members": 747,
+  "remote_model_requests": 0,
+  "semantic_quality": "unmeasured",
+  "private_credential_absent": true
+}

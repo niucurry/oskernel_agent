@@ -1,0 +1,39 @@
+[
+  {
+    "name": "docsearch-paper.pdf",
+    "url": "https://people.cs.vt.edu/penggao/papers/escaping-icml26.pdf",
+    "bytes": 1076552,
+    "sha256": "fc7bb5e60cb55d6511c48ee8e011c10c2ef72a48e94747d8ee06025a05af3eb9"
+  },
+  {
+    "name": "controlled-documentation.html",
+    "url": "https://arxiv.org/html/1311.2702",
+    "bytes": 233550,
+    "sha256": "2fd6d7d33cb6d0fb6c314d6f051cc819a8bb9879b3ad0ca9c90144a2a98a4ce5"
+  },
+  {
+    "name": "refocusing.html",
+    "url": "https://onlinelibrary.wiley.com/doi/10.1002/smr.70157",
+    "failure_type": "HTTPError",
+    "failure": "HTTP Error 403: Forbidden"
+  },
+  {
+    "repository": "ccsnow127/docsearch",
+    "failure_type": "IncompleteRead",
+    "failure": "IncompleteRead(294912 bytes read)"
+  },
+  {
+    "repository": "Qinyun718/repoprobe",
+    "failure_type": "TimeoutError",
+    "failure": "The read operation timed out"
+  },
+  {
+    "name": "apcl-research--improving_summary/README.md",
+    "url": "https://raw.githubusercontent.com/apcl-research/improving_summary/f408f780842619dd04d6548a14fd4412c1b2783b/README.md",
+    "repository": "apcl-research/improving_summary",
+    "commit": "f408f780842619dd04d6548a14fd4412c1b2783b",
+    "git_blob_sha": "cac34345404bedb7ac78d0a2a95d5f9e812d8cb1",
+    "sha256": "6bc02f2efcef00463c6c4fb391fe48e122b62d98fa592a385047ec87c2d58646",
+    "bytes": 6280
+  }
+]

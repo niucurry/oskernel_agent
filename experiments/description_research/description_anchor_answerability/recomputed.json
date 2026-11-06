@@ -1,0 +1,334 @@
+{
+  "rows": [
+    {
+      "arm": "good_masked",
+      "repeat": 1,
+      "score": {
+        "correct": 21,
+        "wrong": 1,
+        "unknown": 0,
+        "omitted": 0,
+        "denominator": 22,
+        "accuracy": 0.9545454545454546
+      },
+      "wrong_questions": [
+        {
+          "question_id": "Q11",
+          "anchor": "E55d975d10f"
+        }
+      ]
+    },
+    {
+      "arm": "wrong_roles_unmasked",
+      "repeat": 1,
+      "score": {
+        "correct": 18,
+        "wrong": 4,
+        "unknown": 0,
+        "omitted": 0,
+        "denominator": 22,
+        "accuracy": 0.8181818181818182
+      },
+      "wrong_questions": [
+        {
+          "question_id": "Q00",
+          "anchor": "E1e9822eb67"
+        },
+        {
+          "question_id": "Q01",
+          "anchor": "E6176ee4cec"
+        },
+        {
+          "question_id": "Q20",
+          "anchor": "Ee9ec47d53f"
+        },
+        {
+          "question_id": "Q21",
+          "anchor": "Ea269151d31"
+        }
+      ]
+    },
+    {
+      "arm": "wrong_roles_masked",
+      "repeat": 1,
+      "score": {
+        "correct": 0,
+        "wrong": 22,
+        "unknown": 0,
+        "omitted": 0,
+        "denominator": 22,
+        "accuracy": 0.0
+      },
+      "wrong_questions": [
+        {
+          "question_id": "Q00",
+          "anchor": "E1e9822eb67"
+        },
+        {
+          "question_id": "Q01",
+          "anchor": "E6176ee4cec"
+        },
+        {
+          "question_id": "Q02",
+          "anchor": "E8194d319d7"
+        },
+        {
+          "question_id": "Q03",
+          "anchor": "Ee03af3326c"
+        },
+        {
+          "question_id": "Q04",
+          "anchor": "E7448eea1c8"
+        },
+        {
+          "question_id": "Q05",
+          "anchor": "Effb47da995"
+        },
+        {
+          "question_id": "Q06",
+          "anchor": "E808c1484fb"
+        },
+        {
+          "question_id": "Q07",
+          "anchor": "E8faca1f599"
+        },
+        {
+          "question_id": "Q08",
+          "anchor": "E8961231e7a"
+        },
+        {
+          "question_id": "Q09",
+          "anchor": "E607bca3a7f"
+        },
+        {
+          "question_id": "Q10",
+          "anchor": "Ecd6cc4cc41"
+        },
+        {
+          "question_id": "Q11",
+          "anchor": "Ede611a69c9"
+        },
+        {
+          "question_id": "Q12",
+          "anchor": "E55d975d10c"
+        },
+        {
+          "question_id": "Q13",
+          "anchor": "E51bf6239e0"
+        },
+        {
+          "question_id": "Q14",
+          "anchor": "E3e3957f883"
+        },
+        {
+          "question_id": "Q15",
+          "anchor": "E4f73b4067f"
+        },
+        {
+          "question_id": "Q16",
+          "anchor": "Ebb7bfcc1b3"
+        },
+        {
+          "question_id": "Q17",
+          "anchor": "Ecbca65396b"
+        },
+        {
+          "question_id": "Q18",
+          "anchor": "Ebb041d4fc4"
+        },
+        {
+          "question_id": "Q19",
+          "anchor": "Ecaf7506ecc"
+        },
+        {
+          "question_id": "Q20",
+          "anchor": "Ee9ec47d53f"
+        },
+        {
+          "question_id": "Q21",
+          "anchor": "Ea269151d31"
+        }
+      ]
+    },
+    {
+      "arm": "names_only_unmasked",
+      "repeat": 1,
+      "score": {
+        "correct": 22,
+        "wrong": 0,
+        "unknown": 0,
+        "omitted": 0,
+        "denominator": 22,
+        "accuracy": 1.0
+      },
+      "wrong_questions": []
+    },
+    {
+      "arm": "good_masked",
+      "repeat": 2,
+      "score": {
+        "correct": 21,
+        "wrong": 1,
+        "unknown": 0,
+        "omitted": 0,
+        "denominator": 22,
+        "accuracy": 0.9545454545454546
+      },
+      "wrong_questions": [
+        {
+          "question_id": "Q11",
+          "anchor": "E55d975d10f"
+        }
+      ]
+    },
+    {
+      "arm": "wrong_roles_unmasked",
+      "repeat": 2,
+      "score": {
+        "correct": 18,
+        "wrong": 3,
+        "unknown": 1,
+        "omitted": 0,
+        "denominator": 22,
+        "accuracy": 0.8181818181818182
+      },
+      "wrong_questions": [
+        {
+          "question_id": "Q00",
+          "anchor": "E1e9822eb67"
+        },
+        {
+          "question_id": "Q01",
+          "anchor": "E6176ee4cec"
+        },
+        {
+          "question_id": "Q02",
+          "anchor": "E8194d319d7"
+        },
+        {
+          "question_id": "Q21",
+          "anchor": "UNKNOWN"
+        }
+      ]
+    },
+    {
+      "arm": "wrong_roles_masked",
+      "repeat": 2,
+      "score": {
+        "correct": 0,
+        "wrong": 22,
+        "unknown": 0,
+        "omitted": 0,
+        "denominator": 22,
+        "accuracy": 0.0
+      },
+      "wrong_questions": [
+        {
+          "question_id": "Q00",
+          "anchor": "E1e9822eb67"
+        },
+        {
+          "question_id": "Q01",
+          "anchor": "E6176ee4cec"
+        },
+        {
+          "question_id": "Q02",
+          "anchor": "E8194d319d7"
+        },
+        {
+          "question_id": "Q03",
+          "anchor": "Ee03af3326c"
+        },
+        {
+          "question_id": "Q04",
+          "anchor": "E7448eea1c8"
+        },
+        {
+          "question_id": "Q05",
+          "anchor": "Effb47da995"
+        },
+        {
+          "question_id": "Q06",
+          "anchor": "E808c1484fb"
+        },
+        {
+          "question_id": "Q07",
+          "anchor": "E8faca1f599"
+        },
+        {
+          "question_id": "Q08",
+          "anchor": "E8961231e7a"
+        },
+        {
+          "question_id": "Q09",
+          "anchor": "E607bca3a7f"
+        },
+        {
+          "question_id": "Q10",
+          "anchor": "Ecd6cc4cc41"
+        },
+        {
+          "question_id": "Q11",
+          "anchor": "Ede611a69c9"
+        },
+        {
+          "question_id": "Q12",
+          "anchor": "E55d975d10c"
+        },
+        {
+          "question_id": "Q13",
+          "anchor": "E51bf6239e0"
+        },
+        {
+          "question_id": "Q14",
+          "anchor": "E3e3957f883"
+        },
+        {
+          "question_id": "Q15",
+          "anchor": "E4f73b4067f"
+        },
+        {
+          "question_id": "Q16",
+          "anchor": "Ebb7bfcc1b3"
+        },
+        {
+          "question_id": "Q17",
+          "anchor": "Ecbca65396b"
+        },
+        {
+          "question_id": "Q18",
+          "anchor": "Ebb041d4fc4"
+        },
+        {
+          "question_id": "Q19",
+          "anchor": "Ecaf7506ecc"
+        },
+        {
+          "question_id": "Q20",
+          "anchor": "Ee9ec47d53f"
+        },
+        {
+          "question_id": "Q21",
+          "anchor": "Ea269151d31"
+        }
+      ]
+    },
+    {
+      "arm": "names_only_unmasked",
+      "repeat": 2,
+      "score": {
+        "correct": 22,
+        "wrong": 0,
+        "unknown": 0,
+        "omitted": 0,
+        "denominator": 22,
+        "accuracy": 1.0
+      },
+      "wrong_questions": []
+    }
+  ],
+  "freeze_mismatches": [],
+  "requests": 8,
+  "actual_tokens": 12356,
+  "recomputes_only": "service identity localization, not arbitrary claim correctness"
+}

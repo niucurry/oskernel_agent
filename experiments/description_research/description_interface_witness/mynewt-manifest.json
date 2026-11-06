@@ -1,0 +1,286 @@
+{
+  "name": "mynewt",
+  "repo": "apache/mynewt-core",
+  "tag": "mynewt_1_14_0_tag",
+  "revision": "828b84d04ea2dd826390ca458a32116a0af116fd",
+  "prefixes": [
+    "fs/fs/",
+    "fs/nffs/",
+    "fs/littlefs/src/mynewt_glue.c"
+  ],
+  "partition": "confirmation",
+  "exposure": "no matching repository found in available historical documents; not guaranteed blind or uncontaminated",
+  "source_root": "/home/niu/.cache/oskernel-description-interface-witness/mynewt",
+  "files": [
+    {
+      "path": "fs/fs/include/fs/fs.h",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9d5ca7e3cfcb73e99dab8dec6114476e8b66e394",
+      "size": 2978,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/fs/include/fs/fs.h",
+      "sha256": "1e4616f4fb36bae82f9c57cf22f49c6986cfe668b4cf09f5bcf8cf2c2a808971"
+    },
+    {
+      "path": "fs/fs/include/fs/fs_if.h",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "567561f21aefb4503069528970d2b5e2fb377016",
+      "size": 2869,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/fs/include/fs/fs_if.h",
+      "sha256": "230f22263e71906072e47bed55fb9ddabc23aa07725d8828d7fa6fad27177690"
+    },
+    {
+      "path": "fs/fs/include/fs/fsutil.h",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d96a5f5ba1257561e238b6166abee208aaf02c32",
+      "size": 1141,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/fs/include/fs/fsutil.h",
+      "sha256": "4942c984408db6f0cfd0716a5c74170f3b273bd6e582ab712bd259eb8ce51a72"
+    },
+    {
+      "path": "fs/fs/src/fs_cli.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "9fa932a222c2bbe977eadcc61ff1dd5f5b238fcf",
+      "size": 4402,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/fs/src/fs_cli.c",
+      "sha256": "6f1d603089d69c29cc3a71bad14aebbc04aa40e61bde041e6d26b301fd34b610"
+    },
+    {
+      "path": "fs/fs/src/fs_dirent.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c9e46369b602489029ed11f263f4bc224584e199",
+      "size": 2036,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/fs/src/fs_dirent.c",
+      "sha256": "0c505969f342a144b19063c2d55f94461c4877f450153df143f7ea9c09f31a0f"
+    },
+    {
+      "path": "fs/fs/src/fs_file.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "320a4eacc0bb4d22025a74ecfee09eb63bbe4fe3",
+      "size": 5358,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/fs/src/fs_file.c",
+      "sha256": "4c2d42698913e7848fc36b1c1af90ad3a063a554d0ec31918b323e8bc28077b9"
+    },
+    {
+      "path": "fs/fs/src/fs_mkdir.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "aca27f59f11c99764350a3d463c63d9ad9049738",
+      "size": 1183,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/fs/src/fs_mkdir.c",
+      "sha256": "ced0dd17867a4f9f73c9ea0f15e5c454f07123ebb9783b3f37cbbfff2be84930"
+    },
+    {
+      "path": "fs/fs/src/fs_mount.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c687cf47c8a79cfdedbd3c8431063a7338e1f786",
+      "size": 2230,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/fs/src/fs_mount.c",
+      "sha256": "ef38daa05c6f1458fdb2dc6b3b4460632bc8fa5a18f2a683a16264a8398f5ccb"
+    },
+    {
+      "path": "fs/fs/src/fs_priv.h",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d5138c938c6a24584d5dd535346c0cb81310c5f4",
+      "size": 1071,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/fs/src/fs_priv.h",
+      "sha256": "9b67249660c738695208a09bc6732fdffd458bea4907195399f686bb19efaf15"
+    },
+    {
+      "path": "fs/fs/src/fsutil.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "81e83e9ba77d70d1a20ed33b0c03b1d2a0ea2647",
+      "size": 1588,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/fs/src/fsutil.c",
+      "sha256": "2a8e978830dc483a319591ab3b33963001a55676ec4f84a5b7b5ef1a7822eddf"
+    },
+    {
+      "path": "fs/nffs/include/nffs/nffs.h",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "35baeb5a1c3faee6adcdc3884b385be8ef05aac1",
+      "size": 2068,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/include/nffs/nffs.h",
+      "sha256": "427a2e8626ac1191c6eb9d9d4120cc5d35d109bbccb2840c2e3d4f8067ce357d"
+    },
+    {
+      "path": "fs/nffs/include/nffs/nffs_test.h",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "bac660a45234665ccc535162adf505c35979e86a",
+      "size": 954,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/include/nffs/nffs_test.h",
+      "sha256": "3ca316a088fb46eef34f8a3685fc8940a75fcdbade726d4a3ed7b6b1f914e662"
+    },
+    {
+      "path": "fs/nffs/src/nffs.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "1dc9c778f7e5f879dca2f5b4274d672410fccdd6",
+      "size": 22018,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs.c",
+      "sha256": "49f41f47f6b2de33cc312196edeb4bbcf69b569fad3c3c2e90247b0ebf8b410e"
+    },
+    {
+      "path": "fs/nffs/src/nffs_area.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "87b0dbff07a5c7e1ec17d909e1ece224ccf98bba",
+      "size": 3779,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_area.c",
+      "sha256": "6cd8584370f873455e83c02f2c479c94f61594fe2177215786bf6d7de9a7cb89"
+    },
+    {
+      "path": "fs/nffs/src/nffs_block.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f7d58475c40db75ae129cb35d79e46762650a94d",
+      "size": 14972,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_block.c",
+      "sha256": "69b55393d010737347b43133d1cb8e58a043ad145ebf9b73ed8f523e83c94534"
+    },
+    {
+      "path": "fs/nffs/src/nffs_cache.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "250309ba9682fe4a7a5b63e692d6dac0126bc8f6",
+      "size": 15711,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_cache.c",
+      "sha256": "05bc7e3c23c8e8e9ede6ace559bedb15b8b6a9dbf4574832b8204b55c1a03ef0"
+    },
+    {
+      "path": "fs/nffs/src/nffs_config.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "6ff61776c5a28b9386b3209346f3bab7cfd7dc31",
+      "size": 1829,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_config.c",
+      "sha256": "65c1c95b646a58fec02af35955eba05022f2ecf315873faec76122c3e5fc0a1c"
+    },
+    {
+      "path": "fs/nffs/src/nffs_crc.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "12a0a3a6442f47bb032ff7f48713a7804faf025d",
+      "size": 4262,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_crc.c",
+      "sha256": "c5762b2ca2ddc7d15ca179d85273a7b480646fdba239acd6602f80bc4fbab8f8"
+    },
+    {
+      "path": "fs/nffs/src/nffs_dir.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "a30636aed8f5edeb9e8ac69b5ac93bc92906313e",
+      "size": 3311,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_dir.c",
+      "sha256": "e4005c8d1ccfafb9d95e5f240f4e933b3f207bc0884e8860b0b62c459a06eb00"
+    },
+    {
+      "path": "fs/nffs/src/nffs_file.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c7bcb0290ab8056d7c351661690da0914b2a373b",
+      "size": 9858,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_file.c",
+      "sha256": "25852386403f768800ad533ba525d5b453798cbff99e2fe78f700b3cc6779eee"
+    },
+    {
+      "path": "fs/nffs/src/nffs_flash.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "cc838374715377410e1589bf4d64ceca6d28343c",
+      "size": 5434,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_flash.c",
+      "sha256": "76d56af78cb57b028da9f3b78045e7bee625ef8cf060b6f565936dd2ddd20e67"
+    },
+    {
+      "path": "fs/nffs/src/nffs_format.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "d3002096e5c3da689dc85b979b75429272a7e728",
+      "size": 4745,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_format.c",
+      "sha256": "3ff769bf73c7712063daf399f3da77b3c4181ab41d66c93a201ead4c5b085172"
+    },
+    {
+      "path": "fs/nffs/src/nffs_gc.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "4950e2c21862a40c45435815412f207dea5cfc63",
+      "size": 19005,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_gc.c",
+      "sha256": "8f20e0cacbf09618569d55c3984dc6911634320c6482039df3f9bc4d61da26c9"
+    },
+    {
+      "path": "fs/nffs/src/nffs_hash.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "00d5fa2276ba6270554341cbb6cdf5e9649e093f",
+      "size": 4894,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_hash.c",
+      "sha256": "f60aec43b532a7ea7aad5728ff8117ac7da0a1957c35ee45577e9dcd80bccac0"
+    },
+    {
+      "path": "fs/nffs/src/nffs_inode.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "beea42d2b0465f66b10f91cb7e0c251571830afc",
+      "size": 38252,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_inode.c",
+      "sha256": "473b891cc6a96a63c292ef95fa1dff8cfb9c620556a6c8325df070427ba1b152"
+    },
+    {
+      "path": "fs/nffs/src/nffs_misc.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "b6fc6f4141b0e05418ecfb6b231baff56f37cedc",
+      "size": 14976,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_misc.c",
+      "sha256": "1f2a4db7590db0d729fdcd9747576f5c227e7dd75fd3ad89b5ca6cbe4c2ca080"
+    },
+    {
+      "path": "fs/nffs/src/nffs_path.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "03a8a993adda7251b97525760e967b77febf2c0f",
+      "size": 9986,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_path.c",
+      "sha256": "ac2b9913d19cfcda10fea7a6fb235644da4f610cd7b75968133922b3d5536696"
+    },
+    {
+      "path": "fs/nffs/src/nffs_priv.h",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2f4412c01a1fa70cfac1d96ff18e12b6cd000e5a",
+      "size": 21381,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_priv.h",
+      "sha256": "9e265cf3f6762f8ccf08d37c91c29781e3cabc5588b70b8bb1476464c2550405"
+    },
+    {
+      "path": "fs/nffs/src/nffs_restore.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "f551577a5785210ccc0cd20ac0175115b1b82aed",
+      "size": 46072,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_restore.c",
+      "sha256": "edb1bddf18c8182c6bfed4425872262e078fe9c2a0fff003f8c3cb0eb61f5072"
+    },
+    {
+      "path": "fs/nffs/src/nffs_write.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "2ce2248996e948a132b853b83b6a07fd557e85e1",
+      "size": 13967,
+      "url": "https://raw.githubusercontent.com/apache/mynewt-core/828b84d04ea2dd826390ca458a32116a0af116fd/fs/nffs/src/nffs_write.c",
+      "sha256": "f0cd1dcf1d447cc53dfb63c8695d29b90855d96d30c2f8affccd318bf4831114"
+    }
+  ]
+}

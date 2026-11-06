@@ -1,0 +1,9 @@
+{
+  "compiler_checks_passed": true,
+  "negative_index": -1,
+  "upper_bound_index": -1,
+  "valid_index": 7,
+  "sum_for_2_7_11": 20,
+  "count_for_that_sum": 3,
+  "performance_comparison": "not_measured"
+}

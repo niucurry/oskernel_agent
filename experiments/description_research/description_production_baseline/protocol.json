@@ -1,0 +1,43 @@
+{
+  "timestamp_utc": "2026-10-08T06:17:17Z",
+  "scope": "Complete current original SUBSYS templates on ChibiOS portable-core public slice, direct API tool adapter; not full OpenCode/VERDICT/finals and not a new candidate",
+  "stage2_shared_budget": {
+    "already_requests": 8,
+    "already_reported_tokens": 12356,
+    "ceil_requests": 60,
+    "ceil_tokens": 200000
+  },
+  "probe_request_ceiling": 8,
+  "probe_reported_token_ceiling": 184000,
+  "max_completion_tokens": 6000,
+  "tool_ceiling": 12,
+  "next_call_preflight": "Conservative UTF-8 request byte count plus max output tokens against probe ceiling; actual usage separately counted; unknown API usage reserved 20000",
+  "no_retry": true,
+  "success": "Original validator accepts actual written subsystem and modules, report rendered; no semantic quality conclusion from validation",
+  "stop": "Any request/tool/token ceiling, API failure or original validation failure stops baseline; no prompt repair this run",
+  "why": "Earlier original production probe stopped before complete report, so source-selector adapters cannot stand in for production outcomes.",
+  "budget_accounting_amendment_before_resume": {
+    "timestamp_utc": "2026-10-08T06:24:47Z",
+    "cause": "Full UTF-8 request bytes counted on every call despite provider already reporting the token count of the identical prompt prefix; guard stops at 58960 actual tokens, below unchanged 120000 ceiling",
+    "replacement": "Previous reported prompt count + UTF-8 serialization of all newly appended messages + 1000 formatting reserve per new message + maximum completion; first request retains whole-byte bound",
+    "budget_ceilings_unchanged": true,
+    "reuse_first_four_responses": true,
+    "not_a_new_prompt_or_model_retry": true
+  },
+  "faithfulness_correction_before_continuation": {
+    "timestamp_utc": "2026-10-08T06:29:26Z",
+    "production_code": "mcp_server.py returns write_report before incrementing _step_count; default analysis ceiling 20 unless configured; SUBSYS recommends <=12",
+    "adapter_correction": "Separate analysis requests from writes; retain <=12 analysis queries, do not charge report outputs as source analysis",
+    "probe_actual_token_ceiling_change": {
+      "before": 120000,
+      "after": 184000,
+      "reason": "Complete currently sampled original SUBSYS baseline within existing parent stage allocation; retain previous stopped result, no method-effect comparison under adjusted budget"
+    },
+    "parent_stage_limit_unchanged": 200000,
+    "already_charged_unique_requests": 5,
+    "already_charged_actual_tokens": 84896,
+    "reuse_first_five_responses": true,
+    "announced_before_new_requests": true
+  },
+  "tool_ceiling_scope": "analysis tools only; write_report excluded as in production dispatch"
+}

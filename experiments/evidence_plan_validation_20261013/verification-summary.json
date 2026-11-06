@@ -1,0 +1,148 @@
+{
+  "date": "2026-10-13",
+  "model": "deepseek-flash",
+  "scope": "controlled_evidence_acquisition_not_behavior_or_scoring_accuracy",
+  "groups": {
+    "baseline": {
+      "status": "returned",
+      "elapsed_seconds": 53.535,
+      "rounds": [
+        {
+          "round": 0,
+          "run_id": "310e88f276ba4eb1ab168bdd12f3d222",
+          "session_ids": [
+            "ses_ecc87b358ffevrXaNk5sFi65yl"
+          ],
+          "stream_status": "complete",
+          "returned": 3,
+          "required": 3,
+          "report_cites_config_line": true,
+          "completed_tools": [
+            "grep",
+            "os-kernel-tools_read_file",
+            "os-kernel-tools_search_code",
+            "os-kernel-tools_write_report"
+          ],
+          "tool_errors": 5,
+          "returned_files": {
+            "config.h": [
+              [
+                1,
+                1
+              ]
+            ],
+            "request.c": [
+              [
+                1,
+                16
+              ]
+            ]
+          }
+        }
+      ],
+      "evaluation": "/home/niu/agent-evidence-plan-validation-20261013/baseline/evaluation.json"
+    },
+    "preview-baseline": {
+      "status": "needs_evidence",
+      "elapsed_seconds": 13.103,
+      "rounds": [
+        {
+          "round": 0,
+          "run_id": "6c4a5d3e18c34f529f6d1847bf323766",
+          "session_ids": [
+            "ses_ecc8486ecffe0NfGqFTmtLFSIZ"
+          ],
+          "stream_status": "complete",
+          "returned": 2,
+          "required": 3,
+          "report_cites_config_line": false,
+          "completed_tools": [
+            "os-kernel-tools_read_file",
+            "os-kernel-tools_write_report",
+            "read"
+          ],
+          "tool_errors": 0,
+          "returned_files": {
+            "request.c": [
+              [
+                1,
+                16
+              ]
+            ]
+          }
+        }
+      ],
+      "evaluation": "/home/niu/agent-evidence-plan-validation-20261013/preview-baseline/evaluation.json"
+    },
+    "preview-repair": {
+      "status": "returned",
+      "elapsed_seconds": 23.706,
+      "rounds": [
+        {
+          "round": 0,
+          "run_id": "ad31abd650fe4c449c0f47f9253a6aff",
+          "session_ids": [
+            "ses_ecc83a6d1ffeZh9JJVWrretcIh"
+          ],
+          "stream_status": "complete",
+          "returned": 2,
+          "required": 3,
+          "report_cites_config_line": false,
+          "completed_tools": [
+            "os-kernel-tools_read_file",
+            "os-kernel-tools_write_report",
+            "read"
+          ],
+          "tool_errors": 0,
+          "returned_files": {
+            "request.c": [
+              [
+                1,
+                16
+              ]
+            ]
+          }
+        },
+        {
+          "round": 1,
+          "run_id": "35408df6126f468a80a30a1c52251d7f",
+          "session_ids": [
+            "ses_ecc8379ccffez7of3Xp5gxLwqT"
+          ],
+          "stream_status": "complete",
+          "returned": 3,
+          "required": 3,
+          "report_cites_config_line": true,
+          "completed_tools": [
+            "os-kernel-tools_read_file",
+            "os-kernel-tools_write_report",
+            "read"
+          ],
+          "tool_errors": 0,
+          "returned_files": {
+            "config.h": [
+              [
+                1,
+                1
+              ]
+            ],
+            "request.c": [
+              [
+                1,
+                16
+              ]
+            ]
+          }
+        }
+      ],
+      "evaluation": "/home/niu/agent-evidence-plan-validation-20261013/preview-repair/evaluation.json"
+    }
+  },
+  "original_source_unchanged": true,
+  "initial_attempt_note": "baseline actively read all targets despite omission request; native read had permission errors. Not a successful omission-control trial.",
+  "regression": {
+    "passed": 299,
+    "failed": 0,
+    "includes_real_opencode_mcp_transport": true
+  }
+}

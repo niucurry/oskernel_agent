@@ -1,0 +1,16 @@
+{
+ "hypothesis": "Source identity cues can let a document-reader answer service-purpose questions correctly despite incorrect role text. Opaque anchors should reduce this false acceptance without losing supported content localization.",
+ "scope": "Evaluation mechanism for OS descriptions, not a claim of improved writer or whole-prose correctness.",
+ "development": "22 maintainer-authored ThreadX service purpose lines with independently located source definitions",
+ "references": "Official rtos-docs version 1e36a62618de3771c973196e7648cba50d19cf1f and portable ThreadX core 06dabb0ad0403f59889ce85eeb3d48dbd9d3759b. Service identities and Ctags spans, not an LLM judgment.",
+ "arms": ["good_masked", "wrong_roles_unmasked", "wrong_roles_masked", "names_only_unmasked"],
+ "controls": "Wrong roles are a deterministic derangement of the same source anchors and purpose text. Positive role text comes unchanged from maintainers. Masking changes only identity cues, not source semantics or claim content.",
+ "repeats": 2,
+ "model": "deepseek-flash, thinking disabled, temperature 0.2, max_tokens 1800",
+ "budget": {"requests": 8, "reported_actual_tokens": 60000, "unknown_usage_reserve": 20000, "parent_stage_remaining_reported_tokens_before": 200000, "no_retry": true},
+ "gate": "Positive masked exact localization >=90% in both repeats; wrong-role score must fall by >=50 percentage points after masking in both repeats. This only passes artifact-sensitivity pilot, not overall method suitability or novelty.",
+ "strong_simple_baseline": "Deterministic token-overlap role-text search, which sees the identical sanitized documents and questions; if it matches the masked reader controls, retain masking only as an evaluation diagnostic, not a new research method.",
+ "failures": "API failure, malformed output, unknown, wrong, budget exhaustion separately retained; unchanged question denominator 22; no format retry or post-hoc threshold change",
+ "stop": "No prompts or samples tuned after results. If simple baseline already solves controls, retire this standalone research candidate. Any later use must be as diagnostics of a genuinely different generator experiment.",
+ "limits": ["Original manual purpose lines can be stale or underspecified, so this is source-identity/role-localization truth, not verified kernel behavior", "This does not establish judge understanding speed", "No production-model quality claim, no held-out confirmation if development gate or strong-baseline requirement fails", "QA metrics and name obfuscation are existing research; this combination is not assumed novel"]
+}

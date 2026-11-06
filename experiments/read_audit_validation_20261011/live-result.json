@@ -1,0 +1,124 @@
+{
+  "run_dir": "/home/niu/agent-read-audit-validation-20261011/deepseek-trial/runs/4173c087a23d4c91a6c7f7a1d395d3b7",
+  "evaluation": {
+    "selected_functions": 1,
+    "fully_returned_functions": 1,
+    "returned_markers": 1,
+    "correct_reports": 1,
+    "corroborated_reports": 1,
+    "incorrect_or_unknown_observations": 0,
+    "selection": {
+      "status": "measured_against_supplied_labels",
+      "expected": 2,
+      "selected_relevant": 1,
+      "recall": 0.5,
+      "omitted": [
+        {
+          "path": "mm.c",
+          "symbol": "frame_valid",
+          "start_line": 1
+        }
+      ]
+    },
+    "targets": [
+      {
+        "path": "mm.c",
+        "symbol": "allocate_frame",
+        "start_line": 3,
+        "marker_returned": true,
+        "marker_status": "returned",
+        "reported_correctly": true,
+        "corroborated": true,
+        "function_returned": true,
+        "missing_ranges": []
+      }
+    ],
+    "run_id": "7eb9c865439f4c9eb0f29325663a266b",
+    "stream_status": "complete",
+    "model": "deepseek-flash",
+    "preview_first": true,
+    "read_evidence": {
+      "status": "returned",
+      "repair_rounds": 1,
+      "requirements": [
+        {
+          "path": "mm.c",
+          "sha256": "3af2b987e33831acee1c5398abf1a858231ec7c822f26d1c76c61842fa8f30c3",
+          "start_line": 3,
+          "end_line": 306,
+          "symbol": "allocate_frame",
+          "scope": "function",
+          "parser_status": "parsed",
+          "status": "returned",
+          "missing_ranges": []
+        },
+        {
+          "path": "mm.c",
+          "sha256": "3af2b987e33831acee1c5398abf1a858231ec7c822f26d1c76c61842fa8f30c3",
+          "start_line": 1,
+          "end_line": 1,
+          "symbol": "frame_valid",
+          "scope": "function",
+          "parser_status": "parsed",
+          "status": "returned",
+          "missing_ranges": []
+        }
+      ],
+      "attempts": [
+        {
+          "round": 0,
+          "run_id": "f687c3bb82ea423aa783bca8835725e5",
+          "requirements": [
+            {
+              "path": "mm.c",
+              "sha256": "3af2b987e33831acee1c5398abf1a858231ec7c822f26d1c76c61842fa8f30c3",
+              "start_line": 3,
+              "end_line": 306,
+              "symbol": "allocate_frame",
+              "scope": "function",
+              "parser_status": "parsed",
+              "status": "not_observed",
+              "missing_ranges": [
+                [
+                  203,
+                  306
+                ]
+              ]
+            }
+          ]
+        },
+        {
+          "round": 1,
+          "run_id": "7eb9c865439f4c9eb0f29325663a266b",
+          "requirements": [
+            {
+              "path": "mm.c",
+              "sha256": "3af2b987e33831acee1c5398abf1a858231ec7c822f26d1c76c61842fa8f30c3",
+              "start_line": 3,
+              "end_line": 306,
+              "symbol": "allocate_frame",
+              "scope": "function",
+              "parser_status": "parsed",
+              "status": "returned",
+              "missing_ranges": []
+            },
+            {
+              "path": "mm.c",
+              "sha256": "3af2b987e33831acee1c5398abf1a858231ec7c822f26d1c76c61842fa8f30c3",
+              "start_line": 1,
+              "end_line": 1,
+              "symbol": "frame_valid",
+              "scope": "function",
+              "parser_status": "parsed",
+              "status": "returned",
+              "missing_ranges": []
+            }
+          ]
+        }
+      ],
+      "relevant_function_recall": "unknown",
+      "artifact": "/home/niu/agent-read-audit-validation-20261011/deepseek-trial/runs/4173c087a23d4c91a6c7f7a1d395d3b7/receipts/4eaf23b72c25ceec/canary-trial-read-1-207166d900/7eb9c865439f4c9eb0f29325663a266b/coverage.json"
+    },
+    "response_error": null
+  }
+}

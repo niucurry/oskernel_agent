@@ -1,0 +1,52 @@
+{
+  "production": {
+    "requests": 8,
+    "tokens": 74359,
+    "unique_tool_requests": {
+      "os-kernel-tools_analyze_subtree": 1,
+      "os-kernel-tools_read_file": 1,
+      "os-kernel-tools_search_code": 4,
+      "os-kernel-tools_write_report": 3
+    }
+  },
+  "pilot": {
+    "requests": 4,
+    "tokens": 2901,
+    "results": [
+      {
+        "report": "template-report.md",
+        "correct": 10,
+        "unknown": 0,
+        "answered": 12
+      },
+      {
+        "report": "normal-form-template-report.md",
+        "correct": 10,
+        "unknown": 0,
+        "answered": 12
+      },
+      {
+        "report": "production-module-plain.md",
+        "correct": 11,
+        "unknown": 0,
+        "answered": 12
+      },
+      {
+        "report": "names-only-report.md",
+        "correct": 0,
+        "unknown": 12,
+        "answered": 0
+      }
+    ]
+  },
+  "total_requests": 12,
+  "reported_tokens": 77260,
+  "unknown_requests": 0,
+  "verified_oracle_raw_bytes": 13134590,
+  "citation_identity_scope": {
+    "template_direct_macro_citations": 5,
+    "normal_form_direct_macro_citations": 2,
+    "note": "Direct citation counts only, not semantic entailment; normal form lacks explicit per-formula links for 3 rewritten macros"
+  },
+  "research": "No gain in deterministic prototype preflight; no full augmented generator, repeat, heldout or human effect claim"
+}

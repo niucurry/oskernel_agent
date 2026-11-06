@@ -101,6 +101,8 @@ _QUICK_SYMBOL_RE = re.compile(
 
 
 def _quick_analyze_subtree(repo_path: Path, subtree_path: str = "") -> str:
+    from ..analysis.source_inventory import quick_symbols
+
     files = _quick_source_files(repo_path, subtree_path)
     if not files:
         return f"[快速模式] 子树 {subtree_path or '<root>'} 下未找到源文件。"
@@ -113,19 +115,18 @@ def _quick_analyze_subtree(repo_path: Path, subtree_path: str = "") -> str:
     ]
     symbol_total = 0
     shown_symbols: list[str] = []
+    uncertain_files: list[str] = []
     for p in files[:80]:
         rel = p.relative_to(repo_path).as_posix()
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             text = ""
-        syms = []
-        for m in _QUICK_SYMBOL_RE.finditer(text):
-            name = m.group(1) or m.group(2)
-            if not name:
-                continue
-            line = text[:m.start()].count("\n") + 1
-            syms.append(f"`{name}` ({rel}:{line})")
+            uncertain_files.append(rel)
+        inventory = quick_symbols(text, p.suffix)
+        syms = [f"`{name}` ({rel}:{line})" for name, line in inventory["symbols"]]
+        if inventory["status"] in {"partial", "unavailable", "unsupported"}:
+            uncertain_files.append(rel)
         symbol_total += len(syms)
         lines.append(f"- {rel}（{len(syms)} 个快速符号）")
         shown_symbols.extend(syms[:8])
@@ -134,6 +135,9 @@ def _quick_analyze_subtree(repo_path: Path, subtree_path: str = "") -> str:
         lines.append(f"  ... 还有 {len(files) - 80} 个文件")
     lines.extend(["", "### 符号样例", f"快速符号总数：{symbol_total}"])
     lines.extend(f"- {s}" for s in shown_symbols[:120])
+    if uncertain_files:
+        lines.append(f"[范围说明] {len(set(uncertain_files))} 个文件的快速符号解析不完整或不可用；"
+                     "未列出符号不代表没有实现，需用 read_file 核对。")
     lines.append("\n[提示] 当前为快速模式，跳过调用图；可继续用 read_file 查看关键文件。")
     return "\n".join(lines)
 
@@ -586,7 +590,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     if _step_count > _MAX_STEPS:
         return [types.TextContent(type="text", text=(
             f"[保护] 已达最大工具调用步数（{_MAX_STEPS} 步）。"
-            "请直接根据已收集的信息输出最终报告，不要再调用任何工具。"
+            "请停止分析查询，根据已收集的信息完成报告；未核验的内容保持未知。"
+            "仍可调用 write_report/write_to_file 写入指定输出文件，以及 validate_refs 核对引用。"
         ))]
 
     # 停止信号传播
@@ -595,7 +600,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         _hallucination_count   = 0
         _consecutive_dup_count = 0
         return [types.TextContent(type="text", text=(
-            "请直接根据已收集的信息输出最终报告，不要再调用任何工具。"
+            "请停止分析查询，根据已收集的信息完成报告；未核验的内容保持未知。"
+            "仍可调用 write_report/write_to_file 写入指定输出文件，以及 validate_refs 核对引用。"
         ))]
 
     # 提取主要查询符号（用于日志和去重）
@@ -774,9 +780,16 @@ def _handle_validate_refs(arguments: dict) -> list[types.TextContent]:
         if rp:
             repo_roots.append(Path(rp))
 
+    # Fast read/search tools intentionally avoid initializing the semantic
+    # engine. Their configured repository is also sufficient for path checks.
+    if not repo_roots:
+        auto_repo = os.environ.get("OSKERNEL_AGENT_REPO_PATH", "").strip()
+        if auto_repo and Path(auto_repo).is_dir():
+            repo_roots.append(Path(auto_repo))
+
     if not repo_roots:
         return [types.TextContent(type="text",
-            text="[错误] 尚未初始化仓库，请先调用 initialize_analysis。")]
+            text="[错误] 未配置有效仓库目录，请检查 OSKERNEL_AGENT_REPO_PATH 或分析上下文。")]
 
     # 提取所有 path/to/file.ext[:line[-line]] 引用，去重
     _EXTS = r"c|h|cc|cpp|cxx|hpp|rs|S|s|ld|lds|toml|md|py|sh|mk|cfg|go|json|yaml|yml|txt"

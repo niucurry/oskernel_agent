@@ -1,0 +1,78 @@
+{
+  "name": "riot",
+  "repo": "RIOT-OS/RIOT",
+  "tag": "2025.07",
+  "revision": "eb65305cf9f1b7affb50b17af5c12341b83a8636",
+  "prefixes": [
+    "sys/fs/",
+    "sys/include/vfs.h"
+  ],
+  "partition": "confirmation",
+  "exposure": "no matching repository found in available historical documents; not guaranteed blind or uncontaminated",
+  "source_root": "/home/niu/.cache/oskernel-description-interface-witness/riot",
+  "files": [
+    {
+      "path": "sys/fs/constfs/constfs.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c7f3051811f155520afcd423aa8c3a4cbfd17372",
+      "size": 7926,
+      "url": "https://raw.githubusercontent.com/RIOT-OS/RIOT/eb65305cf9f1b7affb50b17af5c12341b83a8636/sys/fs/constfs/constfs.c",
+      "sha256": "07f8cfa431e49fda9b6b3ce9cf8fb5ae22f97c3259580fbbc0f3aa1db9e1e390"
+    },
+    {
+      "path": "sys/fs/devfs/auto_init_devfs.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "7fa4d8eb49b48d29a26ce1721e23f0e8405bc931",
+      "size": 1107,
+      "url": "https://raw.githubusercontent.com/RIOT-OS/RIOT/eb65305cf9f1b7affb50b17af5c12341b83a8636/sys/fs/devfs/auto_init_devfs.c",
+      "sha256": "abb3541b33d9651e77853626f459dc08b91f73950aed7c3296c9184e105d4d3b"
+    },
+    {
+      "path": "sys/fs/devfs/devfs.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "eba73b01e3da509642e1cc5a4148eb827ffe4f9c",
+      "size": 7130,
+      "url": "https://raw.githubusercontent.com/RIOT-OS/RIOT/eb65305cf9f1b7affb50b17af5c12341b83a8636/sys/fs/devfs/devfs.c",
+      "sha256": "e463175a20cfcd7ab897f3bf277dfb706e9ca41ed1b3317dcfbf09001e0b1297"
+    },
+    {
+      "path": "sys/fs/devfs/hwrng.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "c174e8f016b7b80400fa83306a87b20bfe1fc77a",
+      "size": 739,
+      "url": "https://raw.githubusercontent.com/RIOT-OS/RIOT/eb65305cf9f1b7affb50b17af5c12341b83a8636/sys/fs/devfs/hwrng.c",
+      "sha256": "10336f93fb26ec353e03ddd0bc7568c13fcffc06dc54a4e266e80a03045fc526"
+    },
+    {
+      "path": "sys/fs/devfs/random-vfs.h",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "92e51d6c936161402477571f68e1e337532de2d5",
+      "size": 769,
+      "url": "https://raw.githubusercontent.com/RIOT-OS/RIOT/eb65305cf9f1b7affb50b17af5c12341b83a8636/sys/fs/devfs/random-vfs.h",
+      "sha256": "6376d8954fedffeab4f3de0e7e36b803cba1a4099e60c3b9e84c7b262b933d9f"
+    },
+    {
+      "path": "sys/fs/devfs/random.c",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "3eb3be7cea586a8d9e8d77399542aafcea22270e",
+      "size": 736,
+      "url": "https://raw.githubusercontent.com/RIOT-OS/RIOT/eb65305cf9f1b7affb50b17af5c12341b83a8636/sys/fs/devfs/random.c",
+      "sha256": "7c15fb3fc8e379c18dc220fc9df6744204c7ed6fa54de46d9ea8c879c83c4928"
+    },
+    {
+      "path": "sys/include/vfs.h",
+      "mode": "100644",
+      "type": "blob",
+      "sha": "51f3a31c0341c746214cee0b3517039bdd145810",
+      "size": 38457,
+      "url": "https://raw.githubusercontent.com/RIOT-OS/RIOT/eb65305cf9f1b7affb50b17af5c12341b83a8636/sys/include/vfs.h",
+      "sha256": "802fe20b74574494b7e3b2937251649de8668f83cc289797e76de67fb6ef7fce"
+    }
+  ]
+}

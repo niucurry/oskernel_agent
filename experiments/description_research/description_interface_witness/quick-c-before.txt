@@ -1,0 +1,21 @@
+## 子树分析（快速模式）：<root>
+文件数：7
+
+### 文件列表
+- sys/include/vfs.h（5 个快速符号）
+- sys/fs/devfs/hwrng.c（0 个快速符号）
+- sys/fs/devfs/random.c（0 个快速符号）
+- sys/fs/devfs/random-vfs.h（0 个快速符号）
+- sys/fs/devfs/auto_init_devfs.c（0 个快速符号）
+- sys/fs/devfs/devfs.c（0 个快速符号）
+- sys/fs/constfs/constfs.c（0 个快速符号）
+
+### 符号样例
+快速符号总数：5
+- `vfs_mount_struct` (sys/include/vfs.h:384)
+- `vfs_file_ops` (sys/include/vfs.h:447)
+- `vfs_dir_ops` (sys/include/vfs.h:577)
+- `vfs_file_system_ops` (sys/include/vfs.h:626)
+- `stat` (sys/include/vfs.h:1206)
+
+[提示] 当前为快速模式，跳过调用图；可继续用 read_file 查看关键文件。

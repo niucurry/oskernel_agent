@@ -1,0 +1,23 @@
+{
+  "tag": "flash-extra",
+  "model": "deepseek-flash",
+  "context_limit": 1048576,
+  "output_limit": 32768,
+  "compaction": "off",
+  "informed": false,
+  "extra_files": [
+    "kernel/vma.c",
+    "kernel/process.c",
+    "kernel/signal.c"
+  ],
+  "targets": 6,
+  "repair_rounds": 2,
+  "started": 1793281756.2196503,
+  "response_error": "llm_batch_failed",
+  "finished_main": 1793281766.233523,
+  "accepted_batch": null,
+  "session": null,
+  "stream_status": null,
+  "read_evidence": {},
+  "audit_files": []
+}

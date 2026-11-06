@@ -362,7 +362,9 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
                            outputs: dict, facts: dict | None) -> str:
     """构造 SUBSYS agent 的 user message。"""
     files = subsys_node["files"]
-    prompt_files = _files_for_subsys_prompt(files)
+    prompt_files = subsys_node.get("_prompt_files")
+    if prompt_files is None:
+        prompt_files = _files_for_subsys_prompt(files)
     payload = {
         "repo_path":      str(repo_path),
         "subsystem":      subsys_node["name"],
@@ -399,7 +401,8 @@ def _build_subsys_request(subsys_node: dict, repo_path: Path,
         "2. files 可能是截断索引；完整代码以 MCP 工具看到的仓库为准\n"
         "3. 直接调用 analyze_subtree('') 或针对 files 中目录调 analyze_subtree(dir)\n"
         "4. 浏览 files 列表与符号清单，识别模块拆分\n"
-        "5. read_file / find_symbol_definition 看关键模块的实现细节\n"
+        "5. read_file / find_symbol_definition 看关键模块的实现细节；引用的函数应完整读取，"
+        "长函数用 read_file 的 start_line/end_line 每次最多 200 行分段读取；头尾预览不算全文\n"
         "6. 工具调用总数 ≤12 次\n\n"
         "**写出顺序**：先写各模块 HTML → 再写子系统总览 HTML → **最后**写 JSON。\n"
         "**不要给子系统或模块打分**（JSON 无 score 字段）。\n\n"
@@ -589,12 +592,14 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
     """处理一个子系统节点：跑 LLM、读回所有 .md、填充节点与模块子节点。"""
     # 断点续跑：产物存在、指纹未变且重新通过校验时复用，不重跑 LLM。
     # 自动生效（无需开关）；强制全量 = 删除 work_dir/description_tree_work。
-    if (_subsys_fingerprint_matches_one(subsys_node, work_dir)
+    if (os.environ.get("AGENT_RECALL_CHECK") != "1" and not subsys_node.get("_evidence_plan")
+            and _subsys_fingerprint_matches_one(subsys_node, work_dir)
             and _restore_one_subsys_from_artifacts(
                 subsys_node, repo_path, work_dir)):
         print(f"[tree] {subsys_node['name']} 复用已通过校验的 SUBSYS 产物",
               file=sys.stderr, flush=True)
         return
+    subsys_node["_prompt_files"] = _files_for_subsys_prompt(subsys_node["files"])
     outputs   = _build_subsys_outputs(subsys_node, work_dir)
     out_path  = Path(outputs["json_path"])
     module_paths = outputs["module_paths"]
@@ -639,7 +644,11 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
         repo_path=repo_path,
         enrich=_enrich,
         cache_validator=_delivery_complete,
+        audit_source_reads=True,
+        read_repair_rounds=2,
     )
+    from ..engines.evidence_plan import bind_evidence_plan
+    bind_evidence_plan(task, subsys_node.get("_evidence_plan"), with_assertions=True)
     parsed = run_batch_task(
         task,
         schema_hint='{"name":str,"role":str,"summary":str,'
@@ -650,11 +659,37 @@ def _process_one_subsys(subsys_node: dict, repo_path: Path,
     )
     _validate_subsys_result(parsed, subsys_node["name"], repo_path)
 
+    parsed, claim_review = _review_description_result(task, parsed)
+    _validate_subsys_result(parsed, subsys_node["name"], repo_path)
     _apply_subsys_result(subsys_node, parsed, repo_path)
+    subsys_node["claim_review"] = claim_review
+    if task.recall_evidence:
+        subsys_node["recall_check"] = task.recall_evidence
+    from ..analysis.read_audit import report_read_audit
+    subsys_node["read_audit"] = report_read_audit(
+        task.result_read_audit, parsed, repo_path,
+    )
+    subsys_node["read_audit"]["coverage"] = task.read_evidence
+    if task.evidence_plan:
+        from ..analysis.evidence_plan import check_evidence_plan
+        subsys_node["evidence_plan"] = check_evidence_plan(repo_path, task.evidence_plan, task.result_read_audit)
+        from ..analysis.evaluation_assertions import check_assertions
+        subsys_node["evaluation_assertions"] = check_assertions(
+            repo_path, task.evidence_plan, parsed, task.result_read_audit, claim_review)
 
 
 def _apply_subsys_result(subsys_node: dict, parsed: dict, repo_path: Path) -> None:
     """把已经验证并补齐正文的子系统结果装配到报告树。"""
+
+    # Never trust an audit claimed inside model JSON or a restored old artifact.
+    # Only _process_one_subsys may replace this with the current host receipt.
+    subsys_node["read_audit"] = {"stream_status": "unknown", "reason": "no_current_run_audit"}
+    subsys_node["claim_review"] = {"status": "unknown", "reason": "no_current_review"}
+    subsys_node.pop("evidence_plan", None)
+    subsys_node.pop("evaluation_assertions", None)
+    subsys_node.pop("recall_check", None)
+    if os.environ.get("AGENT_RECALL_CHECK") == "1":
+        subsys_node["recall_check"] = {"status": "unknown", "reason": "no_current_session", "functions": []}
 
     # 填子系统字段（子系统/模块不打分，评分只在顶层 VERDICT）
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
@@ -698,6 +733,13 @@ def _apply_subsys_result(subsys_node: dict, parsed: dict, repo_path: Path) -> No
             "file_paths": module_paths,
             "content":    module_content,
         })
+
+    from ..analysis.description_scope import description_scope
+    subsys_node["description_scope"] = description_scope(
+        subsys_node.get("files") or [],
+        subsys_node.get("_prompt_files"),
+        subsys_node["children"],
+    )
 
 
 def load_subsys_stage_from_artifacts(
@@ -796,6 +838,13 @@ def run_subsys_stage(tree_root: dict, repo_path: Path,
                     if c.get("type") == "subsystem"]
     if not subsys_nodes:
         return
+
+    from ..engines.evidence_plan import configured_plan
+    from ..analysis.evidence_plan import scoped_plan
+    # Freeze once before parallel dispatch. VERDICT reuses this same snapshot.
+    tree_root["_evidence_plan"] = configured_plan(repo_path)
+    for node in subsys_nodes:
+        node["_evidence_plan"] = scoped_plan(tree_root["_evidence_plan"], node["name"])
 
     requested_workers = _subsys_concurrency()
     serial_opencode = opencode_serial_enabled()
@@ -1533,11 +1582,22 @@ def _collect_subsys_summaries(tree_root: dict) -> list[dict]:
             "summary":    c.get("summary", ""),
             "highlights": c.get("highlights", []),
             "issues":     c.get("issues", []),
+            "claim_review": {
+                "status": (c.get("claim_review") or {}).get("status", "unknown"),
+                "claims": [{"text": item["text"], "status": item["status"]}
+                           for item in (c.get("claim_review") or {}).get("claims", [])],
+                "instruction": "争议、反驳或证据不足的说法不得作为已确认事实继承；未复核不等于通过。",
+            },
+            "evidence_plan": c.get("evidence_plan"),
+            "evaluation_assertions": c.get("evaluation_assertions"),
             "modules":    [
                 {"name": m["name"], "summary": m.get("summary", "")}
                 for m in c.get("children", [])
             ],
         })
+    if os.environ.get("AGENT_RECALL_CHECK") == "1":
+        from ..analysis.recall_check import without_probe_results
+        out = without_probe_results(out)
     return out
 
 
@@ -2035,9 +2095,24 @@ def repair_verdict_similarity(
     return parsed
 
 
+def _review_description_result(task: BatchTask, parsed: dict) -> tuple[dict, dict]:
+    if getattr(task, "evaluation_assertions_enabled", False) and task.evidence_plan:
+        from ..analysis.evaluation_assertions import assertion_shape_errors
+        errors = assertion_shape_errors(task.evidence_plan, parsed)
+        if errors:
+            raise RuntimeError("评价断言未形成完整有效输出：" + "；".join(errors))
+    if task.result_read_audit is None:
+        return parsed, {"status": "unknown", "reason": "no_current_run_audit"}
+    from ..engines.claim_review import review_and_revise
+    return review_and_revise(task, parsed)
+
+
 def run_verdict_stage(tree_root: dict, facts: dict | None,
                        work_dir: Path,
                        repo_path: Path | None = None) -> dict:
+    from ..engines.evidence_plan import bind_evidence_plan, configured_plan
+    plan = (tree_root["_evidence_plan"] if "_evidence_plan" in tree_root
+            else configured_plan(repo_path or Path(".")))
     # 指纹库故障必须在顶层模型开始评分前修复，避免模型看不到工具结果后自行估算原创性。
     _ensure_reference_database(facts)
     outputs = {
@@ -2086,7 +2161,10 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
         repo_path=repo_path or Path("."),
         enrich=_enrich,
         cache_validator=_delivery_complete,
+        audit_source_reads=True,
+        read_repair_rounds=2,
     )
+    bind_evidence_plan(task, plan, with_assertions=True)
     parsed = run_batch_task(
         task,
         schema_hint='{"score_total":int,"dimensions":[...6 items...],'
@@ -2116,9 +2194,36 @@ def run_verdict_stage(tree_root: dict, facts: dict | None,
     _validate_verdict_result(parsed, repo_path or Path("."), facts)
     _validate_similarity_result(parsed, facts)
     _validate_hardcode_reviews(parsed, facts, repo_path or Path("."))
+    parsed, claim_review = _review_description_result(task, parsed)
+    _validate_verdict_result(parsed, repo_path or Path("."), facts)
+    _validate_similarity_result(parsed, facts)
+    _validate_hardcode_reviews(parsed, facts, repo_path or Path("."))
+    assertions = None
+    if task.evaluation_assertions_enabled and task.evidence_plan:
+        from ..analysis.evaluation_assertions import check_assertions
+        assertions = check_assertions(repo_path or Path("."), task.evidence_plan, parsed,
+                                      task.result_read_audit, claim_review)
     # 正文已由 enrich 读入 parsed（含缓存命中场景）
     # 归一化评分：维度统一到 0–100，总分=维度加权平均（覆盖 LLM 自填值）
-    return _normalize_verdict(parsed)
+    result = _normalize_verdict(parsed)
+    result["claim_review"] = claim_review
+    if task.recall_evidence:
+        result["recall_check"] = task.recall_evidence
+    from ..analysis.read_audit import report_read_audit
+    result["read_audit"] = report_read_audit(
+        task.result_read_audit,
+        parsed, repo_path or Path("."),
+    )
+    result["read_audit"]["coverage"] = task.read_evidence
+    result.pop("evidence_plan", None)
+    result.pop("evaluation_claims", None)
+    result.pop("evaluation_assertions", None)
+    if task.evidence_plan:
+        from ..analysis.evidence_plan import check_evidence_plan
+        result["evidence_plan"] = check_evidence_plan(
+            repo_path or Path("."), task.evidence_plan, task.result_read_audit)
+        result["evaluation_assertions"] = assertions
+    return result
 
 
 # 工具函数
@@ -2130,7 +2235,7 @@ def write_tree_json(tree: dict, path: Path) -> None:
 
 def _clean_tree(node: dict) -> dict:
     """删除临时/内部字段。"""
-    _INTERNAL = {"abs_path", "mtime", "size", "_dir_index", "files"}
+    _INTERNAL = {"abs_path", "mtime", "size", "_dir_index", "files", "_prompt_files", "_evidence_plan"}
     out = {k: v for k, v in node.items() if k not in _INTERNAL}
     if "children" in node:
         out["children"] = [_clean_tree(c) for c in node["children"]]

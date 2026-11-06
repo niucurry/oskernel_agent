@@ -1,0 +1,4 @@
+{
+  "mcp_2_3_0": "Installed external cache, but Server.list_tools is absent; real original server import fails. Zero model calls. Pin compatible 1.x version in separate external cache.",
+  "budget_announced_before_model_calls": true
+}

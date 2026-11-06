@@ -1,0 +1,15 @@
+{
+  "source": "typedef struct Thread { void (*cleanup)(void); } Thread;\n#define LOCK do {} while (0);\n#define UNLOCK do {} while (0);\nvoid release(Thread *p) {\n    LOCK\n    if (p->cleanup) { p->cleanup(); }\n    UNLOCK\n}\n",
+  "command": [
+    "gcc-12",
+    "-x",
+    "c",
+    "-std=c11",
+    "-Werror",
+    "-fsyntax-only",
+    "-"
+  ],
+  "exit_code": 0,
+  "stderr": "",
+  "scope": "valid C fixture after preprocessing, not OS build or semantic method evidence"
+}

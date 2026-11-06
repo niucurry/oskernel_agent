@@ -1,0 +1,23 @@
+[
+  {
+    "name": "repodoc.html",
+    "url": "https://arxiv.org/html/2604.26523v1",
+    "bytes": 232587,
+    "sha256": "20d1ac60b5209dc2efbebb8dc548003fe1fa672606d39ea7a92f788c5789507e",
+    "state": "downloaded"
+  },
+  {
+    "name": "sonar.html",
+    "url": "https://arxiv.org/html/2608.04195v1",
+    "bytes": 418283,
+    "sha256": "24b11506a509e3724fb794fd50ae58fa717827964c9e6d5dd07792340f473bf7",
+    "state": "downloaded"
+  },
+  {
+    "name": "complete-oracle.html",
+    "url": "https://arxiv.org/html/2606.09376v1",
+    "bytes": 132428,
+    "sha256": "4b86288a36e22639bdc40e9c5b754a0211ba2501d0ac558d2588a22d01e1a0b7",
+    "state": "downloaded"
+  }
+]

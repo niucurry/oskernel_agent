@@ -1,0 +1,75 @@
+{
+  "summary": "本轮在仓库副本 /home/niu/agent-recall-probe-20261029/exp-kernel/repo 内重新完整读取了 14 个目标范围（futex_wait、buddy_alloc、buddy_free、walk_internal、uvmcopy、copyinstr、pmem_alloc_pages、pmem_free_pages、scheduler、fork、sys_futex、acquire、vma_copy、vmunmap），每个范围均由 read 工具返回源码，未使用仓库外材料。总体判断：实现覆盖 RISC-V/LoongArch 用户页表、伙伴系统物理页、futex 线程同步、fork 与调度；主要风险为 uvmcopy 持 vmem_lock 调用会再次加锁的 vmunmap 导致 double acquire panic，buddy_free 重复释放分支持锁 return，pmem_free_pages 无锁读取元数据且移位早于阶数校验，copyinstr 的 NUL 和长度语义与注释不一致，walk_internal 分配失败不回滚且不刷新 TLB，futex_wait 与 scheduler/futex_clear 存在 ABBA 锁序风险，sys_futex 的 REQUEUE 路径不加锁且不检查返回值，vma_copy 的无效共享内存分支会破坏父链表并可能死循环。",
+  "functions": [
+    {
+      "path": "kernel/futex.c",
+      "symbol": "futex_wait",
+      "description": "功能：让线程 th 在 futex 地址 addr 上睡眠或定时等待，直到被 futex_wake/futex_wake_bitset 唤醒或超时；无返回值，超时通过 th->timeout_occurred 报告（kernel/futex.c:105-173）。关键流程：读取当前时间后获取 fq_lock（kernel/futex.c:108-109），线性扫描 futex_queue 找 valid==0 槽并写入 addr/thread，bitset 固定为 0xffffffff（kernel/futex.c:110-118）；ts 非空时 awakeTime=当前时间+相对超时并置 t_TIMING，否则清 awakeTime 并置 t_SLEEPING（kernel/futex.c:121-131）；在持有 fq_lock 时再获取 th->p->lock（kernel/futex.c:134），把进程置 RUNNABLE、waiting_count 加一，释放 fq_lock 后调用 sched 让出 CPU（kernel/futex.c:143-147）；从 sched 返回后释放 p->lock，再取 fq_lock，若该槽仍 valid 则清槽并递减 waiting_count（kernel/futex.c:157-167）。调用关系：sys_futex 的 FUTEX_WAIT 分支在 kernel/syscall.c:5628-5638 调用；futex_wake/futex_wake_bitset 负责把匹配线程置 t_RUNNABLE、清 timeout_occurred、清 valid 并递减等待计数（kernel/futex.c:194-200、225-231）；scheduler 对到期 t_TIMING 线程置 timeout_occurred=1 并调用 futex_clear（kernel/process.c:561-565、608；kernel/futex.c:327-341）。错误处理与风险：队列满时释放 fq_lock 后 panic（kernel/futex.c:170-172）；ts 未校验 tv_sec/tv_nsec 合法性；锁序为 fq_lock→p->lock（kernel/futex.c:109、134），而 scheduler 持 p->lock 调 futex_clear 再取 fq_lock，存在 ABBA 反转风险。"
+    },
+    {
+      "path": "kernel/pmem.c",
+      "symbol": "buddy_alloc",
+      "description": "功能：从伙伴系统空闲链表分配 2^order 个连续物理页，返回块起始地址，失败返回 NULL（kernel/pmem.c:252-342）。关键分支：order 越界时打印并直接返回（kernel/pmem.c:254-258）；获取 buddy_sys.lock 后从 current_order=order 向上找第一个非空 free_lists，list_pop_front 取节点和地址（kernel/pmem.c:261-275）；命中高阶块时循环减阶分裂，计算 buddy_addr=addr+block_size，按页号索引 nodes、初始化节点、set_block_metadata、list_push_front、set_buddy_free（kernel/pmem.c:281-309）；最后更新请求块元数据、memset 清零 PGSIZE<<order、set_block_metadata、set_buddy_used 后释放锁返回（kernel/pmem.c:311-331）。调用关系：pmem_alloc_pages 在 kernel/pmem.c:551-575 用 get_order 转阶后调用；walk_internal 的页表页、uvmcopy 的用户页、vma_copy 的 VMA 节点最终都经 pmem_alloc_pages 进入。错误处理与风险：找不到块时释放锁返回 NULL（kernel/pmem.c:336-341）；分裂路径对 buddy_page_idx 未做 total_pages 检查（kernel/pmem.c:292-293）；memset 直接把物理块地址当可写指针，依赖直映/DMWIN 约定。"
+    },
+    {
+      "path": "kernel/pmem.c",
+      "symbol": "buddy_free",
+      "description": "功能：释放伙伴系统中的块，并按伙伴关系逐级合并后挂回空闲链表（kernel/pmem.c:349-513）。关键分支：ptr 为空或 order 越界时打印并返回（kernel/pmem.c:351-355）；获取 buddy_sys.lock 后由地址算 page_idx，越界 panic（kernel/pmem.c:358-370）；从 nodes[page_idx] 读 actual_addr/actual_order，调用者传入的 order 只用于合法性检查（kernel/pmem.c:372-376）；扫描实际块所有页位图，若全为 0 判为已释放并打印警告后直接 return（kernel/pmem.c:381-404）；校验 ptr 位于 [actual_addr, actual_addr+block_size)，否则 panic（kernel/pmem.c:406-412）；set_buddy_free 清位图后循环用 get_buddy_addr=XOR 找伙伴，检查伙伴页号、is_buddy_available 和节点 addr/order，满足则 list_remove 伙伴、取较小地址、阶数加一、更新元数据（kernel/pmem.c:422-480）；最后更新最终节点、set_block_metadata、list_push_front 并释放锁（kernel/pmem.c:482-512）。调用关系：pmem_free_pages 在 kernel/pmem.c:673-674 以元数据 block_start/actual_order 调用；vmunmap、freewalk、uvmcopy 的错误清理最终经 pmem_free_pages 进入。错误处理与风险：重复释放分支在持有 buddy_sys.lock 时直接 return 而未 release（kernel/pmem.c:398-404），会遗留锁；actual_order 在移位前未校验；is_buddy_available 只检查伙伴起始页元数据和起始页位（kernel/pmem.c:66-86），依赖元数据一致性；部分页被占用时仍可能整块释放。"
+    },
+    {
+      "path": "kernel/vmem.c",
+      "symbol": "walk_internal",
+      "description": "功能：不获取锁地在页表 pt 中解析 va，返回最末级 PTE 指针；alloc 控制是否现场分配缺失的中间页表，失败返回 NULL（kernel/vmem.c:239-311）。关键流程：assert(va<MAXVA)，pt 为空返回 NULL（kernel/vmem.c:241-247）；从 level=PT_LEVEL-1 递减到 1，用 PX(level,va) 取当前 PTE（kernel/vmem.c:253-256）；若 *pte 带 PTE_V，则 PTE2PA 取下一级物理地址，检查非零后 OR dmwin_win0 更新 pt（kernel/vmem.c:267-276）；若无效且 alloc 为真，pmem_alloc_pages(1) 分配页，失败返回 NULL，成功把 PA2PTE(pt)|PTE_WALK|dmwin_win0 写入父 PTE（kernel/vmem.c:277-291）；无效且 alloc 为假返回 NULL（kernel/vmem.c:292-295）；循环结束返回 level 0 PTE（kernel/vmem.c:297-310）。调用关系：walk 在 kernel/vmem.c:109-119 加 vmem_lock 后调用；walkaddr 经 walk 做用户地址转换并检查 PTE_V/PTE_U（kernel/vmem.c:128-153）；mappages_internal 在调用者持锁上下文中直接调用（kernel/vmem.c:203）；vmunmap、uvmcopy 也直接调用（kernel/vmem.c:334、453、505）。错误处理与风险：va 越界由 assert panic；中间层分配失败不回滚此前已分配的页表页和父 PTE，存在泄漏；代码仅留 TLB 刷新 TODO（kernel/vmem.c:290），本函数不刷新 TLB；对 &pt[...] 的 !pte 检查实际不会成立。"
+    },
+    {
+      "path": "kernel/vmem.c",
+      "symbol": "uvmcopy",
+      "description": "功能：fork 时把父页表 old 中已映射的用户页逐页复制到子页表 new，成功返回 0，失败返回 -1（kernel/vmem.c:439-537）。关键流程：获取 vmem_lock（kernel/vmem.c:442），i=PGROUNDDOWN(myproc()->virt_addr)（kernel/vmem.c:447）；若 i>=0x100，先用 j 循环复制 [0,0x100) 内实际只有页 0 的映射（kernel/vmem.c:449-477）；RISCV 下再复制包含 0x000000010000036e 的一页（kernel/vmem.c:478-501）；随后从 i 到 sz 遍历，walk_internal(old,i,0) 取父 PTE，缺失或无效则跳过（kernel/vmem.c:503-515），否则读 PTE2PA/PTE_FLAGS，pmem_alloc_pages(1) 分配新页，memmove 从 pa|dmwin_win0 复制整页，再 mappages_internal(new,i,mem,PGSIZE,flags) 建立子映射（kernel/vmem.c:517-527）。调用关系：fork 在 kernel/process.c:986 调用；内部依赖 walk_internal、pmem_alloc_pages、mappages_internal、vmunmap 和 dmwin_win0。错误处理与风险：分配失败 goto err；mappages_internal 返回 -1 时先 pmem_free_pages(mem,1) 再 goto err（kernel/vmem.c:519-526）；err 分支调用 vmunmap(new,0,i/PGSIZE,1) 回滚后释放锁返回 -1（kernel/vmem.c:533-536）。关键问题是 uvmcopy 仍持有 vmem_lock 时调用 vmunmap，而 vmunmap 在 kernel/vmem.c:328 再次 acquire(&vmem_lock)，会触发 kernel/spinlock.c:28-29 的 double acquire panic；另外 mappages_internal 重映射返回 -EINVAL（kernel/vmem.c:208-212），这里只判断 == -1，会把该错误当成功继续。"
+    },
+    {
+      "path": "kernel/vmem.c",
+      "symbol": "copyinstr",
+      "description": "功能：从用户页表 pt 的 srcva 复制以 NUL 结尾的字符串到内核缓冲区 dst，最多 max 字节，成功返回已复制字符数，地址不可映射返回 -1（kernel/vmem.c:599-642）。关键流程：外层 while 在未遇 NUL 且 max>0 时循环（kernel/vmem.c:605）；每轮 PGROUNDDOWN(srcva) 后 walkaddr 取物理地址，pa0==0 返回 -1（kernel/vmem.c:607-610）；n=PGSIZE-(srcva-va0) 再与 max 取小（kernel/vmem.c:611-613）；RISCV 直接 pa0+偏移，否则 OR dmwin_win0（kernel/vmem.c:615-619）；内层逐字节复制，遇 NUL 向 dst 写终止符、置 got_null 并 break，普通字符复制并递减 n/max、递增 p/dst/len（kernel/vmem.c:620-637）；一轮后 srcva 推进到下一页（kernel/vmem.c:639），返回 len（kernel/vmem.c:641）。调用关系：fetchstr 在 kernel/vmem.c:549-556 调用并用 strlen 求长度；系统调用参数读取依赖该路径。错误处理与风险：只有 walkaddr 返回 0 才算 -1；max 内没有 NUL 时返回 max 且不在 dst 末尾补 NUL，随后 strlen 可能越界；遇 NUL 时 len 不含终止符，与函数头注释所称含终止符不一致（kernel/vmem.c:597、622-636）；max==0 时直接返回 0，不保证 dst 终止。"
+    },
+    {
+      "path": "kernel/pmem.c",
+      "symbol": "pmem_alloc_pages",
+      "description": "功能：按 npages 分配连续的 2 的幂个物理页，返回块起始地址，失败返回 NULL（kernel/pmem.c:544-581）。关键流程：npages<=0 返回 NULL（kernel/pmem.c:546-549）；get_order(npages) 转阶，order==-1 返回 NULL（kernel/pmem.c:551-552、577-580）；首次 buddy_alloc(order)（kernel/pmem.c:554）；失败则记录调试信息并 emergency_memory_cleanup 后重试（kernel/pmem.c:556-564）；仍失败则记录错误、buddy_diagnose_fork_issue、force_memory_reclaim，再第三次 buddy_alloc（kernel/pmem.c:565-573）；最后无条件返回第三次结果，可能仍为 NULL（kernel/pmem.c:575）。调用关系：本函数是 buddy_alloc 的主要上层入口；walk_internal 的页表页、uvmcopy 的用户页、vma_copy 的 VMA 节点等经此取得物理页。错误处理与风险：非法页数和 get_order 失败快速返回；两级回收后仍失败不再向上区分错误，也不在第三次失败后再次记录；清零由 buddy_alloc 成功路径完成。"
+    },
+    {
+      "path": "kernel/pmem.c",
+      "symbol": "pmem_free_pages",
+      "description": "功能：释放 ptr 对应的伙伴系统块，npages 用于限制请求释放页数不超过元数据记录的实际页数，无返回值（kernel/pmem.c:588-675）。关键流程：ptr 为空或 npages<=0 返回（kernel/pmem.c:590-591）；检查 addr 在 [mem_start,mem_end) 否则警告返回（kernel/pmem.c:596-601）；算 page_idx，越界打印返回（kernel/pmem.c:603-610）；从 nodes[page_idx] 读 block_start/actual_order，并先算 actual_pages=1UL<<actual_order（kernel/pmem.c:612-615）；随后校验 block_start 范围、actual_order 在 [0,BUDDY_MAX_ORDER]、actual_pages>=npages、block_start 按块大小对齐，失败均打印返回（kernel/pmem.c:618-647）；扫描整块位图，全 0 判已释放并返回（kernel/pmem.c:649-671）；否则以 block_start/actual_order 调 buddy_free（kernel/pmem.c:673-674）。调用关系：vmunmap、freewalk、uvmcopy 的错误路径以及 vma.c 多处都会调用；本函数把实际释放和合并交给 buddy_free。错误处理与风险：所有校验失败都静默返回，调用者无法感知；函数按元数据释放整块，不要求 ptr 等于 block_start，也不校验 ptr 位于块内；actual_pages 的移位早于 actual_order 校验，元数据损坏时可能未定义移位；读取元数据时未持 buddy_sys.lock，存在与并发分配/释放的竞态。"
+    },
+    {
+      "path": "kernel/process.c",
+      "symbol": "scheduler",
+      "description": "功能：内核调度器主循环，反复从 pool 中选择 RUNNABLE 进程及其可运行线程，切换上下文运行（kernel/process.c:524-641）。关键流程：取当前 CPU，cpu->proc=NULL（kernel/process.c:527-528）；无限循环中 intr_on（kernel/process.c:529-532），顺序扫描 pool，对每个 p acquire(&p->lock)（kernel/process.c:533-535）；只处理 p->state==RUNNABLE，读取一次当前时间（kernel/process.c:536、551），遍历 thread_queue：优先选 state==t_RUNNABLE；遇到 t_TIMING 且 awakeTime 小于当前绝对时间，则置 timeout_occurred=1、状态转 t_RUNNABLE 并选中（kernel/process.c:552-568）；无可用线程则释放锁 continue（kernel/process.c:571-575）；trapframe 或 current_thread 为空也释放锁跳过（kernel/process.c:578-591）；选中后设置 current_thread=t，copycontext/copytrapframe，线程置 t_RUNNING、清 awakeTime，进程置 RUNNING，调用 futex_clear，设置 cpu->proc=p，再 hsai_swtch（kernel/process.c:599-616）；返回后 copycontext 回线程，把 t 移到队尾，cpu->proc=NULL，释放 p->lock（kernel/process.c:621-635）。调用关系：fork 把子进程和主线程置 RUNNABLE 后由本循环调度（kernel/process.c:1108-1110）；futex_wait 内 sched 返回后回到本循环，scheduler 通过超时检测和 futex_clear 完成定时唤醒清理（kernel/process.c:561-565、608）。错误处理与风险：无 runnable 时只是忙循环且中断开启，没有 idle/wfi；trapframe/current_thread 异常时跳过且不改变进程状态，可能被反复扫描；超时判断用严格小于；整个 hsai_swtch 期间持有 p->lock，并在持锁时调用 futex_clear 取 fq_lock，与 futex_wait 的 fq_lock→p->lock 顺序相反，存在锁序反转风险。"
+    },
+    {
+      "path": "kernel/process.c",
+      "symbol": "fork",
+      "description": "功能：复制当前进程，创建子进程并返回子进程 pid；子进程用户返回值通过 trapframe->a0=0 实现（kernel/process.c:965-1123）。关键流程：debug_buddy 时先诊断（kernel/process.c:972-980）；allocproc 失败返回 -1（kernel/process.c:981-985）；uvmcopy 复制父页表，失败直接 panic（kernel/process.c:986-987）；vma_copy 复制 VMA 链表，成功时从 np->vma->next 遍历到哨兵，对每个非空 VMA 调 vma_map，失败 panic（kernel/process.c:988-1006）；继承 sz/virt_addr，复制 trapframe 并把 a0 置 0，再复制到子进程当前线程（kernel/process.c:1007-1013）；遍历 NOFILE，父项存在且 f_count>0 时调文件操作 dup，否则置 0（kernel/process.c:1017-1021）；复制 cwd/root 指针和路径、uid/gid、pgid/sid、umask、personality、UTS 命名空间并增引用、补充组、rlimits（kernel/process.c:1023-1067）；遍历父 VMA，对 SHARE 且有 shm_kernel 的段在子 VMA 中按指针配对，命中时 RISCV 下 sfence_vma（kernel/process.c:1069-1098）；保存 pid，释放 np->lock（kernel/process.c:1100-1101）；parent_lock 下设置 np->parent 和主线程 ppid（kernel/process.c:1103-1106）；重新获取 np->lock，把进程和主线程置 RUNNABLE，释放锁（kernel/process.c:1108-1112）；最后 debug 诊断并返回 pid（kernel/process.c:1114-1122）。调用关系：uvmcopy 在 kernel/process.c:986 进入 vmem.c；vma_copy 在 kernel/vma.c:1060-1126 分配 VMA 节点、复制文件引用和共享内存 attach_count，失败 panic；vma_map 完成实际映射。错误处理与风险：只有 allocproc 失败正常返回 -1；uvmcopy 失败、vma_map 失败以及 vma_copy 内部失败都 panic，vma_map 失败后的 return -1 不可达；uvmcopy 的错误路径还会因 vmunmap 重复加锁而 panic；文件 dup 返回值未检查；panic 前不回滚已复制页、VMA 或文件引用。"
+    },
+    {
+      "path": "kernel/syscall.c",
+      "symbol": "sys_futex",
+      "description": "功能：futex 系统调用入口，按 op 分派 WAIT、WAKE、REQUEUE、CMP_REQUEUE、WAIT_BITSET、WAKE_BITSET（kernel/syscall.c:5600-5739）。关键流程：base_op=op&(FUTEX_PRIVATE_FLAG-1)，即 op&127，去掉 PRIVATE_FLAG 并忽略 CLOCK_REALTIME 等高位的语义（kernel/syscall.c:5607-5609；include/kernel/futex.h:22-23 中宏值为 128/256）；WAIT 先 copyin 用户 int，失败 -EFAULT，值不等 -EWOULDBLOCK；utime 非空再 copyin timespec；取 current_thread，清 timeout_occurred，调 futex_wait，超时返回 -ETIMEDOUT，否则 break 后返回 0（kernel/syscall.c:5611-5641、5738）；WAKE 返回 futex_wake 的唤醒数（kernel/syscall.c:5642-5644）；REQUEUE 调 futex_requeue 后 break，统一返回 0，不检查错误（kernel/syscall.c:5645-5647）；CMP_REQUEUE 把 val 当 nr_wake、utime 强转 nr_requeue，负值 -EINVAL，copyin 失败 -EFAULT，值不等 -EAGAIN，否则返回 futex_cmp_requeue（kernel/syscall.c:5648-5675）；WAIT_BITSET 校验 bitset 非 0，copyin 比较，utime 非空 copyin，清 timeout 后调 futex_wait_bitset，超时 -ETIMEDOUT（kernel/syscall.c:5676-5719）；WAKE_BITSET 校验 bitset 非 0 后返回 futex_wake_bitset（kernel/syscall.c:5720-5733）；default 返回 -ENOSYS（kernel/syscall.c:5734-5737）。调用关系：本函数把用户参数转换后交给 futex.c 的等待/唤醒/重排队函数；WAIT 的相对超时由 futex_wait 加上当前时间（kernel/futex.c:124），WAIT_BITSET 的 timespec 在 futex_wait_bitset 中直接作为 awakeTime（kernel/futex.c:46）。错误处理与风险：用户地址只用 copyin 检查可读性，不检查 uaddr 对齐；REQUEUE 不校验 uaddr2、不返回错误，且 futex_requeue 本身未取 fq_lock、未递减 waiting_count（kernel/futex.c:246-261）；WAKE 未拒绝负 n；WAIT_BITSET 的超时语义依赖调用者传绝对时间。"
+    },
+    {
+      "path": "kernel/spinlock.c",
+      "symbol": "acquire",
+      "description": "功能：获取自旋锁，先关中断并检查重复获取，再自旋等待原子交换成功，最后记录持锁 CPU（kernel/spinlock.c:24-50）。关键流程：push_off 禁用中断（kernel/spinlock.c:27）；holding(lk) 为真则 panic(double acquire)（kernel/spinlock.c:28-29）；while __sync_lock_test_and_set(&lk->locked,1)!=0 自旋（kernel/spinlock.c:37-38）；__sync_synchronize 内存屏障（kernel/spinlock.c:46）；lk->cpu=mycpu() 记录持锁者（kernel/spinlock.c:49）。调用关系：vmem_lock、fq_lock、buddy_sys.lock、p->lock 等都通过本函数获取；holding 依赖 lk->cpu 与当前 CPU。错误处理：重复获取直接 panic；先 push_off 再检查，panic 路径不会恢复中断计数；没有超时、让出 CPU 或空指针检查。"
+    },
+    {
+      "path": "kernel/vma.c",
+      "symbol": "vma_copy",
+      "description": "功能：为子进程 np 复制父进程 VMA 链表 head，返回新链表哨兵，失败 panic（kernel/vma.c:1060-1126）。关键流程：先 pmem_alloc_pages(1) 分配哨兵 new_vma，失败 goto bad（kernel/vma.c:1062-1066）；初始化哨兵自环、type=NONE，赋给 np->vma（kernel/vma.c:1067-1069）；从 head->next 遍历父链表，每个节点分配 nvma，失败 goto bad（kernel/vma.c:1070-1076）；memmove 复制整个 VMA（kernel/vma.c:1077）；MMAP 且 fd!=-1 时对 np->ofile[fd] 调 dup，未检查返回值（kernel/vma.c:1078-1085）；SHARE 且 shm_kernel 时，若 shm_pages 存在则 attach_count++，否则从链表移除该 VMA 并 pmem_free_pages，然后 continue（kernel/vma.c:1088-1111）；正常节点清空 next/prev 后插入到新哨兵之前（kernel/vma.c:1113-1117），pre 前进（kernel/vma.c:1118）；成功返回 new_vma（kernel/vma.c:1120）。bad 分支把 np->vma 置 NULL、释放哨兵并 panic（kernel/vma.c:1121-1125）。调用关系：fork 在 kernel/process.c:988 调用，随后遍历返回链表并逐个 vma_map。错误处理与风险：分配失败不回收此前已复制的 VMA 节点、文件引用和 attach_count，只释放哨兵后 panic；无效 SHARE 分支用 memmove 复制来的 prev/next 去改写父进程链表，且 continue 前不推进 pre，可能破坏父链表并重复处理同一节点；dup 返回值未检查；遍历和改写链表时未加锁。"
+    },
+    {
+      "path": "kernel/vmem.c",
+      "symbol": "vmunmap",
+      "description": "功能：从虚拟地址 va 开始解除 npages 个连续页的映射，do_free 控制是否释放物理页（kernel/vmem.c:321-379）。关键流程：assert va 按页对齐（kernel/vmem.c:325）；获取 vmem_lock（kernel/vmem.c:328）；按页循环，walk_internal(pt,a,0) 取 PTE，NULL 或无效则 continue（kernel/vmem.c:332-340）；若 PTE_FLAGS(*pte)==PTE_V 则 panic not a leaf（kernel/vmem.c:342-343）；do_free 为真时取 PTE2PA，pa!=0 且 (pa|dmwin_win0) 在 [mem_start,mem_end) 才 pmem_free_pages((void*)(pa|dmwin_win0),1)，否则打印无效物理地址（kernel/vmem.c:345-361）；无论是否有效最后都 *pte=0（kernel/vmem.c:372）；循环结束释放 vmem_lock（kernel/vmem.c:376）。调用关系：uvmfree 在 kernel/vmem.c:381-384 调用；uvmcopy 的错误分支在 kernel/vmem.c:534 调用；freewalk 另行释放页表页。错误处理与风险：va 未对齐 assert panic，非叶 PTE panic；无效物理地址只打印但仍清 PTE；函数不刷新 TLB，也不释放中间页表层级；由于自身 acquire(&vmem_lock)，在已持 vmem_lock 的 uvmcopy 错误路径中调用会 double acquire panic。"
+    }
+  ]
+}

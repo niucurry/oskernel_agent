@@ -1,0 +1,271 @@
+{
+  "items": [
+    {
+      "manual_api": "tx_thread_identify",
+      "purpose": "Retrieves pointer to currently executing thread",
+      "reference": {
+        "name": "_tx_thread_identify",
+        "manual_api": "tx_thread_identify",
+        "family": "thread",
+        "path": "common/src/tx_thread_identify.c",
+        "start": 75,
+        "end": 103
+      }
+    },
+    {
+      "manual_api": "tx_byte_release",
+      "purpose": "Release bytes back to memory pool",
+      "reference": {
+        "name": "_tx_byte_release",
+        "manual_api": "tx_byte_release",
+        "family": "byte_release",
+        "path": "common/src/tx_byte_release.c",
+        "start": 76,
+        "end": 376
+      }
+    },
+    {
+      "manual_api": "tx_block_release",
+      "purpose": "Release fixed-size block of memory",
+      "reference": {
+        "name": "_tx_block_release",
+        "manual_api": "tx_block_release",
+        "family": "block_release",
+        "path": "common/src/tx_block_release.c",
+        "start": 74,
+        "end": 204
+      }
+    },
+    {
+      "manual_api": "tx_timer_info_get",
+      "purpose": "Retrieve information about an application timer",
+      "reference": {
+        "name": "_tx_timer_info_get",
+        "manual_api": "tx_timer_info_get",
+        "family": "timer",
+        "path": "common/src/tx_timer_info_get.c",
+        "start": 78,
+        "end": 248
+      }
+    },
+    {
+      "manual_api": "tx_queue_performance_system_info_get",
+      "purpose": "Get queue system performance information",
+      "reference": {
+        "name": "_tx_queue_performance_system_info_get",
+        "manual_api": "tx_queue_performance_system_info_get",
+        "family": "queue",
+        "path": "common/src/tx_queue_performance_system_info_get.c",
+        "start": 84,
+        "end": 205
+      }
+    },
+    {
+      "manual_api": "tx_queue_performance_info_get",
+      "purpose": "Get queue performance information",
+      "reference": {
+        "name": "_tx_queue_performance_info_get",
+        "manual_api": "tx_queue_performance_info_get",
+        "family": "queue",
+        "path": "common/src/tx_queue_performance_info_get.c",
+        "start": 84,
+        "end": 229
+      }
+    },
+    {
+      "manual_api": "tx_semaphore_performance_system_info_get",
+      "purpose": "Get semaphore system performance information",
+      "reference": {
+        "name": "_tx_semaphore_performance_system_info_get",
+        "manual_api": "tx_semaphore_performance_system_info_get",
+        "family": "semaphore",
+        "path": "common/src/tx_semaphore_performance_system_info_get.c",
+        "start": 80,
+        "end": 174
+      }
+    },
+    {
+      "manual_api": "tx_block_pool_performance_info_get",
+      "purpose": "Get block pool performance information",
+      "reference": {
+        "name": "_tx_block_pool_performance_info_get",
+        "manual_api": "tx_block_pool_performance_info_get",
+        "family": "block_pool",
+        "path": "common/src/tx_block_pool_performance_info_get.c",
+        "start": 82,
+        "end": 201
+      }
+    },
+    {
+      "manual_api": "tx_block_pool_performance_system_info_get",
+      "purpose": "Get block pool system performance information",
+      "reference": {
+        "name": "_tx_block_pool_performance_system_info_get",
+        "manual_api": "tx_block_pool_performance_system_info_get",
+        "family": "block_pool",
+        "path": "common/src/tx_block_pool_performance_system_info_get.c",
+        "start": 79,
+        "end": 173
+      }
+    },
+    {
+      "manual_api": "tx_thread_preemption_change",
+      "purpose": "Change preemption-threshold of application thread",
+      "reference": {
+        "name": "_tx_thread_preemption_change",
+        "manual_api": "tx_thread_preemption_change",
+        "family": "thread",
+        "path": "common/src/tx_thread_preemption_change.c",
+        "start": 76,
+        "end": 280
+      }
+    },
+    {
+      "manual_api": "tx_mutex_performance_system_info_get",
+      "purpose": "Get mutex system performance information",
+      "reference": {
+        "name": "_tx_mutex_performance_system_info_get",
+        "manual_api": "tx_mutex_performance_system_info_get",
+        "family": "mutex",
+        "path": "common/src/tx_mutex_performance_system_info_get.c",
+        "start": 84,
+        "end": 205
+      }
+    },
+    {
+      "manual_api": "tx_event_flags_create",
+      "purpose": "Create event flags group",
+      "reference": {
+        "name": "_tx_event_flags_create",
+        "manual_api": "tx_event_flags_create",
+        "family": "event_flags",
+        "path": "common/src/tx_event_flags_create.c",
+        "start": 74,
+        "end": 141
+      }
+    },
+    {
+      "manual_api": "tx_byte_allocate",
+      "purpose": "Allocate bytes of memory",
+      "reference": {
+        "name": "_tx_byte_allocate",
+        "manual_api": "tx_byte_allocate",
+        "family": "byte_allocate",
+        "path": "common/src/tx_byte_allocate.c",
+        "start": 81,
+        "end": 409
+      }
+    },
+    {
+      "manual_api": "tx_semaphore_put_notify",
+      "purpose": "Notify application when semaphore is put",
+      "reference": {
+        "name": "_tx_semaphore_put_notify",
+        "manual_api": "tx_semaphore_put_notify",
+        "family": "semaphore",
+        "path": "common/src/tx_semaphore_put_notify.c",
+        "start": 74,
+        "end": 107
+      }
+    },
+    {
+      "manual_api": "tx_mutex_get",
+      "purpose": "Obtain ownership of mutex",
+      "reference": {
+        "name": "_tx_mutex_get",
+        "manual_api": "tx_mutex_get",
+        "family": "mutex",
+        "path": "common/src/tx_mutex_get.c",
+        "start": 76,
+        "end": 409
+      }
+    },
+    {
+      "manual_api": "tx_byte_pool_create",
+      "purpose": "Create memory pool of bytes",
+      "reference": {
+        "name": "_tx_byte_pool_create",
+        "manual_api": "tx_byte_pool_create",
+        "family": "byte_pool",
+        "path": "common/src/tx_byte_pool_create.c",
+        "start": 75,
+        "end": 197
+      }
+    },
+    {
+      "manual_api": "tx_timer_deactivate",
+      "purpose": "Deactivate application timer",
+      "reference": {
+        "name": "_tx_timer_deactivate",
+        "manual_api": "tx_timer_deactivate",
+        "family": "timer",
+        "path": "common/src/tx_timer_deactivate.c",
+        "start": 71,
+        "end": 250
+      }
+    },
+    {
+      "manual_api": "tx_event_flags_set_notify",
+      "purpose": "Notify application when event flags are set",
+      "reference": {
+        "name": "_tx_event_flags_set_notify",
+        "manual_api": "tx_event_flags_set_notify",
+        "family": "event_flags",
+        "path": "common/src/tx_event_flags_set_notify.c",
+        "start": 74,
+        "end": 107
+      }
+    },
+    {
+      "manual_api": "tx_byte_pool_delete",
+      "purpose": "Delete memory byte pool",
+      "reference": {
+        "name": "_tx_byte_pool_delete",
+        "manual_api": "tx_byte_pool_delete",
+        "family": "byte_pool",
+        "path": "common/src/tx_byte_pool_delete.c",
+        "start": 80,
+        "end": 211
+      }
+    },
+    {
+      "manual_api": "tx_block_allocate",
+      "purpose": "Allocate fixed-size block of memory",
+      "reference": {
+        "name": "_tx_block_allocate",
+        "manual_api": "tx_block_allocate",
+        "family": "block_allocate",
+        "path": "common/src/tx_block_allocate.c",
+        "start": 79,
+        "end": 372
+      }
+    },
+    {
+      "manual_api": "tx_time_set",
+      "purpose": "Sets the current time",
+      "reference": {
+        "name": "_tx_time_set",
+        "manual_api": "tx_time_set",
+        "family": "time",
+        "path": "common/src/tx_time_set.c",
+        "start": 72,
+        "end": 92
+      }
+    },
+    {
+      "manual_api": "tx_time_get",
+      "purpose": "Retrieves the current time Application Timers",
+      "reference": {
+        "name": "_tx_time_get",
+        "manual_api": "tx_time_get",
+        "family": "time",
+        "path": "common/src/tx_time_get.c",
+        "start": 74,
+        "end": 102
+      }
+    }
+  ],
+  "manual_file_sha256": "fe066b60c514993618825a46d173bc851d16e5e0ee82f12ab06d94eda08a1a08",
+  "selection": "deterministic hash order, at most two services per frozen existing reference family; source intersection only",
+  "timestamp_utc": "2026-10-08T06:05:06Z"
+}

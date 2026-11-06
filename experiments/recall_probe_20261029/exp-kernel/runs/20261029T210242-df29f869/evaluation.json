@@ -1,0 +1,2060 @@
+{
+  "run": "20261029T210242-df29f869",
+  "meta": {
+    "tag": "pilot",
+    "model": "deepseek-flash",
+    "compaction": "off",
+    "informed": false,
+    "context_limit": 1048576,
+    "extra_files": [],
+    "accepted_batch": "recall-trial-read-2",
+    "session": "ses_e78383b62ffe2Qsb7NN5kZE61F",
+    "stream_status": "complete",
+    "response_error": null
+  },
+  "compacted_during_main": false,
+  "main_requests": 57,
+  "probe_requests": 33,
+  "probe_requests_with_tools": 0,
+  "base_prompt_tokens": 49149,
+  "base_chars": 174074,
+  "report_request_found": true,
+  "summary": [
+    {
+      "method": "batch_context",
+      "kind": "canary",
+      "role": "decoy",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 6
+      }
+    },
+    {
+      "method": "batch_context",
+      "kind": "canary",
+      "role": "decoy",
+      "present": true,
+      "n": 21,
+      "correct": 21,
+      "rate": 1.0,
+      "ci95": [
+        0.845,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 21
+      }
+    },
+    {
+      "method": "batch_context",
+      "kind": "canary",
+      "role": "fake",
+      "present": null,
+      "n": 9,
+      "correct": 9,
+      "rate": 1.0,
+      "ci95": [
+        0.701,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 9
+      }
+    },
+    {
+      "method": "batch_context",
+      "kind": "canary",
+      "role": "nomarker",
+      "present": null,
+      "n": 6,
+      "correct": 6,
+      "rate": 1.0,
+      "ci95": [
+        0.61,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 6
+      }
+    },
+    {
+      "method": "batch_context",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 54,
+      "correct": 54,
+      "rate": 1.0,
+      "ci95": [
+        0.934,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 54
+      }
+    },
+    {
+      "method": "batch_pad_after_100000",
+      "kind": "canary",
+      "role": "decoy",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 6
+      }
+    },
+    {
+      "method": "batch_pad_after_100000",
+      "kind": "canary",
+      "role": "decoy",
+      "present": true,
+      "n": 21,
+      "correct": 21,
+      "rate": 1.0,
+      "ci95": [
+        0.845,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 21
+      }
+    },
+    {
+      "method": "batch_pad_after_100000",
+      "kind": "canary",
+      "role": "fake",
+      "present": null,
+      "n": 9,
+      "correct": 9,
+      "rate": 1.0,
+      "ci95": [
+        0.701,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 9
+      }
+    },
+    {
+      "method": "batch_pad_after_100000",
+      "kind": "canary",
+      "role": "nomarker",
+      "present": null,
+      "n": 6,
+      "correct": 6,
+      "rate": 1.0,
+      "ci95": [
+        0.61,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 6
+      }
+    },
+    {
+      "method": "batch_pad_after_100000",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 54,
+      "correct": 54,
+      "rate": 1.0,
+      "ci95": [
+        0.934,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 54
+      }
+    },
+    {
+      "method": "batch_pad_after_300000",
+      "kind": "canary",
+      "role": "decoy",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 6
+      }
+    },
+    {
+      "method": "batch_pad_after_300000",
+      "kind": "canary",
+      "role": "decoy",
+      "present": true,
+      "n": 21,
+      "correct": 21,
+      "rate": 1.0,
+      "ci95": [
+        0.845,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 21
+      }
+    },
+    {
+      "method": "batch_pad_after_300000",
+      "kind": "canary",
+      "role": "fake",
+      "present": null,
+      "n": 9,
+      "correct": 9,
+      "rate": 1.0,
+      "ci95": [
+        0.701,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 9
+      }
+    },
+    {
+      "method": "batch_pad_after_300000",
+      "kind": "canary",
+      "role": "nomarker",
+      "present": null,
+      "n": 6,
+      "correct": 6,
+      "rate": 1.0,
+      "ci95": [
+        0.61,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 6
+      }
+    },
+    {
+      "method": "batch_pad_after_300000",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 54,
+      "correct": 54,
+      "rate": 1.0,
+      "ci95": [
+        0.934,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 54
+      }
+    },
+    {
+      "method": "batch_pad_after_600000",
+      "kind": "canary",
+      "role": "decoy",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 6
+      }
+    },
+    {
+      "method": "batch_pad_after_600000",
+      "kind": "canary",
+      "role": "decoy",
+      "present": true,
+      "n": 21,
+      "correct": 21,
+      "rate": 1.0,
+      "ci95": [
+        0.845,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 21
+      }
+    },
+    {
+      "method": "batch_pad_after_600000",
+      "kind": "canary",
+      "role": "fake",
+      "present": null,
+      "n": 9,
+      "correct": 9,
+      "rate": 1.0,
+      "ci95": [
+        0.701,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 9
+      }
+    },
+    {
+      "method": "batch_pad_after_600000",
+      "kind": "canary",
+      "role": "nomarker",
+      "present": null,
+      "n": 6,
+      "correct": 6,
+      "rate": 1.0,
+      "ci95": [
+        0.61,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 6
+      }
+    },
+    {
+      "method": "batch_pad_after_600000",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 54,
+      "correct": 54,
+      "rate": 1.0,
+      "ci95": [
+        0.934,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 54
+      }
+    },
+    {
+      "method": "context",
+      "kind": "callee",
+      "role": "decoy",
+      "present": false,
+      "n": 4,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.49
+      ],
+      "outcomes": {
+        "wrong": 2,
+        "unknown": 2
+      }
+    },
+    {
+      "method": "context",
+      "kind": "callee",
+      "role": "decoy",
+      "present": true,
+      "n": 9,
+      "correct": 7,
+      "rate": 0.778,
+      "ci95": [
+        0.453,
+        0.937
+      ],
+      "outcomes": {
+        "wrong": 2,
+        "correct": 7
+      }
+    },
+    {
+      "method": "context",
+      "kind": "callee",
+      "role": "nomarker",
+      "present": false,
+      "n": 4,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.49
+      ],
+      "outcomes": {
+        "unknown": 4
+      }
+    },
+    {
+      "method": "context",
+      "kind": "callee",
+      "role": "target",
+      "present": true,
+      "n": 97,
+      "correct": 74,
+      "rate": 0.763,
+      "ci95": [
+        0.669,
+        0.836
+      ],
+      "outcomes": {
+        "correct": 74,
+        "wrong": 23
+      }
+    },
+    {
+      "method": "context",
+      "kind": "calls",
+      "role": "decoy",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "partial": 2
+      }
+    },
+    {
+      "method": "context",
+      "kind": "calls",
+      "role": "decoy",
+      "present": true,
+      "n": 4,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.49
+      ],
+      "outcomes": {
+        "partial": 3,
+        "wrong": 1
+      }
+    },
+    {
+      "method": "context",
+      "kind": "calls",
+      "role": "nomarker",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "wrong": 2
+      }
+    },
+    {
+      "method": "context",
+      "kind": "calls",
+      "role": "target",
+      "present": true,
+      "n": 12,
+      "correct": 1,
+      "rate": 0.083,
+      "ci95": [
+        0.015,
+        0.354
+      ],
+      "outcomes": {
+        "partial": 7,
+        "correct": 1,
+        "wrong": 4
+      }
+    },
+    {
+      "method": "context",
+      "kind": "canary",
+      "role": "decoy",
+      "present": false,
+      "n": 8,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.324
+      ],
+      "outcomes": {
+        "unknown": 6,
+        "swapped": 2
+      }
+    },
+    {
+      "method": "context",
+      "kind": "canary",
+      "role": "decoy",
+      "present": true,
+      "n": 31,
+      "correct": 21,
+      "rate": 0.677,
+      "ci95": [
+        0.501,
+        0.814
+      ],
+      "outcomes": {
+        "unknown": 6,
+        "swapped": 4,
+        "correct": 21
+      }
+    },
+    {
+      "method": "context",
+      "kind": "canary",
+      "role": "fake",
+      "present": null,
+      "n": 12,
+      "correct": 12,
+      "rate": 1.0,
+      "ci95": [
+        0.757,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 12
+      }
+    },
+    {
+      "method": "context",
+      "kind": "canary",
+      "role": "nomarker",
+      "present": null,
+      "n": 8,
+      "correct": 5,
+      "rate": 0.625,
+      "ci95": [
+        0.306,
+        0.863
+      ],
+      "outcomes": {
+        "fabricated": 1,
+        "swapped": 2,
+        "correct": 5
+      }
+    },
+    {
+      "method": "context",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 148,
+      "correct": 111,
+      "rate": 0.75,
+      "ci95": [
+        0.675,
+        0.813
+      ],
+      "outcomes": {
+        "correct": 111,
+        "partial": 3,
+        "unknown": 17,
+        "swapped": 17
+      }
+    },
+    {
+      "method": "context",
+      "kind": "line",
+      "role": "decoy",
+      "present": false,
+      "n": 8,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.324
+      ],
+      "outcomes": {
+        "wrong": 4,
+        "unknown": 4
+      }
+    },
+    {
+      "method": "context",
+      "kind": "line",
+      "role": "decoy",
+      "present": true,
+      "n": 20,
+      "correct": 10,
+      "rate": 0.5,
+      "ci95": [
+        0.299,
+        0.701
+      ],
+      "outcomes": {
+        "partial": 3,
+        "wrong": 7,
+        "correct": 10
+      }
+    },
+    {
+      "method": "context",
+      "kind": "line",
+      "role": "nomarker",
+      "present": false,
+      "n": 8,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.324
+      ],
+      "outcomes": {
+        "wrong": 3,
+        "unknown": 5
+      }
+    },
+    {
+      "method": "context",
+      "kind": "line",
+      "role": "nomarker",
+      "present": true,
+      "n": 8,
+      "correct": 4,
+      "rate": 0.5,
+      "ci95": [
+        0.215,
+        0.785
+      ],
+      "outcomes": {
+        "wrong": 4,
+        "correct": 4
+      }
+    },
+    {
+      "method": "context",
+      "kind": "line",
+      "role": "target",
+      "present": true,
+      "n": 133,
+      "correct": 69,
+      "rate": 0.519,
+      "ci95": [
+        0.435,
+        0.602
+      ],
+      "outcomes": {
+        "wrong": 54,
+        "correct": 69,
+        "partial": 10
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "callee",
+      "role": "decoy",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 4,
+        "wrong": 2
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "callee",
+      "role": "nomarker",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "callee",
+      "role": "target",
+      "present": false,
+      "n": 58,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.062
+      ],
+      "outcomes": {
+        "unknown": 30,
+        "wrong": 28
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "calls",
+      "role": "decoy",
+      "present": false,
+      "n": 3,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.562
+      ],
+      "outcomes": {
+        "wrong": 2,
+        "partial": 1
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "calls",
+      "role": "nomarker",
+      "present": false,
+      "n": 1,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.793
+      ],
+      "outcomes": {
+        "partial": 1
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "calls",
+      "role": "target",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "partial": 2,
+        "wrong": 4
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "canary",
+      "role": "decoy",
+      "present": false,
+      "n": 21,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.155
+      ],
+      "outcomes": {
+        "unknown": 21
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "canary",
+      "role": "fake",
+      "present": null,
+      "n": 6,
+      "correct": 6,
+      "rate": 1.0,
+      "ci95": [
+        0.61,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 6
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "canary",
+      "role": "nomarker",
+      "present": null,
+      "n": 4,
+      "correct": 4,
+      "rate": 1.0,
+      "ci95": [
+        0.51,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 4
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "canary",
+      "role": "target",
+      "present": false,
+      "n": 90,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.041
+      ],
+      "outcomes": {
+        "unknown": 90
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "line",
+      "role": "decoy",
+      "present": false,
+      "n": 14,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.215
+      ],
+      "outcomes": {
+        "unknown": 14
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "line",
+      "role": "nomarker",
+      "present": false,
+      "n": 8,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.324
+      ],
+      "outcomes": {
+        "unknown": 7,
+        "wrong": 1
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "line",
+      "role": "target",
+      "present": false,
+      "n": 78,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.047
+      ],
+      "outcomes": {
+        "unknown": 60,
+        "wrong": 18
+      }
+    },
+    {
+      "method": "live_batch",
+      "kind": "canary",
+      "role": "decoy",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "live_batch",
+      "kind": "canary",
+      "role": "decoy",
+      "present": true,
+      "n": 7,
+      "correct": 7,
+      "rate": 1.0,
+      "ci95": [
+        0.646,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 7
+      }
+    },
+    {
+      "method": "live_batch",
+      "kind": "canary",
+      "role": "fake",
+      "present": null,
+      "n": 3,
+      "correct": 3,
+      "rate": 1.0,
+      "ci95": [
+        0.438,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 3
+      }
+    },
+    {
+      "method": "live_batch",
+      "kind": "canary",
+      "role": "nomarker",
+      "present": null,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "live_batch",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 18,
+      "correct": 18,
+      "rate": 1.0,
+      "ci95": [
+        0.824,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 18
+      }
+    },
+    {
+      "method": "live_single",
+      "kind": "canary",
+      "role": "decoy",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "live_single",
+      "kind": "canary",
+      "role": "decoy",
+      "present": true,
+      "n": 7,
+      "correct": 7,
+      "rate": 1.0,
+      "ci95": [
+        0.646,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 7
+      }
+    },
+    {
+      "method": "live_single",
+      "kind": "canary",
+      "role": "fake",
+      "present": null,
+      "n": 3,
+      "correct": 3,
+      "rate": 1.0,
+      "ci95": [
+        0.438,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 3
+      }
+    },
+    {
+      "method": "live_single",
+      "kind": "canary",
+      "role": "nomarker",
+      "present": null,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "live_single",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 18,
+      "correct": 18,
+      "rate": 1.0,
+      "ci95": [
+        0.824,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 18
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "callee",
+      "role": "decoy",
+      "present": false,
+      "n": 1,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.793
+      ],
+      "outcomes": {
+        "unknown": 1
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "callee",
+      "role": "decoy",
+      "present": true,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "callee",
+      "role": "nomarker",
+      "present": false,
+      "n": 1,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.793
+      ],
+      "outcomes": {
+        "unknown": 1
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "callee",
+      "role": "target",
+      "present": true,
+      "n": 12,
+      "correct": 12,
+      "rate": 1.0,
+      "ci95": [
+        0.757,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 12
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "canary",
+      "role": "decoy",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "canary",
+      "role": "decoy",
+      "present": true,
+      "n": 7,
+      "correct": 7,
+      "rate": 1.0,
+      "ci95": [
+        0.646,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 7
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "canary",
+      "role": "fake",
+      "present": null,
+      "n": 3,
+      "correct": 3,
+      "rate": 1.0,
+      "ci95": [
+        0.438,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 3
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "canary",
+      "role": "nomarker",
+      "present": null,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 18,
+      "correct": 18,
+      "rate": 1.0,
+      "ci95": [
+        0.824,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 18
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "line",
+      "role": "decoy",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "line",
+      "role": "decoy",
+      "present": true,
+      "n": 5,
+      "correct": 5,
+      "rate": 1.0,
+      "ci95": [
+        0.566,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 5
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "line",
+      "role": "nomarker",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "line",
+      "role": "nomarker",
+      "present": true,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "line",
+      "role": "target",
+      "present": true,
+      "n": 17,
+      "correct": 16,
+      "rate": 0.941,
+      "ci95": [
+        0.73,
+        0.99
+      ],
+      "outcomes": {
+        "correct": 16,
+        "unknown": 1
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "callee",
+      "role": "decoy",
+      "present": false,
+      "n": 1,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.793
+      ],
+      "outcomes": {
+        "unknown": 1
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "callee",
+      "role": "decoy",
+      "present": true,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "callee",
+      "role": "nomarker",
+      "present": false,
+      "n": 1,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.793
+      ],
+      "outcomes": {
+        "unknown": 1
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "callee",
+      "role": "target",
+      "present": true,
+      "n": 12,
+      "correct": 12,
+      "rate": 1.0,
+      "ci95": [
+        0.757,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 12
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "canary",
+      "role": "decoy",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "canary",
+      "role": "decoy",
+      "present": true,
+      "n": 7,
+      "correct": 6,
+      "rate": 0.857,
+      "ci95": [
+        0.487,
+        0.974
+      ],
+      "outcomes": {
+        "correct": 6,
+        "unknown": 1
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "canary",
+      "role": "fake",
+      "present": null,
+      "n": 3,
+      "correct": 3,
+      "rate": 1.0,
+      "ci95": [
+        0.438,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 3
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "canary",
+      "role": "nomarker",
+      "present": null,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 18,
+      "correct": 18,
+      "rate": 1.0,
+      "ci95": [
+        0.824,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 18
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "line",
+      "role": "decoy",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "line",
+      "role": "decoy",
+      "present": true,
+      "n": 5,
+      "correct": 5,
+      "rate": 1.0,
+      "ci95": [
+        0.566,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 5
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "line",
+      "role": "nomarker",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "line",
+      "role": "nomarker",
+      "present": true,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "line",
+      "role": "target",
+      "present": true,
+      "n": 17,
+      "correct": 17,
+      "rate": 1.0,
+      "ci95": [
+        0.816,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 17
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "callee",
+      "role": "decoy",
+      "present": false,
+      "n": 1,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.793
+      ],
+      "outcomes": {
+        "unknown": 1
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "callee",
+      "role": "decoy",
+      "present": true,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "callee",
+      "role": "nomarker",
+      "present": false,
+      "n": 1,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.793
+      ],
+      "outcomes": {
+        "unknown": 1
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "callee",
+      "role": "target",
+      "present": true,
+      "n": 12,
+      "correct": 12,
+      "rate": 1.0,
+      "ci95": [
+        0.757,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 12
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "canary",
+      "role": "decoy",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "canary",
+      "role": "decoy",
+      "present": true,
+      "n": 7,
+      "correct": 7,
+      "rate": 1.0,
+      "ci95": [
+        0.646,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 7
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "canary",
+      "role": "fake",
+      "present": null,
+      "n": 3,
+      "correct": 3,
+      "rate": 1.0,
+      "ci95": [
+        0.438,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 3
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "canary",
+      "role": "nomarker",
+      "present": null,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 18,
+      "correct": 18,
+      "rate": 1.0,
+      "ci95": [
+        0.824,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 18
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "line",
+      "role": "decoy",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "line",
+      "role": "decoy",
+      "present": true,
+      "n": 5,
+      "correct": 5,
+      "rate": 1.0,
+      "ci95": [
+        0.566,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 5
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "line",
+      "role": "nomarker",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "line",
+      "role": "nomarker",
+      "present": true,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "line",
+      "role": "target",
+      "present": true,
+      "n": 17,
+      "correct": 17,
+      "rate": 1.0,
+      "ci95": [
+        0.816,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 17
+      }
+    },
+    {
+      "method": "pad_after_690000",
+      "kind": "callee",
+      "role": "target",
+      "present": true,
+      "n": 6,
+      "correct": 6,
+      "rate": 1.0,
+      "ci95": [
+        0.61,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 6
+      }
+    },
+    {
+      "method": "pad_after_690000",
+      "kind": "canary",
+      "role": "decoy",
+      "present": true,
+      "n": 1,
+      "correct": 1,
+      "rate": 1.0,
+      "ci95": [
+        0.207,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 1
+      }
+    },
+    {
+      "method": "pad_after_690000",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 12,
+      "correct": 11,
+      "rate": 0.917,
+      "ci95": [
+        0.646,
+        0.985
+      ],
+      "outcomes": {
+        "correct": 11,
+        "unknown": 1
+      }
+    },
+    {
+      "method": "pad_after_690000",
+      "kind": "line",
+      "role": "target",
+      "present": true,
+      "n": 8,
+      "correct": 8,
+      "rate": 1.0,
+      "ci95": [
+        0.676,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 8
+      }
+    },
+    {
+      "method": "pad_before_300000",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 3,
+      "correct": 3,
+      "rate": 1.0,
+      "ci95": [
+        0.438,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 3
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "callee",
+      "role": "decoy",
+      "present": false,
+      "n": 1,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.793
+      ],
+      "outcomes": {
+        "unknown": 1
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "callee",
+      "role": "decoy",
+      "present": true,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "callee",
+      "role": "nomarker",
+      "present": false,
+      "n": 1,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.793
+      ],
+      "outcomes": {
+        "unknown": 1
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "callee",
+      "role": "target",
+      "present": true,
+      "n": 12,
+      "correct": 12,
+      "rate": 1.0,
+      "ci95": [
+        0.757,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 12
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "canary",
+      "role": "decoy",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "canary",
+      "role": "decoy",
+      "present": true,
+      "n": 7,
+      "correct": 7,
+      "rate": 1.0,
+      "ci95": [
+        0.646,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 7
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "canary",
+      "role": "fake",
+      "present": null,
+      "n": 3,
+      "correct": 3,
+      "rate": 1.0,
+      "ci95": [
+        0.438,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 3
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "canary",
+      "role": "nomarker",
+      "present": null,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 18,
+      "correct": 18,
+      "rate": 1.0,
+      "ci95": [
+        0.824,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 18
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "line",
+      "role": "decoy",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "line",
+      "role": "decoy",
+      "present": true,
+      "n": 5,
+      "correct": 5,
+      "rate": 1.0,
+      "ci95": [
+        0.566,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 5
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "line",
+      "role": "nomarker",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "line",
+      "role": "nomarker",
+      "present": true,
+      "n": 2,
+      "correct": 2,
+      "rate": 1.0,
+      "ci95": [
+        0.342,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 2
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "line",
+      "role": "target",
+      "present": true,
+      "n": 17,
+      "correct": 17,
+      "rate": 1.0,
+      "ci95": [
+        0.816,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 17
+      }
+    },
+    {
+      "method": "substituted",
+      "kind": "canary",
+      "role": "decoy",
+      "present": false,
+      "n": 4,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.49
+      ],
+      "outcomes": {
+        "unknown": 3,
+        "swapped": 1
+      }
+    },
+    {
+      "method": "substituted",
+      "kind": "canary",
+      "role": "decoy",
+      "present": true,
+      "n": 14,
+      "correct": 10,
+      "rate": 0.714,
+      "ci95": [
+        0.454,
+        0.883
+      ],
+      "outcomes": {
+        "unknown": 2,
+        "swapped": 2,
+        "correct": 10
+      }
+    },
+    {
+      "method": "substituted",
+      "kind": "canary",
+      "role": "target",
+      "present": true,
+      "n": 52,
+      "correct": 34,
+      "rate": 0.654,
+      "ci95": [
+        0.518,
+        0.768
+      ],
+      "outcomes": {
+        "correct": 34,
+        "unknown": 6,
+        "swapped": 11,
+        "fabricated": 1
+      }
+    }
+  ]
+}

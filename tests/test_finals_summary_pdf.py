@@ -243,6 +243,22 @@ def test_summary_clamps_overall_and_section_confidence_to_source_caps(tmp_path, 
     assert summary.sections[0].confidence == 80
 
 
+def test_summary_cannot_drop_source_claim_review_warning(tmp_path):
+    digests = load_digests(_digests(tmp_path))
+    prefix = "【复核证据不足，尚未确认】"
+    finding = digests["description"].findings[0]
+    finding.detail = prefix + finding.detail
+    payload = _ai_summary().model_dump(mode="json")
+    with pytest.raises(SummaryPdfError, match="复核限定"):
+        summary_pdf._validate_ai_summary_result(payload, digests)
+    errors = summary_pdf._collect_ai_summary_issue_errors(AISummary.model_validate(payload), digests)
+    assert any(prefix in e for e in errors)
+    for issue in payload["issues"]:
+        if issue["source"] == "description" and issue["source_finding"] == 1:
+            issue["judgment"] = prefix + issue["judgment"]
+    assert summary_pdf._validate_ai_summary_result(payload, digests)
+
+
 def test_summary_compacts_long_judgments_to_fit_layout_cap(tmp_path, monkeypatch):
     """正文超出一页版式上限时按完整句边界逐级压缩 issue 判断，而不是交付失败。"""
     digests = load_digests(_digests(tmp_path))

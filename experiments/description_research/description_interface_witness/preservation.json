@@ -1,0 +1,15 @@
+{
+  "archive": "/home/niu/agent-archives/description-interface-witness-20261008T030633Z/experiments.tar.gz",
+  "manifest": "/home/niu/agent-archives/description-interface-witness-20261008T030633Z/manifest.json",
+  "archive_sha256": "1ef1256c207918987e05bca52295e1b62f953cac7c73085534cc39937b3ebb40",
+  "verified_members": 324,
+  "archive_bytes": 4337898,
+  "local_evidence_kept": true,
+  "old_materials_restored": false,
+  "source_cache": "/home/niu/.cache/oskernel-description-interface-witness",
+  "large_raw_artifacts_gitignored": true,
+  "restore": "Extract only into a new empty directory; archive contains workspace/ and external-data/ prefixes; do not overwrite user files",
+  "private_credentials_included": false,
+  "research_status": "candidate rejected against simple baseline; no paper method success",
+  "file_sources_total_bytes": 8281964
+}

@@ -1,0 +1,497 @@
+{
+  "status": "completed",
+  "original_report_sha256": "635a508eb1f0a4dd6218b16a195c6057faebed43a19bbc4284bc49abc9f748e2",
+  "report_sha256": "930da5f10f78298ca4428769001d5c2f2214b8f2d6bfbbebdeb8ef629c041663",
+  "selection_scope": "evaluation_assertions_and_structured_report_claims_not_all_prose",
+  "candidate_count": 2,
+  "selected_count": 2,
+  "unreviewed": [],
+  "initial": [
+    {
+      "id": "081047ba5fdc4572cbc04cb8",
+      "route": [
+        "evaluation_claims",
+        "retry-count"
+      ],
+      "text": "在默认配置且每次请求均失败的条件下，总共调用 request_attempt 3 次（包括首次尝试），额外重试 2 次。",
+      "location": "request.c:10-19",
+      "kind": "evaluation_assertion",
+      "priority": 200,
+      "selection_factors": {
+        "declared_evaluation_item": "retry-count"
+      },
+      "requirements": [
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "start_line": 10,
+          "end_line": 19,
+          "symbol": "send_request",
+          "scope": "function"
+        },
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "start_line": 5,
+          "end_line": 8,
+          "symbol": "request_attempt",
+          "scope": "function"
+        },
+        {
+          "path": "config.h",
+          "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+          "start_line": 1,
+          "end_line": 1,
+          "symbol": "",
+          "scope": "declared_lines",
+          "parser_status": "parsed"
+        },
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "start_line": 10,
+          "end_line": 19,
+          "symbol": "",
+          "scope": "cited_lines"
+        },
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "start_line": 5,
+          "end_line": 8,
+          "symbol": "",
+          "scope": "cited_lines"
+        },
+        {
+          "path": "config.h",
+          "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+          "parser_status": "parsed",
+          "start_line": 1,
+          "end_line": 1,
+          "symbol": "",
+          "scope": "cited_lines"
+        }
+      ],
+      "assertion_context": {
+        "item_id": "retry-count",
+        "question": "默认配置且每次请求失败时，总调用次数与额外重试次数分别是多少？",
+        "scope": "send_request 的默认配置执行路径",
+        "conditions": [
+          "使用 config.h:1 的默认值 DEFAULT_RETRIES=3，未被任何覆盖配置改写",
+          "条件为每次请求都失败，即 request_attempt 每次都返回非 0(源码中恒返回 -1)",
+          "循环边界为 <=，包含 attempt=0 的首次尝试"
+        ],
+        "counterevidence": [
+          "须核对首次尝试是否已计入总次数，以及循环边界是否包含配置的上限。"
+        ],
+        "decision_rule": "结合循环边界、单次调用和配置确认次数，独立测试前仅作为待验证的源码结论。",
+        "evidence": [
+          {
+            "evidence_id": "entry",
+            "ref": "request.c:10-19",
+            "quote": "int send_request(void) {\n    int result = -1;\n    for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) {\n        result = request_attempt();\n        if (result == 0) {\n            return 0;\n        }\n    }\n    return result;\n}"
+          },
+          {
+            "evidence_id": "attempt",
+            "ref": "request.c:5-8",
+            "quote": "static int request_attempt(void) {\n    attempt_count++;\n    return -1;\n}"
+          },
+          {
+            "evidence_id": "config",
+            "ref": "config.h:1-1",
+            "quote": "#define DEFAULT_RETRIES 3"
+          }
+        ],
+        "validation_need": "execution"
+      },
+      "status": "insufficient",
+      "reviews": [
+        {
+          "claim_id": "081047ba5fdc4572cbc04cb8",
+          "verdict": "contradicted",
+          "model_verdict": "contradicted",
+          "reason": "循环为 attempt=0; attempt <= DEFAULT_RETRIES(=3); attempt++，在每次 request_attempt 都返回 -1 的情况下共执行 attempt=0,1,2,3 四次调用，即总调用 4 次、额外重试 3 次；claim 的 3 次/2 次与源码不符。全仓库仅 config.h:1 定义 DEFAULT_RETRIES=3，未被覆盖。",
+          "evidence": [
+            {
+              "ref": "request.c:10-19",
+              "quote": "int send_request(void) {\n    int result = -1;\n    for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) {\n        result = request_attempt();\n        if (result == 0) {\n            return 0;\n        }\n    }\n    return result;\n}"
+            },
+            {
+              "ref": "config.h:1-1",
+              "quote": "#define DEFAULT_RETRIES 3"
+            },
+            {
+              "ref": "request.c:5-8",
+              "quote": "static int request_attempt(void) {\n    attempt_count++;\n    return -1;\n}"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": "把结论改为：默认配置且每次请求均失败时，send_request 共调用 request_attempt 4 次（attempt=0..3，含首次尝试），其中额外重试 3 次。"
+        },
+        {
+          "claim_id": "081047ba5fdc4572cbc04cb8",
+          "verdict": "insufficient",
+          "model_verdict": "contradicted",
+          "reason": "DEFAULT_RETRIES=3，循环为 attempt<=DEFAULT_RETRIES，attempt 取 0,1,2,3 共 4 次迭代，每次迭代都调用 request_attempt()，因此 request_attempt 共调用 4 次（含首次），额外重试 3 次；claim 的 3 次/2 次不符。config.h 仅有一行且无覆盖定义。",
+          "evidence": [
+            {
+              "ref": "request.c:5-8",
+              "quote": "static int request_attempt(void) {\n    attempt_count++;\n    return -1;\n}"
+            },
+            {
+              "ref": "config.h:1-1",
+              "quote": "#define DEFAULT_RETRIES 3"
+            }
+          ],
+          "errors": [
+            "unverified_evidence"
+          ],
+          "suggested_correction": "改为：默认配置（DEFAULT_RETRIES=3）且每次请求失败时，request_attempt 总共被调用 4 次（含 attempt=0 首次尝试），额外重试 3 次；因循环边界为 <=，尝试次数为 DEFAULT_RETRIES+1。"
+        }
+      ],
+      "independent_sessions": true
+    },
+    {
+      "id": "6dccdfecd491cb352fe4",
+      "route": [
+        "summary"
+      ],
+      "text": "请求入口及计数配置见 request.c:10-19、config.h:1。当前断言待独立复核。",
+      "location": "",
+      "kind": "summary",
+      "priority": 2,
+      "selection_factors": {
+        "severity": "",
+        "absolute_wording": false,
+        "branch_points": 2
+      },
+      "requirements": [
+        {
+          "path": "config.h",
+          "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+          "start_line": 1,
+          "end_line": 1,
+          "symbol": "",
+          "scope": "cited_lines",
+          "parser_status": "parsed"
+        },
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "start_line": 10,
+          "end_line": 19,
+          "symbol": "send_request",
+          "scope": "function",
+          "parser_status": "parsed"
+        }
+      ],
+      "status": "supported",
+      "reviews": [
+        {
+          "claim_id": "6dccdfecd491cb352fe4",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "request.c:10-19 确为请求入口 send_request，config.h:1 确是计数上限配置 DEFAULT_RETRIES=3，两处引用位置与该描述一致；该 claim 本身仅为位置指引与待复核状态说明，不包含次数结论。",
+          "evidence": [
+            {
+              "ref": "request.c:10-19",
+              "quote": "int send_request(void) {\n    int result = -1;\n    for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) {\n        result = request_attempt();\n        if (result == 0) {\n            return 0;\n        }\n    }\n    return result;\n}"
+            },
+            {
+              "ref": "config.h:1-1",
+              "quote": "#define DEFAULT_RETRIES 3"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        },
+        {
+          "claim_id": "6dccdfecd491cb352fe4",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "request.c:10-19 确为请求入口函数 send_request，config.h:1 定义了次数配置 DEFAULT_RETRIES=3，两个引用位置与源码一致；仓库仅这两个文件，无其他入口或配置定义。",
+          "evidence": [
+            {
+              "ref": "request.c:10-19",
+              "quote": "int send_request(void) {\n    int result = -1;\n    for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) {\n        result = request_attempt();\n        if (result == 0) {\n            return 0;\n        }\n    }\n    return result;\n}"
+            },
+            {
+              "ref": "config.h:1-1",
+              "quote": "#define DEFAULT_RETRIES 3"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        }
+      ],
+      "independent_sessions": true
+    }
+  ],
+  "claims": [
+    {
+      "id": "977488c77e8df855723c9b03",
+      "route": [
+        "evaluation_claims",
+        "retry-count"
+      ],
+      "text": "在默认配置且每次请求均失败的条件下，send_request 共调用 request_attempt 4 次（attempt=0,1,2,3，包含首次尝试），其中额外重试 3 次；因循环边界为 `<=`，尝试次数为 DEFAULT_RETRIES+1。",
+      "location": "request.c:10-19",
+      "kind": "evaluation_assertion",
+      "priority": 200,
+      "selection_factors": {
+        "declared_evaluation_item": "retry-count"
+      },
+      "requirements": [
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "start_line": 10,
+          "end_line": 19,
+          "symbol": "send_request",
+          "scope": "function"
+        },
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "start_line": 5,
+          "end_line": 8,
+          "symbol": "request_attempt",
+          "scope": "function"
+        },
+        {
+          "path": "config.h",
+          "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+          "start_line": 1,
+          "end_line": 1,
+          "symbol": "",
+          "scope": "declared_lines",
+          "parser_status": "parsed"
+        },
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "start_line": 10,
+          "end_line": 19,
+          "symbol": "",
+          "scope": "cited_lines"
+        },
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "start_line": 5,
+          "end_line": 8,
+          "symbol": "",
+          "scope": "cited_lines"
+        },
+        {
+          "path": "config.h",
+          "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+          "parser_status": "parsed",
+          "start_line": 1,
+          "end_line": 1,
+          "symbol": "",
+          "scope": "cited_lines"
+        }
+      ],
+      "assertion_context": {
+        "item_id": "retry-count",
+        "question": "默认配置且每次请求失败时，总调用次数与额外重试次数分别是多少？",
+        "scope": "send_request 的默认配置执行路径",
+        "conditions": [
+          "使用 config.h:1 的默认值 DEFAULT_RETRIES=3，未被任何覆盖配置改写",
+          "条件为每次请求都失败，即 request_attempt 每次都返回非 0（源码中恒返回 -1），不触发 request.c:14 的提前返回",
+          "循环边界为 `attempt <= DEFAULT_RETRIES`，包含 attempt=0 的首次尝试",
+          "DEFAULT_RETRIES 与 request_attempt 均在缓存区已完整读取，且全仓库文本检索未发现其他定义或覆盖"
+        ],
+        "counterevidence": [
+          "仍需核查是否存在通过编译宏、头文件包含顺序或构建参数覆盖 DEFAULT_RETRIES 的路径（当前仓库仅 config.h 一处定义，未发现覆盖定义）。",
+          "仍需核查 send_request 是否存在未纳入本次读取范围的调用入口，以及是否有调用方在进入前重置 attempt_count 或修改循环边界。",
+          "仍需核查 request_attempt 是否会在其他编译条件或链接实现下返回 0，从而在首次或中途提前返回并改变总调用次数。"
+        ],
+        "decision_rule": "结合循环边界、单次调用和配置确认次数，独立测试前仅作为待验证的源码结论。",
+        "evidence": [
+          {
+            "evidence_id": "entry",
+            "ref": "request.c:10-19",
+            "quote": "int send_request(void) {\n    int result = -1;\n    for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) {\n        result = request_attempt();\n        if (result == 0) {\n            return 0;\n        }\n    }\n    return result;\n}"
+          },
+          {
+            "evidence_id": "attempt",
+            "ref": "request.c:5-8",
+            "quote": "static int request_attempt(void) {\n    attempt_count++;\n    return -1;\n}"
+          },
+          {
+            "evidence_id": "config",
+            "ref": "config.h:1-1",
+            "quote": "#define DEFAULT_RETRIES 3"
+          }
+        ],
+        "validation_need": "execution"
+      },
+      "status": "supported",
+      "reviews": [
+        {
+          "claim_id": "977488c77e8df855723c9b03",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "完整读取 request.c:10-19 与 config.h:1：DEFAULT_RETRIES=3，循环条件为 attempt <= DEFAULT_RETRIES，故 attempt 取 0,1,2,3 共 4 次迭代；request_attempt（request.c:5-8）恒返回 -1，每次迭代都执行且不触发 request.c:14 的 return 0，因此 request_attempt 共调用 4 次（含首次），额外重试 3 次。全仓库仅有这两个文件，检索无其他 DEFAULT_RETRIES 定义或 send_request 调用入口。",
+          "evidence": [
+            {
+              "ref": "request.c:10-19",
+              "quote": "int send_request(void) {\n    int result = -1;\n    for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) {\n        result = request_attempt();\n        if (result == 0) {\n            return 0;\n        }\n    }\n    return result;\n}"
+            },
+            {
+              "ref": "request.c:5-8",
+              "quote": "static int request_attempt(void) {\n    attempt_count++;\n    return -1;\n}"
+            },
+            {
+              "ref": "config.h:1-1",
+              "quote": "#define DEFAULT_RETRIES 3"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        },
+        {
+          "claim_id": "977488c77e8df855723c9b03",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "完整读取 request.c 与 config.h：config.h:1 定义 DEFAULT_RETRIES=3 且无覆盖；request.c:12 循环为 attempt=0; attempt<=DEFAULT_RETRIES; attempt++，故 attempt 取 0..3 共 4 次迭代；每次迭代都调用 request_attempt（request.c:13），该函数恒返回 -1（request.c:5-8），不会触发 request.c:14 的提前返回。因此总调用 4 次、额外重试 3 次，等于 DEFAULT_RETRIES+1。全仓库仅 config.h 与 request.c，检索未发现其他定义或覆盖。",
+          "evidence": [
+            {
+              "ref": "request.c:10-19",
+              "quote": "int send_request(void) {\n    int result = -1;\n    for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) {\n        result = request_attempt();\n        if (result == 0) {\n            return 0;\n        }\n    }\n    return result;\n}"
+            },
+            {
+              "ref": "request.c:5-8",
+              "quote": "static int request_attempt(void) {\n    attempt_count++;\n    return -1;\n}"
+            },
+            {
+              "ref": "config.h:1-1",
+              "quote": "#define DEFAULT_RETRIES 3"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        }
+      ],
+      "independent_sessions": true
+    },
+    {
+      "id": "b9d97eeb1b5b5c18428c",
+      "route": [
+        "summary"
+      ],
+      "text": "请求入口及计数配置见 request.c:10-19、config.h:1。send_request 使用 `for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++)` 循环，DEFAULT_RETRIES 在 config.h:1 定义为 3，且 request_attempt（request.c:5-8）恒返回 -1 不触发提前返回；故默认配置且每次请求均失败时，request_attempt 共被调用 4 次（attempt=0..3，含首次尝试），额外重试 3 次。原报告所述“3 次/2 次”与源码不符，已修订。全仓库文本检索未发现 DEFAULT_RETRIES 的其他定义或覆盖，也未发现 send_request 的其他调用入口；结论仍待独立执行复核。",
+      "location": "",
+      "kind": "summary",
+      "priority": 2,
+      "selection_factors": {
+        "severity": "",
+        "absolute_wording": false,
+        "branch_points": 2
+      },
+      "requirements": [
+        {
+          "path": "config.h",
+          "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+          "start_line": 1,
+          "end_line": 1,
+          "symbol": "",
+          "scope": "cited_lines",
+          "parser_status": "parsed"
+        },
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "start_line": 5,
+          "end_line": 8,
+          "symbol": "request_attempt",
+          "scope": "function",
+          "parser_status": "parsed"
+        },
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "start_line": 10,
+          "end_line": 19,
+          "symbol": "send_request",
+          "scope": "function",
+          "parser_status": "parsed"
+        }
+      ],
+      "status": "supported",
+      "reviews": [
+        {
+          "claim_id": "b9d97eeb1b5b5c18428c",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "同前：request.c:12 循环边界为 attempt <= DEFAULT_RETRIES，config.h:1 为 3，request_attempt 恒返回 -1 不触发 request.c:14 提前返回，故 request_attempt 共调用 4 次、额外重试 3 次。对仓库根目录检索 DEFAULT_RETRIES/send_request/attempt_count，仅命中 request.c 与 config.h，未发现其他定义、覆盖或 send_request 调用入口；目录仅含这两个文件，与所述文本检索一致。",
+          "evidence": [
+            {
+              "ref": "request.c:10-19",
+              "quote": "int send_request(void) {\n    int result = -1;\n    for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) {\n        result = request_attempt();\n        if (result == 0) {\n            return 0;\n        }\n    }\n    return result;\n}"
+            },
+            {
+              "ref": "request.c:5-8",
+              "quote": "static int request_attempt(void) {\n    attempt_count++;\n    return -1;\n}"
+            },
+            {
+              "ref": "config.h:1-1",
+              "quote": "#define DEFAULT_RETRIES 3"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        },
+        {
+          "claim_id": "b9d97eeb1b5b5c18428c",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "与源码一致：request.c:10-19 的循环边界为 <=，DEFAULT_RETRIES 在 config.h:1 为 3，request_attempt（request.c:5-8）恒返回 -1 不触发提前返回，故默认配置且每次失败时 request_attempt 被调用 4 次（attempt=0..3，含首次），额外重试 3 次；因此原报告“3 次/2 次”与源码不符。全仓库仅 config.h 与 request.c，文本检索确认 DEFAULT_RETRIES 无其他定义或覆盖，send_request 无其他调用入口。",
+          "evidence": [
+            {
+              "ref": "request.c:10-19",
+              "quote": "int send_request(void) {\n    int result = -1;\n    for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) {\n        result = request_attempt();\n        if (result == 0) {\n            return 0;\n        }\n    }\n    return result;\n}"
+            },
+            {
+              "ref": "request.c:5-8",
+              "quote": "static int request_attempt(void) {\n    attempt_count++;\n    return -1;\n}"
+            },
+            {
+              "ref": "config.h:1-1",
+              "quote": "#define DEFAULT_RETRIES 3"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        }
+      ],
+      "independent_sessions": true
+    }
+  ],
+  "revision": {
+    "attempted": true,
+    "new_report_sha256": "930da5f10f78298ca4428769001d5c2f2214b8f2d6bfbbebdeb8ef629c041663",
+    "original_wording_absent": [
+      "081047ba5fdc4572cbc04cb8"
+    ],
+    "remaining_original_wording": []
+  },
+  "artifact": "/home/niu/agent-assertions-validation-20261013/injected-claim/reviews/scoped-claim-correction-3e6cfc16b1/82b5255aa3154439a97dccc48fa2337a/review.json",
+  "limitations": [
+    "agreement_is_not_truth",
+    "same_model_errors_can_be_correlated",
+    "not_all_report_prose_reviewed",
+    "static_source_not_runtime_proof"
+  ],
+  "assertions_artifact": "/home/niu/agent-assertions-validation-20261013/injected-claim/reviews/scoped-claim-correction-3e6cfc16b1/82b5255aa3154439a97dccc48fa2337a/assertions.final.json"
+}

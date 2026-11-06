@@ -1,0 +1,5939 @@
+{
+  "tag": "flash-base",
+  "model": "deepseek-flash",
+  "context_limit": 1048576,
+  "output_limit": 32768,
+  "compaction": "off",
+  "informed": false,
+  "extra_files": [],
+  "targets": 6,
+  "repair_rounds": 2,
+  "started": 1793280466.4779208,
+  "response_error": null,
+  "finished_main": 1793280921.7460845,
+  "accepted_batch": "recall-trial-read-2",
+  "session": "ses_e7823792effewz0nBB700sTHAh",
+  "stream_status": "complete",
+  "read_evidence": {
+    "status": "unresolved",
+    "repair_rounds": 2,
+    "requirements": [
+      {
+        "path": "kernel/futex.c",
+        "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+        "start_line": 105,
+        "end_line": 173,
+        "symbol": "futex_wait",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/pmem.c",
+        "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+        "start_line": 252,
+        "end_line": 342,
+        "symbol": "buddy_alloc",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/pmem.c",
+        "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+        "start_line": 349,
+        "end_line": 513,
+        "symbol": "buddy_free",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 239,
+        "end_line": 311,
+        "symbol": "walk_internal",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 439,
+        "end_line": 537,
+        "symbol": "uvmcopy",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 599,
+        "end_line": 642,
+        "symbol": "copyinstr",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 108,
+        "end_line": 108,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 109,
+        "end_line": 109,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 110,
+        "end_line": 113,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 115,
+        "end_line": 118,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 120,
+        "end_line": 131,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 133,
+        "end_line": 147,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 149,
+        "end_line": 168,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 170,
+        "end_line": 172,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 183,
+        "end_line": 205,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 327,
+        "end_line": 341,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/pmem.c",
+        "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+        "start_line": 544,
+        "end_line": 581,
+        "symbol": "pmem_alloc_pages",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/pmem.c",
+        "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+        "start_line": 588,
+        "end_line": 675,
+        "symbol": "pmem_free_pages",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/process.c",
+        "sha256": "bb6c63fff51b07c1bf76188ad6f96c972eaa5a137a9ac9d46e4d5f7b67ddcbc4",
+        "start_line": 524,
+        "end_line": 641,
+        "symbol": "scheduler",
+        "scope": "function",
+        "parser_status": "partial",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/process.c",
+        "sha256": "bb6c63fff51b07c1bf76188ad6f96c972eaa5a137a9ac9d46e4d5f7b67ddcbc4",
+        "start_line": 965,
+        "end_line": 1123,
+        "symbol": "fork",
+        "scope": "function",
+        "parser_status": "partial",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/syscall.c",
+        "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+        "start_line": 5600,
+        "end_line": 5739,
+        "symbol": "sys_futex",
+        "scope": "function",
+        "parser_status": "partial",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 254,
+        "end_line": 258,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 261,
+        "end_line": 261,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 267,
+        "end_line": 275,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 281,
+        "end_line": 309,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 311,
+        "end_line": 331,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 336,
+        "end_line": 341,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 351,
+        "end_line": 355,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 358,
+        "end_line": 358,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 365,
+        "end_line": 370,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 372,
+        "end_line": 376,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 381,
+        "end_line": 404,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 398,
+        "end_line": 404,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 406,
+        "end_line": 412,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 415,
+        "end_line": 415,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 422,
+        "end_line": 445,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 451,
+        "end_line": 479,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 482,
+        "end_line": 512,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 674,
+        "end_line": 674,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 608,
+        "end_line": 608,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "spinlock.c",
+        "sha256": null,
+        "start_line": 28,
+        "end_line": 29,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 109,
+        "end_line": 119,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 128,
+        "end_line": 153,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 137,
+        "end_line": 152,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 203,
+        "end_line": 203,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 211,
+        "end_line": 211,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 241,
+        "end_line": 241,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 244,
+        "end_line": 247,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 250,
+        "end_line": 251,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 253,
+        "end_line": 256,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 267,
+        "end_line": 276,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 277,
+        "end_line": 291,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 290,
+        "end_line": 290,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 292,
+        "end_line": 295,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 297,
+        "end_line": 310,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 328,
+        "end_line": 328,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 442,
+        "end_line": 442,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 447,
+        "end_line": 447,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 449,
+        "end_line": 477,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 470,
+        "end_line": 470,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 478,
+        "end_line": 501,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 503,
+        "end_line": 515,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 517,
+        "end_line": 527,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 522,
+        "end_line": 526,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 533,
+        "end_line": 536,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 549,
+        "end_line": 556,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 597,
+        "end_line": 597,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 605,
+        "end_line": 605,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 607,
+        "end_line": 610,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 611,
+        "end_line": 613,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 615,
+        "end_line": 619,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 620,
+        "end_line": 637,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 639,
+        "end_line": 639,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 641,
+        "end_line": 641,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 46,
+        "end_line": 46,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 134,
+        "end_line": 134,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 143,
+        "end_line": 147,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 157,
+        "end_line": 157,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 160,
+        "end_line": 168,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 194,
+        "end_line": 200,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 246,
+        "end_line": 261,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "futex.c",
+        "sha256": null,
+        "start_line": 329,
+        "end_line": 329,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/spinlock.c",
+        "sha256": "762acc463db3977ef8410cfb4d9a5b31cdd17147dbb45e3d2ff4e05699d56474",
+        "start_line": 24,
+        "end_line": 50,
+        "symbol": "acquire",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vma.c",
+        "sha256": "51a962065422a9ef38d3c6bc024c09e6c36d1070d1042acb580465ffc9938a64",
+        "start_line": 1060,
+        "end_line": 1126,
+        "symbol": "vma_copy",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 321,
+        "end_line": 379,
+        "symbol": "vmunmap",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 66,
+        "end_line": 85,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 292,
+        "end_line": 293,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 546,
+        "end_line": 549,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 551,
+        "end_line": 552,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 554,
+        "end_line": 554,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 556,
+        "end_line": 564,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 565,
+        "end_line": 573,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 575,
+        "end_line": 575,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 590,
+        "end_line": 591,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 596,
+        "end_line": 601,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 603,
+        "end_line": 610,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 612,
+        "end_line": 615,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 615,
+        "end_line": 615,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 618,
+        "end_line": 647,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 649,
+        "end_line": 671,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "pmem.c",
+        "sha256": null,
+        "start_line": 673,
+        "end_line": 674,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 527,
+        "end_line": 528,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 529,
+        "end_line": 532,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 533,
+        "end_line": 535,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 535,
+        "end_line": 535,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 536,
+        "end_line": 536,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 552,
+        "end_line": 568,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 561,
+        "end_line": 565,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 571,
+        "end_line": 575,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 578,
+        "end_line": 591,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 599,
+        "end_line": 616,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 621,
+        "end_line": 635,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 972,
+        "end_line": 980,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 981,
+        "end_line": 985,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 986,
+        "end_line": 986,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 986,
+        "end_line": 987,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 988,
+        "end_line": 1006,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 1007,
+        "end_line": 1013,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 1017,
+        "end_line": 1021,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 1023,
+        "end_line": 1067,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 1069,
+        "end_line": 1098,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 1100,
+        "end_line": 1101,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 1103,
+        "end_line": 1106,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 1108,
+        "end_line": 1112,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 1109,
+        "end_line": 1110,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "process.c",
+        "sha256": null,
+        "start_line": 1114,
+        "end_line": 1122,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "syscall.c",
+        "sha256": null,
+        "start_line": 5607,
+        "end_line": 5609,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "syscall.c",
+        "sha256": null,
+        "start_line": 5611,
+        "end_line": 5641,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "syscall.c",
+        "sha256": null,
+        "start_line": 5642,
+        "end_line": 5644,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "syscall.c",
+        "sha256": null,
+        "start_line": 5645,
+        "end_line": 5647,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "syscall.c",
+        "sha256": null,
+        "start_line": 5648,
+        "end_line": 5675,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "syscall.c",
+        "sha256": null,
+        "start_line": 5676,
+        "end_line": 5719,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "syscall.c",
+        "sha256": null,
+        "start_line": 5720,
+        "end_line": 5733,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "syscall.c",
+        "sha256": null,
+        "start_line": 5734,
+        "end_line": 5737,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 178,
+        "end_line": 178,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 208,
+        "end_line": 212,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 259,
+        "end_line": 259,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 334,
+        "end_line": 334,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "vmem.c",
+        "sha256": null,
+        "start_line": 472,
+        "end_line": 472,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "include/kernel/futex.h",
+        "sha256": "76f4288ce9388532fd38d599a5ad5bbb5358150dec6fee6a7d41ff409166b7e7",
+        "start_line": 22,
+        "end_line": 23,
+        "symbol": "",
+        "scope": "cited_lines",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/futex.c",
+        "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+        "start_line": 29,
+        "end_line": 96,
+        "symbol": "futex_wait_bitset",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/futex.c",
+        "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+        "start_line": 183,
+        "end_line": 206,
+        "symbol": "futex_wake_bitset",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/futex.c",
+        "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+        "start_line": 246,
+        "end_line": 261,
+        "symbol": "futex_requeue",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/futex.c",
+        "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+        "start_line": 327,
+        "end_line": 341,
+        "symbol": "futex_clear",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/pmem.c",
+        "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+        "start_line": 66,
+        "end_line": 86,
+        "symbol": "is_buddy_available",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 109,
+        "end_line": 119,
+        "symbol": "walk",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 128,
+        "end_line": 153,
+        "symbol": "walkaddr",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 190,
+        "end_line": 224,
+        "symbol": "mappages_internal",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 381,
+        "end_line": 386,
+        "symbol": "uvmfree",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "not_observed",
+        "missing_ranges": [
+          [
+            385,
+            386
+          ]
+        ]
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 549,
+        "end_line": 556,
+        "symbol": "fetchstr",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 597,
+        "end_line": 597,
+        "symbol": "",
+        "scope": "cited_lines",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      }
+    ],
+    "attempts": [
+      {
+        "round": 0,
+        "run_id": "b5559d1f903348a189c40751a340848a",
+        "requirements": [
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 105,
+            "end_line": 173,
+            "symbol": "futex_wait",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 252,
+            "end_line": 342,
+            "symbol": "buddy_alloc",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 349,
+            "end_line": 513,
+            "symbol": "buddy_free",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 239,
+            "end_line": 311,
+            "symbol": "walk_internal",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 439,
+            "end_line": 537,
+            "symbol": "uvmcopy",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 599,
+            "end_line": 642,
+            "symbol": "copyinstr",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 108,
+            "end_line": 108,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 109,
+            "end_line": 109,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 110,
+            "end_line": 113,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 115,
+            "end_line": 118,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 120,
+            "end_line": 131,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 133,
+            "end_line": 147,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 149,
+            "end_line": 168,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 170,
+            "end_line": 172,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 183,
+            "end_line": 205,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 327,
+            "end_line": 341,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 544,
+            "end_line": 581,
+            "symbol": "pmem_alloc_pages",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 588,
+            "end_line": 675,
+            "symbol": "pmem_free_pages",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/process.c",
+            "sha256": "bb6c63fff51b07c1bf76188ad6f96c972eaa5a137a9ac9d46e4d5f7b67ddcbc4",
+            "start_line": 524,
+            "end_line": 641,
+            "symbol": "scheduler",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "not_observed",
+            "missing_ranges": [
+              [
+                524,
+                544
+              ],
+              [
+                625,
+                641
+              ]
+            ]
+          },
+          {
+            "path": "kernel/process.c",
+            "sha256": "bb6c63fff51b07c1bf76188ad6f96c972eaa5a137a9ac9d46e4d5f7b67ddcbc4",
+            "start_line": 965,
+            "end_line": 1123,
+            "symbol": "fork",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "not_observed",
+            "missing_ranges": [
+              [
+                1005,
+                1123
+              ]
+            ]
+          },
+          {
+            "path": "kernel/syscall.c",
+            "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+            "start_line": 5600,
+            "end_line": 5739,
+            "symbol": "sys_futex",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "not_observed",
+            "missing_ranges": [
+              [
+                5655,
+                5705
+              ],
+              [
+                5707,
+                5711
+              ],
+              [
+                5713,
+                5739
+              ]
+            ]
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 254,
+            "end_line": 258,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 261,
+            "end_line": 261,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 267,
+            "end_line": 275,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 281,
+            "end_line": 309,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 311,
+            "end_line": 331,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 336,
+            "end_line": 341,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 351,
+            "end_line": 355,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 358,
+            "end_line": 358,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 365,
+            "end_line": 370,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 372,
+            "end_line": 376,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 381,
+            "end_line": 404,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 398,
+            "end_line": 404,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 406,
+            "end_line": 412,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 415,
+            "end_line": 415,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 422,
+            "end_line": 445,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 451,
+            "end_line": 479,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 482,
+            "end_line": 512,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 674,
+            "end_line": 674,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 608,
+            "end_line": 608,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "spinlock.c",
+            "sha256": null,
+            "start_line": 28,
+            "end_line": 29,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 109,
+            "end_line": 119,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 128,
+            "end_line": 153,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 137,
+            "end_line": 152,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 203,
+            "end_line": 203,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 211,
+            "end_line": 211,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 241,
+            "end_line": 241,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 244,
+            "end_line": 247,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 250,
+            "end_line": 251,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 253,
+            "end_line": 256,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 267,
+            "end_line": 276,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 277,
+            "end_line": 291,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 290,
+            "end_line": 290,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 292,
+            "end_line": 295,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 297,
+            "end_line": 310,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 328,
+            "end_line": 328,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 442,
+            "end_line": 442,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 447,
+            "end_line": 447,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 449,
+            "end_line": 477,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 470,
+            "end_line": 470,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 478,
+            "end_line": 501,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 503,
+            "end_line": 515,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 517,
+            "end_line": 527,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 522,
+            "end_line": 526,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 533,
+            "end_line": 536,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 549,
+            "end_line": 556,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 597,
+            "end_line": 597,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 605,
+            "end_line": 605,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 607,
+            "end_line": 610,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 611,
+            "end_line": 613,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 615,
+            "end_line": 619,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 620,
+            "end_line": 637,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 639,
+            "end_line": 639,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 641,
+            "end_line": 641,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          }
+        ],
+        "result_artifact": "/home/niu/agent-recall-probe-20261029/exp-kernel/runs/20261029T212746-b14424eb/receipts/ee1fbf4c1e969e08/recall-trial-aa8c1465b1/b5559d1f903348a189c40751a340848a/result.json",
+        "result_sha256": "8163d645e841722e961c5554ee31fa5918b1088f5d46cbbce7324eead4e30d7a"
+      },
+      {
+        "round": 1,
+        "run_id": "bae699fe9a9f4e27816d5fd4ed7eb445",
+        "requirements": [
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 105,
+            "end_line": 173,
+            "symbol": "futex_wait",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 252,
+            "end_line": 342,
+            "symbol": "buddy_alloc",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 349,
+            "end_line": 513,
+            "symbol": "buddy_free",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 239,
+            "end_line": 311,
+            "symbol": "walk_internal",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 439,
+            "end_line": 537,
+            "symbol": "uvmcopy",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 599,
+            "end_line": 642,
+            "symbol": "copyinstr",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 108,
+            "end_line": 108,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 109,
+            "end_line": 109,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 110,
+            "end_line": 113,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 115,
+            "end_line": 118,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 120,
+            "end_line": 131,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 133,
+            "end_line": 147,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 149,
+            "end_line": 168,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 170,
+            "end_line": 172,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 183,
+            "end_line": 205,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 327,
+            "end_line": 341,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 544,
+            "end_line": 581,
+            "symbol": "pmem_alloc_pages",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 588,
+            "end_line": 675,
+            "symbol": "pmem_free_pages",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/process.c",
+            "sha256": "bb6c63fff51b07c1bf76188ad6f96c972eaa5a137a9ac9d46e4d5f7b67ddcbc4",
+            "start_line": 524,
+            "end_line": 641,
+            "symbol": "scheduler",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/process.c",
+            "sha256": "bb6c63fff51b07c1bf76188ad6f96c972eaa5a137a9ac9d46e4d5f7b67ddcbc4",
+            "start_line": 965,
+            "end_line": 1123,
+            "symbol": "fork",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/syscall.c",
+            "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+            "start_line": 5600,
+            "end_line": 5739,
+            "symbol": "sys_futex",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 254,
+            "end_line": 258,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 261,
+            "end_line": 261,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 267,
+            "end_line": 275,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 281,
+            "end_line": 309,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 311,
+            "end_line": 331,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 336,
+            "end_line": 341,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 351,
+            "end_line": 355,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 358,
+            "end_line": 358,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 365,
+            "end_line": 370,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 372,
+            "end_line": 376,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 381,
+            "end_line": 404,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 398,
+            "end_line": 404,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 406,
+            "end_line": 412,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 415,
+            "end_line": 415,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 422,
+            "end_line": 445,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 451,
+            "end_line": 479,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 482,
+            "end_line": 512,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 674,
+            "end_line": 674,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 608,
+            "end_line": 608,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "spinlock.c",
+            "sha256": null,
+            "start_line": 28,
+            "end_line": 29,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 109,
+            "end_line": 119,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 128,
+            "end_line": 153,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 137,
+            "end_line": 152,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 203,
+            "end_line": 203,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 211,
+            "end_line": 211,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 241,
+            "end_line": 241,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 244,
+            "end_line": 247,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 250,
+            "end_line": 251,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 253,
+            "end_line": 256,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 267,
+            "end_line": 276,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 277,
+            "end_line": 291,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 290,
+            "end_line": 290,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 292,
+            "end_line": 295,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 297,
+            "end_line": 310,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 328,
+            "end_line": 328,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 442,
+            "end_line": 442,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 447,
+            "end_line": 447,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 449,
+            "end_line": 477,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 470,
+            "end_line": 470,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 478,
+            "end_line": 501,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 503,
+            "end_line": 515,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 517,
+            "end_line": 527,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 522,
+            "end_line": 526,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 533,
+            "end_line": 536,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 549,
+            "end_line": 556,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 597,
+            "end_line": 597,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 605,
+            "end_line": 605,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 607,
+            "end_line": 610,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 611,
+            "end_line": 613,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 615,
+            "end_line": 619,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 620,
+            "end_line": 637,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 639,
+            "end_line": 639,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 641,
+            "end_line": 641,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 46,
+            "end_line": 46,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 134,
+            "end_line": 134,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 143,
+            "end_line": 147,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 157,
+            "end_line": 157,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 160,
+            "end_line": 168,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 194,
+            "end_line": 200,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 246,
+            "end_line": 261,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 329,
+            "end_line": 329,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/spinlock.c",
+            "sha256": "762acc463db3977ef8410cfb4d9a5b31cdd17147dbb45e3d2ff4e05699d56474",
+            "start_line": 24,
+            "end_line": 50,
+            "symbol": "acquire",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "not_observed",
+            "missing_ranges": [
+              [
+                46,
+                50
+              ]
+            ]
+          },
+          {
+            "path": "kernel/vma.c",
+            "sha256": "51a962065422a9ef38d3c6bc024c09e6c36d1070d1042acb580465ffc9938a64",
+            "start_line": 1060,
+            "end_line": 1126,
+            "symbol": "vma_copy",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 321,
+            "end_line": 379,
+            "symbol": "vmunmap",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 66,
+            "end_line": 85,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 292,
+            "end_line": 293,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 546,
+            "end_line": 549,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 551,
+            "end_line": 552,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 554,
+            "end_line": 554,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 556,
+            "end_line": 564,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 565,
+            "end_line": 573,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 575,
+            "end_line": 575,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 590,
+            "end_line": 591,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 596,
+            "end_line": 601,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 603,
+            "end_line": 610,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 612,
+            "end_line": 615,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 615,
+            "end_line": 615,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 618,
+            "end_line": 647,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 649,
+            "end_line": 671,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 673,
+            "end_line": 674,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 527,
+            "end_line": 528,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 529,
+            "end_line": 532,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 533,
+            "end_line": 535,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 535,
+            "end_line": 535,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 536,
+            "end_line": 536,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 552,
+            "end_line": 568,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 561,
+            "end_line": 565,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 571,
+            "end_line": 575,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 578,
+            "end_line": 591,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 599,
+            "end_line": 616,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 621,
+            "end_line": 635,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 972,
+            "end_line": 980,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 981,
+            "end_line": 985,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 986,
+            "end_line": 986,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 986,
+            "end_line": 987,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 988,
+            "end_line": 1006,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1007,
+            "end_line": 1013,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1017,
+            "end_line": 1021,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1023,
+            "end_line": 1067,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1069,
+            "end_line": 1098,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1100,
+            "end_line": 1101,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1103,
+            "end_line": 1106,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1108,
+            "end_line": 1112,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1109,
+            "end_line": 1110,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1114,
+            "end_line": 1122,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5607,
+            "end_line": 5609,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5611,
+            "end_line": 5641,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5642,
+            "end_line": 5644,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5645,
+            "end_line": 5647,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5648,
+            "end_line": 5675,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5676,
+            "end_line": 5719,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5720,
+            "end_line": 5733,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5734,
+            "end_line": 5737,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 178,
+            "end_line": 178,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 208,
+            "end_line": 212,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 259,
+            "end_line": 259,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 334,
+            "end_line": 334,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 472,
+            "end_line": 472,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          }
+        ],
+        "result_artifact": "/home/niu/agent-recall-probe-20261029/exp-kernel/runs/20261029T212746-b14424eb/receipts/ee1fbf4c1e969e08/recall-trial-read-1-4a0b388d76/bae699fe9a9f4e27816d5fd4ed7eb445/result.json",
+        "result_sha256": "5fd8115cbfff499feb785f94b5fb3d0de6c4ef85ae13d92316471a1d470a8afb"
+      },
+      {
+        "round": 2,
+        "run_id": "e13d37f743c44629a90996fca7ab509a",
+        "requirements": [
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 105,
+            "end_line": 173,
+            "symbol": "futex_wait",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 252,
+            "end_line": 342,
+            "symbol": "buddy_alloc",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 349,
+            "end_line": 513,
+            "symbol": "buddy_free",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 239,
+            "end_line": 311,
+            "symbol": "walk_internal",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 439,
+            "end_line": 537,
+            "symbol": "uvmcopy",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 599,
+            "end_line": 642,
+            "symbol": "copyinstr",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 108,
+            "end_line": 108,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 109,
+            "end_line": 109,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 110,
+            "end_line": 113,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 115,
+            "end_line": 118,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 120,
+            "end_line": 131,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 133,
+            "end_line": 147,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 149,
+            "end_line": 168,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 170,
+            "end_line": 172,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 183,
+            "end_line": 205,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 327,
+            "end_line": 341,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 544,
+            "end_line": 581,
+            "symbol": "pmem_alloc_pages",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 588,
+            "end_line": 675,
+            "symbol": "pmem_free_pages",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/process.c",
+            "sha256": "bb6c63fff51b07c1bf76188ad6f96c972eaa5a137a9ac9d46e4d5f7b67ddcbc4",
+            "start_line": 524,
+            "end_line": 641,
+            "symbol": "scheduler",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/process.c",
+            "sha256": "bb6c63fff51b07c1bf76188ad6f96c972eaa5a137a9ac9d46e4d5f7b67ddcbc4",
+            "start_line": 965,
+            "end_line": 1123,
+            "symbol": "fork",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/syscall.c",
+            "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+            "start_line": 5600,
+            "end_line": 5739,
+            "symbol": "sys_futex",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 254,
+            "end_line": 258,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 261,
+            "end_line": 261,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 267,
+            "end_line": 275,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 281,
+            "end_line": 309,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 311,
+            "end_line": 331,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 336,
+            "end_line": 341,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 351,
+            "end_line": 355,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 358,
+            "end_line": 358,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 365,
+            "end_line": 370,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 372,
+            "end_line": 376,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 381,
+            "end_line": 404,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 398,
+            "end_line": 404,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 406,
+            "end_line": 412,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 415,
+            "end_line": 415,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 422,
+            "end_line": 445,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 451,
+            "end_line": 479,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 482,
+            "end_line": 512,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 674,
+            "end_line": 674,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 608,
+            "end_line": 608,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "spinlock.c",
+            "sha256": null,
+            "start_line": 28,
+            "end_line": 29,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 109,
+            "end_line": 119,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 128,
+            "end_line": 153,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 137,
+            "end_line": 152,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 203,
+            "end_line": 203,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 211,
+            "end_line": 211,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 241,
+            "end_line": 241,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 244,
+            "end_line": 247,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 250,
+            "end_line": 251,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 253,
+            "end_line": 256,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 267,
+            "end_line": 276,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 277,
+            "end_line": 291,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 290,
+            "end_line": 290,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 292,
+            "end_line": 295,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 297,
+            "end_line": 310,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 328,
+            "end_line": 328,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 442,
+            "end_line": 442,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 447,
+            "end_line": 447,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 449,
+            "end_line": 477,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 470,
+            "end_line": 470,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 478,
+            "end_line": 501,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 503,
+            "end_line": 515,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 517,
+            "end_line": 527,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 522,
+            "end_line": 526,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 533,
+            "end_line": 536,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 549,
+            "end_line": 556,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 597,
+            "end_line": 597,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 605,
+            "end_line": 605,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 607,
+            "end_line": 610,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 611,
+            "end_line": 613,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 615,
+            "end_line": 619,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 620,
+            "end_line": 637,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 639,
+            "end_line": 639,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 641,
+            "end_line": 641,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 46,
+            "end_line": 46,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 134,
+            "end_line": 134,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 143,
+            "end_line": 147,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 157,
+            "end_line": 157,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 160,
+            "end_line": 168,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 194,
+            "end_line": 200,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 246,
+            "end_line": 261,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "futex.c",
+            "sha256": null,
+            "start_line": 329,
+            "end_line": 329,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/spinlock.c",
+            "sha256": "762acc463db3977ef8410cfb4d9a5b31cdd17147dbb45e3d2ff4e05699d56474",
+            "start_line": 24,
+            "end_line": 50,
+            "symbol": "acquire",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vma.c",
+            "sha256": "51a962065422a9ef38d3c6bc024c09e6c36d1070d1042acb580465ffc9938a64",
+            "start_line": 1060,
+            "end_line": 1126,
+            "symbol": "vma_copy",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 321,
+            "end_line": 379,
+            "symbol": "vmunmap",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 66,
+            "end_line": 85,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 292,
+            "end_line": 293,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 546,
+            "end_line": 549,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 551,
+            "end_line": 552,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 554,
+            "end_line": 554,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 556,
+            "end_line": 564,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 565,
+            "end_line": 573,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 575,
+            "end_line": 575,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 590,
+            "end_line": 591,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 596,
+            "end_line": 601,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 603,
+            "end_line": 610,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 612,
+            "end_line": 615,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 615,
+            "end_line": 615,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 618,
+            "end_line": 647,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 649,
+            "end_line": 671,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "pmem.c",
+            "sha256": null,
+            "start_line": 673,
+            "end_line": 674,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 527,
+            "end_line": 528,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 529,
+            "end_line": 532,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 533,
+            "end_line": 535,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 535,
+            "end_line": 535,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 536,
+            "end_line": 536,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 552,
+            "end_line": 568,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 561,
+            "end_line": 565,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 571,
+            "end_line": 575,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 578,
+            "end_line": 591,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 599,
+            "end_line": 616,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 621,
+            "end_line": 635,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 972,
+            "end_line": 980,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 981,
+            "end_line": 985,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 986,
+            "end_line": 986,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 986,
+            "end_line": 987,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 988,
+            "end_line": 1006,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1007,
+            "end_line": 1013,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1017,
+            "end_line": 1021,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1023,
+            "end_line": 1067,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1069,
+            "end_line": 1098,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1100,
+            "end_line": 1101,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1103,
+            "end_line": 1106,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1108,
+            "end_line": 1112,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1109,
+            "end_line": 1110,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "process.c",
+            "sha256": null,
+            "start_line": 1114,
+            "end_line": 1122,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5607,
+            "end_line": 5609,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5611,
+            "end_line": 5641,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5642,
+            "end_line": 5644,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5645,
+            "end_line": 5647,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5648,
+            "end_line": 5675,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5676,
+            "end_line": 5719,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5720,
+            "end_line": 5733,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "syscall.c",
+            "sha256": null,
+            "start_line": 5734,
+            "end_line": 5737,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 178,
+            "end_line": 178,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 208,
+            "end_line": 212,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 259,
+            "end_line": 259,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 334,
+            "end_line": 334,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "vmem.c",
+            "sha256": null,
+            "start_line": 472,
+            "end_line": 472,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "include/kernel/futex.h",
+            "sha256": "76f4288ce9388532fd38d599a5ad5bbb5358150dec6fee6a7d41ff409166b7e7",
+            "start_line": 22,
+            "end_line": 23,
+            "symbol": "",
+            "scope": "cited_lines",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 29,
+            "end_line": 96,
+            "symbol": "futex_wait_bitset",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 183,
+            "end_line": 206,
+            "symbol": "futex_wake_bitset",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 246,
+            "end_line": 261,
+            "symbol": "futex_requeue",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 327,
+            "end_line": 341,
+            "symbol": "futex_clear",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 66,
+            "end_line": 86,
+            "symbol": "is_buddy_available",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 109,
+            "end_line": 119,
+            "symbol": "walk",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 128,
+            "end_line": 153,
+            "symbol": "walkaddr",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 190,
+            "end_line": 224,
+            "symbol": "mappages_internal",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 381,
+            "end_line": 386,
+            "symbol": "uvmfree",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "not_observed",
+            "missing_ranges": [
+              [
+                385,
+                386
+              ]
+            ]
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 549,
+            "end_line": 556,
+            "symbol": "fetchstr",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 597,
+            "end_line": 597,
+            "symbol": "",
+            "scope": "cited_lines",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          }
+        ],
+        "result_artifact": "/home/niu/agent-recall-probe-20261029/exp-kernel/runs/20261029T212746-b14424eb/receipts/ee1fbf4c1e969e08/recall-trial-read-2-88bc6d3010/e13d37f743c44629a90996fca7ab509a/result.json",
+        "result_sha256": "22a42c30a83a7d894fd6cf84c8523bcd5f8bd3d8a253b68e01be02f2908c5c27"
+      }
+    ],
+    "relevant_function_recall": "unknown",
+    "artifact": "/home/niu/agent-recall-probe-20261029/exp-kernel/runs/20261029T212746-b14424eb/receipts/ee1fbf4c1e969e08/recall-trial-read-2-88bc6d3010/e13d37f743c44629a90996fca7ab509a/coverage.json"
+  },
+  "audit_files": [
+    {
+      "path": "include/kernel/futex.h",
+      "returned_ranges": [
+        [
+          1,
+          53
+        ]
+      ]
+    },
+    {
+      "path": "kernel/SC7_start_kernel.c",
+      "returned_ranges": [
+        [
+          144,
+          144
+        ],
+        [
+          147,
+          148
+        ],
+        [
+          164,
+          164
+        ],
+        [
+          173,
+          173
+        ],
+        [
+          184,
+          184
+        ]
+      ]
+    },
+    {
+      "path": "kernel/console.c",
+      "returned_ranges": [
+        [
+          70,
+          70
+        ],
+        [
+          77,
+          77
+        ]
+      ]
+    },
+    {
+      "path": "kernel/futex.c",
+      "returned_ranges": [
+        [
+          1,
+          354
+        ]
+      ]
+    },
+    {
+      "path": "kernel/pmem.c",
+      "returned_ranges": [
+        [
+          1,
+          139
+        ],
+        [
+          245,
+          514
+        ],
+        [
+          540,
+          679
+        ]
+      ]
+    },
+    {
+      "path": "kernel/process.c",
+      "returned_ranges": [
+        [
+          32,
+          32
+        ],
+        [
+          146,
+          320
+        ],
+        [
+          520,
+          722
+        ],
+        [
+          770,
+          771
+        ],
+        [
+          960,
+          1124
+        ],
+        [
+          1129,
+          1129
+        ],
+        [
+          1131,
+          1131
+        ],
+        [
+          1135,
+          1135
+        ],
+        [
+          1145,
+          1145
+        ],
+        [
+          1257,
+          1257
+        ],
+        [
+          1323,
+          1323
+        ],
+        [
+          1709,
+          1709
+        ],
+        [
+          1817,
+          1817
+        ],
+        [
+          1830,
+          1830
+        ]
+      ]
+    },
+    {
+      "path": "kernel/spinlock.c",
+      "returned_ranges": [
+        [
+          20,
+          54
+        ]
+      ]
+    },
+    {
+      "path": "kernel/syscall.c",
+      "returned_ranges": [
+        [
+          3180,
+          3180
+        ],
+        [
+          5595,
+          5744
+        ]
+      ]
+    },
+    {
+      "path": "kernel/vma.c",
+      "returned_ranges": [
+        [
+          1055,
+          1367
+        ]
+      ]
+    },
+    {
+      "path": "kernel/vmem.c",
+      "returned_ranges": [
+        [
+          95,
+          384
+        ],
+        [
+          435,
+          644
+        ]
+      ]
+    }
+  ],
+  "finished": 1793280933.8501835
+}

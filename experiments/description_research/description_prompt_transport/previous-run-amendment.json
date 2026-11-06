@@ -1,0 +1,87 @@
+{
+  "original_requests": [
+    {
+      "file": "/home/niu/agent-research/description_runtime_grounding/calls/01-request.json",
+      "sha256": "c44779b7e5654d17d6528469fb9149a2c661b932909d77b2f074cbb4c3b49594",
+      "contains_expected_system": false,
+      "system_characters": [
+        2096
+      ]
+    },
+    {
+      "file": "/home/niu/agent-research/description_runtime_grounding/calls/02-request.json",
+      "sha256": "c32af77145ec5fedbc1216b68e2344541d471645a3929db36b5228c8db298e86",
+      "contains_expected_system": false,
+      "system_characters": [
+        9013
+      ]
+    },
+    {
+      "file": "/home/niu/agent-research/description_runtime_grounding/calls/03-request.json",
+      "sha256": "a657fc7419aca7579a37900070f53eba8e9a72b11d523f5e8be9460e37e40e4b",
+      "contains_expected_system": false,
+      "system_characters": [
+        9013
+      ]
+    },
+    {
+      "file": "/home/niu/agent-research/description_runtime_grounding/calls/04-request.json",
+      "sha256": "ed69b77fe6ee7333c4be95a143a5cb965faa4dd5ec5a760ea81f6385f52f46f7",
+      "contains_expected_system": false,
+      "system_characters": [
+        9013
+      ]
+    },
+    {
+      "file": "/home/niu/agent-research/description_runtime_grounding/calls/05-request.json",
+      "sha256": "2cfefe0f3e0e94aea96a120839708c1e7a0847cb632e981b6974259cfc87c5cf",
+      "contains_expected_system": false,
+      "system_characters": [
+        9013
+      ]
+    },
+    {
+      "file": "/home/niu/agent-research/description_runtime_grounding/calls/06-request.json",
+      "sha256": "db3d5209ca2cd15d5e90b5d9ccbbc9a7301c7bfc45a49da84071d4ec3a146c9c",
+      "contains_expected_system": false,
+      "system_characters": [
+        9013
+      ]
+    },
+    {
+      "file": "/home/niu/agent-research/description_runtime_grounding/calls/07-request.json",
+      "sha256": "4ad118136e8b974fc8e5ec0794d5ab7443caa30d47e24f6e7260c5dbb4743f89",
+      "contains_expected_system": false,
+      "system_characters": [
+        9013
+      ]
+    },
+    {
+      "file": "/home/niu/agent-research/description_runtime_grounding/calls/08-request.json",
+      "sha256": "9696615ac60dd9d9f767d3e7238fa24be9034ff666d4cfd5b3280a6f644f66b0",
+      "contains_expected_system": false,
+      "system_characters": [
+        9013
+      ]
+    },
+    {
+      "file": "/home/niu/agent-research/description_runtime_grounding/calls/09-request.json",
+      "sha256": "f6c0c368d633550ddb15a58150f1ff7501380260f55ade8ba0525a050548a74c",
+      "contains_expected_system": false,
+      "system_characters": [
+        9013
+      ]
+    },
+    {
+      "file": "/home/niu/agent-research/description_runtime_grounding/calls/10-request.json",
+      "sha256": "08ddb3da44d4f65bb0a6faa5a9853402dcb66f9916b34bdbb37c1040b4e066d0",
+      "contains_expected_system": false,
+      "system_characters": [
+        9013
+      ]
+    }
+  ],
+  "all_intended_system_absent": true,
+  "boundary": "Then-current production really ran, but computed custom system text never reached the model. Its failure and costs remain valid; intended-template semantic quality was not tested.",
+  "old_frozen_artifacts_modified": false
+}

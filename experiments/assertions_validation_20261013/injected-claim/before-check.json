@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "plan_sha256": "b42329597872e02a85866c377b24d27a0e04ff7687f386355b4a08462b86d514",
+  "snapshot_sha256": "feb13e420101b9c1df8bd29ce384e116b96fcdd86c496023328ffb9f5289294d",
+  "report_sha256": "635a508eb1f0a4dd6218b16a195c6057faebed43a19bbc4284bc49abc9f748e2",
+  "run_id": "5daeed1254d94e50a9e015592932ec83",
+  "read_artifact": "/home/niu/agent-assertions-validation-20261013/generated/receipts/64b6eaf1cc99d813/evidence-plan-validation-420a15e2d2/5daeed1254d94e50a9e015592932ec83/audit.json",
+  "shape_errors": [],
+  "items": [
+    {
+      "item_id": "retry-count",
+      "claim_id": "081047ba5fdc4572cbc04cb8",
+      "dimension": "功能性",
+      "question": "默认配置且每次请求失败时，总调用次数与额外重试次数分别是多少？",
+      "scope": "send_request 的默认配置执行路径",
+      "decision_rule": "结合循环边界、单次调用和配置确认次数，独立测试前仅作为待验证的源码结论。",
+      "score_effect": "本轮不建立数值评分映射。",
+      "statement": "在默认配置且每次请求均失败的条件下，总共调用 request_attempt 3 次（包括首次尝试），额外重试 2 次。",
+      "conditions": [
+        "使用 config.h:1 的默认值 DEFAULT_RETRIES=3，未被任何覆盖配置改写",
+        "条件为每次请求都失败，即 request_attempt 每次都返回非 0(源码中恒返回 -1)",
+        "循环边界为 <=，包含 attempt=0 的首次尝试"
+      ],
+      "counterevidence": [
+        "须核对首次尝试是否已计入总次数，以及循环边界是否包含配置的上限。"
+      ],
+      "limitations": "未执行测试，当前断言待独立复核。",
+      "validation_need": "execution",
+      "model_assessment": "source_supported",
+      "missing_evidence": [],
+      "unquoted_targets": [],
+      "evidence": [
+        {
+          "evidence_id": "entry",
+          "ref": "request.c:10-19",
+          "quote": "int send_request(void) {\n    int result = -1;\n    for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) {\n        result = request_attempt();\n        if (result == 0) {\n            return 0;\n        }\n    }\n    return result;\n}"
+        },
+        {
+          "evidence_id": "attempt",
+          "ref": "request.c:5-8",
+          "quote": "static int request_attempt(void) {\n    attempt_count++;\n    return -1;\n}"
+        },
+        {
+          "evidence_id": "config",
+          "ref": "config.h:1-1",
+          "quote": "#define DEFAULT_RETRIES 3"
+        }
+      ],
+      "requirements": [
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "start_line": 10,
+          "end_line": 19,
+          "symbol": "send_request",
+          "scope": "function"
+        },
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "start_line": 5,
+          "end_line": 8,
+          "symbol": "request_attempt",
+          "scope": "function"
+        },
+        {
+          "path": "config.h",
+          "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+          "start_line": 1,
+          "end_line": 1,
+          "symbol": "",
+          "scope": "declared_lines",
+          "parser_status": "parsed"
+        },
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "start_line": 10,
+          "end_line": 19,
+          "symbol": "",
+          "scope": "cited_lines"
+        },
+        {
+          "path": "request.c",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "start_line": 5,
+          "end_line": 8,
+          "symbol": "",
+          "scope": "cited_lines"
+        },
+        {
+          "path": "config.h",
+          "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+          "parser_status": "parsed",
+          "start_line": 1,
+          "end_line": 1,
+          "symbol": "",
+          "scope": "cited_lines"
+        }
+      ],
+      "status": "ready_for_review",
+      "errors": [],
+      "execution_status": "not_run",
+      "score_status": "not_computed"
+    }
+  ],
+  "review_artifact": null,
+  "limitations": [
+    "source_support_not_execution",
+    "conditions_need_semantic_review",
+    "not_all_report_prose_derived_from_assertions",
+    "no_verified_score_mapping"
+  ]
+}

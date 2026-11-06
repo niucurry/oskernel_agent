@@ -25,4 +25,12 @@ def test_setup_writes_project_private_opencode_files(tmp_path, monkeypatch) -> N
     auth_file = project_root / "data" / "opencode" / "data" / "opencode" / "auth.json"
     config_file = project_root / "data" / "opencode" / "config" / "opencode" / "opencode.json"
     assert json.loads(auth_file.read_text(encoding="utf-8"))["deepseek"]["key"] == "test-key"
-    assert json.loads(config_file.read_text(encoding="utf-8"))["mcp"]["os-kernel-tools"]
+    actual = json.loads(config_file.read_text(encoding="utf-8"))
+    assert actual["mcp"]["os-kernel-tools"]
+    assert actual["agent"]["os-kernel-claim-review"]["prompt"]
+    from oskernel_agent.prompts.builder import SessionType, SESSION_AGENT_NAMES
+
+    for session_type in SessionType:
+        agent = actual["agent"][SESSION_AGENT_NAMES[session_type]]
+        assert agent["prompt"] == setup_opencode._build_session_prompt(session_type)
+        assert "system" not in agent

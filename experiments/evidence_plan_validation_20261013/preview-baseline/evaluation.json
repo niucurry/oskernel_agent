@@ -1,0 +1,405 @@
+{
+  "version": 1,
+  "plan_id": "retry-evidence-v1",
+  "plan_path": "/home/niu/agent-evidence-plan-validation-20261013/plan.json",
+  "plan_sha256": "a4c7fbf7274807b19d157f2ea953751e25cb3be77a5fe7e50c8638095f04f8e3",
+  "repo_path": "/home/niu/agent-evidence-plan-validation-20261013/repo",
+  "items": [
+    {
+      "id": "retry-count",
+      "dimension": "功能性",
+      "question": "默认配置且每次请求失败时，总调用次数由哪些代码决定？",
+      "scope": "send_request 的默认配置执行路径",
+      "decision_rule": "核对入口循环、单次请求返回值和默认次数配置；执行验证完成前仅形成源码说明。",
+      "score_effect": "本次只验证证据获取；尚未建立数值评分映射。",
+      "on_insufficient": "needs_review",
+      "subsystems": [
+        "网络"
+      ],
+      "evidence": [
+        {
+          "id": "entry",
+          "purpose": "入口循环与退出条件",
+          "path": "request.c",
+          "symbol": "send_request",
+          "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+          "parser_status": "parsed",
+          "requirements": [
+            {
+              "path": "request.c",
+              "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+              "start_line": 7,
+              "end_line": 16,
+              "symbol": "send_request",
+              "scope": "function",
+              "parser_status": "parsed"
+            }
+          ],
+          "resolution": "resolved",
+          "status": "returned",
+          "checked_ranges": [
+            {
+              "path": "request.c",
+              "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+              "start_line": 7,
+              "end_line": 16,
+              "symbol": "send_request",
+              "scope": "function",
+              "parser_status": "parsed",
+              "status": "returned",
+              "missing_ranges": []
+            }
+          ]
+        },
+        {
+          "id": "attempt",
+          "purpose": "单次请求的结果",
+          "path": "request.c",
+          "symbol": "request_attempt",
+          "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+          "parser_status": "parsed",
+          "requirements": [
+            {
+              "path": "request.c",
+              "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+              "start_line": 3,
+              "end_line": 5,
+              "symbol": "request_attempt",
+              "scope": "function",
+              "parser_status": "parsed"
+            }
+          ],
+          "resolution": "resolved",
+          "status": "returned",
+          "checked_ranges": [
+            {
+              "path": "request.c",
+              "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+              "start_line": 3,
+              "end_line": 5,
+              "symbol": "request_attempt",
+              "scope": "function",
+              "parser_status": "parsed",
+              "status": "returned",
+              "missing_ranges": []
+            }
+          ]
+        },
+        {
+          "id": "config",
+          "purpose": "默认重试次数",
+          "path": "config.h",
+          "start_line": 1,
+          "end_line": 1,
+          "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+          "parser_status": "parsed",
+          "requirements": [
+            {
+              "path": "config.h",
+              "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+              "start_line": 1,
+              "end_line": 1,
+              "symbol": "",
+              "scope": "declared_lines",
+              "parser_status": "parsed"
+            }
+          ],
+          "resolution": "resolved",
+          "status": "needs_evidence",
+          "checked_ranges": [
+            {
+              "path": "config.h",
+              "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+              "start_line": 1,
+              "end_line": 1,
+              "symbol": "",
+              "scope": "declared_lines",
+              "parser_status": "parsed",
+              "status": "not_observed",
+              "missing_ranges": [
+                [
+                  1,
+                  1
+                ]
+              ]
+            }
+          ]
+        }
+      ],
+      "returned_count": 2,
+      "required_count": 3,
+      "status": "needs_evidence",
+      "judgment_status": "not_verified",
+      "score_status": "not_computed"
+    }
+  ],
+  "snapshot_sha256": "dd362c8a8389ae382d20595277dc83bea3de4f750fbc862e3bf4bcad02151e19",
+  "snapshot_scope": "declared_evidence_files_only",
+  "status": "needs_evidence",
+  "run_id": "6c4a5d3e18c34f529f6d1847bf323766",
+  "artifact": "/home/niu/agent-evidence-plan-validation-20261013/preview-baseline/receipts/ca776bf9d420bbe9/evidence-plan-validation-420a15e2d2/6c4a5d3e18c34f529f6d1847bf323766/audit.json",
+  "relevant_evidence_recall": "unknown",
+  "model": "deepseek-flash",
+  "elapsed_seconds": 13.103,
+  "read_evidence": {
+    "status": "unresolved",
+    "repair_rounds": 0,
+    "requirements": [
+      {
+        "path": "request.c",
+        "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+        "start_line": 7,
+        "end_line": 16,
+        "symbol": "send_request",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "request.c",
+        "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+        "start_line": 3,
+        "end_line": 5,
+        "symbol": "request_attempt",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "config.h",
+        "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+        "start_line": 1,
+        "end_line": 1,
+        "symbol": "",
+        "scope": "declared_lines",
+        "parser_status": "parsed",
+        "status": "not_observed",
+        "missing_ranges": [
+          [
+            1,
+            1
+          ]
+        ]
+      },
+      {
+        "path": "request.c",
+        "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+        "start_line": 1,
+        "end_line": 1,
+        "symbol": "",
+        "scope": "cited_lines",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      }
+    ],
+    "attempts": [
+      {
+        "round": 0,
+        "run_id": "6c4a5d3e18c34f529f6d1847bf323766",
+        "requirements": [
+          {
+            "path": "request.c",
+            "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+            "start_line": 7,
+            "end_line": 16,
+            "symbol": "send_request",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "request.c",
+            "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+            "start_line": 3,
+            "end_line": 5,
+            "symbol": "request_attempt",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "config.h",
+            "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+            "start_line": 1,
+            "end_line": 1,
+            "symbol": "",
+            "scope": "declared_lines",
+            "parser_status": "parsed",
+            "status": "not_observed",
+            "missing_ranges": [
+              [
+                1,
+                1
+              ]
+            ]
+          },
+          {
+            "path": "request.c",
+            "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+            "start_line": 1,
+            "end_line": 1,
+            "symbol": "",
+            "scope": "cited_lines",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          }
+        ],
+        "evidence_plan": {
+          "version": 1,
+          "plan_id": "retry-evidence-v1",
+          "plan_path": "/home/niu/agent-evidence-plan-validation-20261013/plan.json",
+          "plan_sha256": "a4c7fbf7274807b19d157f2ea953751e25cb3be77a5fe7e50c8638095f04f8e3",
+          "repo_path": "/home/niu/agent-evidence-plan-validation-20261013/repo",
+          "items": [
+            {
+              "id": "retry-count",
+              "dimension": "功能性",
+              "question": "默认配置且每次请求失败时，总调用次数由哪些代码决定？",
+              "scope": "send_request 的默认配置执行路径",
+              "decision_rule": "核对入口循环、单次请求返回值和默认次数配置；执行验证完成前仅形成源码说明。",
+              "score_effect": "本次只验证证据获取；尚未建立数值评分映射。",
+              "on_insufficient": "needs_review",
+              "subsystems": [
+                "网络"
+              ],
+              "evidence": [
+                {
+                  "id": "entry",
+                  "purpose": "入口循环与退出条件",
+                  "path": "request.c",
+                  "symbol": "send_request",
+                  "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+                  "parser_status": "parsed",
+                  "requirements": [
+                    {
+                      "path": "request.c",
+                      "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+                      "start_line": 7,
+                      "end_line": 16,
+                      "symbol": "send_request",
+                      "scope": "function",
+                      "parser_status": "parsed"
+                    }
+                  ],
+                  "resolution": "resolved",
+                  "status": "returned",
+                  "checked_ranges": [
+                    {
+                      "path": "request.c",
+                      "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+                      "start_line": 7,
+                      "end_line": 16,
+                      "symbol": "send_request",
+                      "scope": "function",
+                      "parser_status": "parsed",
+                      "status": "returned",
+                      "missing_ranges": []
+                    }
+                  ]
+                },
+                {
+                  "id": "attempt",
+                  "purpose": "单次请求的结果",
+                  "path": "request.c",
+                  "symbol": "request_attempt",
+                  "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+                  "parser_status": "parsed",
+                  "requirements": [
+                    {
+                      "path": "request.c",
+                      "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+                      "start_line": 3,
+                      "end_line": 5,
+                      "symbol": "request_attempt",
+                      "scope": "function",
+                      "parser_status": "parsed"
+                    }
+                  ],
+                  "resolution": "resolved",
+                  "status": "returned",
+                  "checked_ranges": [
+                    {
+                      "path": "request.c",
+                      "sha256": "f9e27bc4a2e6259ebb000bb32ea12e65a44a50cdadbad0da875f13953a1c216b",
+                      "start_line": 3,
+                      "end_line": 5,
+                      "symbol": "request_attempt",
+                      "scope": "function",
+                      "parser_status": "parsed",
+                      "status": "returned",
+                      "missing_ranges": []
+                    }
+                  ]
+                },
+                {
+                  "id": "config",
+                  "purpose": "默认重试次数",
+                  "path": "config.h",
+                  "start_line": 1,
+                  "end_line": 1,
+                  "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+                  "parser_status": "parsed",
+                  "requirements": [
+                    {
+                      "path": "config.h",
+                      "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+                      "start_line": 1,
+                      "end_line": 1,
+                      "symbol": "",
+                      "scope": "declared_lines",
+                      "parser_status": "parsed"
+                    }
+                  ],
+                  "resolution": "resolved",
+                  "status": "needs_evidence",
+                  "checked_ranges": [
+                    {
+                      "path": "config.h",
+                      "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+                      "start_line": 1,
+                      "end_line": 1,
+                      "symbol": "",
+                      "scope": "declared_lines",
+                      "parser_status": "parsed",
+                      "status": "not_observed",
+                      "missing_ranges": [
+                        [
+                          1,
+                          1
+                        ]
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "returned_count": 2,
+              "required_count": 3,
+              "status": "needs_evidence",
+              "judgment_status": "not_verified",
+              "score_status": "not_computed"
+            }
+          ],
+          "snapshot_sha256": "dd362c8a8389ae382d20595277dc83bea3de4f750fbc862e3bf4bcad02151e19",
+          "snapshot_scope": "declared_evidence_files_only",
+          "status": "needs_evidence",
+          "run_id": "6c4a5d3e18c34f529f6d1847bf323766",
+          "artifact": "/home/niu/agent-evidence-plan-validation-20261013/preview-baseline/receipts/ca776bf9d420bbe9/evidence-plan-validation-420a15e2d2/6c4a5d3e18c34f529f6d1847bf323766/audit.json",
+          "relevant_evidence_recall": "unknown"
+        },
+        "result_artifact": "/home/niu/agent-evidence-plan-validation-20261013/preview-baseline/receipts/ca776bf9d420bbe9/evidence-plan-validation-420a15e2d2/6c4a5d3e18c34f529f6d1847bf323766/result.json",
+        "result_sha256": "4e865f1fa3536b69acd0ef8c97546277864bf2ffb5269d87a6fab07dc4b73727"
+      }
+    ],
+    "relevant_function_recall": "unknown",
+    "artifact": "/home/niu/agent-evidence-plan-validation-20261013/preview-baseline/receipts/ca776bf9d420bbe9/evidence-plan-validation-420a15e2d2/6c4a5d3e18c34f529f6d1847bf323766/coverage.json"
+  },
+  "response_error": null,
+  "repair_budget": 0,
+  "omit_first": "retry-count/config"
+}

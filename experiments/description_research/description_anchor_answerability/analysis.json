@@ -1,0 +1,173 @@
+{
+  "results": [
+    {
+      "arm": "good_masked",
+      "repeat": 1,
+      "state": "ok",
+      "score": {
+        "status": "ok",
+        "correct": 21,
+        "wrong": 1,
+        "unknown": 0,
+        "omitted": 0,
+        "duplicate_questions": 0,
+        "denominator": 22,
+        "accuracy": 0.9545454545454546
+      }
+    },
+    {
+      "arm": "wrong_roles_unmasked",
+      "repeat": 1,
+      "state": "ok",
+      "score": {
+        "status": "ok",
+        "correct": 18,
+        "wrong": 4,
+        "unknown": 0,
+        "omitted": 0,
+        "duplicate_questions": 0,
+        "denominator": 22,
+        "accuracy": 0.8181818181818182
+      }
+    },
+    {
+      "arm": "wrong_roles_masked",
+      "repeat": 1,
+      "state": "ok",
+      "score": {
+        "status": "ok",
+        "correct": 0,
+        "wrong": 22,
+        "unknown": 0,
+        "omitted": 0,
+        "duplicate_questions": 0,
+        "denominator": 22,
+        "accuracy": 0.0
+      }
+    },
+    {
+      "arm": "names_only_unmasked",
+      "repeat": 1,
+      "state": "ok",
+      "score": {
+        "status": "ok",
+        "correct": 22,
+        "wrong": 0,
+        "unknown": 0,
+        "omitted": 0,
+        "duplicate_questions": 0,
+        "denominator": 22,
+        "accuracy": 1.0
+      }
+    },
+    {
+      "arm": "good_masked",
+      "repeat": 2,
+      "state": "ok",
+      "score": {
+        "status": "ok",
+        "correct": 21,
+        "wrong": 1,
+        "unknown": 0,
+        "omitted": 0,
+        "duplicate_questions": 0,
+        "denominator": 22,
+        "accuracy": 0.9545454545454546
+      }
+    },
+    {
+      "arm": "wrong_roles_unmasked",
+      "repeat": 2,
+      "state": "ok",
+      "score": {
+        "status": "ok",
+        "correct": 18,
+        "wrong": 3,
+        "unknown": 1,
+        "omitted": 0,
+        "duplicate_questions": 0,
+        "denominator": 22,
+        "accuracy": 0.8181818181818182
+      }
+    },
+    {
+      "arm": "wrong_roles_masked",
+      "repeat": 2,
+      "state": "ok",
+      "score": {
+        "status": "ok",
+        "correct": 0,
+        "wrong": 22,
+        "unknown": 0,
+        "omitted": 0,
+        "duplicate_questions": 0,
+        "denominator": 22,
+        "accuracy": 0.0
+      }
+    },
+    {
+      "arm": "names_only_unmasked",
+      "repeat": 2,
+      "state": "ok",
+      "score": {
+        "status": "ok",
+        "correct": 22,
+        "wrong": 0,
+        "unknown": 0,
+        "omitted": 0,
+        "duplicate_questions": 0,
+        "denominator": 22,
+        "accuracy": 1.0
+      }
+    }
+  ],
+  "lexical_controls": {
+    "good_masked": {
+      "status": "ok",
+      "correct": 22,
+      "wrong": 0,
+      "unknown": 0,
+      "omitted": 0,
+      "duplicate_questions": 0,
+      "denominator": 22,
+      "accuracy": 1.0
+    },
+    "wrong_roles_unmasked": {
+      "status": "ok",
+      "correct": 0,
+      "wrong": 22,
+      "unknown": 0,
+      "omitted": 0,
+      "duplicate_questions": 0,
+      "denominator": 22,
+      "accuracy": 0.0
+    },
+    "wrong_roles_masked": {
+      "status": "ok",
+      "correct": 0,
+      "wrong": 22,
+      "unknown": 0,
+      "omitted": 0,
+      "duplicate_questions": 0,
+      "denominator": 22,
+      "accuracy": 0.0
+    },
+    "names_only_unmasked": {
+      "status": "ok",
+      "correct": 0,
+      "wrong": 0,
+      "unknown": 22,
+      "omitted": 0,
+      "duplicate_questions": 0,
+      "denominator": 22,
+      "accuracy": 0.0
+    }
+  },
+  "reported_actual_tokens": 12356,
+  "requests": 8,
+  "usage_unknown": 0,
+  "wall_seconds": 18.012030404001052,
+  "artifact_sensitivity_gate_passed": true,
+  "novel_method_established": false,
+  "decision": "retain independent-reference/identity controls as diagnostic; no standalone research method: exact purpose controls are solved by simple lexical role search"
+}

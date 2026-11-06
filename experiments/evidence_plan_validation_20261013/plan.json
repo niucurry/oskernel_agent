@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "plan_id": "retry-evidence-v1",
+  "items": [
+    {
+      "id": "retry-count",
+      "dimension": "功能性",
+      "question": "默认配置且每次请求失败时，总调用次数由哪些代码决定？",
+      "scope": "send_request 的默认配置执行路径",
+      "decision_rule": "核对入口循环、单次请求返回值和默认次数配置；执行验证完成前仅形成源码说明。",
+      "score_effect": "本次只验证证据获取；尚未建立数值评分映射。",
+      "on_insufficient": "needs_review",
+      "subsystems": [
+        "网络"
+      ],
+      "evidence": [
+        {
+          "id": "entry",
+          "purpose": "入口循环与退出条件",
+          "path": "request.c",
+          "symbol": "send_request"
+        },
+        {
+          "id": "attempt",
+          "purpose": "单次请求的结果",
+          "path": "request.c",
+          "symbol": "request_attempt"
+        },
+        {
+          "id": "config",
+          "purpose": "默认重试次数",
+          "path": "config.h",
+          "start_line": 1,
+          "end_line": 1
+        }
+      ]
+    }
+  ]
+}

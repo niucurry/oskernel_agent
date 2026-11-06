@@ -1,0 +1,1 @@
+代数重表达（限定无副作用整数实参、原生 size_t 64 位，a 为有效对齐数）：MEM_ALIGN_MASK(a)=a-1；MEM_ALIGN_PREV(p,a)=floor((p mod 2^64)/a)*a；MEM_ALIGN_NEXT(p,a)=floor(((p+a-1) mod 2^64)/a)*a。floor 表示数学向下取整。两个检测宏仍按原始布尔表达式理解。此处只给出标量地址表示，不证明实际内存访问、OS 能力或所有 C 实参形式。

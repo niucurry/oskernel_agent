@@ -1,0 +1,80 @@
+[
+  {
+    "package": "httpx_sse",
+    "repo": "florimondmanca/httpx-sse",
+    "ref": "0.4.0",
+    "commit": "1b8f7f0f6a1ecca36d1a2f839f306c592e93db34",
+    "state": "downloaded",
+    "files": [
+      {
+        "path": "src/httpx_sse/__init__.py",
+        "sha256": "98d5a97081189072f8c1320c8f44fda2a0864521ef8d6133b0c71ad254260bd3",
+        "bytes": 282
+      },
+      {
+        "path": "src/httpx_sse/_api.py",
+        "sha256": "0d1d496406d8ddfa56a28e2c2d345b9547e8f429c28069da5d83b4fe99e33451",
+        "bytes": 2178
+      },
+      {
+        "path": "src/httpx_sse/_decoders.py",
+        "sha256": "e2f3af26dfdf1722b09897b22502effddb7d65054d02c92e3284304feeb991cc",
+        "bytes": 1748
+      },
+      {
+        "path": "src/httpx_sse/_exceptions.py",
+        "sha256": "b05641513d7120cd43bd843a724a73ae1046f5df157df152645308121bf5379f",
+        "bytes": 62
+      },
+      {
+        "path": "src/httpx_sse/_models.py",
+        "sha256": "e16c06781106311da76d139367b3f2565bbb72199683bb5b909c97c9de434f1d",
+        "bytes": 1221
+      },
+      {
+        "path": "src/httpx_sse/py.typed",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      }
+    ]
+  },
+  {
+    "package": "pydantic_settings",
+    "repo": "pydantic/pydantic-settings",
+    "ref": "v2.7.1",
+    "commit": "c989335d268c81026a99e3370907e0d311cceec2",
+    "state": "downloaded",
+    "files": [
+      {
+        "path": "pydantic_settings/__init__.py",
+        "sha256": "acac0340348d42b13caf8485105920a5f01f4c76f18ea320f77ce73518996b41",
+        "bytes": 1346
+      },
+      {
+        "path": "pydantic_settings/main.py",
+        "sha256": "18e570e339c7dec0860ac21b1d26b8789991b28cdc94dd4fb5d8d447f5bd7110",
+        "bytes": 25756
+      },
+      {
+        "path": "pydantic_settings/py.typed",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      {
+        "path": "pydantic_settings/sources.py",
+        "sha256": "3358271f1638ffe3e8a355f12f46ae24b8a7fdebc7424e37c924eb9600784f94",
+        "bytes": 99422
+      },
+      {
+        "path": "pydantic_settings/utils.py",
+        "sha256": "4c3ba131a30271201c0eb572861bc3a1f1d25cb9cf695e2d6601234d9c60eaa5",
+        "bytes": 572
+      },
+      {
+        "path": "pydantic_settings/version.py",
+        "sha256": "7503623f079ef26bb78d8ac6b5d1df8fe3452abcdfdfeb1c046d5ff04b210b91",
+        "bytes": 18
+      }
+    ]
+  }
+]

@@ -1,0 +1,3 @@
+I'll analyze the IPC subsystem. Let me start by examining the code structure.
+I have full understanding of the IPC subsystem. It's a synchronous message-passing mechanism (ChibiOS-style). Let me write the module reports.
+Now the subsystem overview:

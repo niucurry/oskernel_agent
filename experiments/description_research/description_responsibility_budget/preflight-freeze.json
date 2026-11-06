@@ -1,0 +1,9 @@
+{
+  "timestamp_utc": "2026-10-08T05:39:58Z",
+  "files": {
+    "protocol.json": "2801e79a789231b4db9e74aa02a32df82ccfd6ca1ebf71ec31784f1bc474b2c7",
+    "preflight.py": "8c74681b3e55ad8bc05819d19b18bd2c7423f789b3726d13e1c7ff99b2f89006",
+    "threadx-manifest.json": "9f7f87eed8fdbd864880cf027ad4f9f3c521e74f74927dbf8e1736e95bff6f2e",
+    "reference/threadx-chapter4.md": "fe066b60c514993618825a46d173bc851d16e5e0ee82f12ab06d94eda08a1a08"
+  }
+}

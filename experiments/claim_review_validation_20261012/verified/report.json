@@ -1,0 +1,15 @@
+{
+  "summary": "array.c 定义了 lookup 与 sum_prefix 两个函数。lookup 在 index < 0 或 index >= count 时返回 -1，否则返回 items[index]（array.c:1-4）；sum_prefix 先置 total = 0，再循环累加 items[i]，最后返回 total（array.c:6-10）。原报告关于 lookup 未检查负数索引、sum_prefix 直接返回 count 的说法与源码相反，已修正；原报告关于 sum_prefix 性能优于标准库的说法缺乏基准测试依据，属证据不足，未作为结论保留。",
+  "issues": [],
+  "highlights": [
+    {
+      "path": "array.c:2",
+      "quote": "lookup 在 index 小于 0 或大于等于 count 时返回 -1，不访问数组。"
+    },
+    {
+      "path": "array.c:9",
+      "quote": "sum_prefix 先置 total = 0，再循环累加 items[i]，最后返回累加和 total。"
+    }
+  ],
+  "content": "<p>lookup 在 index < 0 或 index >= count 时返回 -1，不访问数组；负数索引已被显式检查（array.c:2）。原报告称 lookup 未检查负数索引、会直接读取数组前的内存，与源码相反，已修正。</p><p>sum_prefix 先置 total = 0，再循环累加 items[i]，最后返回 total（array.c:6-10）；原报告称 sum_prefix 直接返回 count、没有累加数组元素，与源码相反，已修正。</p><p>原报告称 sum_prefix 对所有输入均比标准库快两倍，源码中没有与标准库的性能对比或基准测试数据，该性能断言证据不足，未作为结论保留。</p>"
+}

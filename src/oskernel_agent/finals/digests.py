@@ -262,6 +262,7 @@ def description_priority_findings(
 
 
 def description_digest_from_tree(tree: dict) -> ReportDigest:
+    from ..analysis.claim_review import claim_warning
     meta = tree.get("meta") or {}
     verdict = tree.get("verdict") or {}
     facts = tree.get("facts") or {}
@@ -287,9 +288,10 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
             continue
         reported_issue_locations.add((issue_path.path, issue_path.line))
         source_name = Path(issue_path.path).name or "未知文件"
+        warning = claim_warning(verdict, str(item.get("quote") or ""), raw_path)
         findings.append(Finding(
-            title=f"源码实现问题：{source_name}",
-            detail=concise_module_summary(quote, input_is_html=False),
+            title=f"{'待核对的源码说法' if warning else '源码实现问题'}：{source_name}",
+            detail=warning + concise_module_summary(quote, input_is_html=False),
             severity=_severity(str(item.get("severity") or "medium"), quote),
             confidence=_confidence_ratio(item.get("confidence"), default=0.5),
             source="description",
@@ -315,9 +317,10 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
                 continue
             reported_issue_locations.add(location)
             source_name = Path(issue_path.path).name or "未知文件"
+            warning = claim_warning(subsystem, str(item.get("quote") or ""), raw_path)
             findings.append(Finding(
-                title=f"源码实现问题：{source_name}",
-                detail=concise_module_summary(quote, input_is_html=False),
+                title=f"{'待核对的源码说法' if warning else '源码实现问题'}：{source_name}",
+                detail=warning + concise_module_summary(quote, input_is_html=False),
                 severity=_severity(str(item.get("severity") or "medium"), quote),
                 confidence=_confidence_ratio(item.get("confidence"), default=0.75),
                 source="description",
@@ -332,13 +335,14 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
         if not raw_summary:
             raw_summary = html_to_text(str(subsystem.get("content") or "")) or "未形成模块摘要。"
         summary = normalize_description_claim(str(raw_summary), "", facts)
+        warning = claim_warning(subsystem if "claim_review" in subsystem else (_parent or subsystem), str(raw_summary))
         children = [
             child for child in (subsystem.get("children") or []) if isinstance(child, dict)
         ]
         modules.append(ModuleDigest(
             name=name,
             summary=clip_at_sentence(
-                explain_terms_on_first_use(str(summary)), 160, input_is_html=False,
+                warning + explain_terms_on_first_use(str(summary)), 160, input_is_html=False,
             ),
             evidence_count=(
                 len(subsystem.get("highlights") or []) + len(subsystem.get("issues") or [])
@@ -350,6 +354,7 @@ def description_digest_from_tree(tree: dict) -> ReportDigest:
         str(verdict.get("one_line") or "已完成源码结构分析，结论见问题清单。"),
         verdict,
     )
+    conclusion = claim_warning(verdict, str(verdict.get("one_line") or "")) + conclusion
     reviews = verdict.get("hardcode_reviews") or []
     ordered_findings = sorted(findings, key=_description_priority_key)
     return ReportDigest(

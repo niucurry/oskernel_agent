@@ -1,0 +1,48 @@
+{
+  "id": "3d63549b-527b-481a-b547-ea3c96091f61",
+  "object": "chat.completion",
+  "created": 1791440966,
+  "model": "deepseek-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Now let me check the events, condvar, and system/debug/registry support modules.",
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_00_sL7TjSYKglLM7VmASuQM0205",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\": \"os/rt/src/chevents.c\", \"start_line\": 60, \"end_line\": 280}"
+            }
+          },
+          {
+            "index": 1,
+            "id": "call_01_2bGSdZIDYjGDqYSsdXJP2805",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\": \"os/rt/src/chsys.c\", \"start_line\": 60, \"end_line\": 300}"
+            }
+          }
+        ]
+      },
+      "logprobs": null,
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 30444,
+    "completion_tokens": 164,
+    "total_tokens": 30608,
+    "prompt_tokens_details": {
+      "cached_tokens": 25856
+    },
+    "prompt_cache_hit_tokens": 25856,
+    "prompt_cache_miss_tokens": 4588
+  },
+  "system_fingerprint": "aeb56401ca74e127821c4f9126dcb669"
+}

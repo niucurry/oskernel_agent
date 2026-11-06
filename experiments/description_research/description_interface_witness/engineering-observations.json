@@ -1,0 +1,52 @@
+{
+  "symbol_inventory": [
+    {
+      "repository": "rtthread",
+      "files": 62,
+      "observed_symbols_after": 622,
+      "statuses": {
+        "parsed": 29,
+        "partial": 33
+      }
+    },
+    {
+      "repository": "riot",
+      "files": 7,
+      "observed_symbols_after": 23,
+      "statuses": {
+        "parsed": 5,
+        "partial": 2
+      }
+    },
+    {
+      "repository": "mynewt",
+      "files": 30,
+      "observed_symbols_after": 271,
+      "statuses": {
+        "partial": 14,
+        "parsed": 16
+      }
+    }
+  ],
+  "native_reference_recheck": [
+    {
+      "repository": "rtthread",
+      "runs_match_frozen_reference": true,
+      "observed_bindings": 13
+    },
+    {
+      "repository": "riot",
+      "runs_match_frozen_reference": true,
+      "observed_bindings": 4
+    },
+    {
+      "repository": "mynewt",
+      "runs_match_frozen_reference": true,
+      "observed_bindings": 16
+    }
+  ],
+  "native_recheck_cpu_seconds": 0.12439399999999999,
+  "native_recheck_wall_seconds": 0.1305006699999467,
+  "initial_prepare_cpu_seconds": "not separately measured; unknown; no OS builds performed",
+  "research_effect": "No semantic description or judge benefit claim from these engineering checks"
+}

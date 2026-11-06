@@ -1,0 +1,48 @@
+{
+  "id": "0d48f604-c182-4e45-a7c0-fb36606082f8",
+  "object": "chat.completion",
+  "created": 1791440437,
+  "model": "deepseek-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Now let me read the synchronization primitives (mutex, semaphore, condvar, events, msg) and the time/VT module.",
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_00_DHDlPYDqJUGlCN2E9ICn9409",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\": \"os/rt/src/chmtx.c\", \"start_line\": 100, \"end_line\": 340}"
+            }
+          },
+          {
+            "index": 1,
+            "id": "call_01_uncM61ytGCy42QaUXohn9672",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\": \"os/rt/src/chvt.c\"}"
+            }
+          }
+        ]
+      },
+      "logprobs": null,
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 21719,
+    "completion_tokens": 140,
+    "total_tokens": 21859,
+    "prompt_tokens_details": {
+      "cached_tokens": 16384
+    },
+    "prompt_cache_hit_tokens": 16384,
+    "prompt_cache_miss_tokens": 5335
+  },
+  "system_fingerprint": "aeb56401ca74e127821c4f9126dcb669"
+}

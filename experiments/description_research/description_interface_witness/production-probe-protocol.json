@@ -1,0 +1,16 @@
+{
+  "purpose": "Run the unchanged production SUBSYS request and system template as an actual additional baseline observation; the main benchmark only replayed a bounded source-reading adapter, so do not mislabel that adapter as the complete production flow.",
+  "created_after_main_trial": true,
+  "task": "RIOT pinned 2025.07 filesystem slice, one complete SUBSYS generation",
+  "transport": "Private direct DeepSeek tool-call adapter because project OpenCode configuration/auth directory is absent after cleanup. Original _build_session_prompt, _build_subsys_request, read_file, search_code, _quick_analyze_subtree, _validate_subsys_result and report rendering are used. No prompt retuning.",
+  "request_ceiling": 6,
+  "actual_token_ceiling": 60000,
+  "output_tokens_per_request": 2400,
+  "tool_call_ceiling": 12,
+  "initial_global_ceiling": {"requests":60,"tokens":200000},
+  "prior_reported_tokens": 109962,
+  "unmeasured_main_failure_conservative_reservation_tokens": 20000,
+  "stop": "Stop on request/token/tool limit or first API error; no retry and no expansion. Preserve incomplete outputs; never treat a failed production probe as evidence of candidate superiority.",
+  "evaluation": "Preserve original module report and compare its scope/output contract descriptively. It does not receive the main trial's imposed per-binding output task, so no numerical head-to-head accuracy comparison with that task.",
+  "limitations": "One exposed confirmation repository, different serializer and full production template; no VERDICT or PDF and no full contest report. Transport/tool subset differs from OpenCode, explicitly record any blocked tool. Not a confirmation of a new research method."
+}

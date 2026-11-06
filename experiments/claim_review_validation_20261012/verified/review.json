@@ -1,0 +1,463 @@
+{
+  "status": "completed",
+  "original_report_sha256": "e3907ea3da9b6e131dd8c235f0392f499a2b97586db8aa56a8cedb6942385c46",
+  "report_sha256": "9772909f77a938f18958a604a15b098fdaa8c4319e5a8c4e8f422e4b9b7395b9",
+  "selection_scope": "structured_issues_highlights_and_summaries_not_all_prose",
+  "candidate_count": 3,
+  "selected_count": 3,
+  "unreviewed": [],
+  "initial": [
+    {
+      "id": "733080cbee6e19492c4d",
+      "route": [
+        "issues",
+        0,
+        "quote"
+      ],
+      "text": "lookup 未检查负数索引，会直接读取数组前的内存。",
+      "location": "array.c:2",
+      "kind": "issue",
+      "priority": 111,
+      "selection_factors": {
+        "severity": "high",
+        "absolute_wording": false,
+        "branch_points": 1
+      },
+      "requirements": [
+        {
+          "path": "array.c",
+          "sha256": "b32040042892fdfa7651fc03a0613743f1c175905eb592854044f5af3275f10c",
+          "start_line": 1,
+          "end_line": 4,
+          "symbol": "lookup",
+          "scope": "function",
+          "parser_status": "parsed"
+        }
+      ],
+      "status": "contradicted",
+      "reviews": [
+        {
+          "claim_id": "733080cbee6e19492c4d",
+          "verdict": "contradicted",
+          "model_verdict": "contradicted",
+          "reason": "第2行显式检查 index < 0 并返回 -1，负数索引不会访问数组，与结论相反。",
+          "evidence": [
+            {
+              "ref": "array.c:2-2",
+              "quote": "    if (index < 0 || index >= count) return -1;"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": "改为：lookup 检查了负数索引，index < 0 时直接返回 -1，不访问数组。"
+        },
+        {
+          "claim_id": "733080cbee6e19492c4d",
+          "verdict": "contradicted",
+          "model_verdict": "contradicted",
+          "reason": "array.c:2 明确检查 index < 0，并在负数索引时直接 return -1，不会读取数组前内存。",
+          "evidence": [
+            {
+              "ref": "array.c:1-4",
+              "quote": "int lookup(const int *items, int count, int index) {\n    if (index < 0 || index >= count) return -1;\n    return items[index];\n}"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": "该说法与源码相反：lookup 已用 `index < 0` 检查负数索引并返回 -1，应改为“lookup 检查负数索引并返回 -1”。"
+        }
+      ],
+      "independent_sessions": true
+    },
+    {
+      "id": "59b4413309dad494dec8",
+      "route": [
+        "summary"
+      ],
+      "text": "array.c:6-10 的 sum_prefix 对所有输入均比标准库快两倍。",
+      "location": "",
+      "kind": "summary",
+      "priority": 16,
+      "selection_factors": {
+        "severity": "",
+        "absolute_wording": true,
+        "branch_points": 1
+      },
+      "requirements": [
+        {
+          "path": "array.c",
+          "sha256": "b32040042892fdfa7651fc03a0613743f1c175905eb592854044f5af3275f10c",
+          "start_line": 6,
+          "end_line": 10,
+          "symbol": "sum_prefix",
+          "scope": "function",
+          "parser_status": "parsed"
+        }
+      ],
+      "status": "insufficient",
+      "reviews": [
+        {
+          "claim_id": "59b4413309dad494dec8",
+          "verdict": "insufficient",
+          "model_verdict": "insufficient",
+          "reason": "源码只含累加循环，无与标准库的性能对比，静态源码无法证明运行速度或“对所有输入快两倍”这类性能结论。",
+          "evidence": [
+            {
+              "ref": "array.c:6-10",
+              "quote": "int sum_prefix(const int *items, int count) {\n    int total = 0;\n    for (int i = 0; i < count; i++) total += items[i];\n    return total;\n}"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": "删除或标注为未经基准测试的性能断言，性能需实测数据支持。"
+        },
+        {
+          "claim_id": "59b4413309dad494dec8",
+          "verdict": "insufficient",
+          "model_verdict": "insufficient",
+          "reason": "sum_prefix 源码仅为一个累加循环，未与任何标准库实现比较，静态源码无法证明“对所有输入均快两倍”这一性能论断。",
+          "evidence": [
+            {
+              "ref": "array.c:6-10",
+              "quote": "int sum_prefix(const int *items, int count) {\n    int total = 0;\n    for (int i = 0; i < count; i++) total += items[i];\n    return total;\n}"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        }
+      ],
+      "independent_sessions": true
+    },
+    {
+      "id": "84272d0c7589db80949b",
+      "route": [
+        "highlights",
+        1,
+        "quote"
+      ],
+      "text": "sum_prefix 直接返回 count，没有累加数组元素。",
+      "location": "array.c:9",
+      "kind": "highlight",
+      "priority": 11,
+      "selection_factors": {
+        "severity": "",
+        "absolute_wording": false,
+        "branch_points": 1
+      },
+      "requirements": [
+        {
+          "path": "array.c",
+          "sha256": "b32040042892fdfa7651fc03a0613743f1c175905eb592854044f5af3275f10c",
+          "start_line": 6,
+          "end_line": 10,
+          "symbol": "sum_prefix",
+          "scope": "function",
+          "parser_status": "parsed"
+        }
+      ],
+      "status": "contradicted",
+      "reviews": [
+        {
+          "claim_id": "84272d0c7589db80949b",
+          "verdict": "contradicted",
+          "model_verdict": "contradicted",
+          "reason": "函数在循环中累加 items[i] 到 total 并返回 total，并非直接返回 count。",
+          "evidence": [
+            {
+              "ref": "array.c:6-10",
+              "quote": "int sum_prefix(const int *items, int count) {\n    int total = 0;\n    for (int i = 0; i < count; i++) total += items[i];\n    return total;\n}"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": "改为：sum_prefix 累加 items[0..count-1] 后返回 total。"
+        },
+        {
+          "claim_id": "84272d0c7589db80949b",
+          "verdict": "contradicted",
+          "model_verdict": "contradicted",
+          "reason": "array.c:7-9 中 sum_prefix 先 total=0，再循环累加 items[i]，最后 return total，并非直接返回 count。",
+          "evidence": [
+            {
+              "ref": "array.c:7-9",
+              "quote": "    int total = 0;\n    for (int i = 0; i < count; i++) total += items[i];\n    return total;"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": "应改为“sum_prefix 通过循环累加数组元素后返回累加和 total”。"
+        }
+      ],
+      "independent_sessions": true
+    },
+    {
+      "id": "91d14bdef44d59d325f6",
+      "route": [
+        "highlights",
+        0,
+        "quote"
+      ],
+      "text": "lookup 在 index 小于 0 或大于等于 count 时返回 -1，不访问数组。",
+      "location": "array.c:2",
+      "kind": "highlight",
+      "priority": 11,
+      "selection_factors": {
+        "severity": "",
+        "absolute_wording": false,
+        "branch_points": 1
+      },
+      "requirements": [
+        {
+          "path": "array.c",
+          "sha256": "b32040042892fdfa7651fc03a0613743f1c175905eb592854044f5af3275f10c",
+          "start_line": 1,
+          "end_line": 4,
+          "symbol": "lookup",
+          "scope": "function",
+          "parser_status": "parsed"
+        }
+      ],
+      "status": "supported",
+      "reviews": [
+        {
+          "claim_id": "91d14bdef44d59d325f6",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "第2行在 index < 0 或 index >= count 时返回 -1，第3行仅在此范围外才访问 items[index]。",
+          "evidence": [
+            {
+              "ref": "array.c:2-3",
+              "quote": "    if (index < 0 || index >= count) return -1;\n    return items[index];"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        },
+        {
+          "claim_id": "91d14bdef44d59d325f6",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "array.c:2 的条件 `index < 0 || index >= count` 为真时立即 return -1，不会执行后续 items[index]。",
+          "evidence": [
+            {
+              "ref": "array.c:1-4",
+              "quote": "int lookup(const int *items, int count, int index) {\n    if (index < 0 || index >= count) return -1;\n    return items[index];\n}"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        }
+      ],
+      "independent_sessions": true
+    }
+  ],
+  "claims": [
+    {
+      "id": "8b0ea5b2e9c74a71150d",
+      "route": [
+        "highlights",
+        1,
+        "quote"
+      ],
+      "text": "sum_prefix 先置 total = 0，再循环累加 items[i]，最后返回累加和 total。",
+      "location": "array.c:9",
+      "kind": "highlight",
+      "priority": 11,
+      "selection_factors": {
+        "severity": "",
+        "absolute_wording": false,
+        "branch_points": 1
+      },
+      "requirements": [
+        {
+          "path": "array.c",
+          "sha256": "b32040042892fdfa7651fc03a0613743f1c175905eb592854044f5af3275f10c",
+          "start_line": 6,
+          "end_line": 10,
+          "symbol": "sum_prefix",
+          "scope": "function",
+          "parser_status": "parsed"
+        }
+      ],
+      "status": "supported",
+      "reviews": [
+        {
+          "claim_id": "8b0ea5b2e9c74a71150d",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "array.c 第 7 行 `int total = 0;` 先置零，第 8 行 `for (int i = 0; i < count; i++) total += items[i];` 循环累加，第 9 行 `return total;` 返回累加和，与描述逐一相符。",
+          "evidence": [
+            {
+              "ref": "array.c:6-10",
+              "quote": "int sum_prefix(const int *items, int count) {\n    int total = 0;\n    for (int i = 0; i < count; i++) total += items[i];\n    return total;\n}"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        },
+        {
+          "claim_id": "8b0ea5b2e9c74a71150d",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "array.c 第 6-10 行 sum_prefix 第 7 行置 int total=0，第 8 行循环累加 items[i]，第 9 行返回 total，与描述一致；未发现反例。",
+          "evidence": [
+            {
+              "ref": "array.c:6-10",
+              "quote": "int sum_prefix(const int *items, int count) {\n    int total = 0;\n    for (int i = 0; i < count; i++) total += items[i];\n    return total;\n}"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        }
+      ],
+      "independent_sessions": true
+    },
+    {
+      "id": "91d14bdef44d59d325f6",
+      "route": [
+        "highlights",
+        0,
+        "quote"
+      ],
+      "text": "lookup 在 index 小于 0 或大于等于 count 时返回 -1，不访问数组。",
+      "location": "array.c:2",
+      "kind": "highlight",
+      "priority": 11,
+      "selection_factors": {
+        "severity": "",
+        "absolute_wording": false,
+        "branch_points": 1
+      },
+      "requirements": [
+        {
+          "path": "array.c",
+          "sha256": "b32040042892fdfa7651fc03a0613743f1c175905eb592854044f5af3275f10c",
+          "start_line": 1,
+          "end_line": 4,
+          "symbol": "lookup",
+          "scope": "function",
+          "parser_status": "parsed"
+        }
+      ],
+      "status": "supported",
+      "reviews": [
+        {
+          "claim_id": "91d14bdef44d59d325f6",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "array.c 第 2 行 `if (index < 0 || index >= count) return -1;` 在 index < 0 或 index >= count 时直接返回 -1，且在该分支内无数组访问；仅第 3 行在通过检查后访问 items[index]，与描述相符。",
+          "evidence": [
+            {
+              "ref": "array.c:1-4",
+              "quote": "int lookup(const int *items, int count, int index) {\n    if (index < 0 || index >= count) return -1;\n    return items[index];\n}"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        },
+        {
+          "claim_id": "91d14bdef44d59d325f6",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "array.c 第 2 行条件 index < 0 || index >= count 成立时直接 return -1，且该分支在访问 items[index]（第 3 行）之前返回，故越界时不访问数组；描述与源码一致。",
+          "evidence": [
+            {
+              "ref": "array.c:1-4",
+              "quote": "int lookup(const int *items, int count, int index) {\n    if (index < 0 || index >= count) return -1;\n    return items[index];\n}"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        }
+      ],
+      "independent_sessions": true
+    },
+    {
+      "id": "6608032193c4d7b2f407",
+      "route": [
+        "summary"
+      ],
+      "text": "array.c 定义了 lookup 与 sum_prefix 两个函数。lookup 在 index < 0 或 index >= count 时返回 -1，否则返回 items[index]（array.c:1-4）；sum_prefix 先置 total = 0，再循环累加 items[i]，最后返回 total（array.c:6-10）。原报告关于 lookup 未检查负数索引、sum_prefix 直接返回 count 的说法与源码相反，已修正；原报告关于 sum_prefix 性能优于标准库的说法缺乏基准测试依据，属证据不足，未作为结论保留。",
+      "location": "",
+      "kind": "summary",
+      "priority": 1,
+      "selection_factors": {
+        "severity": "",
+        "absolute_wording": false,
+        "branch_points": 1
+      },
+      "requirements": [
+        {
+          "path": "array.c",
+          "sha256": "b32040042892fdfa7651fc03a0613743f1c175905eb592854044f5af3275f10c",
+          "start_line": 1,
+          "end_line": 4,
+          "symbol": "lookup",
+          "scope": "function",
+          "parser_status": "parsed"
+        },
+        {
+          "path": "array.c",
+          "sha256": "b32040042892fdfa7651fc03a0613743f1c175905eb592854044f5af3275f10c",
+          "start_line": 6,
+          "end_line": 10,
+          "symbol": "sum_prefix",
+          "scope": "function",
+          "parser_status": "parsed"
+        }
+      ],
+      "status": "supported",
+      "reviews": [
+        {
+          "claim_id": "6608032193c4d7b2f407",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "array.c 全文 10 行，仅含 lookup（1-4 行）与 sum_prefix（6-10 行）两个函数定义，函数描述与源码一致；lookup 确已检查负数索引、sum_prefix 也未返回 count，故所述原报告说法与源码相反成立。关于基准测试的元陈述属对原报告的说明，非源码可证事实，但所保留的代码结论均可核对为真。",
+          "evidence": [
+            {
+              "ref": "array.c:1-4",
+              "quote": "int lookup(const int *items, int count, int index) {\n    if (index < 0 || index >= count) return -1;\n    return items[index];\n}"
+            },
+            {
+              "ref": "array.c:6-10",
+              "quote": "int sum_prefix(const int *items, int count) {\n    int total = 0;\n    for (int i = 0; i < count; i++) total += items[i];\n    return total;\n}"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        },
+        {
+          "claim_id": "6608032193c4d7b2f407",
+          "verdict": "supported",
+          "model_verdict": "supported",
+          "reason": "array.c 确实同时定义 lookup(1-4) 与 sum_prefix(6-10)；lookup 越界（index<0 或 index>=count）返回 -1，否则返回 items[index]；sum_prefix 置 total=0、循环累加 items[i] 并返回 total，均与源码一致。关于“原报告”措辞及性能基准的评价无法由所提供的仓库源码验证，但不影响上述可由源码核对的部分。",
+          "evidence": [
+            {
+              "ref": "array.c:1-4",
+              "quote": "int lookup(const int *items, int count, int index) {\n    if (index < 0 || index >= count) return -1;\n    return items[index];\n}"
+            },
+            {
+              "ref": "array.c:6-10",
+              "quote": "int sum_prefix(const int *items, int count) {\n    int total = 0;\n    for (int i = 0; i < count; i++) total += items[i];\n    return total;\n}"
+            }
+          ],
+          "errors": [],
+          "suggested_correction": ""
+        }
+      ],
+      "independent_sessions": true
+    }
+  ],
+  "revision": {
+    "attempted": true,
+    "new_report_sha256": "9772909f77a938f18958a604a15b098fdaa8c4319e5a8c4e8f422e4b9b7395b9",
+    "original_wording_absent": [
+      "733080cbee6e19492c4d",
+      "59b4413309dad494dec8",
+      "84272d0c7589db80949b"
+    ],
+    "remaining_original_wording": []
+  },
+  "artifact": "/home/niu/agent-claim-review-validation-20261012/verified/reviews/claim-validation-5b2cdd5ca8/529357a8b1b948f3a618485e4755b975/review.json",
+  "limitations": [
+    "agreement_is_not_truth",
+    "same_model_errors_can_be_correlated",
+    "not_all_report_prose_reviewed",
+    "static_source_not_runtime_proof"
+  ]
+}

@@ -560,7 +560,7 @@ def _collect_report_issues(tree_json: dict) -> list[dict]:
     merged: dict[str, dict] = {}
     order = 0
 
-    def _add(item: dict, subsystem: str | None = None) -> None:
+    def _add(item: dict, subsystem: str | None = None, review_node: dict | None = None) -> None:
         nonlocal order
         path = str(item.get("path") or "").strip()
         quote = normalize_description_claim(
@@ -570,6 +570,8 @@ def _collect_report_issues(tree_json: dict) -> list[dict]:
             return
         if not path or not quote or not re.search(r"(?::|#L)\d+(?:-L?\d+)?$", path):
             return
+        from ..analysis.claim_review import claim_warning
+        quote = claim_warning(review_node or {}, str(item.get("quote") or ""), path) + quote
         severity = str(item.get("severity") or "medium")
         if severity not in _SEVERITY_RANK:
             severity = "medium"
@@ -599,12 +601,12 @@ def _collect_report_issues(tree_json: dict) -> list[dict]:
 
     for item in (tree_json.get("verdict") or {}).get("issues") or []:
         if isinstance(item, dict):
-            _add(item)
+            _add(item, review_node=tree_json.get("verdict") or {})
     for node in subsystem_nodes:
         name = str(node.get("name") or "未分类")
         for item in node.get("issues") or []:
             if isinstance(item, dict):
-                _add(item, name)
+                _add(item, name, node)
 
     issues = list(merged.values())
     for item in issues:
@@ -1029,8 +1031,225 @@ def _render_all_subsystems(tree_json: dict, resolver) -> str:
   <h2 class="text-xl font-bold mb-1">模块概览</h2>
   <p class="text-xs text-slate-500 mb-3">按仓库实际设计拆分并列模块；笼统“其他”会展开为真实子模块。每项概览正文不超过 300 字；超出篇幅的实现与亮点可展开查看完整说明。问题陈述完整保留，重要问题集中列示，低风险局部问题在所属模块内说明；实现依据覆盖各子模块的代表位置。第三方库本身不计作作品缺陷或自研亮点，只评价项目适配代码及系统可见行为。</p>
   <div>{"".join(cards)}</div>
+  {_render_description_scope(tree_json)}
 </section>
 """
+
+
+def _render_description_scope(tree_json: dict) -> str:
+    rows = []
+    for node in (tree_json.get("tree") or {}).get("children") or []:
+        scope = node.get("description_scope")
+        if not isinstance(scope, dict):
+            continue
+        values = [scope.get(key) for key in (
+            "indexed_files", "prompted_files", "representative_files", "unrepresented_files",
+        )]
+        if any(value is not None and (not isinstance(value, int) or value < 0) for value in values):
+            continue
+        rows.append(f'<tr><td>{_esc(node.get("name", ""))}</td>'
+                    + "".join(f"<td>{value if value is not None else '未知'}</td>" for value in values) + "</tr>")
+    if not rows:
+        return _render_recall_check(tree_json) + _render_evaluation_assertions(tree_json) + _render_evidence_plan(tree_json) + _render_read_audit(tree_json)
+    return (
+        '<div class="text-xs mt-4" data-description-scope="true">'
+        '<h3 class="font-bold">源码范围说明</h3>'
+        '<p>索引和提示清单只用于定位源码；模块代表文件只表示报告列出的来源。'
+        '未列为代表文件不等于功能遗漏，列为代表文件也不证明全文已读或描述正确。'
+        '实际源码阅读覆盖尚未测量；恢复旧阶段产物时提示文件数量保持未知。</p>'
+        '<table><thead><tr><th>子系统</th><th>索引文件</th><th>提示文件</th>'
+        '<th>索引内代表文件</th><th>未列代表文件</th></tr></thead><tbody>'
+        + "".join(rows) + '</tbody></table></div>'
+        + _render_recall_check(tree_json) + _render_evaluation_assertions(tree_json) + _render_evidence_plan(tree_json) + _render_read_audit(tree_json)
+    )
+
+
+_RECALL_LABELS = {'retained_recalled': '标记保留且全部答对', 'dropped': '已读标记不在最终请求中',
+                  'present_not_recalled': '标记仍在，未准确召回', 'misattributed': '张冠李戴',
+                  'not_observed': '未确认标记曾返回', 'unknown': '无法确认', 'unmarked': '未布置标记'}
+_RECALL_LABELS['attribution_target'] = '本函数标记被错误归给另一函数'
+
+
+def _recall_dependency_text(items):
+    text = []
+    for item in items:
+        history = ' → '.join(_RECALL_LABELS.get(s, s) for s in item.get('history', []))
+        text.append(f"{item['path']}:{item['start_line']} {item['symbol']}：{history}")
+    return '<br>依据函数核对：' + _esc('；'.join(text)) if text else ''
+
+
+def _render_recall_check(tree_json: dict) -> str:
+    sections = []
+    nodes = list((tree_json.get('tree') or {}).get('children') or [])
+    nodes.append(dict(tree_json.get('verdict') or {}, name='总评'))
+    for node in nodes:
+        check = node.get('recall_check')
+        if not check:
+            continue
+        rows = []
+        for round_number, attempt in enumerate(check.get('attempts', [check])):
+            for function in attempt.get('functions', []):
+                markers = '；'.join(f"{m['position']}：present={m['present']}，{_RECALL_LABELS.get(m['status'], m['status'])}" for m in function['markers'])
+                actions = '、'.join({'reread': '补读', 'claim_review': '相关断言复核'}.get(a, a) for a in function['actions']) or '无'
+                rows.append(f"<tr><td>{round_number}</td><td>{_esc(function['path'])}:{function['start_line']} {_esc(function['symbol'])}</td>"
+                            f"<td>{_esc(function['coverage'])}；最终请求中完整源码范围：{function['source_present']}</td>"
+                            f"<td>{_esc(markers)}；{_esc(_RECALL_LABELS.get(function['status'], function['status']))}</td><td>{_esc(actions)}</td></tr>")
+        metrics = check.get('metrics', {})
+        ratio = lambda key: '未知' if metrics.get(key) is None else f"{metrics[key]:.1%}"
+        calls = check.get('calls', [])
+        costs = [(a.get('metrics') or {}).get('prompt_tokens') for a in check.get('attempts', [check])]
+        cost = sum(costs) if all(c is not None for c in costs) else '记录不完整'
+        selection = check.get('selection', {})
+        state = {'checked': '已核对', 'unknown': '无法确认：缺少本轮会话记录', 'probe_invalid': '提问无效，召回结果不采信',
+                 'no_candidates': '没有可核对的函数'}.get(check.get('status'), '无法确认')
+        controls = '；'.join(f"{c['path']} {c['symbol']}：" + {'control_correct': '正确返回 null', 'confabulation': '对照误报', 'unknown': '无法确认'}.get(c['status'], c['status']) for c in check.get('controls', []))
+        sections.append(f"<h4>{_esc(node.get('name', ''))}</h4><p>{_esc(state)}。最终标记保留率：{ratio('retention_rate')}；完整函数保留率：{ratio('function_retention_rate')}；"
+                        f"present 样本召回率：{ratio('recall_rate')}；张冠李戴：{metrics.get('misattributed', '未知')}；"
+                        f"对照题误报：{metrics.get('confabulations', '未知')}；各轮提问输入 token 合计：{cost}。"
+                        f"调用列表题：{sum(c['correct'] for c in calls)}/{len(calls)}；"
+                        f"补读轮数：{check.get('total_repair_rounds', 0)}；超预算未核对：{len(selection.get('omitted', []))}；"
+                        f"提问时上下文变化：{metrics.get('probe_context_changed', 0)}；"
+                        f"未标记对照缺额：{selection.get('control_shortfall', 2)}；报告标记 echo：{any(a.get('report_echo') for a in check.get('attempts', [check]))}。</p>"
+                        '<table><thead><tr><th>轮次</th><th>函数</th><th>读取与源码保留</th><th>标记与召回</th><th>触发动作</th></tr></thead><tbody>'
+                        + ''.join(rows) + '</tbody></table><p>对照题：' + _esc(controls or '无可用对照') + '</p>')
+    if not sections:
+        return ''
+    return ('<section data-recall-check="true"><h3>源码保留与召回核对</h3>'
+            '<p>标记保留不等于完整源码保留，召回答对不等于语义正确。标记缺失不单独证明发生了压缩；'
+            '调用列表题单独统计。补读预算耗尽仍未通过的状态保留，核对本身不改变评分。</p>'
+            + ''.join(sections) + '</section>')
+
+
+def _render_evaluation_assertions(tree_json: dict) -> str:
+    nodes = list((tree_json.get("tree") or {}).get("children") or [])
+    nodes.append(dict(tree_json.get("verdict") or {}, name="总评"))
+    labels = {"supported": "两次源码复核支持", "adjudicated_supported": "分歧后源码复核支持",
+              "contradicted": "两次复核反驳", "adjudicated_contradicted": "分歧后复核反驳",
+              "disputed": "复核有分歧", "insufficient": "证据不足，尚不能确认",
+              "ready_for_review": "来源核对通过，待语义复核", "not_reviewed": "未完成独立复核"}
+    reasons = {"invalid_assertion_structure": "断言格式或项目对应无效",
+               "incomplete_author_session": "生成会话记录不完整",
+               "required_evidence_not_returned": "必要范围未完整返回或源码发生变化",
+               "invalid_evidence": "引文格式无效", "unverified_evidence": "原文或读取记录未通过核对",
+               "quote_not_in_declared_target": "引文未对应指定证据", "missing_target_quotes": "部分必要证据没有有效引文"}
+    rows = []
+    for node in nodes:
+        for item in (node.get("evaluation_assertions") or {}).get("items", []):
+            evidence = "".join(f"<li>{_esc(e['evidence_id'])}：{_esc(e['ref'])}</li>" for e in item.get("evidence", []))
+            errors = "；".join(reasons.get(e, e) for e in item.get("errors", []))
+            rows.append(f"<tr><td>{_esc(node.get('name', ''))} / {_esc(item['question'])}</td>"
+                f"<td>{_esc(item['statement'])}<br>范围：{_esc(item['scope'])}"
+                f"<br>条件：{_esc('；'.join(item.get('conditions', [])))}"
+                f"<br>待查反例：{_esc('；'.join(item.get('counterevidence', [])) or '未提出')}</td>"
+                f"<td><ul>{evidence}</ul>{_esc(labels.get(item['status'], '尚未确认'))}"
+                f"<br>{_esc(errors or item.get('limitations', ''))}"
+                + _recall_dependency_text(item.get("recall_dependencies", [])) +
+                "<br>执行验证：未运行；分数：未计算</td></tr>")
+    if not rows:
+        return ""
+    return ('<div class="text-xs mt-4" data-evaluation-assertions="true"><h3 class="font-bold">按评价项核对的事实断言</h3>'
+            '<p>适用范围与成立条件是结论的一部分。引文真实、材料齐全以及多次模型支持，'
+            '都不能替代独立执行验证。仍有反驳、分歧或证据不足的条目不能作为确定评分依据。</p>'
+            '<table><thead><tr><th>评价项</th><th>断言及成立条件</th><th>证据与验证状态</th></tr></thead><tbody>'
+            + ''.join(rows) + '</tbody></table></div>')
+
+
+def _render_evidence_plan(tree_json: dict) -> str:
+    nodes = list((tree_json.get("tree") or {}).get("children") or [])
+    nodes.append(dict(tree_json.get("verdict") or {}, name="总评"))
+    rows = []
+    labels = {"returned": "目标范围已返回", "needs_evidence": "仍缺读取证据",
+              "unknown": "记录不完整，无法确认", "unresolved_location": "尚未定位，需核对清单"}
+    reasons = {"missing_or_unreadable": "文件缺失或不可读取", "unreliable_parse": "无法可靠解析函数",
+               "ambiguous_symbol": "同名函数不能唯一定位", "symbol_not_found": "指定函数未定位",
+               "invalid_range": "行范围超出文件"}
+    for node in nodes:
+        plan = node.get("evidence_plan")
+        if not isinstance(plan, dict):
+            continue
+        for item in plan.get("items", []):
+            parts = []
+            for target in item.get("evidence", []):
+                locations = [f"{r['path']}:{r['start_line']}-{r['end_line']}"
+                             for r in target.get("requirements", [])] or [target.get("path", "")]
+                state = labels.get(target.get("status"), labels["unknown"])
+                detail = reasons.get(target.get("resolution"), "")
+                if any(r.get("status") == "source_changed_or_unavailable" for r in target.get("checked_ranges", [])):
+                    detail = "源码已变化或不可读取，本轮原记录不适用"
+                parts.append(f"<li>{_esc(target.get('purpose', ''))}：{_esc('、'.join(locations))}；"
+                             f"{state}{'（' + detail + '）' if detail else ''}</li>")
+            rows.append(f"<tr><td>{_esc(node.get('name', ''))}</td>"
+                        f"<td>{_esc(item.get('dimension', ''))}：{_esc(item.get('question', ''))}"
+                        f"<br>适用范围：{_esc(item.get('scope', ''))}</td>"
+                        f"<td><ul>{''.join(parts)}</ul></td>"
+                        f"<td>{item.get('returned_count', 0)}/{item.get('required_count', 0)} 项已返回；"
+                        "行为尚未验证，本步骤未计算分数</td></tr>")
+    if not rows:
+        return ""
+    return ('<div class="text-xs mt-4" data-evidence-plan="true"><h3 class="font-bold">评价项的必要证据</h3>'
+            '<p>清单由评测方在运行前提供。此处只核对清单要求的材料是否由工具返回，'
+            '不能据此认定所有相关代码已查全或评价正确。缺证据的项目待核对，不据此扣分或给满分。'
+            '本表尚未形成按细则核验的分项分数；原有六维分数不因此成为已验证分数。</p>'
+            '<table><thead><tr><th>会话</th><th>评价项</th><th>必要证据与缺口</th><th>状态</th></tr>'
+            '</thead><tbody>' + ''.join(rows) + '</tbody></table></div>')
+
+
+def _render_read_audit(tree_json: dict) -> str:
+    rows = []
+    coverage_rows = []
+    nodes = list((tree_json.get("tree") or {}).get("children") or [])
+    nodes.append(dict(tree_json.get("verdict") or {}, name="总评"))
+    for node in nodes:
+        audit = node.get("read_audit")
+        if not isinstance(audit, dict):
+            continue
+        coverage = audit.get("coverage") or {}
+        for req in coverage.get("requirements") or []:
+            location = f"{req['path']}:{req['start_line']}-{req['end_line']}"
+            if req.get("status") == "returned":
+                label = "目标范围完整返回"
+            else:
+                missing = "、".join(f"{lo}—{hi}" for lo, hi in req.get("missing_ranges", []))
+                label = "仍缺可核对的返回证据" + (f"（{missing} 行）" if missing else "（源码变化或无法定位）")
+            scope = {"function": "函数", "declared_lines": "评测方指定范围"}.get(
+                req.get("scope"), "引用范围（未确认函数边界）")
+            coverage_rows.append(f'<tr><td>{_esc(node.get("name", ""))}</td>'
+                                 f'<td>{_esc(location)} {_esc(req.get("symbol", ""))}</td>'
+                                 f'<td>{scope}：{_esc(label)}；补读 {coverage.get("repair_rounds", 0)} 轮</td></tr>')
+        if not audit.get("run_id"):
+            continue
+        labels = {
+            "returned": "对应源码行已由工具返回",
+            "not_observed_in_tool_outputs": "未在本次工具返回中找到，需核对其他输入或补读",
+            "unverified_line": "返回行不完整或与当前源码不符，需核对",
+            "unknown_source_changed": "源码已变化，原记录不适用",
+            "unknown": "记录不足，无法确认",
+        }
+        for ref in audit.get("references") or []:
+            if not isinstance(ref, dict):
+                continue
+            location = f"{ref.get('path', '')}:{ref.get('line', '')}"
+            if ref.get("end_line", ref.get("line")) != ref.get("line"):
+                location += f"-{ref['end_line']}"
+            label = labels.get(ref.get("status"), labels["unknown"])
+            rows.append(f'<tr><td>{_esc(node.get("name", ""))}</td>'
+                        f'<td>{_esc(location)}</td><td>{label}</td></tr>')
+    if not rows and not coverage_rows:
+        return ""
+    return (
+        '<div class="text-xs mt-4" data-read-audit="true">'
+        '<h3 class="font-bold">源码引用核对</h3>'
+        '<p>核对 OpenCode 原生工具与 MCP 工具实际返回的源码行。'
+        '已返回不代表理解或判断正确；提示正文、附件、子任务和无法定位的工具输出未完整计入，'
+        '未记录的引用不直接判为虚构。旧阶段恢复结果保持未知。'
+        '引用函数最多自动补读两轮；目标范围返回完整也不代表相关函数没有遗漏。</p>'
+        '<table><thead><tr><th>子系统</th><th>引用</th><th>核对结果</th></tr></thead><tbody>'
+        + "".join(rows) + '</tbody></table>'
+        + ('<h4 class="font-bold mt-2">函数范围与补读结果</h4><table><thead><tr>'
+           '<th>子系统</th><th>目标</th><th>核对结果</th></tr></thead><tbody>'
+           + "".join(coverage_rows) + '</tbody></table>' if coverage_rows else '')
+        + '</div>'
+    )
 
 
 def _render_brief_toc() -> str:
@@ -1049,6 +1268,53 @@ def _render_brief_toc() -> str:
     )
 
 
+def _render_claim_reviews(tree_json: dict) -> str:
+    labels = {"supported": "两次复核支持（不等于正确性证明）",
+              "adjudicated_supported": "分歧后复核支持，仍需审慎使用",
+              "contradicted": "两次复核反驳，不宜作为确定结论",
+              "adjudicated_contradicted": "分歧后复核反驳，不宜作为确定结论",
+              "disputed": "复核存在分歧，尚未确认",
+              "insufficient": "证据不足，尚未确认"}
+    nodes = list((tree_json.get("tree") or {}).get("children") or [])
+    nodes.append(dict(tree_json.get("verdict") or {}, name="总评"))
+    rows = []
+    notes = []
+    for node in nodes:
+        review = node.get("claim_review")
+        if not isinstance(review, dict):
+            continue
+        name = _esc(node.get("name", ""))
+        if review.get("status") == "unknown":
+            notes.append(f"{name}：没有本次有效复核记录。")
+            continue
+        notes.append(f"{name}：选中 {review.get('selected_count', 0)} 条，"
+                     f"未复核 {len(review.get('unreviewed') or [])} 条；"
+                     + ("已修订一轮。" if (review.get("revision") or {}).get("attempted") else "未触发修订。"))
+        for old in (review.get("revision") or {}).get("remaining_original_wording") or []:
+            notes.append(f"{name}：正文仍包含先前未确认的原表述，需核对其上下文：{_esc(old['text'])}")
+        for claim in review.get("claims") or []:
+            reasons = "；".join(str(r.get("reason") or "") for r in claim.get("reviews") or [])
+            evidence = "、".join(sorted({str(e.get("ref", "")) for r in claim.get("reviews") or []
+                                        for e in r.get("evidence") or []}))
+            context = claim.get("assertion_context") or {}
+            scope = (f"<br>范围：{_esc(context['scope'])}<br>条件：{_esc('；'.join(context['conditions']))}"
+                     if context else "")
+            rows.append(f"<tr><td>{name}</td><td>{_esc(claim.get('text', ''))}{scope}</td>"
+                        f"<td>{_esc(labels.get(claim.get('status'), '尚未确认'))}</td>"
+                        f"<td>{_esc(reasons)}<br>{_esc(evidence)}"
+                        + _recall_dependency_text(claim.get("recall_dependencies", [])) + "</td></tr>")
+    if not notes:
+        return ""
+    return ('<section class="brief-card p-5 mb-5" data-claim-review="true">'
+            '<h2 class="text-xl font-bold mb-2">关键结论复核</h2>'
+            '<p>本节只复核选中的评价断言、结构化问题、亮点与摘要，不代表全文已验证。'
+            '下列存在反驳、分歧或证据不足的说法不得当作确定事实，依赖这些说法的评分也需人工核对。'
+            '同一模型的多次复核可能重复犯错；源码证据不能代替运行测试。</p>'
+            + '<p>' + '<br>'.join(notes) + '</p>'
+            + '<table><thead><tr><th>范围</th><th>结论</th><th>结果</th><th>理由与证据</th></tr></thead><tbody>'
+            + ''.join(rows) + '</tbody></table></section>')
+
+
 # 渲染入口
 
 def render_tree_html(tree_json: dict, title: str = "代码树报告",
@@ -1057,6 +1323,7 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
     assert_report_complete("", structured=tree_json)
     meta = tree_json.get("meta", {})
     conclusion_html = _render_judge_conclusion(tree_json, resolver)
+    review_html = _render_claim_reviews(tree_json)
     hardcode_html = _render_hardcode_brief(tree_json, resolver)
     modules_html = _render_all_subsystems(tree_json, resolver)
     toc_html = _render_brief_toc()
@@ -1086,10 +1353,11 @@ def render_tree_html(tree_json: dict, title: str = "代码树报告",
       <div class="text-sm text-slate-500 mt-2">队伍：{_esc(meta.get('team_id','未记录'))} · 分析时间：{_esc(meta.get('ts',''))} · 索引源文件：{_esc(meta.get('indexed_files',0))} 个</div>
       <div class="text-xs text-slate-500 mt-1 ai-disclaimer">分析依据：源码结构分析与硬编码线索复核。相关判断仅供评委参考，不构成违规认定。</div>
     </header>
+    {review_html}
     {conclusion_html}
     {hardcode_html}
     {modules_html}
-    <footer class="text-xs text-slate-500 pb-8">结论所需证据均已收录在本报告的源码链接中。</footer>
+    <footer class="text-xs text-slate-500 pb-8">源码链接用于核对引用；未复核及证据不足的结论以本报告标注为准。</footer>
   </main>
 </div>
 </body>

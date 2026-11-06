@@ -1,0 +1,63 @@
+{
+  "reports": [
+    {
+      "file": "subsys-进程间通信.content.md",
+      "chars": 962,
+      "source_refs": [
+        "os/rt/include/chmsg.h:171",
+        "os/rt/include/chmsg.h:52",
+        "os/rt/src/chmsg.c:26",
+        "os/rt/src/chmsg.c:47"
+      ],
+      "sha256": "0d8be48b58ae74f1223e92afc57869e6faafd8a8acc236bf6359eb65c342c996"
+    },
+    {
+      "file": "subsys-进程间通信.module-001.md",
+      "chars": 559,
+      "source_refs": [
+        "os/rt/include/chmsg.h:52",
+        "os/rt/src/chmsg.c:26",
+        "os/rt/src/chmsg.c:80",
+        "os/rt/src/chmsg.c:89",
+        "os/rt/src/chmsg.c:93"
+      ],
+      "sha256": "6b4e4d5c5c52f5fb3da506842aad1769b35540469e68673d40d8dfc75e877313"
+    },
+    {
+      "file": "subsys-进程间通信.module-002.md",
+      "chars": 616,
+      "source_refs": [
+        "os/rt/include/chmsg.h:126",
+        "os/rt/include/chmsg.h:87",
+        "os/rt/include/chmsg.h:94",
+        "os/rt/src/chmsg.c:116",
+        "os/rt/src/chmsg.c:153",
+        "os/rt/src/chmsg.c:158"
+      ],
+      "sha256": "3dde8c707fd72f90890d1c2a21bd379ad312b79ac3ad158bfe7763b92cd6cd4c"
+    },
+    {
+      "file": "subsys-进程间通信.module-003.md",
+      "chars": 500,
+      "source_refs": [
+        "os/rt/include/chmsg.h:153",
+        "os/rt/include/chmsg.h:171",
+        "os/rt/include/chmsg.h:188",
+        "os/rt/src/chmsg.c:188"
+      ],
+      "sha256": "a8616b687c043e4ec6fa2b68ec279a9f73f74d137ecc4b772dd0ab750ba9df0d"
+    },
+    {
+      "file": "subsys-进程间通信.module-004.md",
+      "chars": 486,
+      "source_refs": [
+        "os/rt/include/chmsg.h:205",
+        "os/rt/src/chmsg.c:210",
+        "os/rt/src/chmsg.c:94"
+      ],
+      "sha256": "3fd31fac621fcba03df5ae3d577d3bdbb43ab3954692df3b6334b88a56dbd242"
+    }
+  ],
+  "json_report_absent": true,
+  "scope": "Fragment existence, text lengths and literal citations only; semantic correctness not inferred"
+}

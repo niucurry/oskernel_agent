@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "plan_id": "scoped-retry-v1",
+  "items": [
+    {
+      "id": "retry-count",
+      "dimension": "功能性",
+      "question": "默认配置且每次请求失败时，总调用次数与额外重试次数分别是多少？",
+      "scope": "send_request 的默认配置执行路径",
+      "decision_rule": "结合循环边界、单次调用和配置确认次数，独立测试前仅作为待验证的源码结论。",
+      "score_effect": "本轮不建立数值评分映射。",
+      "subsystems": [
+        "网络"
+      ],
+      "evidence": [
+        {
+          "id": "entry",
+          "purpose": "循环边界与退出条件",
+          "path": "request.c",
+          "symbol": "send_request"
+        },
+        {
+          "id": "attempt",
+          "purpose": "单次请求结果",
+          "path": "request.c",
+          "symbol": "request_attempt"
+        },
+        {
+          "id": "config",
+          "purpose": "默认重试配置",
+          "path": "config.h",
+          "start_line": 1,
+          "end_line": 1
+        }
+      ]
+    }
+  ]
+}

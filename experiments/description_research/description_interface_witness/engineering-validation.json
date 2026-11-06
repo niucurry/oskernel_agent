@@ -1,0 +1,25 @@
+{
+  "command": "env PYTHONPATH=/home/niu/.cache/oskernel-description-test-deps:src:. FINALS_CJK_FONT=/home/niu/.cache/oskernel-description-fonts/NotoSansSC-Regular.ttf FINALS_CJK_BOLD_FONT=/home/niu/.cache/oskernel-description-fonts/NotoSansSC-Bold.ttf python3 -m pytest tests/test_source_inventory.py tests/test_description_scope_inventory.py tests/test_finals_description.py tests/test_description_integrity.py tests/test_finals_readability.py tests/test_report.py tests/test_report_completeness.py tests/test_llm_batch.py -q -p no:cacheprovider --junitxml=research/description_interface_witness/engineering-validation.xml",
+  "exit_code": 0,
+  "passed": 261,
+  "junit_sha256": "187d448239a4275042ff7ae218af722b3da52a44cd05f5a982934f4b47d8e877",
+  "files": {
+    "src/oskernel_agent/analysis/description_scope.py": "4d14bb1ef48c4ea7e4cfaec49fc499d48ece704c8acf73707349ac68a0559ff0",
+    "src/oskernel_agent/analysis/source_inventory.py": "e70c5d1f8a148c047727ed102377a498ed437110f90ae0db898762c769a69f38",
+    "src/oskernel_agent/cli/mcp_server.py": "4d5a63310f13e7be09a4ef312c7ba375ffda1eea2322c7a52114c5bf57bc06a7",
+    "src/oskernel_agent/pipeline/tree_builder.py": "e36e7b4a0f78d39f49cedfa1a6ea305506a1ee0cc111548d268a09e73ce12f9c",
+    "src/oskernel_agent/reports/html_tree.py": "c89343e33f61bd596a54412aaea7bb5b8245106177aca640a0d421bab043a8e2",
+    "tests/test_description_scope_inventory.py": "eba44d9211dbc42e7fca789913e9f9dd5d8916ff240c06bf2d36245afd9c021c",
+    "tests/test_source_inventory.py": "d41e1fc6475b9e1a2b4c5d16c2e04afa41d1f3422a54061212d2acdaaab2b356"
+  },
+  "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+  "packages": {
+    "tree-sitter": "0.25.2",
+    "tree-sitter-c": "0.24.1",
+    "pydantic": "2.13.2",
+    "pytest": "9.1.0"
+  },
+  "scope": "related production regression only; no whole suite or semantic efficacy claim",
+  "earlier_invalid_command": "tests/test_tree_builder.py nonexistent: pytest exit 4, zero tests; corrected command results preserved",
+  "previous_subset_result": "125 passed before final related-report/batch regression; final command supersedes, counts not added"
+}

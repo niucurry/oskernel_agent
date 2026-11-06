@@ -1,0 +1,1 @@
+原宏编译执行例子（无副作用整数实参、原生 size_t 64 位）：MEM_ALIGN_PREV(7,4)=4；MEM_ALIGN_NEXT(7,4)=8；MEM_ALIGN_NEXT(8,4)=8；MEM_IS_VALID_ALIGNMENT(8)=1。这些是有限例子，不代表任意输入。

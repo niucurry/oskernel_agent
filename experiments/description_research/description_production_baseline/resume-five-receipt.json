@@ -1,0 +1,9 @@
+{
+  "run_sha256": "e665965961d9f593223452db6221ee380660fe2b5c2b6a7aa3cc0ef2c30d8d3e",
+  "timestamp_utc": "2026-10-08T06:29:26Z",
+  "prefix_reuse_request_count": 5,
+  "previous_actual_tokens": 84896,
+  "new_probe_budget": 184000,
+  "stage_budget": 200000,
+  "scope": "production baseline observation, not candidate rescue"
+}

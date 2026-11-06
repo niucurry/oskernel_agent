@@ -1,0 +1,8 @@
+[
+ {"path": "kernel/vmem.c", "symbol": "uvmcopy", "confirmed": true, "reason": "fork 时复制用户地址空间的核心实现"},
+ {"path": "kernel/vmem.c", "symbol": "walk_internal", "confirmed": true, "reason": "页表遍历，虚拟内存模块的基础"},
+ {"path": "kernel/vmem.c", "symbol": "copyinstr", "confirmed": true, "reason": "内核从用户空间复制字符串，系统调用参数入口"},
+ {"path": "kernel/pmem.c", "symbol": "buddy_alloc", "confirmed": true, "reason": "伙伴系统物理页分配"},
+ {"path": "kernel/pmem.c", "symbol": "buddy_free", "confirmed": true, "reason": "伙伴系统物理页释放与合并"},
+ {"path": "kernel/futex.c", "symbol": "futex_wait", "confirmed": true, "reason": "futex 等待，线程同步核心路径"}
+]

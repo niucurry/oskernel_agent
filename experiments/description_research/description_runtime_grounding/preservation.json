@@ -1,0 +1,14 @@
+{
+  "archive": "/home/niu/agent-archives/description-runtime-grounding-20261008T084740Z/experiment.tar.gz",
+  "sha256": "fb7980ac59a8ac1b8893f4e5db5dce976960fb2d02314bd04efa6e652d7b2b74",
+  "archive_bytes": 4344671,
+  "verified_members": 434,
+  "private_credential_absent": true,
+  "runtime_cpu_seconds": 9.577827,
+  "semantic_quality": "unmeasured; failed complete delivery retained",
+  "budget": {
+    "requests": 10,
+    "reported_tokens": 110727,
+    "unknown_requests": 0
+  }
+}

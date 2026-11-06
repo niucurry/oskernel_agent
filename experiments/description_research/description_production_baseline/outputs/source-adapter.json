@@ -1,0 +1,7 @@
+{
+  "mcp_dependency_preflight": "ModuleNotFoundError: mcp; zero model requests",
+  "adapter": "AST load exact existing fast-mode functions, no edits or dependency graph",
+  "mcp_server_sha256": "4d5a63310f13e7be09a4ef312c7ba375ffda1eea2322c7a52114c5bf57bc06a7",
+  "script_sha256": "e665965961d9f593223452db6221ee380660fe2b5c2b6a7aa3cc0ef2c30d8d3e",
+  "frozen_before_probe_requests_utc": "2026-10-08T06:29:26Z"
+}

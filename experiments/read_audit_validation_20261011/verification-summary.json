@@ -1,0 +1,103 @@
+{
+  "model": "deepseek-flash",
+  "run_dir": "/home/niu/agent-read-audit-validation-20261011/deepseek-final/runs/fa26197576504ab9ba28e1b63a989c75",
+  "repair_rounds": 1,
+  "coverage_status": "returned",
+  "correct_reports": 1,
+  "fully_returned_functions": 1,
+  "selection_recall": 0.5,
+  "attempts": [
+    {
+      "round": 0,
+      "tools": [
+        "read",
+        "os-kernel-tools_read_file",
+        "read",
+        "read",
+        "os-kernel-tools_write_report"
+      ],
+      "status": "complete",
+      "returned_ranges": [
+        [
+          [
+            1,
+            80
+          ],
+          [
+            267,
+            306
+          ]
+        ]
+      ],
+      "fully_returned_functions": 0,
+      "corroborated_reports": 1,
+      "requirements": [
+        {
+          "path": "mm.c",
+          "start_line": 3,
+          "end_line": 306,
+          "status": "not_observed",
+          "missing_ranges": [
+            [
+              81,
+              266
+            ]
+          ]
+        },
+        {
+          "path": "mm.c",
+          "start_line": 1,
+          "end_line": 1,
+          "status": "returned",
+          "missing_ranges": []
+        }
+      ]
+    },
+    {
+      "round": 1,
+      "tools": [
+        "read",
+        "os-kernel-tools_read_file",
+        "os-kernel-tools_read_file",
+        "read",
+        "read",
+        "os-kernel-tools_write_report"
+      ],
+      "status": "complete",
+      "returned_ranges": [
+        [
+          [
+            1,
+            306
+          ]
+        ]
+      ],
+      "fully_returned_functions": 1,
+      "corroborated_reports": 1,
+      "requirements": [
+        {
+          "path": "mm.c",
+          "start_line": 3,
+          "end_line": 306,
+          "status": "returned",
+          "missing_ranges": []
+        },
+        {
+          "path": "mm.c",
+          "start_line": 1,
+          "end_line": 1,
+          "status": "returned",
+          "missing_ranges": []
+        },
+        {
+          "path": "mm.c",
+          "start_line": 1,
+          "end_line": 306,
+          "status": "returned",
+          "missing_ranges": []
+        }
+      ]
+    }
+  ],
+  "original_source_unchanged": true
+}

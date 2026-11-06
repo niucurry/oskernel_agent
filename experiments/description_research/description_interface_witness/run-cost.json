@@ -1,0 +1,7 @@
+{
+  "wall_seconds": 135.419,
+  "subprocess_cpu_seconds_run_only": 1.0408340855860843e-17,
+  "model_requests": 32,
+  "actual_tokens": 109962,
+  "usage_missing_calls": []
+}

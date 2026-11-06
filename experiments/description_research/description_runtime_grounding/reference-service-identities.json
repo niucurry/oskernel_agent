@@ -1,0 +1,104 @@
+{
+  "items": [
+    {
+      "name": "chMsgGet",
+      "path": "os/rt/include/chmsg.h",
+      "start": 188,
+      "end": 193,
+      "purpose": "Returns the message carried by the specified thread.",
+      "reference_type": "Existing maintainer @brief, not execution truth"
+    },
+    {
+      "name": "chMsgIsPendingI",
+      "path": "os/rt/include/chmsg.h",
+      "start": 171,
+      "end": 176,
+      "purpose": "Evaluates to @p true if the thread has pending messages.",
+      "reference_type": "Existing maintainer @brief, not execution truth"
+    },
+    {
+      "name": "chMsgPoll",
+      "path": "os/rt/include/chmsg.h",
+      "start": 153,
+      "end": 161,
+      "purpose": "Poll to check for an incoming message.",
+      "reference_type": "Existing maintainer @brief, not execution truth"
+    },
+    {
+      "name": "chMsgPollS",
+      "path": "os/rt/src/chmsg.c",
+      "start": 188,
+      "end": 198,
+      "purpose": "Poll to check for an incoming message.",
+      "reference_type": "Existing maintainer @brief, not execution truth"
+    },
+    {
+      "name": "chMsgRelease",
+      "path": "os/rt/src/chmsg.c",
+      "start": 210,
+      "end": 216,
+      "purpose": "Releases a sender thread specifying a response message.",
+      "reference_type": "Existing maintainer @brief, not execution truth"
+    },
+    {
+      "name": "chMsgReleaseS",
+      "path": "os/rt/include/chmsg.h",
+      "start": 205,
+      "end": 210,
+      "purpose": "Releases the thread waiting on top of the messages queue.",
+      "reference_type": "Existing maintainer @brief, not execution truth"
+    },
+    {
+      "name": "chMsgSend",
+      "path": "os/rt/src/chmsg.c",
+      "start": 80,
+      "end": 98,
+      "purpose": "Sends a message to the specified thread.",
+      "reference_type": "Existing maintainer @brief, not execution truth"
+    },
+    {
+      "name": "chMsgWait",
+      "path": "os/rt/include/chmsg.h",
+      "start": 94,
+      "end": 102,
+      "purpose": "Suspends the thread and waits for an incoming message.",
+      "reference_type": "Existing maintainer @brief, not execution truth"
+    },
+    {
+      "name": "chMsgWaitS",
+      "path": "os/rt/src/chmsg.c",
+      "start": 116,
+      "end": 129,
+      "purpose": "Suspends the thread and waits for an incoming message.",
+      "reference_type": "Existing maintainer @brief, not execution truth"
+    },
+    {
+      "name": "chMsgWaitTimeout",
+      "path": "os/rt/include/chmsg.h",
+      "start": 126,
+      "end": 134,
+      "purpose": "Suspends the thread and waits for an incoming message or a timeout to occur.",
+      "reference_type": "Existing maintainer @brief, not execution truth"
+    },
+    {
+      "name": "chMsgWaitTimeoutS",
+      "path": "os/rt/src/chmsg.c",
+      "start": 153,
+      "end": 169,
+      "purpose": "Suspends the thread and waits for an incoming message or a timeout to occur.",
+      "reference_type": "Existing maintainer @brief, not execution truth"
+    }
+  ],
+  "command": [
+    "ctags",
+    "--output-format=json",
+    "--fields=+neK",
+    "--kinds-C=f",
+    "-f",
+    "-",
+    "/home/niu/agent-research/description_runtime_grounding/repo/os/rt/src/chmsg.c",
+    "/home/niu/agent-research/description_runtime_grounding/repo/os/rt/include/chmsg.h"
+  ],
+  "reference_boundary": "Service identity/purpose annotation only, not a complete module-feature ontology or arbitrary Chinese prose oracle",
+  "model_requests": 0
+}

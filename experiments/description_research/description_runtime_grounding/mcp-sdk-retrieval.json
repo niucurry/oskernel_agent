@@ -1,0 +1,13 @@
+{
+  "url": "https://codeload.github.com/modelcontextprotocol/python-sdk/tar.gz/refs/tags/v1.26.0",
+  "tag": "v1.26.0",
+  "ref": {
+    "sha": "3d9d34552a9ab8988acf8d06e4a705bd799fc32b",
+    "type": "commit",
+    "url": "https://api.github.com/repos/modelcontextprotocol/python-sdk/git/commits/3d9d34552a9ab8988acf8d06e4a705bd799fc32b"
+  },
+  "sha256": "598a1755389d898c18f4aefcc07d84a80130b1a67cca706a00fe88fbec23d22d",
+  "tar_bytes": 595526,
+  "extracted_members": 154,
+  "scope": "only MCP 1.x source package, project metadata and license; no author code edits"
+}

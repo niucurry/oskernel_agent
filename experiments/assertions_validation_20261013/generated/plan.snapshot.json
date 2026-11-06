@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "plan_id": "scoped-retry-v1",
+  "plan_path": "/home/niu/agent-assertions-validation-20261013/plan.json",
+  "plan_sha256": "b42329597872e02a85866c377b24d27a0e04ff7687f386355b4a08462b86d514",
+  "repo_path": "/home/niu/agent-assertions-validation-20261013/repo",
+  "items": [
+    {
+      "id": "retry-count",
+      "dimension": "功能性",
+      "question": "默认配置且每次请求失败时，总调用次数与额外重试次数分别是多少？",
+      "scope": "send_request 的默认配置执行路径",
+      "decision_rule": "结合循环边界、单次调用和配置确认次数，独立测试前仅作为待验证的源码结论。",
+      "score_effect": "本轮不建立数值评分映射。",
+      "on_insufficient": "needs_review",
+      "subsystems": [
+        "网络"
+      ],
+      "evidence": [
+        {
+          "id": "entry",
+          "purpose": "循环边界与退出条件",
+          "path": "request.c",
+          "symbol": "send_request",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "requirements": [
+            {
+              "path": "request.c",
+              "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+              "start_line": 10,
+              "end_line": 19,
+              "symbol": "send_request",
+              "scope": "function",
+              "parser_status": "parsed"
+            }
+          ],
+          "resolution": "resolved"
+        },
+        {
+          "id": "attempt",
+          "purpose": "单次请求结果",
+          "path": "request.c",
+          "symbol": "request_attempt",
+          "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+          "parser_status": "parsed",
+          "requirements": [
+            {
+              "path": "request.c",
+              "sha256": "518ffdd283150e32dac502cc381a29d1b645de484089c8ae952df9eb6dd61244",
+              "start_line": 5,
+              "end_line": 8,
+              "symbol": "request_attempt",
+              "scope": "function",
+              "parser_status": "parsed"
+            }
+          ],
+          "resolution": "resolved"
+        },
+        {
+          "id": "config",
+          "purpose": "默认重试配置",
+          "path": "config.h",
+          "start_line": 1,
+          "end_line": 1,
+          "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+          "parser_status": "parsed",
+          "requirements": [
+            {
+              "path": "config.h",
+              "sha256": "d0e5887585233b16d207790b204d193959378854cafe275e9f1a062de7ebbd71",
+              "start_line": 1,
+              "end_line": 1,
+              "symbol": "",
+              "scope": "declared_lines",
+              "parser_status": "parsed"
+            }
+          ],
+          "resolution": "resolved"
+        }
+      ]
+    }
+  ],
+  "snapshot_sha256": "feb13e420101b9c1df8bd29ce384e116b96fcdd86c496023328ffb9f5289294d",
+  "snapshot_scope": "declared_evidence_files_only"
+}

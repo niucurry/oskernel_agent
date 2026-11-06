@@ -1,0 +1,182 @@
+[
+  {
+    "id": 1,
+    "request_sha256": "65f3d00e9ead0e7d24fbf5eadb792cc3fbf0db8c83b3dc5c79a9d75d8a4076cc",
+    "status": "ok",
+    "reserved_next_call_tokens": 14706,
+    "accounted_tokens": 2052,
+    "usage": {
+      "prompt_tokens": 2045,
+      "completion_tokens": 7,
+      "total_tokens": 2052,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 2045
+    },
+    "model": "deepseek-flash"
+  },
+  {
+    "id": 2,
+    "request_sha256": "b6219e7fd2d9b2ba1e43e5bdb673f54581fde953d85815641c42dfdc51ed2012",
+    "status": "ok",
+    "reserved_next_call_tokens": 44481,
+    "accounted_tokens": 5542,
+    "usage": {
+      "prompt_tokens": 5439,
+      "completion_tokens": 103,
+      "total_tokens": 5542,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 5439
+    },
+    "model": "deepseek-flash"
+  },
+  {
+    "id": 3,
+    "request_sha256": "21ce353a7b7fbf995eeaa16e8c66192e6b649a03eb2ab0b18ac87ab7c0d65f2f",
+    "status": "ok",
+    "reserved_next_call_tokens": 21405,
+    "accounted_tokens": 7256,
+    "usage": {
+      "prompt_tokens": 7135,
+      "completion_tokens": 121,
+      "total_tokens": 7256,
+      "prompt_tokens_details": {
+        "cached_tokens": 5504
+      },
+      "prompt_cache_hit_tokens": 5504,
+      "prompt_cache_miss_tokens": 1631
+    },
+    "model": "deepseek-flash"
+  },
+  {
+    "id": 4,
+    "request_sha256": "b1e8a90f418806b4f34bb3643c55772480af967352bed9eb3bff4eb51d2204cc",
+    "status": "ok",
+    "reserved_next_call_tokens": 26956,
+    "accounted_tokens": 9966,
+    "usage": {
+      "prompt_tokens": 9884,
+      "completion_tokens": 82,
+      "total_tokens": 9966,
+      "prompt_tokens_details": {
+        "cached_tokens": 7168
+      },
+      "prompt_cache_hit_tokens": 7168,
+      "prompt_cache_miss_tokens": 2716
+    },
+    "model": "deepseek-flash"
+  },
+  {
+    "id": 5,
+    "request_sha256": "d7cef8ac628f7fd13026c5e5924a549671fa6dffad2fae43d60914181a906ca8",
+    "status": "ok",
+    "reserved_next_call_tokens": 22805,
+    "accounted_tokens": 13091,
+    "usage": {
+      "prompt_tokens": 11303,
+      "completion_tokens": 1788,
+      "total_tokens": 13091,
+      "prompt_tokens_details": {
+        "cached_tokens": 9856
+      },
+      "prompt_cache_hit_tokens": 9856,
+      "prompt_cache_miss_tokens": 1447
+    },
+    "model": "deepseek-flash"
+  },
+  {
+    "id": 6,
+    "request_sha256": "783d935621357931fe3caf435199554daf6059fa92b89cdca7da4ee89a031275",
+    "status": "ok",
+    "reserved_next_call_tokens": 29330,
+    "accounted_tokens": 14078,
+    "usage": {
+      "prompt_tokens": 13267,
+      "completion_tokens": 811,
+      "total_tokens": 14078,
+      "prompt_tokens_details": {
+        "cached_tokens": 11776
+      },
+      "prompt_cache_hit_tokens": 11776,
+      "prompt_cache_miss_tokens": 1491
+    },
+    "model": "deepseek-flash"
+  },
+  {
+    "id": 7,
+    "request_sha256": "d74c169f186f348f6d7ca8fb45d2d47531b9f8b57cb0e060c97424fbf444fc63",
+    "status": "ok",
+    "reserved_next_call_tokens": 24105,
+    "accounted_tokens": 14337,
+    "usage": {
+      "prompt_tokens": 14123,
+      "completion_tokens": 214,
+      "total_tokens": 14337,
+      "prompt_tokens_details": {
+        "cached_tokens": 13952
+      },
+      "prompt_cache_hit_tokens": 13952,
+      "prompt_cache_miss_tokens": 171
+    },
+    "model": "deepseek-flash"
+  },
+  {
+    "id": 8,
+    "request_sha256": "090eb495e17193c2cf7bb99daa116bca0eba3ac2da8743004eac7b0b694fe104",
+    "status": "ok",
+    "reserved_next_call_tokens": 22949,
+    "accounted_tokens": 14576,
+    "usage": {
+      "prompt_tokens": 14362,
+      "completion_tokens": 214,
+      "total_tokens": 14576,
+      "prompt_tokens_details": {
+        "cached_tokens": 14208
+      },
+      "prompt_cache_hit_tokens": 14208,
+      "prompt_cache_miss_tokens": 154
+    },
+    "model": "deepseek-flash"
+  },
+  {
+    "id": 9,
+    "request_sha256": "7296dbf150f4306df8a4addf540a6cc81301db5bde92d0416941a490a08cebfa",
+    "status": "ok",
+    "reserved_next_call_tokens": 23188,
+    "accounted_tokens": 14646,
+    "usage": {
+      "prompt_tokens": 14601,
+      "completion_tokens": 45,
+      "total_tokens": 14646,
+      "prompt_tokens_details": {
+        "cached_tokens": 14464
+      },
+      "prompt_cache_hit_tokens": 14464,
+      "prompt_cache_miss_tokens": 137
+    },
+    "model": "deepseek-flash"
+  },
+  {
+    "id": 10,
+    "request_sha256": "8f072923723ad55e69b641e7b0c4823acb2260da0a43400d83535e01efb7fec4",
+    "status": "ok",
+    "reserved_next_call_tokens": 23857,
+    "accounted_tokens": 15183,
+    "usage": {
+      "prompt_tokens": 14969,
+      "completion_tokens": 214,
+      "total_tokens": 15183,
+      "prompt_tokens_details": {
+        "cached_tokens": 14592
+      },
+      "prompt_cache_hit_tokens": 14592,
+      "prompt_cache_miss_tokens": 377
+    },
+    "model": "deepseek-flash"
+  }
+]

@@ -1,0 +1,78 @@
+[
+  {
+    "id": 1,
+    "report": "template-report.md",
+    "request_sha256": "1527ff8d37da33b762f3181985dac1711cc417f0b50ebeef31a6cdcdb23f6141",
+    "request_file": "01-request.json",
+    "response_file": "01-response.json",
+    "status": "ok",
+    "accounted_tokens": 760,
+    "usage": {
+      "prompt_tokens": 717,
+      "completion_tokens": 43,
+      "total_tokens": 760,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 717
+    }
+  },
+  {
+    "id": 2,
+    "report": "normal-form-template-report.md",
+    "request_sha256": "66cc25f9ac7df95fb078f1f14fb0bc50ba7850ce91ea0045f7a2984722f7a757",
+    "request_file": "02-request.json",
+    "response_file": "02-response.json",
+    "status": "ok",
+    "accounted_tokens": 778,
+    "usage": {
+      "prompt_tokens": 735,
+      "completion_tokens": 43,
+      "total_tokens": 778,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 735
+    }
+  },
+  {
+    "id": 3,
+    "report": "production-module-plain.md",
+    "request_sha256": "c757d9e429ca6897aa54cff34cd1c8ba405aca18a7388770728f6b142664d030",
+    "request_file": "03-request.json",
+    "response_file": "03-response.json",
+    "status": "ok",
+    "accounted_tokens": 818,
+    "usage": {
+      "prompt_tokens": 781,
+      "completion_tokens": 37,
+      "total_tokens": 818,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 781
+    }
+  },
+  {
+    "id": 4,
+    "report": "names-only-report.md",
+    "request_sha256": "ee144ddee330ddcfbed7fcfc562c8755d081de8d85284af9f6289f277792c022",
+    "request_file": "04-request.json",
+    "response_file": "04-response.json",
+    "status": "ok",
+    "accounted_tokens": 545,
+    "usage": {
+      "prompt_tokens": 508,
+      "completion_tokens": 37,
+      "total_tokens": 545,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 508
+    }
+  }
+]

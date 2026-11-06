@@ -1,0 +1,9 @@
+{
+  "files": {
+    "protocol.json": "a84d9b24e257b3b304fa1afb831224d739ab51058e22f030d960e4aac8c45383",
+    "probe.py": "47e9611f4ccf2aa71674d78578a97725db7e52316c57d08f4b2f4110462e8ba1",
+    "reference-preflight.json": "1379ad3bf2ed4bfbecde1224350aa42bd085ca796390425e9fa213b987d0751c",
+    "prepared.json": "7acb2560926fea76b9d360c9ad0ead210435f0b2f1603403adc874b29d851adb"
+  },
+  "timestamp_utc": "2026-10-08T06:09:16Z"
+}

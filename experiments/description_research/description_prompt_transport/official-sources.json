@@ -1,0 +1,10 @@
+[
+  {
+    "url": "https://opencode.ai/docs/agents/",
+    "error": "HTTPError: HTTP Error 403: Forbidden"
+  },
+  {
+    "url": "https://opencode.ai/config.json",
+    "error": "HTTPError: HTTP Error 403: Forbidden"
+  }
+]

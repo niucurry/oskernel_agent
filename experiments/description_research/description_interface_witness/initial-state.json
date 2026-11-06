@@ -1,0 +1,15 @@
+{
+  "git_head": "2e7bfdc641b90f3596bdf70c6fdc04c163da44ab",
+  "status": " D docs/finals-report-plan.md\n D docs/progress-presentation.pptx\n?? research/assessment_sensitivity/\n?? research/build_evidence/\n?? research/capability_confirmation/\n?? research/chronix_guest_validation/\n?? research/configuration_sampling_gate/\n?? research/contest_corpus_inventory/\n?? research/contest_effect_audit/\n?? research/contest_guest_validation/\n?? research/contest_syscall_audit/\n?? research/history_evidence_audit/\n?? research/identity_conformance/\n?? research/identity_controls/\n?? research/natural_defect_feasibility/\n?? research/natural_upstream_review/\n?? research/noaxiom_boot_feasibility/\n?? research/noaxiom_contract_validation/\n?? research/oracle_falsification/\n?? research/performance_validity_probe/\n?? research/preparation_cache_compaction/\n?? research/review_grounding/\n?? research/upstream_exclusion_guard/\n?? research/upstream_residual/\n?? research/verdict_binding/\n",
+  "disk_free": 810819584,
+  "private_config_available": true,
+  "models": [
+    "deepseek-flash",
+    "deepseek-v4-pro"
+  ],
+  "balance_cny_preflight": "1.55",
+  "subprocess_cpu_limit_seconds": 7200,
+  "model_request_limit": 60,
+  "actual_token_limit": 200000,
+  "created_at_utc": "2026-10-08T02:34:44Z"
+}

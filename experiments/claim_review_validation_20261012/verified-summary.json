@@ -1,0 +1,20 @@
+{
+  "report": "/home/niu/agent-claim-review-validation-20261012/verified/report.json",
+  "review": "/home/niu/agent-claim-review-validation-20261012/verified/review.json",
+  "selected": 3,
+  "revision": {
+    "attempted": true,
+    "new_report_sha256": "9772909f77a938f18958a604a15b098fdaa8c4319e5a8c4e8f422e4b9b7395b9",
+    "original_wording_absent": [
+      "733080cbee6e19492c4d",
+      "59b4413309dad494dec8",
+      "84272d0c7589db80949b"
+    ],
+    "remaining_original_wording": []
+  },
+  "statuses": [
+    "supported",
+    "supported",
+    "supported"
+  ]
+}

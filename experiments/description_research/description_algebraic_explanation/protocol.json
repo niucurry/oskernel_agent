@@ -1,0 +1,45 @@
+{
+  "utc": "2026-10-08T09:34:38.121724+00:00",
+  "scope": "Stage 4: finite algebraic explanation pilot only; no behavior graphs, condition JSON, compression or repair",
+  "budget": {
+    "requests": 60,
+    "actual_tokens": 200000,
+    "cpu_seconds": 7200,
+    "production_subbudget": {
+      "requests": 12,
+      "actual_tokens": 120000
+    },
+    "matched_pilot_subbudget": {
+      "requests": 24,
+      "actual_tokens": 60000
+    },
+    "unknown_request_minimum_reserve": 20000,
+    "no_failed_task_retry": true
+  },
+  "candidate": "Equivalent quotient/modulus normal forms replace obscure arithmetic in auxiliary source interpretation; then generate a module explanation. No claim of novelty or success before closest work and strong controls.",
+  "production_input": "Original complete chalign.h; exposed ChibiOS repository, new function slice, not blind repository",
+  "production_compatibility_fixes": "Current prompt transport and no-context fast reference validation retained, original request/report validator and MCP max steps 20",
+  "pilot_arms": [
+    "Current production report (delivery and partial outputs retained separately)",
+    "Source only with matched fixed report instruction",
+    "Source plus finite GCC execution examples",
+    "Source plus algebraic normal forms",
+    "Deterministic exact C expression/comment template"
+  ],
+  "reference": "gcc-12 compiled original unchanged chalign.h, size_t actual native width, numeric addresses only; no OS execution or arbitrary prose truth",
+  "input_and_length": "All pilot model arms get same whole original header and stated native width; auxiliary examples/normal forms are charged and byte-length capped. All reports max 900 Unicode characters; reader gets only report and 12 numeric questions, no original header",
+  "primary": "correct answers / 12 fixed independent compiler results, with wrong, unknown and missing reported; reader model is consumer, never source of reference truth",
+  "secondary": [
+    "Report characters and overflow beyond length cap",
+    "Evidence/citation path presence, not entailment",
+    "Request/token and preprocessing CPU"
+  ],
+  "development_gate": "Normal-form report must beat applicable source-only, execution-example and deterministic-C-expression reports by >=2/12 correct answers in EACH of two frozen repeated generations, with no lower number of answered questions; length <=900; no tuning after failure",
+  "confirmation": "Only if development passes, use previously unused FreeRTOS or Zephyr arithmetic interface at pinned official revision, one function holdout and one new repository, frozen same gate. Not yet acquired, pretraining contamination not excluded.",
+  "stop": [
+    "API/interface/budget unknown retained, no blind retry",
+    "Any gate failure stops this candidate; no revised prompt/domain/denominator rescue",
+    "If closest original implementation already has equivalent mechanism, classify pilot as applicability only, not new method"
+  ],
+  "novelty_boundary": "ASAP already semantic-augments summarization; CNL already verifies code facts; numerical normalization has not yet shown distinct benefit. Pilot can reject it, cannot itself establish TSE novelty."
+}

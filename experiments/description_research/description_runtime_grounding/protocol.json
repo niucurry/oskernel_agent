@@ -1,0 +1,52 @@
+{
+  "utc": "2026-10-08T07:51:22Z",
+  "scope": "Original SUBSYS OpenCode/MCP runtime baseline on a complete two-file portable messaging unit; limited diagnosis, not whole OS, no new method-effect claim",
+  "repository": "ChibiOS/ChibiOS",
+  "revision": "e209b17cdf7ed9b118fd87863ca92db852b151b3",
+  "inputs": [
+    {
+      "path": "os/rt/src/chmsg.c",
+      "bytes": 8149,
+      "sha256": "efa84f3b960b0a0e4f996216b52e2e350721ca867910ca8611ea456b4bdcebd6"
+    },
+    {
+      "path": "os/rt/include/chmsg.h",
+      "bytes": 7396,
+      "sha256": "fdacd63b2e2849ba6f654771abf882b7bc87fe5b1ebf7da53c833ecd0144ff61"
+    }
+  ],
+  "exposure": "Previously exposed ChibiOS repository; these files were available before this run, not a blind confirmation",
+  "budget": {
+    "requests": 16,
+    "reported_actual_tokens": 120000,
+    "unknown_request_reserve": 20000,
+    "cpu_seconds": 7200,
+    "max_completion_tokens": 6000,
+    "no_task_retry": true,
+    "unknown_request_reserve_rule": "at least 20000, raised to the conservative next-call bound if larger; pending calls retain this reservation until reported usage exists"
+  },
+  "model": {
+    "id": "deepseek-flash",
+    "thinking": "disabled",
+    "temperature": 0.2
+  },
+  "production": "Original setup prompt and tree_builder request/output/validator; OpenCode 1.14.48; original MCP server (current useful engineering changes), max-steps 20, native tools denied as original config",
+  "adapter_changes": "Local budget-auditing HTTP relay, enforces frozen generation parameters and requests provider stream usage; does not edit model messages or tool results. A comparison-only tool is denied to remain within user scope",
+  "stop": "One baseline run; any request/token/API/format/tool-completion failure retained; no prompt repair and no JSON-repair model calls",
+  "success": "All required reports actually written and original subsystem validator accepts them. This is delivery verification; semantic effect needs a separate independent bounded reference",
+  "prior_budget": {
+    "stage2_actual_tokens": 163209,
+    "stage2_requests": 15,
+    "stage2_ceiling_tokens": 200000,
+    "stage2_remaining_tokens": 36791,
+    "stage1_reported_tokens": 136170,
+    "stage1_requests": 35,
+    "stage1_unknown_requests": 1
+  },
+  "rationale": "A verified complete existing-runtime description baseline is missing. Earlier 4-tool direct adapter stops cannot establish production quality. Before any new model requests, allocate a smaller 120k stage for one small genuine-source unit rather than extending failed candidates.",
+  "preflight_notes": [
+    "MCP 2.3.0 installed but incompatible with original Server decorator API. No model request.",
+    "PyPI route became unreachable. MCP 1.26.0 exact official GitHub source and two small compatibility dependencies fetched and content hashes verified, no source modifications.",
+    "Two multiline maintainer @brief texts corrected before model requests; truncated initial preflight preserved."
+  ]
+}

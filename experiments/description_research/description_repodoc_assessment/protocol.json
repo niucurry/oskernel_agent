@@ -1,0 +1,10 @@
+{
+  "scope": "Feasibility of the unchanged official RepoDoc C component extractor as a description-generation baseline; no new clustering, behavior graph or call-state research",
+  "author_revision": "306becd0f143211c0dde2bdbd480578356280e28",
+  "repositories": ["threadx", "ChibiOS", "nuttx"],
+  "inputs": "Previously exposed, versioned public portable-core slices; not new blind repositories",
+  "truth_boundary": "Independent Ctags definition-location agreement, not compiler-verified whole-OS ground truth; disagreements are not automatically semantic errors",
+  "budget": {"model_requests": 0, "cpu_seconds": 120, "subprocess_timeout_seconds": 60},
+  "stop": "One extraction run, no model calls, no patch to the author extractor to improve its agreement; original errors or dependency failure retained",
+  "quality_boundary": "No generated documentation and no statement that extractor agreement proves summary quality or paper benefit"
+}

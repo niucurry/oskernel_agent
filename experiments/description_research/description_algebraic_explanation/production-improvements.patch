@@ -1,0 +1,87 @@
+diff --git a/README.md b/README.md
+index 0adbc54..1a4efca 100644
+--- a/README.md
++++ b/README.md
+@@ -3,7 +3,7 @@
+ 面向全国大学生操作系统比赛评委的内核作品分析系统。系统从源码、Git 历史和历年作品库中生成四份不可由参赛队修改的正式报告：
+ 
+ - `summary.pdf`：一页评审摘要；
+-- `description.html`：真实可用性、硬编码风险和内核模块分析；
++- `description.html`：有源码依据的模块与实现分析、硬编码线索复核；
+ - `development.html`：提交异常、开发阶段和关键提交；
+ - `comparison.html`：与唯一最接近历史作品的同源证据对比。
+ 
+@@ -13,6 +13,7 @@
+ 
+ - [新任务提示词：只研究 OS 代码描述系统](docs/description-research-restart-2026-10-08.md)
+ - [工程交接：保留的修复与验证范围](docs/engineering-handoff-2026-10-08.md)
++- [描述系统首轮实验：强基线持平与保留的工程改进](docs/description-interface-witness-2026-10-08.md)
+ - [项目结构](docs/project-map.md)
+ - [设计方案与技术文档](docs/design-specification.pdf)
+ 
+@@ -47,6 +48,9 @@ cp config.toml.example config.toml      # Windows: Copy-Item config.toml.example
+ `data/opencode/`，不会修改用户目录中的 OpenCode 配置。比赛最低提交次数只能通过
+ `FINALS_MIN_COMMITS` 配置为当届章程的真实值；未配置时系统不会自行认定“提交缺失”。
+ 
++升级后应重新执行 `oskernel-setup`，以使用 OpenCode 的 `agent.prompt` 配置字段；旧版生成的
++`agent.system` 没有将描述系统提示传递给模型。
++
+ ## 快速使用
+ 
+ ### 描述报告
+@@ -56,14 +60,9 @@ oskernel-agent --repo-path /path/to/repository --output description.html
+ oskernel-agent --url https://gitlab.example/group/project.git
+ ```
+ 
+-默认只静态核对根目录 Makefile 的 `kernel-rv` 与 `kernel-la`。需要在比赛统一镜像中真实编译时显式启用：
+-
+-```bash
+-oskernel-agent --repo-path /path/to/repository --output description.html \
+-  --verify-build --build-image zhouzhouyi/os-contest:20260510
+-```
++当前描述入口从源码生成模块、功能与实现说明，并复核硬编码线索；不执行比赛镜像编译或内核启动。硬编码候选必须经过 AI 逐条复核；缺少必要事实、复核未完成或证据链接无效时拒绝交付。报告中的静态实现说明不证明运行可用性。
+ 
+-本地还没有镜像时可追加 `--pull-build-image`；前端和批处理生成描述报告时会默认启用这两个参数。首次拉取镜像体积较大，工具最多等待一小时；后续直接复用本地镜像。真实编译使用一次性仓库副本、关闭容器网络并依次执行两个 Make 目标；实际运行锁定到已检查的镜像 ID，报告记录镜像 digest、资源限制、退出状态、耗时、产物大小和 SHA-256，不会修改原仓库。描述报告会先列出构建证据、硬编码作弊风险和其他严重问题，再展示各内核模块。硬编码候选必须经过 AI 逐条复核；缺少必要事实、复核未完成或证据链接无效时拒绝交付。
++模块概览附有源码范围计数，区分索引、实际提示清单和模块代表来源；实际源码阅读覆盖保持未知。恢复旧阶段产物时，历史提示数量也保持未知。快速符号清单支持 C/C++ 函数定义及函数式宏名称，语法解析不完整或不可用时会明确提示；符号出现不证明已经编译或启用。
+ 
+ ### 历史库与对比报告
+ 
+diff --git a/src/oskernel_agent/cli/setup_opencode.py b/src/oskernel_agent/cli/setup_opencode.py
+index 1f7e51e..d937979 100644
+--- a/src/oskernel_agent/cli/setup_opencode.py
++++ b/src/oskernel_agent/cli/setup_opencode.py
+@@ -221,7 +221,7 @@ def setup() -> None:
+         prompt = _build_session_prompt(session_type)
+         existing["agent"][agent_name] = {
+             "model": MODEL,
+-            "system": prompt,
++            "prompt": prompt,
+             "permission": {
+                 "bash":  {"*": "deny"},
+                 "edit":  {"*": "deny"},
+@@ -243,7 +243,7 @@ def setup() -> None:
+     plagiarism_system = _PLAGIARISM_SYSTEM_PROMPT
+     existing["agent"]["os-kernel-plagiarism"] = {
+         "model": MODEL,
+-        "system": plagiarism_system,
++        "prompt": plagiarism_system,
+         "permission": {
+             "bash":  {"*": "deny"},
+             "edit":  {"*": "deny"},
+diff --git a/tests/test_setup_opencode.py b/tests/test_setup_opencode.py
+index c492c79..36e0a64 100644
+--- a/tests/test_setup_opencode.py
++++ b/tests/test_setup_opencode.py
+@@ -25,4 +25,11 @@ def test_setup_writes_project_private_opencode_files(tmp_path, monkeypatch) -> N
+     auth_file = project_root / "data" / "opencode" / "data" / "opencode" / "auth.json"
+     config_file = project_root / "data" / "opencode" / "config" / "opencode" / "opencode.json"
+     assert json.loads(auth_file.read_text(encoding="utf-8"))["deepseek"]["key"] == "test-key"
+-    assert json.loads(config_file.read_text(encoding="utf-8"))["mcp"]["os-kernel-tools"]
++    actual = json.loads(config_file.read_text(encoding="utf-8"))
++    assert actual["mcp"]["os-kernel-tools"]
++    from oskernel_agent.prompts.builder import SessionType, SESSION_AGENT_NAMES
++
++    for session_type in SessionType:
++        agent = actual["agent"][SESSION_AGENT_NAMES[session_type]]
++        assert agent["prompt"] == setup_opencode._build_session_prompt(session_type)
++        assert "system" not in agent

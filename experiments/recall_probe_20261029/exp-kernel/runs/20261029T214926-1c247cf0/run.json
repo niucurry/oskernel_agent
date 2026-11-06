@@ -1,0 +1,16 @@
+{
+  "tag": "flash-extra",
+  "model": "deepseek-flash",
+  "context_limit": 1048576,
+  "output_limit": 32768,
+  "compaction": "off",
+  "informed": false,
+  "extra_files": [
+    "kernel/vma.c",
+    "kernel/process.c",
+    "kernel/signal.c"
+  ],
+  "targets": 6,
+  "repair_rounds": 2,
+  "started": 1793281766.87251
+}

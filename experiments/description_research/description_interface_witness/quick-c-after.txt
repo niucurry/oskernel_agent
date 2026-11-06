@@ -1,0 +1,39 @@
+## 子树分析（快速模式）：<root>
+文件数：7
+
+### 文件列表
+- sys/include/vfs.h（4 个快速符号）
+- sys/fs/devfs/hwrng.c（1 个快速符号）
+- sys/fs/devfs/random.c（1 个快速符号）
+- sys/fs/devfs/random-vfs.h（0 个快速符号）
+- sys/fs/devfs/auto_init_devfs.c（1 个快速符号）
+- sys/fs/devfs/devfs.c（7 个快速符号）
+- sys/fs/constfs/constfs.c（9 个快速符号）
+
+### 符号样例
+快速符号总数：23
+- `vfs_mount_struct` (sys/include/vfs.h:384)
+- `vfs_file_ops` (sys/include/vfs.h:447)
+- `vfs_dir_ops` (sys/include/vfs.h:577)
+- `vfs_file_system_ops` (sys/include/vfs.h:626)
+- `hwrng_vfs_read` (sys/fs/devfs/hwrng.c:32)
+- `random_vfs_read` (sys/fs/devfs/random.c:31)
+- `auto_init_devfs` (sys/fs/devfs/auto_init_devfs.c:48)
+- `devfs_open` (sys/fs/devfs/devfs.c:78)
+- `devfs_fcntl` (sys/fs/devfs/devfs.c:111)
+- `devfs_opendir` (sys/fs/devfs/devfs.c:125)
+- `devfs_readdir` (sys/fs/devfs/devfs.c:136)
+- `devfs_closedir` (sys/fs/devfs/devfs.c:176)
+- `devfs_register` (sys/fs/devfs/devfs.c:185)
+- `devfs_unregister` (sys/fs/devfs/devfs.c:225)
+- `constfs_stat` (sys/fs/constfs/constfs.c:83)
+- `constfs_statvfs` (sys/fs/constfs/constfs.c:105)
+- `constfs_fstat` (sys/fs/constfs/constfs.c:132)
+- `constfs_lseek` (sys/fs/constfs/constfs.c:142)
+- `constfs_open` (sys/fs/constfs/constfs.c:166)
+- `constfs_read` (sys/fs/constfs/constfs.c:188)
+- `constfs_opendir` (sys/fs/constfs/constfs.c:206)
+- `constfs_readdir` (sys/fs/constfs/constfs.c:217)
+[范围说明] 2 个文件的快速符号解析不完整或不可用；未列出符号不代表没有实现，需用 read_file 核对。
+
+[提示] 当前为快速模式，跳过调用图；可继续用 read_file 查看关键文件。

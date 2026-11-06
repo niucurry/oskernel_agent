@@ -1,0 +1,6 @@
+{
+  "type": "controlled_statement_error_after_generation",
+  "explanation": "实验程序改写断言次数，源码与引文保持不变；不是模型自然犯错率样本。",
+  "author_read_artifact": "/home/niu/agent-assertions-validation-20261013/generated/receipts/64b6eaf1cc99d813/evidence-plan-validation-420a15e2d2/5daeed1254d94e50a9e015592932ec83/audit.json",
+  "oracle_hidden_from_model": "/home/niu/agent-assertions-validation-20261013/oracle.json"
+}

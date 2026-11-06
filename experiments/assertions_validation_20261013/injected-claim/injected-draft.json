@@ -1,0 +1,39 @@
+{
+  "summary": "请求入口及计数配置见 request.c:10-19、config.h:1。当前断言待独立复核。",
+  "evaluation_claims": [
+    {
+      "item_id": "retry-count",
+      "statement": "在默认配置且每次请求均失败的条件下，总共调用 request_attempt 3 次（包括首次尝试），额外重试 2 次。",
+      "scope": "send_request 的默认配置执行路径",
+      "conditions": [
+        "使用 config.h:1 的默认值 DEFAULT_RETRIES=3，未被任何覆盖配置改写",
+        "条件为每次请求都失败，即 request_attempt 每次都返回非 0(源码中恒返回 -1)",
+        "循环边界为 <=，包含 attempt=0 的首次尝试"
+      ],
+      "evidence": [
+        {
+          "evidence_id": "entry",
+          "ref": "request.c:10-19",
+          "quote": "int send_request(void) {\n    int result = -1;\n    for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) {\n        result = request_attempt();\n        if (result == 0) {\n            return 0;\n        }\n    }\n    return result;\n}"
+        },
+        {
+          "evidence_id": "attempt",
+          "ref": "request.c:5-8",
+          "quote": "static int request_attempt(void) {\n    attempt_count++;\n    return -1;\n}"
+        },
+        {
+          "evidence_id": "config",
+          "ref": "config.h:1-1",
+          "quote": "#define DEFAULT_RETRIES 3"
+        }
+      ],
+      "counterevidence": [
+        "须核对首次尝试是否已计入总次数，以及循环边界是否包含配置的上限。"
+      ],
+      "missing_evidence": [],
+      "limitations": "未执行测试，当前断言待独立复核。",
+      "assessment": "source_supported",
+      "validation_need": "execution"
+    }
+  ]
+}

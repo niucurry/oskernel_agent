@@ -1,0 +1,4 @@
+[
+ {"path": "kernel/vmem.c", "symbol": "uvmalloc"},
+ {"path": "kernel/futex.c", "symbol": "futex_requeue"}
+]

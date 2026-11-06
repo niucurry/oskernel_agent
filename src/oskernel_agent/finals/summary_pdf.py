@@ -445,6 +445,7 @@ def _validate_ai_summary_result(
     value: dict,
     digests: dict[str, ReportDigest],
 ) -> AISummary:
+    from ..analysis.claim_review import review_prefix
     if not isinstance(value, dict) or value.get("_error"):
         raise SummaryPdfError("摘要智能体未返回可用结果")
     value = _normalize_zero_based_finding_refs(
@@ -481,6 +482,9 @@ def _validate_ai_summary_result(
                 f"摘要智能体引用了不存在的问题：{issue.source}#{issue.source_finding}"
             )
         source_finding = findings[issue.source_finding - 1]
+        prefix = review_prefix(source_finding.detail)
+        if prefix and not issue.judgment.startswith(prefix):
+            raise SummaryPdfError(f"摘要丢失来源复核限定：判断必须以 {prefix} 开头")
         if issue.severity != source_finding.severity:
             raise SummaryPdfError(
                 f"摘要智能体改变了来源严重度：{issue.source}#{issue.source_finding}"
@@ -576,6 +580,7 @@ def _collect_ai_summary_issue_errors(
     硬编码确认化。结构性错误（遗漏全部问题、总体/分节置信度上限）不在此列，
     由调用方直接抛出。
     """
+    from ..analysis.claim_review import review_prefix
     errors: list[str] = []
     source_corpora = {
         source: _source_report_corpus(source, digests)
@@ -589,6 +594,9 @@ def _collect_ai_summary_issue_errors(
             )
             continue
         source_finding = findings[issue.source_finding - 1]
+        prefix = review_prefix(source_finding.detail)
+        if prefix and not issue.judgment.startswith(prefix):
+            errors.append(f"{issue.source}#{issue.source_finding}：judgment 必须以来源复核限定 {prefix} 开头")
         if issue.severity != source_finding.severity:
             errors.append(
                 f"{issue.source}#{issue.source_finding}：severity 应为 "
@@ -719,6 +727,10 @@ def run_ai_summary_analysis(
         "总体 confidence 不得高于三份报告 confidence 的最低值，每个 section confidence 不得高于"
         "对应来源报告 confidence。"
         "证据不足时降低置信度并使用审慎表述。文字要简洁、自然、无模板腔。\n"
+        "来源若标为未复核、复核反驳、分歧或证据不足，必须保留该限定，"
+        "不得在摘要中改写成已经确认的缺陷或事实。\n"
+        "若来源 finding.detail 以【复核…】或【未完成独立复核】开头，"
+        "对应 issue.judgment 必须原样保留该前缀，不得删改。\n"
         "硬编码部分只使用 AI 复核后的 hardcode_confirmed 与 hardcode_suspected；确认项与疑似项必须分开表述，不得把疑似证据并入确认结论；"
         "不得在摘要中引用原始扫描候选数、扫描命中数、排除数或扫描文件数。\n"
         "开发过程报告只证明提交历史；不得写 LTP 或其他测试已通过、跑通或成功。\n"

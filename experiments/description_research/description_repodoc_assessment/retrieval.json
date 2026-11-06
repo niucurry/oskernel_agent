@@ -1,0 +1,83 @@
+{
+  "repository": "SYSUSELab/RepoDoc",
+  "revision": "306becd0f143211c0dde2bdbd480578356280e28",
+  "files": [
+    {
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/SYSUSELab/RepoDoc/306becd0f143211c0dde2bdbd480578356280e28/README.md",
+      "git_blob": "f03aca7e581715509f5ff1259539027652083c1e",
+      "sha256": "e1185c0104a1496a9d5cc0849d93812f9f6d1ae1bf981a75e4ddcb5d2c78e17b",
+      "bytes": 366
+    },
+    {
+      "path": "pyproject.toml",
+      "url": "https://raw.githubusercontent.com/SYSUSELab/RepoDoc/306becd0f143211c0dde2bdbd480578356280e28/pyproject.toml",
+      "git_blob": "71145613d46b77001440164fbc23dda225318b2d",
+      "sha256": "3e0a4884e1f926fccfc817c7fe691aae3f8e9f469a6629c8dc89c7ef833a0b99",
+      "bytes": 746
+    },
+    {
+      "path": "repodoc/src/analysis/analyzers/c.py",
+      "url": "https://raw.githubusercontent.com/SYSUSELab/RepoDoc/306becd0f143211c0dde2bdbd480578356280e28/repodoc/src/analysis/analyzers/c.py",
+      "git_blob": "df8c0edcbd831a98af445fddd7859ea222e04ebf",
+      "sha256": "e342a166943680321c02d3727045a1e992058a992063cc0aea53a030aa81ca3a",
+      "bytes": 11071
+    },
+    {
+      "path": "repodoc/src/analysis/ast_parser.py",
+      "url": "https://raw.githubusercontent.com/SYSUSELab/RepoDoc/306becd0f143211c0dde2bdbd480578356280e28/repodoc/src/analysis/ast_parser.py",
+      "git_blob": "4a743693135aa98770e9c671e5e1b842594594f4",
+      "sha256": "cb01a7e91406cd519509a337dfa13762e8932f76d12ba0cb41e6ea5d9cf5979f",
+      "bytes": 4446
+    },
+    {
+      "path": "repodoc/src/analysis/models/core.py",
+      "url": "https://raw.githubusercontent.com/SYSUSELab/RepoDoc/306becd0f143211c0dde2bdbd480578356280e28/repodoc/src/analysis/models/core.py",
+      "git_blob": "e4f32f8e37125ac914862c82deb90ce6341a730f",
+      "sha256": "22e7dfe5710bdd0d9bf0fae5fc87632aa195ef9c908f23cd103c0868ce2aa49b",
+      "bytes": 820
+    },
+    {
+      "path": "repodoc/src/analysis/utils/patterns.py",
+      "url": "https://raw.githubusercontent.com/SYSUSELab/RepoDoc/306becd0f143211c0dde2bdbd480578356280e28/repodoc/src/analysis/utils/patterns.py",
+      "git_blob": "e8ba25a63b4d24a61c53dc98b2078721933d5506",
+      "sha256": "e306bb683694df5ab9d288d99551fedb3e31e927454210471999ddc1063ab92a",
+      "bytes": 9092
+    },
+    {
+      "path": "repodoc/src/analysis/utils/security.py",
+      "url": "https://raw.githubusercontent.com/SYSUSELab/RepoDoc/306becd0f143211c0dde2bdbd480578356280e28/repodoc/src/analysis/utils/security.py",
+      "git_blob": "ae3bb920bf147f2a634ada41406341e069b9e6ff",
+      "sha256": "90f827756c0b8980386488e0d9a73f467c5853780764b8df028ca1ccb3e1fa51",
+      "bytes": 1157
+    },
+    {
+      "path": "repodoc/src/skills/doc_writer/prompts.py",
+      "url": "https://raw.githubusercontent.com/SYSUSELab/RepoDoc/306becd0f143211c0dde2bdbd480578356280e28/repodoc/src/skills/doc_writer/prompts.py",
+      "git_blob": "628e8fc7fde49b6ee684c0f85425708cc1fbe82a",
+      "sha256": "1f5f57dcccbc7b4b156e140564056b70c88fffe23f4a663a1cc4352dbf81188d",
+      "bytes": 13571
+    },
+    {
+      "path": "repodoc/src/clustering/prompts.py",
+      "url": "https://raw.githubusercontent.com/SYSUSELab/RepoDoc/306becd0f143211c0dde2bdbd480578356280e28/repodoc/src/clustering/prompts.py",
+      "git_blob": "1a549aa676ca810df0410a5232725ec1cd1af8ec",
+      "sha256": "5fc49141676b7d06566534dde3f6dc1892355b043706cb3ddf60469b94a4522b",
+      "bytes": 3655
+    },
+    {
+      "path": "repodoc/src/analysis/__init__.py",
+      "url": "https://raw.githubusercontent.com/SYSUSELab/RepoDoc/306becd0f143211c0dde2bdbd480578356280e28/repodoc/src/analysis/__init__.py",
+      "git_blob": "180617722b6694232e36d89f5a95f58d681a4ff2",
+      "sha256": "37d2ee183c49e83d31d5eb2f746d7e022e67a585963a95bdd14c770ca5fb4616",
+      "bytes": 667
+    },
+    {
+      "path": "repodoc/src/analysis/repo_analyzer.py",
+      "url": "https://raw.githubusercontent.com/SYSUSELab/RepoDoc/306becd0f143211c0dde2bdbd480578356280e28/repodoc/src/analysis/repo_analyzer.py",
+      "git_blob": "a65c522ec3957ebbdd965ac3c13217ed2d50e922",
+      "sha256": "69b77774b2dca7b1da8f98cf731ce8fcbe25e44d7087ef2a991ec204844e760b",
+      "bytes": 4556
+    }
+  ]
+}

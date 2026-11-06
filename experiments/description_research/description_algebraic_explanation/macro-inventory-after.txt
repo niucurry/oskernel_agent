@@ -1,0 +1,16 @@
+## 子树分析（快速模式）：os/rt/include
+文件数：1
+
+### 文件列表
+- os/rt/include/chalign.h（5 个快速符号）
+
+### 符号样例
+快速符号总数：5
+- `MEM_ALIGN_MASK` (os/rt/include/chalign.h:60)
+- `MEM_ALIGN_PREV` (os/rt/include/chalign.h:68)
+- `MEM_ALIGN_NEXT` (os/rt/include/chalign.h:79)
+- `MEM_IS_ALIGNED` (os/rt/include/chalign.h:90)
+- `MEM_IS_VALID_ALIGNMENT` (os/rt/include/chalign.h:98)
+[范围说明] 1 个文件的快速符号解析不完整或不可用；未列出符号不代表没有实现，需用 read_file 核对。
+
+[提示] 当前为快速模式，跳过调用图；可继续用 read_file 查看关键文件。

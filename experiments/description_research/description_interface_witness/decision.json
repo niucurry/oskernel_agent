@@ -1,0 +1,49 @@
+{
+  "decision": "reject_as_paper_method",
+  "engineering_decision": "retain source scope display, C/C++ quick definition inventory with explicit partial/unknown, and accurate description-entry docs",
+  "frozen_primary_complete_evidence": {
+    "candidate": 66,
+    "simple_baseline": 66,
+    "denominator": 66
+  },
+  "development_gate": "failed: no gain beyond strongest baseline in either repeat",
+  "confirmation_gate": "no gain in RIOT or Mynewt in either repeat; does not rescue development failure",
+  "failure_classification": "mechanism indistinguishable from ordinary symbol lookup on the tested explicit initializers; candidate implementation and finite compiler reference succeeded; TLS failure in another arm and serializer drift do not explain candidate-baseline equality",
+  "requests": 35,
+  "requests_with_reported_usage": 34,
+  "reported_usage": {
+    "total_tokens": 136170,
+    "prompt_tokens": 116211,
+    "completion_tokens": 19959,
+    "prompt_cache_hit_tokens": 56063,
+    "prompt_cache_miss_tokens": 60148
+  },
+  "unknown_usage_failure_requests": 1,
+  "reserved_unknown_tokens": 20000,
+  "peak_rate_estimate_usd": 0.042331577999999995,
+  "actual_invoice_cost": "unknown; balance reported CNY1.55 both before/after main trial, not proof of zero charge",
+  "pricing_source": "https://api-docs.deepseek.com/quick_start/pricing",
+  "production_original_prompt_probe": {
+    "state": "token_budget_stop",
+    "requests": 3,
+    "reported_tokens": 26208,
+    "interpretation": "incomplete; no end-to-end production quality comparison"
+  },
+  "independent_reference": "compiled projected original initializer + independent Ctags spans; not source behavior or human truth",
+  "research_claims_not_established": [
+    "novel algorithm",
+    "whole-report semantic correctness",
+    "OS capabilities",
+    "real judge decisions or time",
+    "TSE/TOSEM publication readiness"
+  ],
+  "engineering_validation": {
+    "passed": 261,
+    "whole_suite": false,
+    "semantic_effect_evidence": false
+  },
+  "scope_exclusions_respected": true,
+  "old_experiments_restored": false,
+  "git_committed_or_pushed_by_this_task": false,
+  "completed_at_utc": "2026-10-08T03:05:48Z"
+}

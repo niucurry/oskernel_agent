@@ -1,0 +1,48 @@
+{
+  "id": "f0a1c957-8386-4789-ac76-9ac4c63a23b9",
+  "object": "chat.completion",
+  "created": 1791440436,
+  "model": "deepseek-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Let me read the middle sections of these files and other key modules.",
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_00_Thfeq95IeBkGFy82MyoG2465",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\": \"os/rt/src/chschd.c\", \"start_line\": 81, \"end_line\": 400}"
+            }
+          },
+          {
+            "index": 1,
+            "id": "call_01_mcM1I29jiu9ZSlvSht5i0323",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\": \"os/rt/src/chthreads.c\", \"start_line\": 81, \"end_line\": 500}"
+            }
+          }
+        ]
+      },
+      "logprobs": null,
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 16273,
+    "completion_tokens": 160,
+    "total_tokens": 16433,
+    "prompt_tokens_details": {
+      "cached_tokens": 13440
+    },
+    "prompt_cache_hit_tokens": 13440,
+    "prompt_cache_miss_tokens": 2833
+  },
+  "system_fingerprint": "aeb56401ca74e127821c4f9126dcb669"
+}

@@ -221,7 +221,7 @@ def setup() -> None:
         prompt = _build_session_prompt(session_type)
         existing["agent"][agent_name] = {
             "model": MODEL,
-            "system": prompt,
+            "prompt": prompt,
             "permission": {
                 "bash":  {"*": "deny"},
                 "edit":  {"*": "deny"},
@@ -239,11 +239,18 @@ def setup() -> None:
         }
         print(f"[配置] 注册 agent：{agent_name}（{len(prompt)} 字符）")
 
+    from ..analysis.claim_review import REVIEW_PROMPT
+    existing["agent"]["os-kernel-claim-review"] = {
+        "model": MODEL, "mode": "primary", "prompt": REVIEW_PROMPT,
+        "permission": dict(existing["agent"]["os-kernel-subsys"]["permission"]),
+    }
+    print("[配置] 注册 agent：os-kernel-claim-review（独立源码结论复核）")
+
     # 查重对比管道：注册 os-kernel-plagiarism agent
     plagiarism_system = _PLAGIARISM_SYSTEM_PROMPT
     existing["agent"]["os-kernel-plagiarism"] = {
         "model": MODEL,
-        "system": plagiarism_system,
+        "prompt": plagiarism_system,
         "permission": {
             "bash":  {"*": "deny"},
             "edit":  {"*": "deny"},

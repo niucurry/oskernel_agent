@@ -1,0 +1,39 @@
+diff --git a/src/oskernel_agent/cli/setup_opencode.py b/src/oskernel_agent/cli/setup_opencode.py
+index 1f7e51e..d937979 100644
+--- a/src/oskernel_agent/cli/setup_opencode.py
++++ b/src/oskernel_agent/cli/setup_opencode.py
+@@ -221,7 +221,7 @@ def setup() -> None:
+         prompt = _build_session_prompt(session_type)
+         existing["agent"][agent_name] = {
+             "model": MODEL,
+-            "system": prompt,
++            "prompt": prompt,
+             "permission": {
+                 "bash":  {"*": "deny"},
+                 "edit":  {"*": "deny"},
+@@ -243,7 +243,7 @@ def setup() -> None:
+     plagiarism_system = _PLAGIARISM_SYSTEM_PROMPT
+     existing["agent"]["os-kernel-plagiarism"] = {
+         "model": MODEL,
+-        "system": plagiarism_system,
++        "prompt": plagiarism_system,
+         "permission": {
+             "bash":  {"*": "deny"},
+             "edit":  {"*": "deny"},
+diff --git a/tests/test_setup_opencode.py b/tests/test_setup_opencode.py
+index c492c79..36e0a64 100644
+--- a/tests/test_setup_opencode.py
++++ b/tests/test_setup_opencode.py
+@@ -25,4 +25,11 @@ def test_setup_writes_project_private_opencode_files(tmp_path, monkeypatch) -> N
+     auth_file = project_root / "data" / "opencode" / "data" / "opencode" / "auth.json"
+     config_file = project_root / "data" / "opencode" / "config" / "opencode" / "opencode.json"
+     assert json.loads(auth_file.read_text(encoding="utf-8"))["deepseek"]["key"] == "test-key"
+-    assert json.loads(config_file.read_text(encoding="utf-8"))["mcp"]["os-kernel-tools"]
++    actual = json.loads(config_file.read_text(encoding="utf-8"))
++    assert actual["mcp"]["os-kernel-tools"]
++    from oskernel_agent.prompts.builder import SessionType, SESSION_AGENT_NAMES
++
++    for session_type in SessionType:
++        agent = actual["agent"][SESSION_AGENT_NAMES[session_type]]
++        assert agent["prompt"] == setup_opencode._build_session_prompt(session_type)
++        assert "system" not in agent

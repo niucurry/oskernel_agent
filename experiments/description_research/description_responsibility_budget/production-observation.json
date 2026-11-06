@@ -1,0 +1,41 @@
+{
+  "timestamp_utc": "2026-10-08T05:42:36Z",
+  "indexed_files": 197,
+  "prompted_files": 80,
+  "rows": {
+    "6000": {
+      "bytes": 5916,
+      "read_files": [
+        "common/inc/tx_initialize.h"
+      ],
+      "fully_exposed_services": 0,
+      "families": [],
+      "disclaimer": "Mechanical packing in sampler order, not model adaptive reading or full production report quality."
+    },
+    "12000": {
+      "bytes": 8160,
+      "read_files": [
+        "common/inc/tx_api.h"
+      ],
+      "fully_exposed_services": 0,
+      "families": [],
+      "disclaimer": "Mechanical packing in sampler order, not model adaptive reading or full production report quality."
+    },
+    "24000": {
+      "bytes": 21828,
+      "read_files": [
+        "common/inc/tx_api.h",
+        "common/src/tx_block_allocate.c",
+        "common/inc/tx_block_pool.h"
+      ],
+      "fully_exposed_services": 0,
+      "families": [],
+      "disclaimer": "Mechanical packing in sampler order, not model adaptive reading or full production report quality."
+    }
+  },
+  "model_calls": 0,
+  "production_functions_sha256": {
+    "src/oskernel_agent/pipeline/tree_builder.py": "e36e7b4a0f78d39f49cedfa1a6ea305506a1ee0cc111548d268a09e73ce12f9c",
+    "src/oskernel_agent/tools/tool_handlers.py": "8b476bb859181c42e4898b48e96bf6ee4d7b464aa65e6f5137cfd3a644ea76ab"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "summary": "array.c:6-10 的 sum_prefix 对所有输入均比标准库快两倍。",
+  "issues": [
+    {
+      "path": "array.c:2",
+      "severity": "high",
+      "quote": "lookup 未检查负数索引，会直接读取数组前的内存。"
+    }
+  ],
+  "highlights": [
+    {
+      "path": "array.c:2",
+      "quote": "lookup 在 index 小于 0 或大于等于 count 时返回 -1，不访问数组。"
+    },
+    {
+      "path": "array.c:9",
+      "quote": "sum_prefix 直接返回 count，没有累加数组元素。"
+    }
+  ],
+  "content": "<p>lookup 未检查负数索引，会直接读取数组前的内存。</p><p>sum_prefix 直接返回 count，没有累加数组元素。</p>"
+}

@@ -1,0 +1,854 @@
+{
+  "items": [
+    {
+      "manual_api": "tx_thread_identify",
+      "purpose": "Retrieves pointer to currently executing thread",
+      "reference": {
+        "name": "_tx_thread_identify",
+        "manual_api": "tx_thread_identify",
+        "family": "thread",
+        "path": "common/src/tx_thread_identify.c",
+        "start": 75,
+        "end": 103
+      },
+      "id": "E6176ee4cec"
+    },
+    {
+      "manual_api": "tx_byte_release",
+      "purpose": "Release bytes back to memory pool",
+      "reference": {
+        "name": "_tx_byte_release",
+        "manual_api": "tx_byte_release",
+        "family": "byte_release",
+        "path": "common/src/tx_byte_release.c",
+        "start": 76,
+        "end": 376
+      },
+      "id": "E8194d319d7"
+    },
+    {
+      "manual_api": "tx_block_release",
+      "purpose": "Release fixed-size block of memory",
+      "reference": {
+        "name": "_tx_block_release",
+        "manual_api": "tx_block_release",
+        "family": "block_release",
+        "path": "common/src/tx_block_release.c",
+        "start": 74,
+        "end": 204
+      },
+      "id": "Ee03af3326c"
+    },
+    {
+      "manual_api": "tx_timer_info_get",
+      "purpose": "Retrieve information about an application timer",
+      "reference": {
+        "name": "_tx_timer_info_get",
+        "manual_api": "tx_timer_info_get",
+        "family": "timer",
+        "path": "common/src/tx_timer_info_get.c",
+        "start": 78,
+        "end": 248
+      },
+      "id": "E7448eea1c8"
+    },
+    {
+      "manual_api": "tx_queue_performance_system_info_get",
+      "purpose": "Get queue system performance information",
+      "reference": {
+        "name": "_tx_queue_performance_system_info_get",
+        "manual_api": "tx_queue_performance_system_info_get",
+        "family": "queue",
+        "path": "common/src/tx_queue_performance_system_info_get.c",
+        "start": 84,
+        "end": 205
+      },
+      "id": "Effb47da995"
+    },
+    {
+      "manual_api": "tx_queue_performance_info_get",
+      "purpose": "Get queue performance information",
+      "reference": {
+        "name": "_tx_queue_performance_info_get",
+        "manual_api": "tx_queue_performance_info_get",
+        "family": "queue",
+        "path": "common/src/tx_queue_performance_info_get.c",
+        "start": 84,
+        "end": 229
+      },
+      "id": "E808c1484fb"
+    },
+    {
+      "manual_api": "tx_semaphore_performance_system_info_get",
+      "purpose": "Get semaphore system performance information",
+      "reference": {
+        "name": "_tx_semaphore_performance_system_info_get",
+        "manual_api": "tx_semaphore_performance_system_info_get",
+        "family": "semaphore",
+        "path": "common/src/tx_semaphore_performance_system_info_get.c",
+        "start": 80,
+        "end": 174
+      },
+      "id": "E8faca1f599"
+    },
+    {
+      "manual_api": "tx_block_pool_performance_info_get",
+      "purpose": "Get block pool performance information",
+      "reference": {
+        "name": "_tx_block_pool_performance_info_get",
+        "manual_api": "tx_block_pool_performance_info_get",
+        "family": "block_pool",
+        "path": "common/src/tx_block_pool_performance_info_get.c",
+        "start": 82,
+        "end": 201
+      },
+      "id": "E8961231e7a"
+    },
+    {
+      "manual_api": "tx_block_pool_performance_system_info_get",
+      "purpose": "Get block pool system performance information",
+      "reference": {
+        "name": "_tx_block_pool_performance_system_info_get",
+        "manual_api": "tx_block_pool_performance_system_info_get",
+        "family": "block_pool",
+        "path": "common/src/tx_block_pool_performance_system_info_get.c",
+        "start": 79,
+        "end": 173
+      },
+      "id": "E607bca3a7f"
+    },
+    {
+      "manual_api": "tx_thread_preemption_change",
+      "purpose": "Change preemption-threshold of application thread",
+      "reference": {
+        "name": "_tx_thread_preemption_change",
+        "manual_api": "tx_thread_preemption_change",
+        "family": "thread",
+        "path": "common/src/tx_thread_preemption_change.c",
+        "start": 76,
+        "end": 280
+      },
+      "id": "Ecd6cc4cc41"
+    },
+    {
+      "manual_api": "tx_mutex_performance_system_info_get",
+      "purpose": "Get mutex system performance information",
+      "reference": {
+        "name": "_tx_mutex_performance_system_info_get",
+        "manual_api": "tx_mutex_performance_system_info_get",
+        "family": "mutex",
+        "path": "common/src/tx_mutex_performance_system_info_get.c",
+        "start": 84,
+        "end": 205
+      },
+      "id": "Ede611a69c9"
+    },
+    {
+      "manual_api": "tx_event_flags_create",
+      "purpose": "Create event flags group",
+      "reference": {
+        "name": "_tx_event_flags_create",
+        "manual_api": "tx_event_flags_create",
+        "family": "event_flags",
+        "path": "common/src/tx_event_flags_create.c",
+        "start": 74,
+        "end": 141
+      },
+      "id": "E55d975d10c"
+    },
+    {
+      "manual_api": "tx_byte_allocate",
+      "purpose": "Allocate bytes of memory",
+      "reference": {
+        "name": "_tx_byte_allocate",
+        "manual_api": "tx_byte_allocate",
+        "family": "byte_allocate",
+        "path": "common/src/tx_byte_allocate.c",
+        "start": 81,
+        "end": 409
+      },
+      "id": "E51bf6239e0"
+    },
+    {
+      "manual_api": "tx_semaphore_put_notify",
+      "purpose": "Notify application when semaphore is put",
+      "reference": {
+        "name": "_tx_semaphore_put_notify",
+        "manual_api": "tx_semaphore_put_notify",
+        "family": "semaphore",
+        "path": "common/src/tx_semaphore_put_notify.c",
+        "start": 74,
+        "end": 107
+      },
+      "id": "E3e3957f883"
+    },
+    {
+      "manual_api": "tx_mutex_get",
+      "purpose": "Obtain ownership of mutex",
+      "reference": {
+        "name": "_tx_mutex_get",
+        "manual_api": "tx_mutex_get",
+        "family": "mutex",
+        "path": "common/src/tx_mutex_get.c",
+        "start": 76,
+        "end": 409
+      },
+      "id": "E4f73b4067f"
+    },
+    {
+      "manual_api": "tx_byte_pool_create",
+      "purpose": "Create memory pool of bytes",
+      "reference": {
+        "name": "_tx_byte_pool_create",
+        "manual_api": "tx_byte_pool_create",
+        "family": "byte_pool",
+        "path": "common/src/tx_byte_pool_create.c",
+        "start": 75,
+        "end": 197
+      },
+      "id": "Ebb7bfcc1b3"
+    },
+    {
+      "manual_api": "tx_timer_deactivate",
+      "purpose": "Deactivate application timer",
+      "reference": {
+        "name": "_tx_timer_deactivate",
+        "manual_api": "tx_timer_deactivate",
+        "family": "timer",
+        "path": "common/src/tx_timer_deactivate.c",
+        "start": 71,
+        "end": 250
+      },
+      "id": "Ecbca65396b"
+    },
+    {
+      "manual_api": "tx_event_flags_set_notify",
+      "purpose": "Notify application when event flags are set",
+      "reference": {
+        "name": "_tx_event_flags_set_notify",
+        "manual_api": "tx_event_flags_set_notify",
+        "family": "event_flags",
+        "path": "common/src/tx_event_flags_set_notify.c",
+        "start": 74,
+        "end": 107
+      },
+      "id": "Ebb041d4fc4"
+    },
+    {
+      "manual_api": "tx_byte_pool_delete",
+      "purpose": "Delete memory byte pool",
+      "reference": {
+        "name": "_tx_byte_pool_delete",
+        "manual_api": "tx_byte_pool_delete",
+        "family": "byte_pool",
+        "path": "common/src/tx_byte_pool_delete.c",
+        "start": 80,
+        "end": 211
+      },
+      "id": "Ecaf7506ecc"
+    },
+    {
+      "manual_api": "tx_block_allocate",
+      "purpose": "Allocate fixed-size block of memory",
+      "reference": {
+        "name": "_tx_block_allocate",
+        "manual_api": "tx_block_allocate",
+        "family": "block_allocate",
+        "path": "common/src/tx_block_allocate.c",
+        "start": 79,
+        "end": 372
+      },
+      "id": "Ee9ec47d53f"
+    },
+    {
+      "manual_api": "tx_time_set",
+      "purpose": "Sets the current time",
+      "reference": {
+        "name": "_tx_time_set",
+        "manual_api": "tx_time_set",
+        "family": "time",
+        "path": "common/src/tx_time_set.c",
+        "start": 72,
+        "end": 92
+      },
+      "id": "Ea269151d31"
+    },
+    {
+      "manual_api": "tx_time_get",
+      "purpose": "Retrieves the current time",
+      "reference": {
+        "name": "_tx_time_get",
+        "manual_api": "tx_time_get",
+        "family": "time",
+        "path": "common/src/tx_time_get.c",
+        "start": 74,
+        "end": 102
+      },
+      "id": "E1e9822eb67"
+    }
+  ],
+  "questions": [
+    {
+      "question_id": "Q00",
+      "purpose": "Retrieves pointer to currently executing thread"
+    },
+    {
+      "question_id": "Q01",
+      "purpose": "Release bytes back to memory pool"
+    },
+    {
+      "question_id": "Q02",
+      "purpose": "Release fixed-size block of memory"
+    },
+    {
+      "question_id": "Q03",
+      "purpose": "Retrieve information about an application timer"
+    },
+    {
+      "question_id": "Q04",
+      "purpose": "Get queue system performance information"
+    },
+    {
+      "question_id": "Q05",
+      "purpose": "Get queue performance information"
+    },
+    {
+      "question_id": "Q06",
+      "purpose": "Get semaphore system performance information"
+    },
+    {
+      "question_id": "Q07",
+      "purpose": "Get block pool performance information"
+    },
+    {
+      "question_id": "Q08",
+      "purpose": "Get block pool system performance information"
+    },
+    {
+      "question_id": "Q09",
+      "purpose": "Change preemption-threshold of application thread"
+    },
+    {
+      "question_id": "Q10",
+      "purpose": "Get mutex system performance information"
+    },
+    {
+      "question_id": "Q11",
+      "purpose": "Create event flags group"
+    },
+    {
+      "question_id": "Q12",
+      "purpose": "Allocate bytes of memory"
+    },
+    {
+      "question_id": "Q13",
+      "purpose": "Notify application when semaphore is put"
+    },
+    {
+      "question_id": "Q14",
+      "purpose": "Obtain ownership of mutex"
+    },
+    {
+      "question_id": "Q15",
+      "purpose": "Create memory pool of bytes"
+    },
+    {
+      "question_id": "Q16",
+      "purpose": "Deactivate application timer"
+    },
+    {
+      "question_id": "Q17",
+      "purpose": "Notify application when event flags are set"
+    },
+    {
+      "question_id": "Q18",
+      "purpose": "Delete memory byte pool"
+    },
+    {
+      "question_id": "Q19",
+      "purpose": "Allocate fixed-size block of memory"
+    },
+    {
+      "question_id": "Q20",
+      "purpose": "Sets the current time"
+    },
+    {
+      "question_id": "Q21",
+      "purpose": "Retrieves the current time"
+    }
+  ],
+  "truth": {
+    "Q00": "E6176ee4cec",
+    "Q01": "E8194d319d7",
+    "Q02": "Ee03af3326c",
+    "Q03": "E7448eea1c8",
+    "Q04": "Effb47da995",
+    "Q05": "E808c1484fb",
+    "Q06": "E8faca1f599",
+    "Q07": "E8961231e7a",
+    "Q08": "E607bca3a7f",
+    "Q09": "Ecd6cc4cc41",
+    "Q10": "Ede611a69c9",
+    "Q11": "E55d975d10c",
+    "Q12": "E51bf6239e0",
+    "Q13": "E3e3957f883",
+    "Q14": "E4f73b4067f",
+    "Q15": "Ebb7bfcc1b3",
+    "Q16": "Ecbca65396b",
+    "Q17": "Ebb041d4fc4",
+    "Q18": "Ecaf7506ecc",
+    "Q19": "Ee9ec47d53f",
+    "Q20": "Ea269151d31",
+    "Q21": "E1e9822eb67"
+  },
+  "arms": {
+    "good_masked": [
+      {
+        "anchor": "E1e9822eb67",
+        "name": "",
+        "description": "Retrieves the current time"
+      },
+      {
+        "anchor": "E3e3957f883",
+        "name": "",
+        "description": "Notify application when semaphore is put"
+      },
+      {
+        "anchor": "E4f73b4067f",
+        "name": "",
+        "description": "Obtain ownership of mutex"
+      },
+      {
+        "anchor": "E51bf6239e0",
+        "name": "",
+        "description": "Allocate bytes of memory"
+      },
+      {
+        "anchor": "E55d975d10c",
+        "name": "",
+        "description": "Create event flags group"
+      },
+      {
+        "anchor": "E607bca3a7f",
+        "name": "",
+        "description": "Get block pool system performance information"
+      },
+      {
+        "anchor": "E6176ee4cec",
+        "name": "",
+        "description": "Retrieves pointer to currently executing thread"
+      },
+      {
+        "anchor": "E7448eea1c8",
+        "name": "",
+        "description": "Retrieve information about an application timer"
+      },
+      {
+        "anchor": "E808c1484fb",
+        "name": "",
+        "description": "Get queue performance information"
+      },
+      {
+        "anchor": "E8194d319d7",
+        "name": "",
+        "description": "Release bytes back to memory pool"
+      },
+      {
+        "anchor": "E8961231e7a",
+        "name": "",
+        "description": "Get block pool performance information"
+      },
+      {
+        "anchor": "E8faca1f599",
+        "name": "",
+        "description": "Get semaphore system performance information"
+      },
+      {
+        "anchor": "Ea269151d31",
+        "name": "",
+        "description": "Sets the current time"
+      },
+      {
+        "anchor": "Ebb041d4fc4",
+        "name": "",
+        "description": "Notify application when event flags are set"
+      },
+      {
+        "anchor": "Ebb7bfcc1b3",
+        "name": "",
+        "description": "Create memory pool of bytes"
+      },
+      {
+        "anchor": "Ecaf7506ecc",
+        "name": "",
+        "description": "Delete memory byte pool"
+      },
+      {
+        "anchor": "Ecbca65396b",
+        "name": "",
+        "description": "Deactivate application timer"
+      },
+      {
+        "anchor": "Ecd6cc4cc41",
+        "name": "",
+        "description": "Change preemption-threshold of application thread"
+      },
+      {
+        "anchor": "Ede611a69c9",
+        "name": "",
+        "description": "Get mutex system performance information"
+      },
+      {
+        "anchor": "Ee03af3326c",
+        "name": "",
+        "description": "Release fixed-size block of memory"
+      },
+      {
+        "anchor": "Ee9ec47d53f",
+        "name": "",
+        "description": "Allocate fixed-size block of memory"
+      },
+      {
+        "anchor": "Effb47da995",
+        "name": "",
+        "description": "Get queue system performance information"
+      }
+    ],
+    "wrong_roles_unmasked": [
+      {
+        "anchor": "E1e9822eb67",
+        "name": "tx_time_get",
+        "description": "Retrieves pointer to currently executing thread"
+      },
+      {
+        "anchor": "E3e3957f883",
+        "name": "tx_semaphore_put_notify",
+        "description": "Obtain ownership of mutex"
+      },
+      {
+        "anchor": "E4f73b4067f",
+        "name": "tx_mutex_get",
+        "description": "Create memory pool of bytes"
+      },
+      {
+        "anchor": "E51bf6239e0",
+        "name": "tx_byte_allocate",
+        "description": "Notify application when semaphore is put"
+      },
+      {
+        "anchor": "E55d975d10c",
+        "name": "tx_event_flags_create",
+        "description": "Allocate bytes of memory"
+      },
+      {
+        "anchor": "E607bca3a7f",
+        "name": "tx_block_pool_performance_system_info_get",
+        "description": "Change preemption-threshold of application thread"
+      },
+      {
+        "anchor": "E6176ee4cec",
+        "name": "tx_thread_identify",
+        "description": "Release bytes back to memory pool"
+      },
+      {
+        "anchor": "E7448eea1c8",
+        "name": "tx_timer_info_get",
+        "description": "Get queue system performance information"
+      },
+      {
+        "anchor": "E808c1484fb",
+        "name": "tx_queue_performance_info_get",
+        "description": "Get semaphore system performance information"
+      },
+      {
+        "anchor": "E8194d319d7",
+        "name": "tx_byte_release",
+        "description": "Release fixed-size block of memory"
+      },
+      {
+        "anchor": "E8961231e7a",
+        "name": "tx_block_pool_performance_info_get",
+        "description": "Get block pool system performance information"
+      },
+      {
+        "anchor": "E8faca1f599",
+        "name": "tx_semaphore_performance_system_info_get",
+        "description": "Get block pool performance information"
+      },
+      {
+        "anchor": "Ea269151d31",
+        "name": "tx_time_set",
+        "description": "Retrieves the current time"
+      },
+      {
+        "anchor": "Ebb041d4fc4",
+        "name": "tx_event_flags_set_notify",
+        "description": "Delete memory byte pool"
+      },
+      {
+        "anchor": "Ebb7bfcc1b3",
+        "name": "tx_byte_pool_create",
+        "description": "Deactivate application timer"
+      },
+      {
+        "anchor": "Ecaf7506ecc",
+        "name": "tx_byte_pool_delete",
+        "description": "Allocate fixed-size block of memory"
+      },
+      {
+        "anchor": "Ecbca65396b",
+        "name": "tx_timer_deactivate",
+        "description": "Notify application when event flags are set"
+      },
+      {
+        "anchor": "Ecd6cc4cc41",
+        "name": "tx_thread_preemption_change",
+        "description": "Get mutex system performance information"
+      },
+      {
+        "anchor": "Ede611a69c9",
+        "name": "tx_mutex_performance_system_info_get",
+        "description": "Create event flags group"
+      },
+      {
+        "anchor": "Ee03af3326c",
+        "name": "tx_block_release",
+        "description": "Retrieve information about an application timer"
+      },
+      {
+        "anchor": "Ee9ec47d53f",
+        "name": "tx_block_allocate",
+        "description": "Sets the current time"
+      },
+      {
+        "anchor": "Effb47da995",
+        "name": "tx_queue_performance_system_info_get",
+        "description": "Get queue performance information"
+      }
+    ],
+    "wrong_roles_masked": [
+      {
+        "anchor": "E1e9822eb67",
+        "name": "",
+        "description": "Retrieves pointer to currently executing thread"
+      },
+      {
+        "anchor": "E3e3957f883",
+        "name": "",
+        "description": "Obtain ownership of mutex"
+      },
+      {
+        "anchor": "E4f73b4067f",
+        "name": "",
+        "description": "Create memory pool of bytes"
+      },
+      {
+        "anchor": "E51bf6239e0",
+        "name": "",
+        "description": "Notify application when semaphore is put"
+      },
+      {
+        "anchor": "E55d975d10c",
+        "name": "",
+        "description": "Allocate bytes of memory"
+      },
+      {
+        "anchor": "E607bca3a7f",
+        "name": "",
+        "description": "Change preemption-threshold of application thread"
+      },
+      {
+        "anchor": "E6176ee4cec",
+        "name": "",
+        "description": "Release bytes back to memory pool"
+      },
+      {
+        "anchor": "E7448eea1c8",
+        "name": "",
+        "description": "Get queue system performance information"
+      },
+      {
+        "anchor": "E808c1484fb",
+        "name": "",
+        "description": "Get semaphore system performance information"
+      },
+      {
+        "anchor": "E8194d319d7",
+        "name": "",
+        "description": "Release fixed-size block of memory"
+      },
+      {
+        "anchor": "E8961231e7a",
+        "name": "",
+        "description": "Get block pool system performance information"
+      },
+      {
+        "anchor": "E8faca1f599",
+        "name": "",
+        "description": "Get block pool performance information"
+      },
+      {
+        "anchor": "Ea269151d31",
+        "name": "",
+        "description": "Retrieves the current time"
+      },
+      {
+        "anchor": "Ebb041d4fc4",
+        "name": "",
+        "description": "Delete memory byte pool"
+      },
+      {
+        "anchor": "Ebb7bfcc1b3",
+        "name": "",
+        "description": "Deactivate application timer"
+      },
+      {
+        "anchor": "Ecaf7506ecc",
+        "name": "",
+        "description": "Allocate fixed-size block of memory"
+      },
+      {
+        "anchor": "Ecbca65396b",
+        "name": "",
+        "description": "Notify application when event flags are set"
+      },
+      {
+        "anchor": "Ecd6cc4cc41",
+        "name": "",
+        "description": "Get mutex system performance information"
+      },
+      {
+        "anchor": "Ede611a69c9",
+        "name": "",
+        "description": "Create event flags group"
+      },
+      {
+        "anchor": "Ee03af3326c",
+        "name": "",
+        "description": "Retrieve information about an application timer"
+      },
+      {
+        "anchor": "Ee9ec47d53f",
+        "name": "",
+        "description": "Sets the current time"
+      },
+      {
+        "anchor": "Effb47da995",
+        "name": "",
+        "description": "Get queue performance information"
+      }
+    ],
+    "names_only_unmasked": [
+      {
+        "anchor": "E1e9822eb67",
+        "name": "tx_time_get",
+        "description": ""
+      },
+      {
+        "anchor": "E3e3957f883",
+        "name": "tx_semaphore_put_notify",
+        "description": ""
+      },
+      {
+        "anchor": "E4f73b4067f",
+        "name": "tx_mutex_get",
+        "description": ""
+      },
+      {
+        "anchor": "E51bf6239e0",
+        "name": "tx_byte_allocate",
+        "description": ""
+      },
+      {
+        "anchor": "E55d975d10c",
+        "name": "tx_event_flags_create",
+        "description": ""
+      },
+      {
+        "anchor": "E607bca3a7f",
+        "name": "tx_block_pool_performance_system_info_get",
+        "description": ""
+      },
+      {
+        "anchor": "E6176ee4cec",
+        "name": "tx_thread_identify",
+        "description": ""
+      },
+      {
+        "anchor": "E7448eea1c8",
+        "name": "tx_timer_info_get",
+        "description": ""
+      },
+      {
+        "anchor": "E808c1484fb",
+        "name": "tx_queue_performance_info_get",
+        "description": ""
+      },
+      {
+        "anchor": "E8194d319d7",
+        "name": "tx_byte_release",
+        "description": ""
+      },
+      {
+        "anchor": "E8961231e7a",
+        "name": "tx_block_pool_performance_info_get",
+        "description": ""
+      },
+      {
+        "anchor": "E8faca1f599",
+        "name": "tx_semaphore_performance_system_info_get",
+        "description": ""
+      },
+      {
+        "anchor": "Ea269151d31",
+        "name": "tx_time_set",
+        "description": ""
+      },
+      {
+        "anchor": "Ebb041d4fc4",
+        "name": "tx_event_flags_set_notify",
+        "description": ""
+      },
+      {
+        "anchor": "Ebb7bfcc1b3",
+        "name": "tx_byte_pool_create",
+        "description": ""
+      },
+      {
+        "anchor": "Ecaf7506ecc",
+        "name": "tx_byte_pool_delete",
+        "description": ""
+      },
+      {
+        "anchor": "Ecbca65396b",
+        "name": "tx_timer_deactivate",
+        "description": ""
+      },
+      {
+        "anchor": "Ecd6cc4cc41",
+        "name": "tx_thread_preemption_change",
+        "description": ""
+      },
+      {
+        "anchor": "Ede611a69c9",
+        "name": "tx_mutex_performance_system_info_get",
+        "description": ""
+      },
+      {
+        "anchor": "Ee03af3326c",
+        "name": "tx_block_release",
+        "description": ""
+      },
+      {
+        "anchor": "Ee9ec47d53f",
+        "name": "tx_block_allocate",
+        "description": ""
+      },
+      {
+        "anchor": "Effb47da995",
+        "name": "tx_queue_performance_system_info_get",
+        "description": ""
+      }
+    ]
+  }
+}

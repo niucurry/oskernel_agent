@@ -1,0 +1,42 @@
+{
+  "summary": "仓库仅含两个文件。request.c:12 的循环为 for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++)，边界为 <=；config.h:1 定义 #define DEFAULT_RETRIES 3；request.c:5-8 的 request_attempt 每次自增 attempt_count 并恒返回 -1；request.c:13 每轮循环调用一次 request_attempt()，仅当返回 0 才在 request.c:14-16 提前返回。因此默认配置(DEFAULT_RETRIES=3)且每次请求都失败时，循环体执行 4 次(attempt=0,1,2,3)，request_attempt 被调用 4 次，即总调用次数 4、额外重试次数 3。request.c:18 循环结束后返回最后一次 result(-1)。",
+  "evaluation_claims": [
+    {
+      "item_id": "retry-count",
+      "statement": "在默认配置(DEFAULT_RETRIES=3)且每次 request_attempt 都失败(恒返回 -1)的条件下，send_request 的循环 for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) 执行 4 次(attempt 取值 0、1、2、3)，因此 request_attempt 被调用 4 次：总调用次数为 4，相对首次尝试的额外重试次数为 3(=DEFAULT_RETRIES)。",
+      "scope": "send_request 的默认配置执行路径",
+      "conditions": [
+        "使用 config.h:1 的默认值 DEFAULT_RETRIES=3，未被任何覆盖配置改写",
+        "条件为每次请求都失败，即 request_attempt 每次都返回非 0(源码中恒返回 -1)",
+        "循环边界为 <=，包含 attempt=0 的首次尝试"
+      ],
+      "evidence": [
+        {
+          "evidence_id": "entry",
+          "ref": "request.c:10-19",
+          "quote": "int send_request(void) {\n    int result = -1;\n    for (int attempt = 0; attempt <= DEFAULT_RETRIES; attempt++) {\n        result = request_attempt();\n        if (result == 0) {\n            return 0;\n        }\n    }\n    return result;\n}"
+        },
+        {
+          "evidence_id": "attempt",
+          "ref": "request.c:5-8",
+          "quote": "static int request_attempt(void) {\n    attempt_count++;\n    return -1;\n}"
+        },
+        {
+          "evidence_id": "config",
+          "ref": "config.h:1-1",
+          "quote": "#define DEFAULT_RETRIES 3"
+        }
+      ],
+      "counterevidence": [
+        "是否存在覆盖 DEFAULT_RETRIES 的编译期宏重定义或其它 config 头文件(本仓库只含 config.h 与 request.c，未发现其它定义，但未做全仓库符号引用检查)",
+        "是否存在除 send_request 之外的入口/调用者会影响 attempt_count 或调用次数(搜索仅见 request.c 内 3 处匹配，未见其它文件)",
+        "结果成功(result==0)时会提前返回，调用次数少于 4；本结论限定于每次失败的分支",
+        "attempt_count 为全局变量，若被多线程并发或多次调用累加，单次调用的计数需要独立验证"
+      ],
+      "missing_evidence": [],
+      "limitations": "仅做静态源码核对，未执行编译或运行，未独立计算文件 sha256(当前工具集不含哈希/命令执行能力)，sha256 一致性依据评测方给定的 evidence 元数据。未发现配置覆盖或其他入口，但未做链接期/构建系统层面的穷尽检索。",
+      "assessment": "source_supported",
+      "validation_need": "execution"
+    }
+  ]
+}

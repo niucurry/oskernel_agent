@@ -1,0 +1,1359 @@
+{
+  "tag": "flash-base",
+  "model": "deepseek-flash",
+  "context_limit": 1048576,
+  "output_limit": 32768,
+  "compaction": "off",
+  "informed": false,
+  "extra_files": [],
+  "targets": 6,
+  "repair_rounds": 2,
+  "started": 1793281121.6500468,
+  "response_error": null,
+  "finished_main": 1793281542.965038,
+  "accepted_batch": "recall-trial-read-2",
+  "session": "ses_e781948dbffenR4FTVYYtTGjOw",
+  "stream_status": "complete",
+  "read_evidence": {
+    "status": "unresolved",
+    "repair_rounds": 2,
+    "requirements": [
+      {
+        "path": "kernel/futex.c",
+        "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+        "start_line": 105,
+        "end_line": 173,
+        "symbol": "futex_wait",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/pmem.c",
+        "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+        "start_line": 252,
+        "end_line": 342,
+        "symbol": "buddy_alloc",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/pmem.c",
+        "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+        "start_line": 349,
+        "end_line": 513,
+        "symbol": "buddy_free",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 239,
+        "end_line": 311,
+        "symbol": "walk_internal",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 439,
+        "end_line": 537,
+        "symbol": "uvmcopy",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 599,
+        "end_line": 642,
+        "symbol": "copyinstr",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "exec.c",
+        "sha256": null,
+        "start_line": 764,
+        "end_line": 764,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/pmem.c",
+        "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+        "start_line": 544,
+        "end_line": 581,
+        "symbol": "pmem_alloc_pages",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/process.c",
+        "sha256": "bb6c63fff51b07c1bf76188ad6f96c972eaa5a137a9ac9d46e4d5f7b67ddcbc4",
+        "start_line": 965,
+        "end_line": 1123,
+        "symbol": "fork",
+        "scope": "function",
+        "parser_status": "partial",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/syscall.c",
+        "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+        "start_line": 210,
+        "end_line": 465,
+        "symbol": "sys_openat",
+        "scope": "function",
+        "parser_status": "partial",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/syscall.c",
+        "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+        "start_line": 5600,
+        "end_line": 5739,
+        "symbol": "sys_futex",
+        "scope": "function",
+        "parser_status": "partial",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 109,
+        "end_line": 119,
+        "symbol": "walk",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 190,
+        "end_line": 224,
+        "symbol": "mappages_internal",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 321,
+        "end_line": 379,
+        "symbol": "vmunmap",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 549,
+        "end_line": 556,
+        "symbol": "fetchstr",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "include/hal/loongarch/loongarch.h",
+        "sha256": "761a0ebfef6800e7b970ae581aa9e406fdcbb15de5f5aea3b7e972c734d08212",
+        "start_line": 372,
+        "end_line": 372,
+        "symbol": "",
+        "scope": "cited_lines",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "include/hal/riscv/riscv.h",
+        "sha256": "055850d91ff9a2fc8a8e0f7743e606ddde1b5505b93c183e5bde93f106b601b3",
+        "start_line": 332,
+        "end_line": 332,
+        "symbol": "",
+        "scope": "cited_lines",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/futex.c",
+        "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+        "start_line": 29,
+        "end_line": 96,
+        "symbol": "futex_wait_bitset",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/futex.c",
+        "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+        "start_line": 215,
+        "end_line": 237,
+        "symbol": "futex_wake",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/pmem.c",
+        "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+        "start_line": 154,
+        "end_line": 245,
+        "symbol": "buddy_init",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/pmem.c",
+        "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+        "start_line": 588,
+        "end_line": 675,
+        "symbol": "pmem_free_pages",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/pmem.c",
+        "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+        "start_line": 681,
+        "end_line": 689,
+        "symbol": "kalloc",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/spinlock.c",
+        "sha256": "762acc463db3977ef8410cfb4d9a5b31cdd17147dbb45e3d2ff4e05699d56474",
+        "start_line": 24,
+        "end_line": 50,
+        "symbol": "acquire",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/syscall.c",
+        "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+        "start_line": 1405,
+        "end_line": 1562,
+        "symbol": "sys_execve",
+        "scope": "function",
+        "parser_status": "partial",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 84,
+        "end_line": 94,
+        "symbol": "mappages",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 128,
+        "end_line": 153,
+        "symbol": "walkaddr",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "kernel/vmem.c",
+        "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+        "start_line": 381,
+        "end_line": 386,
+        "symbol": "uvmfree",
+        "scope": "function",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "include/hal/loongarch/loongarch.h",
+        "sha256": "761a0ebfef6800e7b970ae581aa9e406fdcbb15de5f5aea3b7e972c734d08212",
+        "start_line": 369,
+        "end_line": 369,
+        "symbol": "",
+        "scope": "cited_lines",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "include/hal/riscv/riscv.h",
+        "sha256": "055850d91ff9a2fc8a8e0f7743e606ddde1b5505b93c183e5bde93f106b601b3",
+        "start_line": 339,
+        "end_line": 341,
+        "symbol": "",
+        "scope": "cited_lines",
+        "parser_status": "parsed",
+        "status": "returned",
+        "missing_ranges": []
+      },
+      {
+        "path": "spinlock.c",
+        "sha256": null,
+        "start_line": 28,
+        "end_line": 29,
+        "symbol": "",
+        "scope": "unresolved_reference",
+        "parser_status": "unavailable",
+        "status": "unresolved_reference",
+        "missing_ranges": []
+      }
+    ],
+    "attempts": [
+      {
+        "round": 0,
+        "run_id": "f0d59560648c40909d22890f31fa7840",
+        "requirements": [
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 105,
+            "end_line": 173,
+            "symbol": "futex_wait",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 252,
+            "end_line": 342,
+            "symbol": "buddy_alloc",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 349,
+            "end_line": 513,
+            "symbol": "buddy_free",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 239,
+            "end_line": 311,
+            "symbol": "walk_internal",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 439,
+            "end_line": 537,
+            "symbol": "uvmcopy",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 599,
+            "end_line": 642,
+            "symbol": "copyinstr",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "exec.c",
+            "sha256": null,
+            "start_line": 764,
+            "end_line": 764,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 544,
+            "end_line": 581,
+            "symbol": "pmem_alloc_pages",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/process.c",
+            "sha256": "bb6c63fff51b07c1bf76188ad6f96c972eaa5a137a9ac9d46e4d5f7b67ddcbc4",
+            "start_line": 965,
+            "end_line": 1123,
+            "symbol": "fork",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "not_observed",
+            "missing_ranges": [
+              [
+                965,
+                985
+              ],
+              [
+                987,
+                1123
+              ]
+            ]
+          },
+          {
+            "path": "kernel/syscall.c",
+            "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+            "start_line": 210,
+            "end_line": 465,
+            "symbol": "sys_openat",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "not_observed",
+            "missing_ranges": [
+              [
+                210,
+                215
+              ],
+              [
+                217,
+                465
+              ]
+            ]
+          },
+          {
+            "path": "kernel/syscall.c",
+            "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+            "start_line": 5600,
+            "end_line": 5739,
+            "symbol": "sys_futex",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "not_observed",
+            "missing_ranges": [
+              [
+                5600,
+                5630
+              ],
+              [
+                5632,
+                5739
+              ]
+            ]
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 109,
+            "end_line": 119,
+            "symbol": "walk",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 190,
+            "end_line": 224,
+            "symbol": "mappages_internal",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 321,
+            "end_line": 379,
+            "symbol": "vmunmap",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "not_observed",
+            "missing_ranges": [
+              [
+                340,
+                379
+              ]
+            ]
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 549,
+            "end_line": 556,
+            "symbol": "fetchstr",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          }
+        ],
+        "result_artifact": "/home/niu/agent-recall-probe-20261029/exp-kernel/runs/20261029T213841-bdc79c9c/receipts/b1d1366e45b003e1/recall-trial-aa8c1465b1/f0d59560648c40909d22890f31fa7840/result.json",
+        "result_sha256": "b4a9460a49c531278979c450514498679e279f1aabc81b25ec3d1be1fe33274c"
+      },
+      {
+        "round": 1,
+        "run_id": "582a0e7731af4e08a69247c096eb73a8",
+        "requirements": [
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 105,
+            "end_line": 173,
+            "symbol": "futex_wait",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 252,
+            "end_line": 342,
+            "symbol": "buddy_alloc",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 349,
+            "end_line": 513,
+            "symbol": "buddy_free",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 239,
+            "end_line": 311,
+            "symbol": "walk_internal",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 439,
+            "end_line": 537,
+            "symbol": "uvmcopy",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 599,
+            "end_line": 642,
+            "symbol": "copyinstr",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "exec.c",
+            "sha256": null,
+            "start_line": 764,
+            "end_line": 764,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 544,
+            "end_line": 581,
+            "symbol": "pmem_alloc_pages",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/process.c",
+            "sha256": "bb6c63fff51b07c1bf76188ad6f96c972eaa5a137a9ac9d46e4d5f7b67ddcbc4",
+            "start_line": 965,
+            "end_line": 1123,
+            "symbol": "fork",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/syscall.c",
+            "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+            "start_line": 210,
+            "end_line": 465,
+            "symbol": "sys_openat",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/syscall.c",
+            "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+            "start_line": 5600,
+            "end_line": 5739,
+            "symbol": "sys_futex",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 109,
+            "end_line": 119,
+            "symbol": "walk",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 190,
+            "end_line": 224,
+            "symbol": "mappages_internal",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 321,
+            "end_line": 379,
+            "symbol": "vmunmap",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 549,
+            "end_line": 556,
+            "symbol": "fetchstr",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "include/hal/loongarch/loongarch.h",
+            "sha256": "761a0ebfef6800e7b970ae581aa9e406fdcbb15de5f5aea3b7e972c734d08212",
+            "start_line": 372,
+            "end_line": 372,
+            "symbol": "",
+            "scope": "cited_lines",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "include/hal/riscv/riscv.h",
+            "sha256": "055850d91ff9a2fc8a8e0f7743e606ddde1b5505b93c183e5bde93f106b601b3",
+            "start_line": 332,
+            "end_line": 332,
+            "symbol": "",
+            "scope": "cited_lines",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 29,
+            "end_line": 96,
+            "symbol": "futex_wait_bitset",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 215,
+            "end_line": 237,
+            "symbol": "futex_wake",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 154,
+            "end_line": 245,
+            "symbol": "buddy_init",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "not_observed",
+            "missing_ranges": [
+              [
+                154,
+                194
+              ],
+              [
+                196,
+                229
+              ]
+            ]
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 588,
+            "end_line": 675,
+            "symbol": "pmem_free_pages",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 681,
+            "end_line": 689,
+            "symbol": "kalloc",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/spinlock.c",
+            "sha256": "762acc463db3977ef8410cfb4d9a5b31cdd17147dbb45e3d2ff4e05699d56474",
+            "start_line": 24,
+            "end_line": 50,
+            "symbol": "acquire",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/syscall.c",
+            "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+            "start_line": 1405,
+            "end_line": 1562,
+            "symbol": "sys_execve",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "not_observed",
+            "missing_ranges": [
+              [
+                1405,
+                1449
+              ],
+              [
+                1451,
+                1500
+              ],
+              [
+                1502,
+                1562
+              ]
+            ]
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 84,
+            "end_line": 94,
+            "symbol": "mappages",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 128,
+            "end_line": 153,
+            "symbol": "walkaddr",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 381,
+            "end_line": 386,
+            "symbol": "uvmfree",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          }
+        ],
+        "result_artifact": "/home/niu/agent-recall-probe-20261029/exp-kernel/runs/20261029T213841-bdc79c9c/receipts/b1d1366e45b003e1/recall-trial-read-1-4a0b388d76/582a0e7731af4e08a69247c096eb73a8/result.json",
+        "result_sha256": "1c75069b64e265bb95a8c83ac2fa633bff9207e928a2185e9061780ebd6809e9"
+      },
+      {
+        "round": 2,
+        "run_id": "61e5eaca77224b3b9bd913f19d6d7810",
+        "requirements": [
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 105,
+            "end_line": 173,
+            "symbol": "futex_wait",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 252,
+            "end_line": 342,
+            "symbol": "buddy_alloc",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 349,
+            "end_line": 513,
+            "symbol": "buddy_free",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 239,
+            "end_line": 311,
+            "symbol": "walk_internal",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 439,
+            "end_line": 537,
+            "symbol": "uvmcopy",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 599,
+            "end_line": 642,
+            "symbol": "copyinstr",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "exec.c",
+            "sha256": null,
+            "start_line": 764,
+            "end_line": 764,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 544,
+            "end_line": 581,
+            "symbol": "pmem_alloc_pages",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/process.c",
+            "sha256": "bb6c63fff51b07c1bf76188ad6f96c972eaa5a137a9ac9d46e4d5f7b67ddcbc4",
+            "start_line": 965,
+            "end_line": 1123,
+            "symbol": "fork",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/syscall.c",
+            "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+            "start_line": 210,
+            "end_line": 465,
+            "symbol": "sys_openat",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/syscall.c",
+            "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+            "start_line": 5600,
+            "end_line": 5739,
+            "symbol": "sys_futex",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 109,
+            "end_line": 119,
+            "symbol": "walk",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 190,
+            "end_line": 224,
+            "symbol": "mappages_internal",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 321,
+            "end_line": 379,
+            "symbol": "vmunmap",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 549,
+            "end_line": 556,
+            "symbol": "fetchstr",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "include/hal/loongarch/loongarch.h",
+            "sha256": "761a0ebfef6800e7b970ae581aa9e406fdcbb15de5f5aea3b7e972c734d08212",
+            "start_line": 372,
+            "end_line": 372,
+            "symbol": "",
+            "scope": "cited_lines",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "include/hal/riscv/riscv.h",
+            "sha256": "055850d91ff9a2fc8a8e0f7743e606ddde1b5505b93c183e5bde93f106b601b3",
+            "start_line": 332,
+            "end_line": 332,
+            "symbol": "",
+            "scope": "cited_lines",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 29,
+            "end_line": 96,
+            "symbol": "futex_wait_bitset",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/futex.c",
+            "sha256": "d4163da012d387da0a29191915c653dfe886308dcecb222bd91ac7eb5ffeafa5",
+            "start_line": 215,
+            "end_line": 237,
+            "symbol": "futex_wake",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 154,
+            "end_line": 245,
+            "symbol": "buddy_init",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 588,
+            "end_line": 675,
+            "symbol": "pmem_free_pages",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/pmem.c",
+            "sha256": "8f5512238a3b9a0be12cd52dddcefafc1c9cbeedd67837a40f53692a831f9e35",
+            "start_line": 681,
+            "end_line": 689,
+            "symbol": "kalloc",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/spinlock.c",
+            "sha256": "762acc463db3977ef8410cfb4d9a5b31cdd17147dbb45e3d2ff4e05699d56474",
+            "start_line": 24,
+            "end_line": 50,
+            "symbol": "acquire",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/syscall.c",
+            "sha256": "6bb171c145a4bd2323f7c302dcc5a44bd2512f514d6acbaa93c50a3cc60e09cf",
+            "start_line": 1405,
+            "end_line": 1562,
+            "symbol": "sys_execve",
+            "scope": "function",
+            "parser_status": "partial",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 84,
+            "end_line": 94,
+            "symbol": "mappages",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 128,
+            "end_line": 153,
+            "symbol": "walkaddr",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "kernel/vmem.c",
+            "sha256": "e4d76f308f0da20b7d47fb3fea7cf7bac75d6f0cd212acdfca94b03858a53af6",
+            "start_line": 381,
+            "end_line": 386,
+            "symbol": "uvmfree",
+            "scope": "function",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "include/hal/loongarch/loongarch.h",
+            "sha256": "761a0ebfef6800e7b970ae581aa9e406fdcbb15de5f5aea3b7e972c734d08212",
+            "start_line": 369,
+            "end_line": 369,
+            "symbol": "",
+            "scope": "cited_lines",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "include/hal/riscv/riscv.h",
+            "sha256": "055850d91ff9a2fc8a8e0f7743e606ddde1b5505b93c183e5bde93f106b601b3",
+            "start_line": 339,
+            "end_line": 341,
+            "symbol": "",
+            "scope": "cited_lines",
+            "parser_status": "parsed",
+            "status": "returned",
+            "missing_ranges": []
+          },
+          {
+            "path": "spinlock.c",
+            "sha256": null,
+            "start_line": 28,
+            "end_line": 29,
+            "symbol": "",
+            "scope": "unresolved_reference",
+            "parser_status": "unavailable",
+            "status": "unresolved_reference",
+            "missing_ranges": []
+          }
+        ],
+        "result_artifact": "/home/niu/agent-recall-probe-20261029/exp-kernel/runs/20261029T213841-bdc79c9c/receipts/b1d1366e45b003e1/recall-trial-read-2-88bc6d3010/61e5eaca77224b3b9bd913f19d6d7810/result.json",
+        "result_sha256": "9b52f417c4dea2b3e7e468927cdc7f8d71586e9111bd67509618d86c72e5e82d"
+      }
+    ],
+    "relevant_function_recall": "unknown",
+    "artifact": "/home/niu/agent-recall-probe-20261029/exp-kernel/runs/20261029T213841-bdc79c9c/receipts/b1d1366e45b003e1/recall-trial-read-2-88bc6d3010/61e5eaca77224b3b9bd913f19d6d7810/coverage.json"
+  },
+  "audit_files": [
+    {
+      "path": "include/hal/loongarch/loongarch.h",
+      "returned_ranges": [
+        [
+          360,
+          384
+        ]
+      ]
+    },
+    {
+      "path": "include/hal/riscv/riscv.h",
+      "returned_ranges": [
+        [
+          320,
+          344
+        ]
+      ]
+    },
+    {
+      "path": "kernel/futex.c",
+      "returned_ranges": [
+        [
+          1,
+          358
+        ]
+      ]
+    },
+    {
+      "path": "kernel/pmem.c",
+      "returned_ranges": [
+        [
+          1,
+          1204
+        ]
+      ]
+    },
+    {
+      "path": "kernel/process.c",
+      "returned_ranges": [
+        [
+          940,
+          1139
+        ]
+      ]
+    },
+    {
+      "path": "kernel/spinlock.c",
+      "returned_ranges": [
+        [
+          1,
+          126
+        ]
+      ]
+    },
+    {
+      "path": "kernel/syscall.c",
+      "returned_ranges": [
+        [
+          200,
+          479
+        ],
+        [
+          1380,
+          1639
+        ],
+        [
+          5590,
+          5749
+        ],
+        [
+          10116,
+          10116
+        ]
+      ]
+    },
+    {
+      "path": "kernel/vmem.c",
+      "returned_ranges": [
+        [
+          1,
+          963
+        ]
+      ]
+    },
+    {
+      "path": "user/loongarch/user.c",
+      "returned_ranges": [
+        [
+          96,
+          96
+        ],
+        [
+          124,
+          124
+        ],
+        [
+          157,
+          157
+        ],
+        [
+          999,
+          999
+        ],
+        [
+          1027,
+          1027
+        ],
+        [
+          1074,
+          1074
+        ],
+        [
+          1090,
+          1090
+        ],
+        [
+          1106,
+          1106
+        ],
+        [
+          1123,
+          1123
+        ],
+        [
+          1139,
+          1139
+        ]
+      ]
+    }
+  ],
+  "finished": 1793281560.570443
+}

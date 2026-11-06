@@ -1,0 +1,9 @@
+[
+  {
+    "path": "mm.c",
+    "symbol": "allocate_frame",
+    "start_line": 3,
+    "end_line": 306,
+    "reason": "合成测试的分配入口，包含超出默认预览范围的代码"
+  }
+]

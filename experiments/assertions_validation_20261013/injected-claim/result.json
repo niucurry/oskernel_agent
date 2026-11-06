@@ -1,0 +1,38 @@
+{
+  "initial": [
+    {
+      "kind": "evaluation_assertion",
+      "status": "insufficient",
+      "errors": [
+        [],
+        [
+          "unverified_evidence"
+        ]
+      ]
+    },
+    {
+      "kind": "summary",
+      "status": "supported",
+      "errors": [
+        [],
+        []
+      ]
+    }
+  ],
+  "revision": {
+    "attempted": true,
+    "new_report_sha256": "930da5f10f78298ca4428769001d5c2f2214b8f2d6bfbbebdeb8ef629c041663",
+    "original_wording_absent": [
+      "081047ba5fdc4572cbc04cb8"
+    ],
+    "remaining_original_wording": []
+  },
+  "final": [
+    {
+      "statement": "在默认配置且每次请求均失败的条件下，send_request 共调用 request_attempt 4 次（attempt=0,1,2,3，包含首次尝试），其中额外重试 3 次；因循环边界为 `<=`，尝试次数为 DEFAULT_RETRIES+1。",
+      "status": "supported",
+      "errors": []
+    }
+  ],
+  "elapsed_seconds": 79.259
+}

@@ -1,0 +1,30 @@
+{
+  "codewiki_revision": "64c2b60f23013904e495b0c12acba9b91ceb5746",
+  "artifacts": [
+    {
+      "file": "/home/niu/.cache/oskernel-description-interface-witness/literature/codewiki.pdf",
+      "sha256": "8ed5395eabe54e9dc9c9bb8d9cb36d7f389c0e0030d1d37df506d01d34e28b7a",
+      "bytes": 1952909
+    },
+    {
+      "file": "/home/niu/.cache/oskernel-description-interface-witness/literature/referee.pdf",
+      "sha256": "40e522a29249dc43b4b18d5b27a5771a710b00c3865f4f16a2caa79b6bfe7dab",
+      "bytes": 1356298
+    },
+    {
+      "file": "/home/niu/.cache/oskernel-description-interface-witness/literature/codewiki-c.py",
+      "sha256": "424c0639ab1a0c53d949c608f60d9dd625d9d331c25866524329f9ab3b3a9351",
+      "bytes": 10036
+    },
+    {
+      "file": "/home/niu/.cache/oskernel-description-interface-witness/literature/codewiki-core.py",
+      "sha256": "d4b6978bd12ce9bbc9c8815e5a9cad9ac09940ac931ceb3561e2962ad5c4dffc",
+      "bytes": 1148
+    },
+    {
+      "file": "/home/niu/.cache/oskernel-description-interface-witness/literature/codewiki-leaf_selection.py",
+      "sha256": "8bb0f1bd92af3221571bd35a8d7b032cef518e609eed0b8578a6919fd31fd43d",
+      "bytes": 3017
+    }
+  ]
+}

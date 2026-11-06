@@ -1,0 +1,27 @@
+{
+  "MEM_ALIGN_MASK": {
+    "body": "((size_t)(a) - 1U)",
+    "parameters": "(a)",
+    "line": 60
+  },
+  "MEM_ALIGN_PREV": {
+    "body": "((size_t)(p) & ~MEM_ALIGN_MASK(a))                                        \\\n  ",
+    "parameters": "(p, a)",
+    "line": 68
+  },
+  "MEM_ALIGN_NEXT": {
+    "body": "MEM_ALIGN_PREV((size_t)(p) + MEM_ALIGN_MASK(a), (a))                      \\\n  ",
+    "parameters": "(p, a)",
+    "line": 79
+  },
+  "MEM_IS_ALIGNED": {
+    "body": "(((size_t)(p) & MEM_ALIGN_MASK(a)) == 0U)",
+    "parameters": "(p, a)",
+    "line": 90
+  },
+  "MEM_IS_VALID_ALIGNMENT": {
+    "body": "(((size_t)(a) != 0U) && (((size_t)(a) & ((size_t)(a) - 1U)) == 0U))",
+    "parameters": "(a)",
+    "line": 98
+  }
+}

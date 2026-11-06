@@ -1,0 +1,161 @@
+{
+  "run_dir": "/home/niu/agent-read-audit-validation-20261011/deepseek-final/runs/fa26197576504ab9ba28e1b63a989c75",
+  "evaluation": {
+    "selected_functions": 1,
+    "fully_returned_functions": 1,
+    "returned_markers": 1,
+    "correct_reports": 1,
+    "corroborated_reports": 1,
+    "incorrect_or_unknown_observations": 0,
+    "selection": {
+      "status": "measured_against_supplied_labels",
+      "expected": 2,
+      "selected_relevant": 1,
+      "recall": 0.5,
+      "omitted": [
+        {
+          "path": "mm.c",
+          "symbol": "frame_valid",
+          "start_line": 1
+        }
+      ]
+    },
+    "targets": [
+      {
+        "path": "mm.c",
+        "symbol": "allocate_frame",
+        "start_line": 3,
+        "marker_returned": true,
+        "marker_status": "returned",
+        "reported_correctly": true,
+        "corroborated": true,
+        "function_returned": true,
+        "missing_ranges": []
+      }
+    ],
+    "run_id": "e315848a59864ec8a33b26393b21c64f",
+    "stream_status": "complete",
+    "model": "deepseek-flash",
+    "preview_first": true,
+    "read_evidence": {
+      "status": "returned",
+      "repair_rounds": 1,
+      "requirements": [
+        {
+          "path": "mm.c",
+          "sha256": "d63d7a09683cc0b0c3b4f9c12681f7517de053be2e762b35cd9b4a452f7c970e",
+          "start_line": 3,
+          "end_line": 306,
+          "symbol": "allocate_frame",
+          "scope": "function",
+          "parser_status": "parsed",
+          "status": "returned",
+          "missing_ranges": []
+        },
+        {
+          "path": "mm.c",
+          "sha256": "d63d7a09683cc0b0c3b4f9c12681f7517de053be2e762b35cd9b4a452f7c970e",
+          "start_line": 1,
+          "end_line": 1,
+          "symbol": "frame_valid",
+          "scope": "function",
+          "parser_status": "parsed",
+          "status": "returned",
+          "missing_ranges": []
+        },
+        {
+          "path": "mm.c",
+          "sha256": "d63d7a09683cc0b0c3b4f9c12681f7517de053be2e762b35cd9b4a452f7c970e",
+          "start_line": 1,
+          "end_line": 306,
+          "symbol": "",
+          "scope": "cited_lines",
+          "parser_status": "parsed",
+          "status": "returned",
+          "missing_ranges": []
+        }
+      ],
+      "attempts": [
+        {
+          "round": 0,
+          "run_id": "5fc5a35c3e384e509751ed8166c743ff",
+          "requirements": [
+            {
+              "path": "mm.c",
+              "sha256": "d63d7a09683cc0b0c3b4f9c12681f7517de053be2e762b35cd9b4a452f7c970e",
+              "start_line": 3,
+              "end_line": 306,
+              "symbol": "allocate_frame",
+              "scope": "function",
+              "parser_status": "parsed",
+              "status": "not_observed",
+              "missing_ranges": [
+                [
+                  81,
+                  266
+                ]
+              ]
+            },
+            {
+              "path": "mm.c",
+              "sha256": "d63d7a09683cc0b0c3b4f9c12681f7517de053be2e762b35cd9b4a452f7c970e",
+              "start_line": 1,
+              "end_line": 1,
+              "symbol": "frame_valid",
+              "scope": "function",
+              "parser_status": "parsed",
+              "status": "returned",
+              "missing_ranges": []
+            }
+          ],
+          "result_artifact": "/home/niu/agent-read-audit-validation-20261011/deepseek-final/runs/fa26197576504ab9ba28e1b63a989c75/receipts/5b7b4b6ecdf4b2a7/canary-trial-768c925366/5fc5a35c3e384e509751ed8166c743ff/result.json",
+          "result_sha256": "c82a8b18dcee1d41e608364ba35f1c845b79e94a6eb01307c5940cc0e5b48738"
+        },
+        {
+          "round": 1,
+          "run_id": "e315848a59864ec8a33b26393b21c64f",
+          "requirements": [
+            {
+              "path": "mm.c",
+              "sha256": "d63d7a09683cc0b0c3b4f9c12681f7517de053be2e762b35cd9b4a452f7c970e",
+              "start_line": 3,
+              "end_line": 306,
+              "symbol": "allocate_frame",
+              "scope": "function",
+              "parser_status": "parsed",
+              "status": "returned",
+              "missing_ranges": []
+            },
+            {
+              "path": "mm.c",
+              "sha256": "d63d7a09683cc0b0c3b4f9c12681f7517de053be2e762b35cd9b4a452f7c970e",
+              "start_line": 1,
+              "end_line": 1,
+              "symbol": "frame_valid",
+              "scope": "function",
+              "parser_status": "parsed",
+              "status": "returned",
+              "missing_ranges": []
+            },
+            {
+              "path": "mm.c",
+              "sha256": "d63d7a09683cc0b0c3b4f9c12681f7517de053be2e762b35cd9b4a452f7c970e",
+              "start_line": 1,
+              "end_line": 306,
+              "symbol": "",
+              "scope": "cited_lines",
+              "parser_status": "parsed",
+              "status": "returned",
+              "missing_ranges": []
+            }
+          ],
+          "result_artifact": "/home/niu/agent-read-audit-validation-20261011/deepseek-final/runs/fa26197576504ab9ba28e1b63a989c75/receipts/5b7b4b6ecdf4b2a7/canary-trial-read-1-207166d900/e315848a59864ec8a33b26393b21c64f/result.json",
+          "result_sha256": "a899b879e8d3b94df626070bbd246f7d57efb0bdb15c4eef30415800d6961253"
+        }
+      ],
+      "relevant_function_recall": "unknown",
+      "artifact": "/home/niu/agent-read-audit-validation-20261011/deepseek-final/runs/fa26197576504ab9ba28e1b63a989c75/receipts/5b7b4b6ecdf4b2a7/canary-trial-read-1-207166d900/e315848a59864ec8a33b26393b21c64f/coverage.json"
+    },
+    "response_error": null
+  }
+}

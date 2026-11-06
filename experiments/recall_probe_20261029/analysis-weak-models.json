@@ -1,0 +1,2604 @@
+{
+  "rows": 2632,
+  "runs": 3,
+  "validity": {
+    "Qwen/Qwen2.5-72B-Instruct-128K": {
+      "fresh_canary": {
+        "n": 10,
+        "correct": 0,
+        "outcomes": {
+          "unknown": 10
+        }
+      },
+      "fresh_content": {
+        "n": 13,
+        "correct": 0,
+        "outcomes": {
+          "unknown": 12,
+          "wrong": 1
+        }
+      },
+      "substituted": {
+        "n": 3,
+        "correct": 2,
+        "outcomes": {
+          "correct": 2,
+          "unknown": 1
+        },
+        "gave_original": 0
+      },
+      "absent_canary": {
+        "n": 0,
+        "correct": 0,
+        "outcomes": {}
+      },
+      "null_controls": {
+        "n": 0,
+        "correct": 0,
+        "outcomes": {}
+      },
+      "present": {
+        "canary": {
+          "n": 14,
+          "correct": 11,
+          "outcomes": {
+            "correct": 11,
+            "partial": 1,
+            "unknown": 2
+          }
+        },
+        "line": {
+          "n": 12,
+          "correct": 0,
+          "outcomes": {
+            "wrong": 12
+          }
+        },
+        "callee": {
+          "n": 7,
+          "correct": 4,
+          "outcomes": {
+            "correct": 4,
+            "wrong": 3
+          }
+        },
+        "calls": {
+          "n": 0,
+          "correct": 0,
+          "outcomes": {}
+        }
+      },
+      "test_retest_agreement": 1.0,
+      "canary_predicts_content_same_position": {
+        "odds_ratio": 0.37,
+        "ci95": [
+          0.04,
+          3.13
+        ],
+        "content_miss_rate_when_canary_missed": 0.6,
+        "content_miss_rate_when_canary_hit": 0.818,
+        "cells": {
+          "canary_miss_content_miss": 3,
+          "canary_miss_content_hit": 2,
+          "canary_hit_content_miss": 9,
+          "canary_hit_content_hit": 2
+        }
+      },
+      "canary_predicts_call_list_same_function": {
+        "odds_ratio": 1.0,
+        "ci95": [
+          0.0,
+          255.63
+        ],
+        "content_miss_rate_when_canary_missed": 0.0,
+        "content_miss_rate_when_canary_hit": 0.0,
+        "cells": {
+          "canary_miss_content_miss": 0,
+          "canary_miss_content_hit": 0,
+          "canary_hit_content_miss": 0,
+          "canary_hit_content_hit": 0
+        }
+      }
+    },
+    "Qwen/Qwen3-14B": {
+      "fresh_canary": {
+        "n": 14,
+        "correct": 0,
+        "outcomes": {
+          "unknown": 14
+        }
+      },
+      "fresh_content": {
+        "n": 20,
+        "correct": 0,
+        "outcomes": {
+          "wrong": 6,
+          "unknown": 14
+        }
+      },
+      "substituted": {
+        "n": 3,
+        "correct": 0,
+        "outcomes": {
+          "swapped": 3
+        },
+        "gave_original": 0
+      },
+      "absent_canary": {
+        "n": 0,
+        "correct": 0,
+        "outcomes": {}
+      },
+      "null_controls": {
+        "n": 0,
+        "correct": 0,
+        "outcomes": {}
+      },
+      "present": {
+        "canary": {
+          "n": 18,
+          "correct": 12,
+          "outcomes": {
+            "swapped": 4,
+            "unknown": 2,
+            "correct": 12
+          }
+        },
+        "line": {
+          "n": 16,
+          "correct": 7,
+          "outcomes": {
+            "wrong": 9,
+            "correct": 7
+          }
+        },
+        "callee": {
+          "n": 14,
+          "correct": 9,
+          "outcomes": {
+            "correct": 9,
+            "wrong": 5
+          }
+        },
+        "calls": {
+          "n": 0,
+          "correct": 0,
+          "outcomes": {}
+        }
+      },
+      "test_retest_agreement": 1.0,
+      "canary_predicts_content_same_position": {
+        "odds_ratio": 2.18,
+        "ci95": [
+          0.46,
+          10.29
+        ],
+        "content_miss_rate_when_canary_missed": 0.667,
+        "content_miss_rate_when_canary_hit": 0.462,
+        "cells": {
+          "canary_miss_content_miss": 8,
+          "canary_miss_content_hit": 4,
+          "canary_hit_content_miss": 6,
+          "canary_hit_content_hit": 7
+        }
+      },
+      "canary_predicts_call_list_same_function": {
+        "odds_ratio": 1.0,
+        "ci95": [
+          0.0,
+          255.63
+        ],
+        "content_miss_rate_when_canary_missed": 0.0,
+        "content_miss_rate_when_canary_hit": 0.0,
+        "cells": {
+          "canary_miss_content_miss": 0,
+          "canary_miss_content_hit": 0,
+          "canary_hit_content_miss": 0,
+          "canary_hit_content_hit": 0
+        }
+      }
+    },
+    "Qwen/Qwen3-30B-A3B-Instruct-2507": {
+      "fresh_canary": {
+        "n": 10,
+        "correct": 0,
+        "outcomes": {
+          "unknown": 10
+        }
+      },
+      "fresh_content": {
+        "n": 16,
+        "correct": 0,
+        "outcomes": {
+          "wrong": 16
+        }
+      },
+      "substituted": {
+        "n": 4,
+        "correct": 4,
+        "outcomes": {
+          "correct": 4
+        },
+        "gave_original": 0
+      },
+      "absent_canary": {
+        "n": 0,
+        "correct": 0,
+        "outcomes": {}
+      },
+      "null_controls": {
+        "n": 0,
+        "correct": 0,
+        "outcomes": {}
+      },
+      "present": {
+        "canary": {
+          "n": 15,
+          "correct": 15,
+          "outcomes": {
+            "correct": 15
+          }
+        },
+        "line": {
+          "n": 14,
+          "correct": 10,
+          "outcomes": {
+            "correct": 10,
+            "partial": 3,
+            "wrong": 1
+          }
+        },
+        "callee": {
+          "n": 11,
+          "correct": 9,
+          "outcomes": {
+            "correct": 9,
+            "wrong": 2
+          }
+        },
+        "calls": {
+          "n": 0,
+          "correct": 0,
+          "outcomes": {}
+        }
+      },
+      "test_retest_agreement": 0.75,
+      "canary_predicts_content_same_position": {
+        "odds_ratio": 4.11,
+        "ci95": [
+          0.07,
+          236.7
+        ],
+        "content_miss_rate_when_canary_missed": 0.0,
+        "content_miss_rate_when_canary_hit": 0.182,
+        "cells": {
+          "canary_miss_content_miss": 0,
+          "canary_miss_content_hit": 0,
+          "canary_hit_content_miss": 4,
+          "canary_hit_content_hit": 18
+        }
+      },
+      "canary_predicts_call_list_same_function": {
+        "odds_ratio": 1.0,
+        "ci95": [
+          0.0,
+          255.63
+        ],
+        "content_miss_rate_when_canary_missed": 0.0,
+        "content_miss_rate_when_canary_hit": 0.0,
+        "cells": {
+          "canary_miss_content_miss": 0,
+          "canary_miss_content_hit": 0,
+          "canary_hit_content_miss": 0,
+          "canary_hit_content_hit": 0
+        }
+      }
+    },
+    "Qwen/Qwen3-8B": {
+      "fresh_canary": {
+        "n": 81,
+        "correct": 0,
+        "outcomes": {
+          "unknown": 81
+        }
+      },
+      "fresh_content": {
+        "n": 160,
+        "correct": 0,
+        "outcomes": {
+          "unknown": 96,
+          "wrong": 56,
+          "partial": 8
+        }
+      },
+      "substituted": {
+        "n": 76,
+        "correct": 35,
+        "outcomes": {
+          "swapped": 24,
+          "unknown": 12,
+          "correct": 35,
+          "fabricated": 4,
+          "partial": 1
+        },
+        "gave_original": 0
+      },
+      "absent_canary": {
+        "n": 10,
+        "correct": 0,
+        "outcomes": {
+          "unknown": 2,
+          "swapped": 8
+        }
+      },
+      "null_controls": {
+        "n": 30,
+        "correct": 17,
+        "outcomes": {
+          "fabricated": 5,
+          "swapped": 8,
+          "correct": 17
+        }
+      },
+      "present": {
+        "canary": {
+          "n": 152,
+          "correct": 63,
+          "outcomes": {
+            "swapped": 53,
+            "unknown": 23,
+            "correct": 63,
+            "partial": 7,
+            "fabricated": 6
+          }
+        },
+        "line": {
+          "n": 152,
+          "correct": 22,
+          "outcomes": {
+            "wrong": 118,
+            "partial": 12,
+            "correct": 22
+          }
+        },
+        "callee": {
+          "n": 88,
+          "correct": 28,
+          "outcomes": {
+            "correct": 28,
+            "wrong": 60
+          }
+        },
+        "calls": {
+          "n": 39,
+          "correct": 8,
+          "outcomes": {
+            "partial": 20,
+            "correct": 8,
+            "wrong": 11
+          }
+        }
+      },
+      "test_retest_agreement": 0.9,
+      "canary_predicts_content_same_position": {
+        "odds_ratio": 0.53,
+        "ci95": [
+          0.26,
+          1.07
+        ],
+        "content_miss_rate_when_canary_missed": 0.741,
+        "content_miss_rate_when_canary_hit": 0.848,
+        "cells": {
+          "canary_miss_content_miss": 106,
+          "canary_miss_content_hit": 37,
+          "canary_hit_content_miss": 67,
+          "canary_hit_content_hit": 12
+        }
+      },
+      "canary_predicts_call_list_same_function": {
+        "odds_ratio": 7.82,
+        "ci95": [
+          0.87,
+          70.17
+        ],
+        "content_miss_rate_when_canary_missed": 0.833,
+        "content_miss_rate_when_canary_hit": 0.333,
+        "cells": {
+          "canary_miss_content_miss": 30,
+          "canary_miss_content_hit": 6,
+          "canary_hit_content_miss": 1,
+          "canary_hit_content_hit": 2
+        }
+      }
+    },
+    "Qwen/Qwen3.5-4B": {
+      "fresh_canary": {
+        "n": 2,
+        "correct": 0,
+        "outcomes": {
+          "unknown": 2
+        }
+      },
+      "fresh_content": {
+        "n": 0,
+        "correct": 0,
+        "outcomes": {}
+      },
+      "substituted": {
+        "n": 2,
+        "correct": 0,
+        "outcomes": {
+          "unknown": 2
+        },
+        "gave_original": 0
+      },
+      "absent_canary": {
+        "n": 0,
+        "correct": 0,
+        "outcomes": {}
+      },
+      "null_controls": {
+        "n": 0,
+        "correct": 0,
+        "outcomes": {}
+      },
+      "present": {
+        "canary": {
+          "n": 6,
+          "correct": 4,
+          "outcomes": {
+            "unknown": 2,
+            "correct": 4
+          }
+        },
+        "line": {
+          "n": 0,
+          "correct": 0,
+          "outcomes": {}
+        },
+        "callee": {
+          "n": 0,
+          "correct": 0,
+          "outcomes": {}
+        },
+        "calls": {
+          "n": 0,
+          "correct": 0,
+          "outcomes": {}
+        }
+      },
+      "test_retest_agreement": 0.333,
+      "canary_predicts_content_same_position": {
+        "odds_ratio": 1.0,
+        "ci95": [
+          0.0,
+          255.63
+        ],
+        "content_miss_rate_when_canary_missed": 0.0,
+        "content_miss_rate_when_canary_hit": 0.0,
+        "cells": {
+          "canary_miss_content_miss": 0,
+          "canary_miss_content_hit": 0,
+          "canary_hit_content_miss": 0,
+          "canary_hit_content_hit": 0
+        }
+      },
+      "canary_predicts_call_list_same_function": {
+        "odds_ratio": 1.0,
+        "ci95": [
+          0.0,
+          255.63
+        ],
+        "content_miss_rate_when_canary_missed": 0.0,
+        "content_miss_rate_when_canary_hit": 0.0,
+        "cells": {
+          "canary_miss_content_miss": 0,
+          "canary_miss_content_hit": 0,
+          "canary_hit_content_miss": 0,
+          "canary_hit_content_hit": 0
+        }
+      }
+    },
+    "Qwen/Qwen3.5-9B": {
+      "fresh_canary": {
+        "n": 21,
+        "correct": 0,
+        "outcomes": {
+          "unknown": 21
+        }
+      },
+      "fresh_content": {
+        "n": 29,
+        "correct": 0,
+        "outcomes": {
+          "wrong": 13,
+          "unknown": 16
+        }
+      },
+      "substituted": {
+        "n": 4,
+        "correct": 4,
+        "outcomes": {
+          "correct": 4
+        },
+        "gave_original": 0
+      },
+      "absent_canary": {
+        "n": 0,
+        "correct": 0,
+        "outcomes": {}
+      },
+      "null_controls": {
+        "n": 0,
+        "correct": 0,
+        "outcomes": {}
+      },
+      "present": {
+        "canary": {
+          "n": 26,
+          "correct": 24,
+          "outcomes": {
+            "correct": 24,
+            "swapped": 1,
+            "unknown": 1
+          }
+        },
+        "line": {
+          "n": 23,
+          "correct": 13,
+          "outcomes": {
+            "correct": 13,
+            "partial": 5,
+            "wrong": 5
+          }
+        },
+        "callee": {
+          "n": 18,
+          "correct": 17,
+          "outcomes": {
+            "correct": 17,
+            "wrong": 1
+          }
+        },
+        "calls": {
+          "n": 0,
+          "correct": 0,
+          "outcomes": {}
+        }
+      },
+      "test_retest_agreement": 0.875,
+      "canary_predicts_content_same_position": {
+        "odds_ratio": 1.34,
+        "ci95": [
+          0.17,
+          10.51
+        ],
+        "content_miss_rate_when_canary_missed": 0.25,
+        "content_miss_rate_when_canary_hit": 0.235,
+        "cells": {
+          "canary_miss_content_miss": 1,
+          "canary_miss_content_hit": 3,
+          "canary_hit_content_miss": 8,
+          "canary_hit_content_hit": 26
+        }
+      },
+      "canary_predicts_call_list_same_function": {
+        "odds_ratio": 1.0,
+        "ci95": [
+          0.0,
+          255.63
+        ],
+        "content_miss_rate_when_canary_missed": 0.0,
+        "content_miss_rate_when_canary_hit": 0.0,
+        "cells": {
+          "canary_miss_content_miss": 0,
+          "canary_miss_content_hit": 0,
+          "canary_hit_content_miss": 0,
+          "canary_hit_content_hit": 0
+        }
+      }
+    },
+    "deepseek-flash": {
+      "fresh_canary": {
+        "n": 56,
+        "correct": 0,
+        "outcomes": {
+          "unknown": 56
+        }
+      },
+      "fresh_content": {
+        "n": 89,
+        "correct": 0,
+        "outcomes": {
+          "unknown": 89
+        }
+      },
+      "substituted": {
+        "n": 51,
+        "correct": 51,
+        "outcomes": {
+          "correct": 51
+        },
+        "gave_original": 0
+      },
+      "absent_canary": {
+        "n": 10,
+        "correct": 0,
+        "outcomes": {
+          "unknown": 10
+        }
+      },
+      "null_controls": {
+        "n": 20,
+        "correct": 20,
+        "outcomes": {
+          "correct": 20
+        }
+      },
+      "present": {
+        "canary": {
+          "n": 102,
+          "correct": 102,
+          "outcomes": {
+            "correct": 102
+          }
+        },
+        "line": {
+          "n": 98,
+          "correct": 97,
+          "outcomes": {
+            "correct": 97,
+            "partial": 1
+          }
+        },
+        "callee": {
+          "n": 58,
+          "correct": 58,
+          "outcomes": {
+            "correct": 58
+          }
+        },
+        "calls": {
+          "n": 0,
+          "correct": 0,
+          "outcomes": {}
+        }
+      },
+      "test_retest_agreement": 0.994,
+      "canary_predicts_content_same_position": {
+        "odds_ratio": 95.67,
+        "ci95": [
+          1.38,
+          6621.74
+        ],
+        "content_miss_rate_when_canary_missed": 0.0,
+        "content_miss_rate_when_canary_hit": 0.007,
+        "cells": {
+          "canary_miss_content_miss": 0,
+          "canary_miss_content_hit": 0,
+          "canary_hit_content_miss": 1,
+          "canary_hit_content_hit": 143
+        }
+      },
+      "canary_predicts_call_list_same_function": {
+        "odds_ratio": 1.0,
+        "ci95": [
+          0.0,
+          255.63
+        ],
+        "content_miss_rate_when_canary_missed": 0.0,
+        "content_miss_rate_when_canary_hit": 0.0,
+        "cells": {
+          "canary_miss_content_miss": 0,
+          "canary_miss_content_hit": 0,
+          "canary_hit_content_miss": 0,
+          "canary_hit_content_hit": 0
+        }
+      }
+    }
+  },
+  "table": [
+    {
+      "model": "Qwen/Qwen2.5-72B-Instruct-128K",
+      "method": "context",
+      "kind": "callee",
+      "present": true,
+      "n": 7,
+      "correct": 4,
+      "rate": 0.571,
+      "ci95": [
+        0.25,
+        0.842
+      ],
+      "outcomes": {
+        "correct": 4,
+        "wrong": 3
+      }
+    },
+    {
+      "model": "Qwen/Qwen2.5-72B-Instruct-128K",
+      "method": "context",
+      "kind": "canary",
+      "present": true,
+      "n": 14,
+      "correct": 11,
+      "rate": 0.786,
+      "ci95": [
+        0.524,
+        0.924
+      ],
+      "outcomes": {
+        "correct": 11,
+        "partial": 1,
+        "unknown": 2
+      }
+    },
+    {
+      "model": "Qwen/Qwen2.5-72B-Instruct-128K",
+      "method": "context",
+      "kind": "line",
+      "present": true,
+      "n": 12,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.243
+      ],
+      "outcomes": {
+        "wrong": 12
+      }
+    },
+    {
+      "model": "Qwen/Qwen2.5-72B-Instruct-128K",
+      "method": "fresh",
+      "kind": "callee",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 5,
+        "wrong": 1
+      }
+    },
+    {
+      "model": "Qwen/Qwen2.5-72B-Instruct-128K",
+      "method": "fresh",
+      "kind": "canary",
+      "present": false,
+      "n": 10,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.278
+      ],
+      "outcomes": {
+        "unknown": 10
+      }
+    },
+    {
+      "model": "Qwen/Qwen2.5-72B-Instruct-128K",
+      "method": "fresh",
+      "kind": "line",
+      "present": false,
+      "n": 7,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.354
+      ],
+      "outcomes": {
+        "unknown": 7
+      }
+    },
+    {
+      "model": "Qwen/Qwen2.5-72B-Instruct-128K",
+      "method": "substituted",
+      "kind": "canary",
+      "present": true,
+      "n": 3,
+      "correct": 2,
+      "rate": 0.667,
+      "ci95": [
+        0.208,
+        0.939
+      ],
+      "outcomes": {
+        "correct": 2,
+        "unknown": 1
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-14B",
+      "method": "context",
+      "kind": "callee",
+      "present": true,
+      "n": 14,
+      "correct": 9,
+      "rate": 0.643,
+      "ci95": [
+        0.388,
+        0.837
+      ],
+      "outcomes": {
+        "correct": 9,
+        "wrong": 5
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-14B",
+      "method": "context",
+      "kind": "canary",
+      "present": true,
+      "n": 18,
+      "correct": 12,
+      "rate": 0.667,
+      "ci95": [
+        0.437,
+        0.837
+      ],
+      "outcomes": {
+        "swapped": 4,
+        "unknown": 2,
+        "correct": 12
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-14B",
+      "method": "context",
+      "kind": "line",
+      "present": true,
+      "n": 16,
+      "correct": 7,
+      "rate": 0.438,
+      "ci95": [
+        0.231,
+        0.668
+      ],
+      "outcomes": {
+        "wrong": 9,
+        "correct": 7
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-14B",
+      "method": "fresh",
+      "kind": "callee",
+      "present": false,
+      "n": 9,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.299
+      ],
+      "outcomes": {
+        "wrong": 6,
+        "unknown": 3
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-14B",
+      "method": "fresh",
+      "kind": "canary",
+      "present": false,
+      "n": 14,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.215
+      ],
+      "outcomes": {
+        "unknown": 14
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-14B",
+      "method": "fresh",
+      "kind": "line",
+      "present": false,
+      "n": 11,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.259
+      ],
+      "outcomes": {
+        "unknown": 11
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-14B",
+      "method": "substituted",
+      "kind": "canary",
+      "present": true,
+      "n": 3,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.562
+      ],
+      "outcomes": {
+        "swapped": 3
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+      "method": "context",
+      "kind": "callee",
+      "present": true,
+      "n": 11,
+      "correct": 9,
+      "rate": 0.818,
+      "ci95": [
+        0.523,
+        0.949
+      ],
+      "outcomes": {
+        "correct": 9,
+        "wrong": 2
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+      "method": "context",
+      "kind": "canary",
+      "present": true,
+      "n": 15,
+      "correct": 15,
+      "rate": 1.0,
+      "ci95": [
+        0.796,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 15
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+      "method": "context",
+      "kind": "line",
+      "present": true,
+      "n": 14,
+      "correct": 10,
+      "rate": 0.714,
+      "ci95": [
+        0.454,
+        0.883
+      ],
+      "outcomes": {
+        "correct": 10,
+        "partial": 3,
+        "wrong": 1
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+      "method": "fresh",
+      "kind": "callee",
+      "present": false,
+      "n": 7,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.354
+      ],
+      "outcomes": {
+        "wrong": 7
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+      "method": "fresh",
+      "kind": "canary",
+      "present": false,
+      "n": 10,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.278
+      ],
+      "outcomes": {
+        "unknown": 10
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+      "method": "fresh",
+      "kind": "line",
+      "present": false,
+      "n": 9,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.299
+      ],
+      "outcomes": {
+        "wrong": 9
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+      "method": "substituted",
+      "kind": "canary",
+      "present": true,
+      "n": 4,
+      "correct": 4,
+      "rate": 1.0,
+      "ci95": [
+        0.51,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 4
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "context",
+      "kind": "callee",
+      "present": false,
+      "n": 8,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.324
+      ],
+      "outcomes": {
+        "wrong": 2,
+        "unknown": 6
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "context",
+      "kind": "callee",
+      "present": true,
+      "n": 88,
+      "correct": 28,
+      "rate": 0.318,
+      "ci95": [
+        0.23,
+        0.421
+      ],
+      "outcomes": {
+        "correct": 28,
+        "wrong": 60
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "context",
+      "kind": "calls",
+      "present": false,
+      "n": 8,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.324
+      ],
+      "outcomes": {
+        "partial": 4,
+        "wrong": 4
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "context",
+      "kind": "calls",
+      "present": true,
+      "n": 39,
+      "correct": 8,
+      "rate": 0.205,
+      "ci95": [
+        0.108,
+        0.355
+      ],
+      "outcomes": {
+        "partial": 20,
+        "correct": 8,
+        "wrong": 11
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "context",
+      "kind": "canary",
+      "present": false,
+      "n": 10,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.278
+      ],
+      "outcomes": {
+        "unknown": 2,
+        "swapped": 8
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "context",
+      "kind": "canary",
+      "present": null,
+      "n": 30,
+      "correct": 17,
+      "rate": 0.567,
+      "ci95": [
+        0.392,
+        0.726
+      ],
+      "outcomes": {
+        "fabricated": 5,
+        "swapped": 8,
+        "correct": 17
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "context",
+      "kind": "canary",
+      "present": true,
+      "n": 152,
+      "correct": 63,
+      "rate": 0.414,
+      "ci95": [
+        0.339,
+        0.494
+      ],
+      "outcomes": {
+        "swapped": 53,
+        "unknown": 23,
+        "correct": 63,
+        "partial": 7,
+        "fabricated": 6
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "context",
+      "kind": "line",
+      "present": false,
+      "n": 16,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.194
+      ],
+      "outcomes": {
+        "wrong": 13,
+        "unknown": 3
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "context",
+      "kind": "line",
+      "present": true,
+      "n": 152,
+      "correct": 22,
+      "rate": 0.145,
+      "ci95": [
+        0.098,
+        0.209
+      ],
+      "outcomes": {
+        "wrong": 118,
+        "partial": 12,
+        "correct": 22
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "fresh",
+      "kind": "callee",
+      "present": false,
+      "n": 48,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.074
+      ],
+      "outcomes": {
+        "unknown": 20,
+        "wrong": 28
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "fresh",
+      "kind": "calls",
+      "present": false,
+      "n": 28,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.121
+      ],
+      "outcomes": {
+        "partial": 8,
+        "wrong": 20
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "fresh",
+      "kind": "canary",
+      "present": false,
+      "n": 81,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.045
+      ],
+      "outcomes": {
+        "unknown": 81
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "fresh",
+      "kind": "canary",
+      "present": null,
+      "n": 15,
+      "correct": 15,
+      "rate": 1.0,
+      "ci95": [
+        0.796,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 15
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "fresh",
+      "kind": "line",
+      "present": false,
+      "n": 84,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.044
+      ],
+      "outcomes": {
+        "unknown": 76,
+        "wrong": 8
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "substituted",
+      "kind": "canary",
+      "present": false,
+      "n": 5,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.434
+      ],
+      "outcomes": {
+        "unknown": 2,
+        "swapped": 2,
+        "fabricated": 1
+      }
+    },
+    {
+      "model": "Qwen/Qwen3-8B",
+      "method": "substituted",
+      "kind": "canary",
+      "present": true,
+      "n": 76,
+      "correct": 35,
+      "rate": 0.461,
+      "ci95": [
+        0.353,
+        0.572
+      ],
+      "outcomes": {
+        "swapped": 24,
+        "unknown": 12,
+        "correct": 35,
+        "fabricated": 4,
+        "partial": 1
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-4B",
+      "method": "context",
+      "kind": "canary",
+      "present": true,
+      "n": 6,
+      "correct": 4,
+      "rate": 0.667,
+      "ci95": [
+        0.3,
+        0.903
+      ],
+      "outcomes": {
+        "unknown": 2,
+        "correct": 4
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-4B",
+      "method": "fresh",
+      "kind": "canary",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-4B",
+      "method": "substituted",
+      "kind": "canary",
+      "present": true,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-9B",
+      "method": "context",
+      "kind": "callee",
+      "present": true,
+      "n": 18,
+      "correct": 17,
+      "rate": 0.944,
+      "ci95": [
+        0.742,
+        0.99
+      ],
+      "outcomes": {
+        "correct": 17,
+        "wrong": 1
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-9B",
+      "method": "context",
+      "kind": "canary",
+      "present": true,
+      "n": 26,
+      "correct": 24,
+      "rate": 0.923,
+      "ci95": [
+        0.759,
+        0.979
+      ],
+      "outcomes": {
+        "correct": 24,
+        "swapped": 1,
+        "unknown": 1
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-9B",
+      "method": "context",
+      "kind": "line",
+      "present": true,
+      "n": 23,
+      "correct": 13,
+      "rate": 0.565,
+      "ci95": [
+        0.368,
+        0.744
+      ],
+      "outcomes": {
+        "correct": 13,
+        "partial": 5,
+        "wrong": 5
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-9B",
+      "method": "fresh",
+      "kind": "callee",
+      "present": false,
+      "n": 12,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.243
+      ],
+      "outcomes": {
+        "wrong": 5,
+        "unknown": 7
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-9B",
+      "method": "fresh",
+      "kind": "canary",
+      "present": false,
+      "n": 21,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.155
+      ],
+      "outcomes": {
+        "unknown": 21
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-9B",
+      "method": "fresh",
+      "kind": "line",
+      "present": false,
+      "n": 17,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.184
+      ],
+      "outcomes": {
+        "unknown": 9,
+        "wrong": 8
+      }
+    },
+    {
+      "model": "Qwen/Qwen3.5-9B",
+      "method": "substituted",
+      "kind": "canary",
+      "present": true,
+      "n": 4,
+      "correct": 4,
+      "rate": 1.0,
+      "ci95": [
+        0.51,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 4
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "batch_context",
+      "kind": "canary",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 6
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "batch_context",
+      "kind": "canary",
+      "present": null,
+      "n": 15,
+      "correct": 15,
+      "rate": 1.0,
+      "ci95": [
+        0.796,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 15
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "batch_context",
+      "kind": "canary",
+      "present": true,
+      "n": 75,
+      "correct": 75,
+      "rate": 1.0,
+      "ci95": [
+        0.951,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 75
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "batch_pad_after_100000",
+      "kind": "canary",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 6
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "batch_pad_after_100000",
+      "kind": "canary",
+      "present": null,
+      "n": 15,
+      "correct": 15,
+      "rate": 1.0,
+      "ci95": [
+        0.796,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 15
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "batch_pad_after_100000",
+      "kind": "canary",
+      "present": true,
+      "n": 75,
+      "correct": 75,
+      "rate": 1.0,
+      "ci95": [
+        0.951,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 75
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "batch_pad_after_300000",
+      "kind": "canary",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 6
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "batch_pad_after_300000",
+      "kind": "canary",
+      "present": null,
+      "n": 15,
+      "correct": 15,
+      "rate": 1.0,
+      "ci95": [
+        0.796,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 15
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "batch_pad_after_300000",
+      "kind": "canary",
+      "present": true,
+      "n": 75,
+      "correct": 75,
+      "rate": 1.0,
+      "ci95": [
+        0.951,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 75
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "batch_pad_after_600000",
+      "kind": "canary",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 6
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "batch_pad_after_600000",
+      "kind": "canary",
+      "present": null,
+      "n": 15,
+      "correct": 15,
+      "rate": 1.0,
+      "ci95": [
+        0.796,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 15
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "batch_pad_after_600000",
+      "kind": "canary",
+      "present": true,
+      "n": 75,
+      "correct": 75,
+      "rate": 1.0,
+      "ci95": [
+        0.951,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 75
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "context",
+      "kind": "callee",
+      "present": false,
+      "n": 8,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.324
+      ],
+      "outcomes": {
+        "unknown": 8
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "context",
+      "kind": "callee",
+      "present": true,
+      "n": 58,
+      "correct": 58,
+      "rate": 1.0,
+      "ci95": [
+        0.938,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 58
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "context",
+      "kind": "canary",
+      "present": false,
+      "n": 10,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.278
+      ],
+      "outcomes": {
+        "unknown": 10
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "context",
+      "kind": "canary",
+      "present": null,
+      "n": 20,
+      "correct": 20,
+      "rate": 1.0,
+      "ci95": [
+        0.839,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 20
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "context",
+      "kind": "canary",
+      "present": true,
+      "n": 102,
+      "correct": 102,
+      "rate": 1.0,
+      "ci95": [
+        0.964,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 102
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "context",
+      "kind": "line",
+      "present": false,
+      "n": 16,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.194
+      ],
+      "outcomes": {
+        "unknown": 16
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "context",
+      "kind": "line",
+      "present": true,
+      "n": 98,
+      "correct": 97,
+      "rate": 0.99,
+      "ci95": [
+        0.944,
+        0.998
+      ],
+      "outcomes": {
+        "correct": 97,
+        "partial": 1
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "fresh",
+      "kind": "callee",
+      "present": false,
+      "n": 32,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.107
+      ],
+      "outcomes": {
+        "unknown": 32
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "fresh",
+      "kind": "canary",
+      "present": false,
+      "n": 56,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.064
+      ],
+      "outcomes": {
+        "unknown": 56
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "fresh",
+      "kind": "canary",
+      "present": null,
+      "n": 10,
+      "correct": 10,
+      "rate": 1.0,
+      "ci95": [
+        0.722,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 10
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "fresh",
+      "kind": "line",
+      "present": false,
+      "n": 57,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.063
+      ],
+      "outcomes": {
+        "unknown": 57
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "live_batch",
+      "kind": "canary",
+      "present": false,
+      "n": 5,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.434
+      ],
+      "outcomes": {
+        "unknown": 5
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "live_batch",
+      "kind": "canary",
+      "present": null,
+      "n": 15,
+      "correct": 15,
+      "rate": 1.0,
+      "ci95": [
+        0.796,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 15
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "live_batch",
+      "kind": "canary",
+      "present": true,
+      "n": 76,
+      "correct": 75,
+      "rate": 0.987,
+      "ci95": [
+        0.929,
+        0.998
+      ],
+      "outcomes": {
+        "correct": 75,
+        "partial": 1
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "live_single",
+      "kind": "canary",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "live_single",
+      "kind": "canary",
+      "present": null,
+      "n": 5,
+      "correct": 5,
+      "rate": 1.0,
+      "ci95": [
+        0.566,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 5
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "live_single",
+      "kind": "canary",
+      "present": true,
+      "n": 25,
+      "correct": 25,
+      "rate": 1.0,
+      "ci95": [
+        0.867,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 25
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_100000",
+      "kind": "callee",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_100000",
+      "kind": "callee",
+      "present": true,
+      "n": 14,
+      "correct": 14,
+      "rate": 1.0,
+      "ci95": [
+        0.785,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 14
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_100000",
+      "kind": "canary",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_100000",
+      "kind": "canary",
+      "present": null,
+      "n": 5,
+      "correct": 5,
+      "rate": 1.0,
+      "ci95": [
+        0.566,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 5
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_100000",
+      "kind": "canary",
+      "present": true,
+      "n": 25,
+      "correct": 25,
+      "rate": 1.0,
+      "ci95": [
+        0.867,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 25
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_100000",
+      "kind": "line",
+      "present": false,
+      "n": 4,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.49
+      ],
+      "outcomes": {
+        "unknown": 4
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_100000",
+      "kind": "line",
+      "present": true,
+      "n": 24,
+      "correct": 23,
+      "rate": 0.958,
+      "ci95": [
+        0.798,
+        0.993
+      ],
+      "outcomes": {
+        "correct": 23,
+        "unknown": 1
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_300000",
+      "kind": "callee",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_300000",
+      "kind": "callee",
+      "present": true,
+      "n": 14,
+      "correct": 14,
+      "rate": 1.0,
+      "ci95": [
+        0.785,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 14
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_300000",
+      "kind": "canary",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_300000",
+      "kind": "canary",
+      "present": null,
+      "n": 5,
+      "correct": 5,
+      "rate": 1.0,
+      "ci95": [
+        0.566,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 5
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_300000",
+      "kind": "canary",
+      "present": true,
+      "n": 25,
+      "correct": 24,
+      "rate": 0.96,
+      "ci95": [
+        0.805,
+        0.993
+      ],
+      "outcomes": {
+        "correct": 24,
+        "unknown": 1
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_300000",
+      "kind": "line",
+      "present": false,
+      "n": 4,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.49
+      ],
+      "outcomes": {
+        "unknown": 4
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_300000",
+      "kind": "line",
+      "present": true,
+      "n": 24,
+      "correct": 24,
+      "rate": 1.0,
+      "ci95": [
+        0.862,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 24
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_600000",
+      "kind": "callee",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_600000",
+      "kind": "callee",
+      "present": true,
+      "n": 14,
+      "correct": 14,
+      "rate": 1.0,
+      "ci95": [
+        0.785,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 14
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_600000",
+      "kind": "canary",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_600000",
+      "kind": "canary",
+      "present": null,
+      "n": 5,
+      "correct": 5,
+      "rate": 1.0,
+      "ci95": [
+        0.566,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 5
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_600000",
+      "kind": "canary",
+      "present": true,
+      "n": 25,
+      "correct": 25,
+      "rate": 1.0,
+      "ci95": [
+        0.867,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 25
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_600000",
+      "kind": "line",
+      "present": false,
+      "n": 4,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.49
+      ],
+      "outcomes": {
+        "unknown": 4
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_600000",
+      "kind": "line",
+      "present": true,
+      "n": 24,
+      "correct": 24,
+      "rate": 1.0,
+      "ci95": [
+        0.862,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 24
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_690000",
+      "kind": "callee",
+      "present": true,
+      "n": 6,
+      "correct": 6,
+      "rate": 1.0,
+      "ci95": [
+        0.61,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 6
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_690000",
+      "kind": "canary",
+      "present": true,
+      "n": 13,
+      "correct": 12,
+      "rate": 0.923,
+      "ci95": [
+        0.667,
+        0.986
+      ],
+      "outcomes": {
+        "correct": 12,
+        "unknown": 1
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_after_690000",
+      "kind": "line",
+      "present": true,
+      "n": 8,
+      "correct": 8,
+      "rate": 1.0,
+      "ci95": [
+        0.676,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 8
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "pad_before_300000",
+      "kind": "canary",
+      "present": true,
+      "n": 3,
+      "correct": 3,
+      "rate": 1.0,
+      "ci95": [
+        0.438,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 3
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "report_time",
+      "kind": "callee",
+      "present": false,
+      "n": 4,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.49
+      ],
+      "outcomes": {
+        "unknown": 4
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "report_time",
+      "kind": "callee",
+      "present": true,
+      "n": 28,
+      "correct": 28,
+      "rate": 1.0,
+      "ci95": [
+        0.879,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 28
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "report_time",
+      "kind": "canary",
+      "present": false,
+      "n": 5,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.434
+      ],
+      "outcomes": {
+        "unknown": 5
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "report_time",
+      "kind": "canary",
+      "present": null,
+      "n": 10,
+      "correct": 10,
+      "rate": 1.0,
+      "ci95": [
+        0.722,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 10
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "report_time",
+      "kind": "canary",
+      "present": true,
+      "n": 51,
+      "correct": 51,
+      "rate": 1.0,
+      "ci95": [
+        0.93,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 51
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "report_time",
+      "kind": "line",
+      "present": false,
+      "n": 8,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.324
+      ],
+      "outcomes": {
+        "unknown": 8
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "report_time",
+      "kind": "line",
+      "present": true,
+      "n": 48,
+      "correct": 48,
+      "rate": 1.0,
+      "ci95": [
+        0.926,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 48
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "substituted",
+      "kind": "canary",
+      "present": false,
+      "n": 5,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.434
+      ],
+      "outcomes": {
+        "unknown": 5
+      }
+    },
+    {
+      "model": "deepseek-flash",
+      "method": "substituted",
+      "kind": "canary",
+      "present": true,
+      "n": 51,
+      "correct": 51,
+      "rate": 1.0,
+      "ci95": [
+        0.93,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 51
+      }
+    }
+  ],
+  "canary_all_correct_vs_content_rate": [
+    {
+      "canary_all_correct": false,
+      "content_rate": 0.0,
+      "functions": 5
+    },
+    {
+      "canary_all_correct": false,
+      "content_rate": 0.1,
+      "functions": 3
+    },
+    {
+      "canary_all_correct": false,
+      "content_rate": 0.2,
+      "functions": 9
+    },
+    {
+      "canary_all_correct": false,
+      "content_rate": 0.3,
+      "functions": 4
+    },
+    {
+      "canary_all_correct": false,
+      "content_rate": 0.4,
+      "functions": 2
+    },
+    {
+      "canary_all_correct": false,
+      "content_rate": 0.5,
+      "functions": 3
+    },
+    {
+      "canary_all_correct": false,
+      "content_rate": 0.6,
+      "functions": 1
+    },
+    {
+      "canary_all_correct": false,
+      "content_rate": 0.7,
+      "functions": 1
+    },
+    {
+      "canary_all_correct": false,
+      "content_rate": 0.8,
+      "functions": 1
+    },
+    {
+      "canary_all_correct": false,
+      "content_rate": 1.0,
+      "functions": 1
+    },
+    {
+      "canary_all_correct": true,
+      "content_rate": 0.0,
+      "functions": 4
+    },
+    {
+      "canary_all_correct": true,
+      "content_rate": 0.2,
+      "functions": 1
+    },
+    {
+      "canary_all_correct": true,
+      "content_rate": 0.4,
+      "functions": 1
+    },
+    {
+      "canary_all_correct": true,
+      "content_rate": 0.5,
+      "functions": 1
+    },
+    {
+      "canary_all_correct": true,
+      "content_rate": 0.6,
+      "functions": 1
+    },
+    {
+      "canary_all_correct": true,
+      "content_rate": 0.8,
+      "functions": 4
+    },
+    {
+      "canary_all_correct": true,
+      "content_rate": 0.9,
+      "functions": 1
+    },
+    {
+      "canary_all_correct": true,
+      "content_rate": 1.0,
+      "functions": 46
+    }
+  ]
+}

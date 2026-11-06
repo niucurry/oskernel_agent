@@ -1,0 +1,978 @@
+{
+  "rows": 1447,
+  "runs": 3,
+  "table": [
+    {
+      "method": "batch_context",
+      "kind": "canary",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 6
+      }
+    },
+    {
+      "method": "batch_context",
+      "kind": "canary",
+      "present": null,
+      "n": 15,
+      "correct": 15,
+      "rate": 1.0,
+      "ci95": [
+        0.796,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 15
+      }
+    },
+    {
+      "method": "batch_context",
+      "kind": "canary",
+      "present": true,
+      "n": 75,
+      "correct": 75,
+      "rate": 1.0,
+      "ci95": [
+        0.951,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 75
+      }
+    },
+    {
+      "method": "batch_pad_after_100000",
+      "kind": "canary",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 6
+      }
+    },
+    {
+      "method": "batch_pad_after_100000",
+      "kind": "canary",
+      "present": null,
+      "n": 15,
+      "correct": 15,
+      "rate": 1.0,
+      "ci95": [
+        0.796,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 15
+      }
+    },
+    {
+      "method": "batch_pad_after_100000",
+      "kind": "canary",
+      "present": true,
+      "n": 75,
+      "correct": 75,
+      "rate": 1.0,
+      "ci95": [
+        0.951,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 75
+      }
+    },
+    {
+      "method": "batch_pad_after_300000",
+      "kind": "canary",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 6
+      }
+    },
+    {
+      "method": "batch_pad_after_300000",
+      "kind": "canary",
+      "present": null,
+      "n": 15,
+      "correct": 15,
+      "rate": 1.0,
+      "ci95": [
+        0.796,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 15
+      }
+    },
+    {
+      "method": "batch_pad_after_300000",
+      "kind": "canary",
+      "present": true,
+      "n": 75,
+      "correct": 75,
+      "rate": 1.0,
+      "ci95": [
+        0.951,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 75
+      }
+    },
+    {
+      "method": "batch_pad_after_600000",
+      "kind": "canary",
+      "present": false,
+      "n": 6,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.39
+      ],
+      "outcomes": {
+        "unknown": 6
+      }
+    },
+    {
+      "method": "batch_pad_after_600000",
+      "kind": "canary",
+      "present": null,
+      "n": 15,
+      "correct": 15,
+      "rate": 1.0,
+      "ci95": [
+        0.796,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 15
+      }
+    },
+    {
+      "method": "batch_pad_after_600000",
+      "kind": "canary",
+      "present": true,
+      "n": 75,
+      "correct": 75,
+      "rate": 1.0,
+      "ci95": [
+        0.951,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 75
+      }
+    },
+    {
+      "method": "context",
+      "kind": "callee",
+      "present": false,
+      "n": 8,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.324
+      ],
+      "outcomes": {
+        "unknown": 8
+      }
+    },
+    {
+      "method": "context",
+      "kind": "callee",
+      "present": true,
+      "n": 58,
+      "correct": 58,
+      "rate": 1.0,
+      "ci95": [
+        0.938,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 58
+      }
+    },
+    {
+      "method": "context",
+      "kind": "canary",
+      "present": false,
+      "n": 10,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.278
+      ],
+      "outcomes": {
+        "unknown": 10
+      }
+    },
+    {
+      "method": "context",
+      "kind": "canary",
+      "present": null,
+      "n": 20,
+      "correct": 20,
+      "rate": 1.0,
+      "ci95": [
+        0.839,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 20
+      }
+    },
+    {
+      "method": "context",
+      "kind": "canary",
+      "present": true,
+      "n": 102,
+      "correct": 102,
+      "rate": 1.0,
+      "ci95": [
+        0.964,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 102
+      }
+    },
+    {
+      "method": "context",
+      "kind": "line",
+      "present": false,
+      "n": 16,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.194
+      ],
+      "outcomes": {
+        "unknown": 16
+      }
+    },
+    {
+      "method": "context",
+      "kind": "line",
+      "present": true,
+      "n": 98,
+      "correct": 97,
+      "rate": 0.99,
+      "ci95": [
+        0.944,
+        0.998
+      ],
+      "outcomes": {
+        "correct": 97,
+        "partial": 1
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "callee",
+      "present": false,
+      "n": 32,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.107
+      ],
+      "outcomes": {
+        "unknown": 32
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "canary",
+      "present": false,
+      "n": 56,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.064
+      ],
+      "outcomes": {
+        "unknown": 56
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "canary",
+      "present": null,
+      "n": 10,
+      "correct": 10,
+      "rate": 1.0,
+      "ci95": [
+        0.722,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 10
+      }
+    },
+    {
+      "method": "fresh",
+      "kind": "line",
+      "present": false,
+      "n": 57,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.063
+      ],
+      "outcomes": {
+        "unknown": 57
+      }
+    },
+    {
+      "method": "live_batch",
+      "kind": "canary",
+      "present": false,
+      "n": 5,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.434
+      ],
+      "outcomes": {
+        "unknown": 5
+      }
+    },
+    {
+      "method": "live_batch",
+      "kind": "canary",
+      "present": null,
+      "n": 15,
+      "correct": 15,
+      "rate": 1.0,
+      "ci95": [
+        0.796,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 15
+      }
+    },
+    {
+      "method": "live_batch",
+      "kind": "canary",
+      "present": true,
+      "n": 76,
+      "correct": 75,
+      "rate": 0.987,
+      "ci95": [
+        0.929,
+        0.998
+      ],
+      "outcomes": {
+        "correct": 75,
+        "partial": 1
+      }
+    },
+    {
+      "method": "live_single",
+      "kind": "canary",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "live_single",
+      "kind": "canary",
+      "present": null,
+      "n": 5,
+      "correct": 5,
+      "rate": 1.0,
+      "ci95": [
+        0.566,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 5
+      }
+    },
+    {
+      "method": "live_single",
+      "kind": "canary",
+      "present": true,
+      "n": 25,
+      "correct": 25,
+      "rate": 1.0,
+      "ci95": [
+        0.867,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 25
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "callee",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "callee",
+      "present": true,
+      "n": 14,
+      "correct": 14,
+      "rate": 1.0,
+      "ci95": [
+        0.785,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 14
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "canary",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "canary",
+      "present": null,
+      "n": 5,
+      "correct": 5,
+      "rate": 1.0,
+      "ci95": [
+        0.566,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 5
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "canary",
+      "present": true,
+      "n": 25,
+      "correct": 25,
+      "rate": 1.0,
+      "ci95": [
+        0.867,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 25
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "line",
+      "present": false,
+      "n": 4,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.49
+      ],
+      "outcomes": {
+        "unknown": 4
+      }
+    },
+    {
+      "method": "pad_after_100000",
+      "kind": "line",
+      "present": true,
+      "n": 24,
+      "correct": 23,
+      "rate": 0.958,
+      "ci95": [
+        0.798,
+        0.993
+      ],
+      "outcomes": {
+        "correct": 23,
+        "unknown": 1
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "callee",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "callee",
+      "present": true,
+      "n": 14,
+      "correct": 14,
+      "rate": 1.0,
+      "ci95": [
+        0.785,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 14
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "canary",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "canary",
+      "present": null,
+      "n": 5,
+      "correct": 5,
+      "rate": 1.0,
+      "ci95": [
+        0.566,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 5
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "canary",
+      "present": true,
+      "n": 25,
+      "correct": 24,
+      "rate": 0.96,
+      "ci95": [
+        0.805,
+        0.993
+      ],
+      "outcomes": {
+        "correct": 24,
+        "unknown": 1
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "line",
+      "present": false,
+      "n": 4,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.49
+      ],
+      "outcomes": {
+        "unknown": 4
+      }
+    },
+    {
+      "method": "pad_after_300000",
+      "kind": "line",
+      "present": true,
+      "n": 24,
+      "correct": 24,
+      "rate": 1.0,
+      "ci95": [
+        0.862,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 24
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "callee",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "callee",
+      "present": true,
+      "n": 14,
+      "correct": 14,
+      "rate": 1.0,
+      "ci95": [
+        0.785,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 14
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "canary",
+      "present": false,
+      "n": 2,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.658
+      ],
+      "outcomes": {
+        "unknown": 2
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "canary",
+      "present": null,
+      "n": 5,
+      "correct": 5,
+      "rate": 1.0,
+      "ci95": [
+        0.566,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 5
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "canary",
+      "present": true,
+      "n": 25,
+      "correct": 25,
+      "rate": 1.0,
+      "ci95": [
+        0.867,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 25
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "line",
+      "present": false,
+      "n": 4,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.49
+      ],
+      "outcomes": {
+        "unknown": 4
+      }
+    },
+    {
+      "method": "pad_after_600000",
+      "kind": "line",
+      "present": true,
+      "n": 24,
+      "correct": 24,
+      "rate": 1.0,
+      "ci95": [
+        0.862,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 24
+      }
+    },
+    {
+      "method": "pad_after_690000",
+      "kind": "callee",
+      "present": true,
+      "n": 6,
+      "correct": 6,
+      "rate": 1.0,
+      "ci95": [
+        0.61,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 6
+      }
+    },
+    {
+      "method": "pad_after_690000",
+      "kind": "canary",
+      "present": true,
+      "n": 13,
+      "correct": 12,
+      "rate": 0.923,
+      "ci95": [
+        0.667,
+        0.986
+      ],
+      "outcomes": {
+        "correct": 12,
+        "unknown": 1
+      }
+    },
+    {
+      "method": "pad_after_690000",
+      "kind": "line",
+      "present": true,
+      "n": 8,
+      "correct": 8,
+      "rate": 1.0,
+      "ci95": [
+        0.676,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 8
+      }
+    },
+    {
+      "method": "pad_before_300000",
+      "kind": "canary",
+      "present": true,
+      "n": 3,
+      "correct": 3,
+      "rate": 1.0,
+      "ci95": [
+        0.438,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 3
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "callee",
+      "present": false,
+      "n": 4,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.49
+      ],
+      "outcomes": {
+        "unknown": 4
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "callee",
+      "present": true,
+      "n": 28,
+      "correct": 28,
+      "rate": 1.0,
+      "ci95": [
+        0.879,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 28
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "canary",
+      "present": false,
+      "n": 5,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.434
+      ],
+      "outcomes": {
+        "unknown": 5
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "canary",
+      "present": null,
+      "n": 10,
+      "correct": 10,
+      "rate": 1.0,
+      "ci95": [
+        0.722,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 10
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "canary",
+      "present": true,
+      "n": 51,
+      "correct": 51,
+      "rate": 1.0,
+      "ci95": [
+        0.93,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 51
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "line",
+      "present": false,
+      "n": 8,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.324
+      ],
+      "outcomes": {
+        "unknown": 8
+      }
+    },
+    {
+      "method": "report_time",
+      "kind": "line",
+      "present": true,
+      "n": 48,
+      "correct": 48,
+      "rate": 1.0,
+      "ci95": [
+        0.926,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 48
+      }
+    },
+    {
+      "method": "substituted",
+      "kind": "canary",
+      "present": false,
+      "n": 5,
+      "correct": 0,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.434
+      ],
+      "outcomes": {
+        "unknown": 5
+      }
+    },
+    {
+      "method": "substituted",
+      "kind": "canary",
+      "present": true,
+      "n": 51,
+      "correct": 51,
+      "rate": 1.0,
+      "ci95": [
+        0.93,
+        1.0
+      ],
+      "outcomes": {
+        "correct": 51
+      }
+    }
+  ],
+  "canary_all_correct_vs_content_rate": [
+    {
+      "canary_all_correct": false,
+      "content_rate": 1.0,
+      "functions": 1
+    },
+    {
+      "canary_all_correct": true,
+      "content_rate": 0.8,
+      "functions": 1
+    },
+    {
+      "canary_all_correct": true,
+      "content_rate": 0.9,
+      "functions": 1
+    },
+    {
+      "canary_all_correct": true,
+      "content_rate": 1.0,
+      "functions": 41
+    }
+  ]
+}

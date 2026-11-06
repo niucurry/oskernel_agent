@@ -1,0 +1,63 @@
+{
+  "compiler_symbols": [
+    "allocate",
+    "plain",
+    "release"
+  ],
+  "original_author_function_names": [
+    "if",
+    "plain",
+    "release"
+  ],
+  "production_inventory": {
+    "symbols": [
+      [
+        "Thread",
+        1
+      ],
+      [
+        "release",
+        4
+      ],
+      [
+        "allocate",
+        9
+      ],
+      [
+        "plain",
+        10
+      ]
+    ],
+    "status": "partial"
+  },
+  "commands": [
+    {
+      "command": [
+        "/usr/bin/gcc-12",
+        "-std=c11",
+        "-Werror",
+        "-c",
+        "/home/niu/agent-research/description_repodoc_assessment/fixture.c",
+        "-o",
+        "/home/niu/agent-research/description_repodoc_assessment/fixture.o"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "nm",
+        "--defined-only",
+        "--format=posix",
+        "/home/niu/agent-research/description_repodoc_assessment/fixture.o"
+      ],
+      "returncode": 0,
+      "stdout": "allocate T 28 f\nplain T 37 f\nrelease T 0 28\n",
+      "stderr": ""
+    }
+  ],
+  "source_sha256": "26436b776b2dfdcc0daaa0816c2d2b5c2b9286da484a43bee114c6b162f8570c",
+  "model_calls": 0,
+  "boundary": "Only this valid C fixture was compiled; public OS slices were not built. This verifies a structural failure, not prose quality."
+}

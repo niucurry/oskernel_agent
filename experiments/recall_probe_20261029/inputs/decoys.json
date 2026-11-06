@@ -1,0 +1,5 @@
+[
+ {"path": "kernel/vmem.c", "symbol": "vmunmap"},
+ {"path": "kernel/pmem.c", "symbol": "buddy_init"},
+ {"path": "kernel/futex.c", "symbol": "futex_wake"}
+]

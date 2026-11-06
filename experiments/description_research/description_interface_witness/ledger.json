@@ -1,0 +1,760 @@
+[
+  {
+    "id": 1,
+    "repo": "rtthread",
+    "arm": "production_reader",
+    "repeat": 0,
+    "phase": "allocation",
+    "request_sha256": "e7f69608ecd794aca3e602c403dc182f2b2822aed714dabda26843dfbc9d6c08",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/001/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/001/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 4065,
+      "completion_tokens": 318,
+      "total_tokens": 4383,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 4065
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 3.184
+  },
+  {
+    "id": 2,
+    "repo": "rtthread",
+    "arm": "production_reader",
+    "repeat": 0,
+    "phase": "description",
+    "request_sha256": "338727c27aeac6074f567717b728deda405d46f79a657f80d8cd62d26b62ba76",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/002/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/002/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3318,
+      "completion_tokens": 426,
+      "total_tokens": 3744,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 3318
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 4.044
+  },
+  {
+    "id": 3,
+    "repo": "rtthread",
+    "arm": "bm25_chunks",
+    "repeat": 0,
+    "phase": "description",
+    "request_sha256": "bbd43f94dd3f37f6d1ecfa13927e1f7e183b51410b182e3d866c97ad143f8277",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/003/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/003/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3537,
+      "completion_tokens": 867,
+      "total_tokens": 4404,
+      "prompt_tokens_details": {
+        "cached_tokens": 128
+      },
+      "prompt_cache_hit_tokens": 128,
+      "prompt_cache_miss_tokens": 3409
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 3.74
+  },
+  {
+    "id": 4,
+    "repo": "rtthread",
+    "arm": "codewiki_components",
+    "repeat": 0,
+    "phase": "description",
+    "request_sha256": "01355f651fe95309fa2895b5345255afd15ac185c9c488ccfcf4ac2f95da31e3",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/004/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/004/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3333,
+      "completion_tokens": 182,
+      "total_tokens": 3515,
+      "prompt_tokens_details": {
+        "cached_tokens": 128
+      },
+      "prompt_cache_hit_tokens": 128,
+      "prompt_cache_miss_tokens": 3205
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 2.689
+  },
+  {
+    "id": 5,
+    "repo": "rtthread",
+    "arm": "interface_witness",
+    "repeat": 0,
+    "phase": "description",
+    "request_sha256": "f35f00070ae84786a15769fd1b3d81a07064e52e38ba0dfcee4e55a05a69c1d0",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/005/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/005/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 1808,
+      "completion_tokens": 861,
+      "total_tokens": 2669,
+      "prompt_tokens_details": {
+        "cached_tokens": 256
+      },
+      "prompt_cache_hit_tokens": 256,
+      "prompt_cache_miss_tokens": 1552
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 4.826
+  },
+  {
+    "id": 6,
+    "repo": "rtthread",
+    "arm": "production_reader",
+    "repeat": 1,
+    "phase": "allocation",
+    "request_sha256": "e7f69608ecd794aca3e602c403dc182f2b2822aed714dabda26843dfbc9d6c08",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/006/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/006/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 4065,
+      "completion_tokens": 269,
+      "total_tokens": 4334,
+      "prompt_tokens_details": {
+        "cached_tokens": 3840
+      },
+      "prompt_cache_hit_tokens": 3840,
+      "prompt_cache_miss_tokens": 225
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 3.241
+  },
+  {
+    "id": 7,
+    "repo": "rtthread",
+    "arm": "production_reader",
+    "repeat": 1,
+    "phase": "description",
+    "request_sha256": "338727c27aeac6074f567717b728deda405d46f79a657f80d8cd62d26b62ba76",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/007/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/007/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3318,
+      "completion_tokens": 434,
+      "total_tokens": 3752,
+      "prompt_tokens_details": {
+        "cached_tokens": 3072
+      },
+      "prompt_cache_hit_tokens": 3072,
+      "prompt_cache_miss_tokens": 246
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 3.432
+  },
+  {
+    "id": 8,
+    "repo": "rtthread",
+    "arm": "bm25_chunks",
+    "repeat": 1,
+    "phase": "description",
+    "request_sha256": "bbd43f94dd3f37f6d1ecfa13927e1f7e183b51410b182e3d866c97ad143f8277",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/008/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/008/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3537,
+      "completion_tokens": 865,
+      "total_tokens": 4402,
+      "prompt_tokens_details": {
+        "cached_tokens": 3328
+      },
+      "prompt_cache_hit_tokens": 3328,
+      "prompt_cache_miss_tokens": 209
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 4.697
+  },
+  {
+    "id": 9,
+    "repo": "rtthread",
+    "arm": "codewiki_components",
+    "repeat": 1,
+    "phase": "description",
+    "request_sha256": "01355f651fe95309fa2895b5345255afd15ac185c9c488ccfcf4ac2f95da31e3",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/009/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/009/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3333,
+      "completion_tokens": 188,
+      "total_tokens": 3521,
+      "prompt_tokens_details": {
+        "cached_tokens": 3199
+      },
+      "prompt_cache_hit_tokens": 3199,
+      "prompt_cache_miss_tokens": 134
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 1.874
+  },
+  {
+    "id": 10,
+    "repo": "rtthread",
+    "arm": "interface_witness",
+    "repeat": 1,
+    "phase": "description",
+    "request_sha256": "f35f00070ae84786a15769fd1b3d81a07064e52e38ba0dfcee4e55a05a69c1d0",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/010/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/010/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 1808,
+      "completion_tokens": 1108,
+      "total_tokens": 2916,
+      "prompt_tokens_details": {
+        "cached_tokens": 1664
+      },
+      "prompt_cache_hit_tokens": 1664,
+      "prompt_cache_miss_tokens": 144
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 4.961
+  },
+  {
+    "id": 11,
+    "repo": "riot",
+    "arm": "production_reader",
+    "repeat": 0,
+    "phase": "allocation",
+    "request_sha256": "e9aa8f8f5dc5c3ffb1162b0c93bf54d966407fd3d674ea225a979c2e63d0dcce",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/011/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/011/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 2025,
+      "completion_tokens": 157,
+      "total_tokens": 2182,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 2025
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 3.05
+  },
+  {
+    "id": 12,
+    "repo": "riot",
+    "arm": "production_reader",
+    "repeat": 0,
+    "phase": "description",
+    "request_sha256": "f5e57e2ef5668176b63428194258445937f1a027355e5e1f78f543593d766b4b",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/012/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/012/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3445,
+      "completion_tokens": 524,
+      "total_tokens": 3969,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 3445
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 3.14
+  },
+  {
+    "id": 13,
+    "repo": "riot",
+    "arm": "bm25_chunks",
+    "repeat": 0,
+    "phase": "description",
+    "request_sha256": "6fed7f60615618334e53f28e1055f12b29547064d94e2eed87c4ad28bc5e73e5",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/013/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/013/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3606,
+      "completion_tokens": 352,
+      "total_tokens": 3958,
+      "prompt_tokens_details": {
+        "cached_tokens": 128
+      },
+      "prompt_cache_hit_tokens": 128,
+      "prompt_cache_miss_tokens": 3478
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 2.404
+  },
+  {
+    "id": 14,
+    "repo": "riot",
+    "arm": "codewiki_components",
+    "repeat": 0,
+    "phase": "description",
+    "request_sha256": "63e045570ddbada2ead29077cfb9a57d71614d688b55f52d7c957e774a650846",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/014/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/014/response.json",
+    "status": "api_failure",
+    "error_type": "URLError",
+    "error": "<urlopen error [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1000)>",
+    "elapsed_seconds": 5.006
+  },
+  {
+    "id": 15,
+    "repo": "riot",
+    "arm": "interface_witness",
+    "repeat": 0,
+    "phase": "description",
+    "request_sha256": "702c1984d9e6c77076afd14a5f20d7e344ee07a27c36d52dcfbf7778009661d7",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/015/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/015/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 851,
+      "completion_tokens": 248,
+      "total_tokens": 1099,
+      "prompt_tokens_details": {
+        "cached_tokens": 128
+      },
+      "prompt_cache_hit_tokens": 128,
+      "prompt_cache_miss_tokens": 723
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 1.652
+  },
+  {
+    "id": 16,
+    "repo": "riot",
+    "arm": "production_reader",
+    "repeat": 1,
+    "phase": "allocation",
+    "request_sha256": "e9aa8f8f5dc5c3ffb1162b0c93bf54d966407fd3d674ea225a979c2e63d0dcce",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/016/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/016/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 2025,
+      "completion_tokens": 157,
+      "total_tokens": 2182,
+      "prompt_tokens_details": {
+        "cached_tokens": 1792
+      },
+      "prompt_cache_hit_tokens": 1792,
+      "prompt_cache_miss_tokens": 233
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 3.562
+  },
+  {
+    "id": 17,
+    "repo": "riot",
+    "arm": "production_reader",
+    "repeat": 1,
+    "phase": "description",
+    "request_sha256": "f5e57e2ef5668176b63428194258445937f1a027355e5e1f78f543593d766b4b",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/017/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/017/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3445,
+      "completion_tokens": 474,
+      "total_tokens": 3919,
+      "prompt_tokens_details": {
+        "cached_tokens": 3200
+      },
+      "prompt_cache_hit_tokens": 3200,
+      "prompt_cache_miss_tokens": 245
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 4.28
+  },
+  {
+    "id": 18,
+    "repo": "riot",
+    "arm": "bm25_chunks",
+    "repeat": 1,
+    "phase": "description",
+    "request_sha256": "6fed7f60615618334e53f28e1055f12b29547064d94e2eed87c4ad28bc5e73e5",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/018/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/018/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3606,
+      "completion_tokens": 358,
+      "total_tokens": 3964,
+      "prompt_tokens_details": {
+        "cached_tokens": 3456
+      },
+      "prompt_cache_hit_tokens": 3456,
+      "prompt_cache_miss_tokens": 150
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 2.587
+  },
+  {
+    "id": 19,
+    "repo": "riot",
+    "arm": "codewiki_components",
+    "repeat": 1,
+    "phase": "description",
+    "request_sha256": "63e045570ddbada2ead29077cfb9a57d71614d688b55f52d7c957e774a650846",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/019/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/019/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3329,
+      "completion_tokens": 282,
+      "total_tokens": 3611,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 3329
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 2.037
+  },
+  {
+    "id": 20,
+    "repo": "riot",
+    "arm": "interface_witness",
+    "repeat": 1,
+    "phase": "description",
+    "request_sha256": "702c1984d9e6c77076afd14a5f20d7e344ee07a27c36d52dcfbf7778009661d7",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/020/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/020/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 851,
+      "completion_tokens": 247,
+      "total_tokens": 1098,
+      "prompt_tokens_details": {
+        "cached_tokens": 640
+      },
+      "prompt_cache_hit_tokens": 640,
+      "prompt_cache_miss_tokens": 211
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 2.646
+  },
+  {
+    "id": 21,
+    "repo": "mynewt",
+    "arm": "production_reader",
+    "repeat": 0,
+    "phase": "allocation",
+    "request_sha256": "94bc04f47edbb5b9272a262931cef37489541d5e299417d62a44659646116d18",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/021/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/021/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3123,
+      "completion_tokens": 275,
+      "total_tokens": 3398,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 3123
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 2.349
+  },
+  {
+    "id": 22,
+    "repo": "mynewt",
+    "arm": "production_reader",
+    "repeat": 0,
+    "phase": "description",
+    "request_sha256": "b6be9f95e0358d064b2220e9dd42e06c68a27e8dda1c562ae837e45533ebbe52",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/022/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/022/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3161,
+      "completion_tokens": 1154,
+      "total_tokens": 4315,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 3161
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 4.357
+  },
+  {
+    "id": 23,
+    "repo": "mynewt",
+    "arm": "bm25_chunks",
+    "repeat": 0,
+    "phase": "description",
+    "request_sha256": "72ecbfada5b1bc81ae99d037ef11b72f91ba1a5dadacd8fea9875e4b65a4a49a",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/023/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/023/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3534,
+      "completion_tokens": 1047,
+      "total_tokens": 4581,
+      "prompt_tokens_details": {
+        "cached_tokens": 128
+      },
+      "prompt_cache_hit_tokens": 128,
+      "prompt_cache_miss_tokens": 3406
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 3.499
+  },
+  {
+    "id": 24,
+    "repo": "mynewt",
+    "arm": "codewiki_components",
+    "repeat": 0,
+    "phase": "description",
+    "request_sha256": "d2bfb8774681f1a0be7d19f4730023f692b2aed1b9e1d2ac9d358958d210cd46",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/024/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/024/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3495,
+      "completion_tokens": 809,
+      "total_tokens": 4304,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "prompt_cache_hit_tokens": 0,
+      "prompt_cache_miss_tokens": 3495
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 3.108
+  },
+  {
+    "id": 25,
+    "repo": "mynewt",
+    "arm": "interface_witness",
+    "repeat": 0,
+    "phase": "description",
+    "request_sha256": "c6c206beaefd3b7a41f1fe016e7ad9e482878102e6fe867193cf751fc42016ba",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/025/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/025/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 2073,
+      "completion_tokens": 1209,
+      "total_tokens": 3282,
+      "prompt_tokens_details": {
+        "cached_tokens": 384
+      },
+      "prompt_cache_hit_tokens": 384,
+      "prompt_cache_miss_tokens": 1689
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 5.665
+  },
+  {
+    "id": 26,
+    "repo": "mynewt",
+    "arm": "simple_lookup",
+    "repeat": 0,
+    "phase": "description",
+    "request_sha256": "0fdf612d4f9c3e81113eb2f0730c701c93c912a8120171d06e5c215ea80879d3",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/026/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/026/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 2147,
+      "completion_tokens": 1166,
+      "total_tokens": 3313,
+      "prompt_tokens_details": {
+        "cached_tokens": 384
+      },
+      "prompt_cache_hit_tokens": 384,
+      "prompt_cache_miss_tokens": 1763
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 4.022
+  },
+  {
+    "id": 27,
+    "repo": "mynewt",
+    "arm": "production_reader",
+    "repeat": 1,
+    "phase": "allocation",
+    "request_sha256": "94bc04f47edbb5b9272a262931cef37489541d5e299417d62a44659646116d18",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/027/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/027/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3123,
+      "completion_tokens": 275,
+      "total_tokens": 3398,
+      "prompt_tokens_details": {
+        "cached_tokens": 2944
+      },
+      "prompt_cache_hit_tokens": 2944,
+      "prompt_cache_miss_tokens": 179
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 3.81
+  },
+  {
+    "id": 28,
+    "repo": "mynewt",
+    "arm": "production_reader",
+    "repeat": 1,
+    "phase": "description",
+    "request_sha256": "b6be9f95e0358d064b2220e9dd42e06c68a27e8dda1c562ae837e45533ebbe52",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/028/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/028/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3161,
+      "completion_tokens": 1149,
+      "total_tokens": 4310,
+      "prompt_tokens_details": {
+        "cached_tokens": 2944
+      },
+      "prompt_cache_hit_tokens": 2944,
+      "prompt_cache_miss_tokens": 217
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 4.293
+  },
+  {
+    "id": 29,
+    "repo": "mynewt",
+    "arm": "bm25_chunks",
+    "repeat": 1,
+    "phase": "description",
+    "request_sha256": "72ecbfada5b1bc81ae99d037ef11b72f91ba1a5dadacd8fea9875e4b65a4a49a",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/029/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/029/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3534,
+      "completion_tokens": 1050,
+      "total_tokens": 4584,
+      "prompt_tokens_details": {
+        "cached_tokens": 3328
+      },
+      "prompt_cache_hit_tokens": 3328,
+      "prompt_cache_miss_tokens": 206
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 5.618
+  },
+  {
+    "id": 30,
+    "repo": "mynewt",
+    "arm": "codewiki_components",
+    "repeat": 1,
+    "phase": "description",
+    "request_sha256": "d2bfb8774681f1a0be7d19f4730023f692b2aed1b9e1d2ac9d358958d210cd46",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/030/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/030/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 3495,
+      "completion_tokens": 814,
+      "total_tokens": 4309,
+      "prompt_tokens_details": {
+        "cached_tokens": 3328
+      },
+      "prompt_cache_hit_tokens": 3328,
+      "prompt_cache_miss_tokens": 167
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 7.674
+  },
+  {
+    "id": 31,
+    "repo": "mynewt",
+    "arm": "interface_witness",
+    "repeat": 1,
+    "phase": "description",
+    "request_sha256": "c6c206beaefd3b7a41f1fe016e7ad9e482878102e6fe867193cf751fc42016ba",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/031/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/031/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 2073,
+      "completion_tokens": 1165,
+      "total_tokens": 3238,
+      "prompt_tokens_details": {
+        "cached_tokens": 1920
+      },
+      "prompt_cache_hit_tokens": 1920,
+      "prompt_cache_miss_tokens": 153
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 5.073
+  },
+  {
+    "id": 32,
+    "repo": "mynewt",
+    "arm": "simple_lookup",
+    "repeat": 1,
+    "phase": "description",
+    "request_sha256": "0fdf612d4f9c3e81113eb2f0730c701c93c912a8120171d06e5c215ea80879d3",
+    "request_path": "/home/niu/agent/research/description_interface_witness/calls/032/request.json",
+    "response_path": "/home/niu/agent/research/description_interface_witness/calls/032/response.json",
+    "status": "ok",
+    "usage": {
+      "prompt_tokens": 2147,
+      "completion_tokens": 1161,
+      "total_tokens": 3308,
+      "prompt_tokens_details": {
+        "cached_tokens": 1920
+      },
+      "prompt_cache_hit_tokens": 1920,
+      "prompt_cache_miss_tokens": 227
+    },
+    "model": "deepseek-flash",
+    "finish_reason": "stop",
+    "elapsed_seconds": 5.578
+  }
+]

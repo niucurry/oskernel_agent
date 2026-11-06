@@ -233,7 +233,7 @@ def _opencode_env(task: "BatchTask") -> dict:
     )
     if task.repo_path is not None:
         env["OSKERNEL_AGENT_REPO_PATH"] = str(Path(task.repo_path).resolve())
-    if opencode_isolated_data_enabled():
+    if opencode_isolated_data_enabled() and not task.runtime_env:
         isolated_root = _prepare_opencode_data_home(task)
         env["XDG_DATA_HOME"] = str(isolated_root / "data")
         env["XDG_STATE_HOME"] = str(isolated_root / "state")
@@ -243,6 +243,7 @@ def _opencode_env(task: "BatchTask") -> dict:
         env["PATH"] = local_bin + os.pathsep + env.get("PATH", "")
     # 为每个 worker 隔离 session
     env["OPENCODE_SESSION_ID"] = uuid.uuid4().hex
+    env.update(task.runtime_env)
     return env
 
 
@@ -329,6 +330,22 @@ class BatchTask:
     cache_validator: Callable[[dict], bool | str | None] | None = None
     # 大体积只读输入通过 OpenCode --file 附加，避免 Windows 命令行 32767 字符上限。
     input_files: tuple[Path, ...] = ()
+    # Collect host events for native and MCP tools alike. Shared with retry tasks,
+    # but each invocation has a separate receipt; consumers use only the last run.
+    audit_source_reads: bool = False
+    read_audit_runs: list[dict] = field(default_factory=list, repr=False)
+    # Track the accepted result, which may precede a later failed retry.
+    result_read_audit: dict | None = field(default=None, repr=False)
+    read_repair_rounds: int = 0
+    read_evidence: dict = field(default_factory=dict, repr=False)
+    required_source_ranges: list[dict] = field(default_factory=list, repr=False)
+    # Evaluator-owned snapshot, never populated from model output.
+    evidence_plan: dict | None = field(default=None, repr=False)
+    evaluation_assertions_enabled: bool = False
+    runtime_env: dict = field(default_factory=dict, repr=False)
+    recall_runs: list[dict] = field(default_factory=list, repr=False)
+    recall_evidence: dict = field(default_factory=dict, repr=False)
+    recall_budget: dict = field(default_factory=dict, repr=False)
 
 
 _print_lock = threading.Lock()
@@ -421,7 +438,10 @@ def _opencode_command(task: BatchTask) -> list[str]:
             f"{len(task.user_request)} 字符"
         )
 
-    cmd = [_OPENCODE, "run", "--agent", task.agent_name, message]
+    cmd = [_OPENCODE, "run", "--agent", task.agent_name]
+    if task.audit_source_reads:
+        cmd.extend(["--format", "json"])
+    cmd.append(message)
     for input_file in input_files:
         cmd.extend(["--file", str(input_file)])
     return cmd
@@ -584,18 +604,60 @@ def _materialize_stdout_writes(task: BatchTask, stdout: str) -> list[Path]:
     return wrote
 
 
+def _record_source_reads(task: BatchTask, stdout: str, returncode: int | None) -> None:
+    if not task.audit_source_reads:
+        return
+    from ..analysis.read_audit import persist_read_audit
+
+    run_id = uuid.uuid4().hex
+    # Report jobs remove their working directories after successful delivery.
+    # Receipts must live outside those directories, and outside isolated XDG data.
+    root = Path(os.environ.get("AGENT_READ_AUDIT_DIR") or PROJECT_ROOT / "data" / "read_audit")
+    target = f"{task.repo_path}:{task.output_path.resolve()}"
+    target_key = hashlib.sha256(target.encode()).hexdigest()[:16]
+    directory = root / target_key / _safe_path_part(task.batch_id) / run_id
+    try:
+        if task.repo_path is None:
+            raise ValueError("读取审计缺少 repo_path")
+        audit = persist_read_audit(
+            stdout, task.repo_path, directory,
+            batch_id=task.batch_id, run_id=run_id, returncode=returncode,
+        )
+    except (OSError, ValueError, TypeError) as exc:
+        # Audit failure must never silently turn into a zero-read claim.
+        audit = {"stream_status": "unknown", "run_id": run_id,
+                 "batch_id": task.batch_id, "reason": f"audit_failed: {exc}"}
+        _log(f"[llm_batch] {task.batch_id} 读取审计失败：{exc}")
+    task.read_audit_runs.append(audit)
+
+
 def _run_opencode_once(task: BatchTask, timeout: int) -> tuple[bool, str, list[Path]]:
+    from .recall_check import enabled, run_once
+    if enabled(task):
+        return run_once(task, timeout, _run_opencode_once_raw)
+    return _run_opencode_once_raw(task, timeout)
+
+
+def _run_opencode_once_raw(task: BatchTask, timeout: int) -> tuple[bool, str, list[Path]]:
     """跑一次 OpenCode 子进程。
 
     返回 (是否产生了 output_path 文件, stdout, 本次实际落盘的文件路径)。
     第三项用于 output_path 缺失时找回模型写到别名路径的 JSON。
     """
     cmd = _opencode_command(task)
+    environment = _opencode_env(task)
+    temporary = None
+    dependencies = None
+    if os.environ.get('AGENT_RECALL_CHECK') == '1' and not task.runtime_env:
+        temporary = Path(tempfile.mkdtemp(prefix='oskernel-invocation-'))
+        environment['TMPDIR'] = str(temporary)
+        if opencode_isolated_data_enabled():
+            dependencies = Path(environment['XDG_CONFIG_HOME']) / 'opencode' / 'node_modules'
     try:
         with _opencode_run_guard():
             proc = subprocess.run(
                 cmd,
-                env=_opencode_env(task),
+                env=environment,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -604,12 +666,33 @@ def _run_opencode_once(task: BatchTask, timeout: int) -> tuple[bool, str, list[P
                 # opencode.exe run 即使带 positional message，仍会阻塞读 stdin；
                 # 子进程 stdin 是未关闭的管道时会一直等到超时。给 DEVNULL 立即 EOF。
                 stdin=subprocess.DEVNULL,
+                **({"cwd": task.repo_path} if task.runtime_env else {}),
             )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        partial = exc.stdout or ""
+        if isinstance(partial, bytes):
+            partial = partial.decode("utf-8", errors="replace")
+        _record_source_reads(task, partial, None)
         _log(f"[llm_batch] {task.batch_id} 超时 {timeout}s")
         return False, "", []
+    except OSError:
+        _record_source_reads(task, "", None)
+        raise
+    finally:
+        if temporary is not None:
+            shutil.rmtree(temporary, ignore_errors=True)
+        if dependencies is not None:
+            shutil.rmtree(dependencies, ignore_errors=True)
     stdout = proc.stdout or ""
-    written = _materialize_stdout_writes(task, stdout)
+    _record_source_reads(task, stdout, proc.returncode)
+    actual_writes: list[Path] = []
+    if task.audit_source_reads:
+        from ..analysis.read_audit import assistant_text, completed_output_writes
+        actual_writes = completed_output_writes(stdout, task.output_path.parent)
+        # Tool results may contain source text resembling write_report calls.
+        # Only assistant text may enter the legacy output-recovery path.
+        stdout = assistant_text(stdout)
+    written = actual_writes + _materialize_stdout_writes(task, stdout)
     ok = task.output_path.exists()
     if proc.returncode not in (0, 1) or not ok:
         _log(
@@ -664,6 +747,8 @@ def _try_repair_json(task: BatchTask, raw_text: str,
         cache_dir=task.cache_dir,
         cache_key="",
         repo_path=task.repo_path,
+        audit_source_reads=task.audit_source_reads,
+        read_audit_runs=task.read_audit_runs,
     )
     ok, _, written = _run_opencode_once(repair_task, timeout)
     # 修复产物同样回收别名落盘（修复 agent 偶发写到 report.json 等别名）。
@@ -741,10 +826,25 @@ def _best_written_content(task: BatchTask, written: list[Path]) -> str:
 def run_batch_task(task: BatchTask, schema_hint: str = "",
                    timeout: int = 300,
                    repair_validator=None) -> dict:
+    from .recall_check import enabled, verify
+    active = enabled(task)
+    if active:
+        task.cache_enabled = False
+        task.recall_evidence = {}
+    parsed = _run_batch_task(task, schema_hint, timeout, repair_validator)
+    if active and not parsed.get("_error") and _delivery_valid(_delivery_verdict(task, parsed)):
+        parsed = verify(task, parsed, timeout)
+    return parsed
+
+
+def _run_batch_task(task: BatchTask, schema_hint: str = "",
+                    timeout: int = 300, repair_validator=None) -> dict:
     """单 batch 完整执行：缓存查 → 跑 LLM → 解析 → 失败修复 → 兜底 fallback。
 
     repair_validator 可选：json_repair 输出的轻量结构校验（见 _try_repair_json）。
     """
+    task.result_read_audit = None
+    task.read_evidence = {}
     cached = cache_read(task.cache_dir, task.cache_key) if task.cache_enabled else None
     if cached is not None:
         if _delivery_valid(_delivery_verdict(task, cached)):
@@ -759,8 +859,11 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
         except OSError:
             pass
 
+    before = len(task.read_audit_runs)
     ok, stdout, written = _run_opencode_once(task, timeout)
     parsed = _locate_parsed_json(task, ok, written)
+    if parsed is not None:
+        task.result_read_audit = task.read_audit_runs[-1] if len(task.read_audit_runs) > before else None
 
     if parsed is None:
         # 尝试 json 修复：输入优先取模型实际落盘的内容（定向修，不重建），
@@ -777,6 +880,8 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
             _log(f"[llm_batch] {task.batch_id} 触发 json_repair")
             parsed = _try_repair_json(task, raw, schema_hint, timeout,
                                       repair_validator)
+            if parsed is not None:
+                task.result_read_audit = task.read_audit_runs[-1] if len(task.read_audit_runs) > before else None
 
     if parsed is None:
         # 最终重试 1 次（知情重试：附上上次输出片段，让模型对照修正格式）
@@ -789,8 +894,11 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
             + "上次输出片段：\n" + _tail_text(raw or stdout, 1500)
         )
         retry_task = _retry_task(task, reason)
+        before = len(task.read_audit_runs)
         ok2, _, written2 = _run_opencode_once(retry_task, timeout)
         parsed = _locate_parsed_json(retry_task, ok2, written2)
+        if parsed is not None:
+            task.result_read_audit = task.read_audit_runs[-1] if len(task.read_audit_runs) > before else None
 
     if parsed is None:
         _log(f"[llm_batch] {task.batch_id} 最终失败，使用 fallback")
@@ -817,10 +925,16 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
             except OSError:
                 pass
         retry_task = _retry_task(task, _delivery_reason(task, parsed))
+        before = len(task.read_audit_runs)
         ok2, _, written2 = _run_opencode_once(retry_task, timeout)
         retried = _locate_parsed_json(retry_task, ok2, written2)
         if retried is not None:
             parsed = enrich_result(retried)
+            task.result_read_audit = task.read_audit_runs[-1] if len(task.read_audit_runs) > before else None
+
+    if not parsed.get("_error") and _delivery_valid(_delivery_verdict(task, parsed)):
+        from .read_repair import verify_source_reads
+        parsed = verify_source_reads(task, parsed, timeout)
 
     # 只缓存成功结果：带 _error 的兜底**不写缓存**，否则一次瞬时失败（超时/限流/
     # 子进程异常）会被永久冻住，后续每次跑都命中空结果而不再重试。不缓存则下次自愈。
@@ -834,4 +948,3 @@ def run_batch_task(task: BatchTask, schema_hint: str = "",
     else:
         cache_write(task.cache_dir, task.cache_key, parsed)
     return parsed
-

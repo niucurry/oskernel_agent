@@ -1,0 +1,19 @@
+{
+  "answers": [
+    15,
+    64,
+    64,
+    96,
+    4294967312,
+    4294967328,
+    0,
+    18446744073709551600,
+    1,
+    0,
+    0,
+    0
+  ],
+  "scope": "12 scalar observations of original macros at native size_t 64; not all prose correctness",
+  "source_sha256": "ef394cd696eff88d5cccf4429faba18ca832b0b7a7c15cd3ac83d7dfdcc098fc",
+  "compiler_raw_output_sha256": "b893fbbac77745da7e6225554552e1040de8a01fe262c9eb36fb7b52c7380c9d"
+}

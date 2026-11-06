@@ -1,0 +1,48 @@
+{
+  "id": "57a4b26c-28fc-4ba6-816d-7046962b1014",
+  "object": "chat.completion",
+  "created": 1791440435,
+  "model": "deepseek-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "I have the symbol map. Now let me read the key implementation files.",
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_00_xgCLKJSL0koCFAjTphvw9988",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\": \"os/rt/src/chschd.c\"}"
+            }
+          },
+          {
+            "index": 1,
+            "id": "call_01_DJ3uX918c0teyQXd8DS56999",
+            "type": "function",
+            "function": {
+              "name": "read_file",
+              "arguments": "{\"path\": \"os/rt/src/chthreads.c\"}"
+            }
+          }
+        ]
+      },
+      "logprobs": null,
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 13374,
+    "completion_tokens": 93,
+    "total_tokens": 13467,
+    "prompt_tokens_details": {
+      "cached_tokens": 7168
+    },
+    "prompt_cache_hit_tokens": 7168,
+    "prompt_cache_miss_tokens": 6206
+  },
+  "system_fingerprint": "aeb56401ca74e127821c4f9126dcb669"
+}
