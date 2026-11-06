@@ -11,9 +11,9 @@
 
 ## 文档
 
-- [新任务提示词：只研究 OS 代码描述系统](docs/description-research-restart-2026-10-08.md)
-- [工程交接：保留的修复与验证范围](docs/engineering-handoff-2026-10-08.md)
-- [描述系统首轮实验：强基线持平与保留的工程改进](docs/description-interface-witness-2026-10-08.md)
+- [新任务提示词：只研究 OS 代码描述系统](docs/research/description-research-restart-2026-10-08.md)
+- [工程交接：保留的修复与验证范围](docs/research/engineering-handoff-2026-10-08.md)
+- [描述系统首轮实验：强基线持平与保留的工程改进](docs/research/description-interface-witness-2026-10-08.md)
 - [项目结构](docs/project-map.md)
 - [设计方案与技术文档](docs/design-specification.pdf)
 
@@ -79,33 +79,33 @@ SUBSYS/VERDICT 对缺口最多自动补读两轮，每轮重新核对并保留�
 触发拒绝交付。旧阶段产物恢复时不伪造读取历史。原始工具记录可能含源码，不应提交到 Git。
 可选 canary 实验只在新仓库副本的已确认函数中插入随机注释，分别统计完整函数读取、
 标记回报与人工相关清单的漏选情况。具体机制、测量边界与复现命令见
-[源码读取审计说明](docs/read-audit-2026-10-11.md)。
+[源码读取审计说明](docs/research/read-audit-2026-10-11.md)。
 
 新生成的描述报告还会优先复核最多 6 条关键结论：两个独立会话读取源码并给出原文证据，
 程序核对证据真实性与阅读记录；有支持/反驳分歧时追加一次复核。有有效纠错依据时修订
 报告一轮，再核对新版本。未复核、分歧、证据不足都会在报告中说明，模型一致不等于正确。
 升级后需重新运行 `oskernel-setup` 注册复核角色。日志默认位于 `data/claim_reviews/`。
-具体规则、成本边界和独立验证命令见[关键结论复核说明](docs/claim-review-2026-10-12.md)。
+具体规则、成本边界和独立验证命令见[关键结论复核说明](docs/research/claim-review-2026-10-12.md)。
 
 可通过 `AGENT_EVIDENCE_PLAN=/仓库外/plan.json` 指定评测方预先确认的评价项与必要证据。
 清单在生成报告前固定；即使报告从未引用某个配置或函数，程序仍会核对并对可读取的缺口
 执行最多两轮补读。清单中的缺失位置和源码变化会保留在报告中；清单读齐不证明所有相关
 证据查全，也不产生已验证分数。默认不猜测比赛规则或目标清单。具体格式、离线检查与
-模型验证见[评价项证据清单说明](docs/evidence-plan-2026-10-13.md)，总体路线以
-[用户确认的计划](docs/evaluation-improvement-plan.md)为准。
+模型验证见[评价项证据清单说明](docs/research/evidence-plan-2026-10-13.md)，总体路线以
+[用户确认的计划](docs/research/evaluation-improvement-plan.md)为准。
 
 启用评价清单后，新生成的 SUBSYS/VERDICT 还必须逐项提供带范围和成立条件的事实断言，
 并将引文对应到各项必要证据。程序核对原文、源码版本和实际读取；材料齐全的断言优先进入
 独立复核，未选中或证据不足的保留待核验状态。结论、条件或报告变化后旧复核不沿用。
 具体运行行为仍显示“执行验证未运行”，不会因模型支持就计算已验证分数。机制、输出格式和
-`--claims` 独立验证入口见[结构化评价断言说明](docs/evaluation-assertions-2026-10-13.md)。
+`--claims` 独立验证入口见[结构化评价断言说明](docs/research/evaluation-assertions-2026-10-13.md)。
 
 可选 `AGENT_RECALL_CHECK=1` 在 SUBSYS/VERDICT 报告生成后核对源码保留与召回：
 仅在副本插入随机注释，由本地代理记录实际模型输入，再复制被采纳会话，以无工具权限批量提问。
 异常函数进入有限补读和相关断言复核，每轮重新生成随机值；报告清除所有标记并保留核对历史。
 默认最多核对 12 个函数名（含对照），抽查 15% 已读非关键函数；标记保留、完整源码保留、
 召回、调用列表分别记录。关闭时不改变原有流程。配置、成本、验收和边界见
-[报告后核对说明](docs/recall-check-2026-11-01.md)。
+[报告后核对说明](docs/research/recall-check-2026-11-01.md)。
 
 ### 历史库与对比报告
 
@@ -258,8 +258,8 @@ cd frontend && npm run build
 
 ## 维护工具
 
-后续研究仅面向描述系统，要求见 [新任务提示词](docs/description-research-restart-2026-10-08.md)。
-生产仓库保留系统代码与必要回归测试；已停止的实验代码和记录已移至仓库外，归档入口见 [工程交接](docs/engineering-handoff-2026-10-08.md)。
+后续研究仅面向描述系统，要求见 [新任务提示词](docs/research/description-research-restart-2026-10-08.md)。
+生产仓库保留系统代码与必要回归测试；已停止的实验代码和记录已移至仓库外，归档入口见 [工程交接](docs/research/engineering-handoff-2026-10-08.md)。
 
 | 命令 | 用途 |
 |---|---|

@@ -24,7 +24,7 @@
 
 先检查 `git status` 和适用的 `AGENTS.md`。完整读取：
 
-- `docs/engineering-handoff-2026-10-08.md`：本次保留的工程改进、验证与提交范围。
+- `docs/research/engineering-handoff-2026-10-08.md`：本次保留的工程改进、验证与提交范围。
 - `README.md`、`docs/project-map.md`、描述报告的实际入口、提示模板和生产代码。
 
 旧实验已从仓库清理，简要结论和外部归档入口见工程交接。不要先恢复旧实验或重建它们的环境；确需核对某条历史事实时，只读取归档中的相应材料。
